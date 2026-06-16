@@ -140,6 +140,18 @@ impl CodeIndex {
         self.fts.lock().unwrap()
     }
 
+    /// Try to acquire the store mutex (for testing concurrency behaviour).
+    #[doc(hidden)]
+    pub fn try_lock_store_for_test(&self) -> Option<std::sync::MutexGuard<'_, IndexStore>> {
+        self.store.try_lock().ok()
+    }
+
+    /// Try to acquire the FTS mutex (for testing concurrency behaviour).
+    #[doc(hidden)]
+    pub fn try_lock_fts_for_test(&self) -> Option<std::sync::MutexGuard<'_, FtsIndex>> {
+        self.fts.try_lock().ok()
+    }
+
     // ── Query Methods ───────────────────────────────────────────────────
 
     /// Search the index using full-text search combined with structured filters.
@@ -150,20 +162,28 @@ impl CodeIndex {
             query.max_results
         };
 
-        let fts = self.fts.lock().unwrap();
-        debug!(
-            query = %query.query,
-            kind = ?query.kind,
-            language = ?query.language,
-            file_pattern = ?query.file_pattern,
-            limit = limit,
-            "CodeIndex search"
-        );
-        let mut results = fts.search(&query.query, limit * 2)?;
-        debug!(
-            raw_results = results.len(),
-            "CodeIndex FTS results before filtering"
-        );
+        // Lock order: FTS first, then (only when needed for the language
+        // filter) the SQLite store. Holding both locks in the opposite order
+        // (store then FTS) is what writers do, so acquiring FTS first and
+        // dropping it before locking store prevents deadlocks between readers
+        // and the background indexing worker.
+        let mut results = {
+            let fts = self.fts.lock().unwrap();
+            debug!(
+                query = %query.query,
+                kind = ?query.kind,
+                language = ?query.language,
+                file_pattern = ?query.file_pattern,
+                limit = limit,
+                "CodeIndex search"
+            );
+            let results = fts.search(&query.query, limit * 2)?;
+            debug!(
+                raw_results = results.len(),
+                "CodeIndex FTS results before filtering"
+            );
+            results
+        };
 
         // Apply post-FTS filters.
         if let Some(ref kind) = query.kind {
@@ -190,10 +210,72 @@ impl CodeIndex {
         Ok(results)
     }
 
+    /// Non-blocking variant of [`search()`].
+    ///
+    /// Returns `None` if either the FTS or the SQLite store lock is currently
+    /// held by a background re-index. Callers should retry briefly or fall
+    /// back to a simpler search tool rather than blocking the agent loop.
+    pub fn try_search(&self, query: &SearchQuery) -> Result<Option<Vec<SearchResult>>> {
+        let limit = if query.max_results == 0 {
+            20
+        } else {
+            query.max_results
+        };
+
+        let fts = match self.fts.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let mut results = match fts.search(&query.query, limit * 2) {
+            Ok(r) => r,
+            Err(e) => return Err(e),
+        };
+        drop(fts);
+
+        if let Some(ref kind) = query.kind {
+            let kind_str = kind.to_string();
+            results.retain(|r| r.kind == kind_str);
+        }
+        if let Some(ref lang) = query.language {
+            let store = match self.store.try_lock() {
+                Ok(g) => g,
+                Err(_) => return Ok(None),
+            };
+            results.retain(|r| {
+                store
+                    .get_file(&r.file_path)
+                    .ok()
+                    .flatten()
+                    .and_then(|f| f.language)
+                    .as_deref()
+                    == Some(lang.as_str())
+            });
+        }
+        if let Some(ref pattern) = query.file_pattern {
+            results.retain(|r| r.file_path.contains(pattern.as_str()));
+        }
+
+        results.truncate(limit);
+        Ok(Some(results))
+    }
+
     /// Query symbols from the structured SQLite index.
     pub fn symbols(&self, filter: &SymbolFilter) -> Result<Vec<Symbol>> {
         let store = self.store.lock().unwrap();
         store.query_symbols(filter)
+    }
+
+    /// Non-blocking variant of [`symbols()`].
+    ///
+    /// Returns `None` if the SQLite store lock is currently held (e.g. by a
+    /// background reindex). Callers should retry briefly or fall back to
+    /// `grep` rather than blocking the agent loop.
+    pub fn try_symbols(&self, filter: &SymbolFilter) -> Result<Option<Vec<Symbol>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        Ok(Some(store.query_symbols(filter)?))
     }
 
     /// Find all references to a symbol by name.
@@ -204,6 +286,25 @@ impl CodeIndex {
             refs.truncate(limit);
         }
         Ok(refs)
+    }
+
+    /// Non-blocking variant of [`references()`].
+    ///
+    /// Returns `None` if the SQLite store lock is currently held.
+    pub fn try_references(
+        &self,
+        symbol_name: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<SymbolRef>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let mut refs = store.find_references(symbol_name)?;
+        if limit > 0 {
+            refs.truncate(limit);
+        }
+        Ok(Some(refs))
     }
 
     /// Get file dependencies in the given direction.
@@ -231,6 +332,43 @@ impl CodeIndex {
                     .collect())
             }
         }
+    }
+
+    /// Non-blocking variant of [`dependencies()`].
+    ///
+    /// Returns `None` if the SQLite store lock is currently held.
+    pub fn try_dependencies(
+        &self,
+        path: &str,
+        direction: DepDirection,
+    ) -> Result<Option<Vec<String>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let deps = match direction {
+            DepDirection::Imports => {
+                let file_id = store
+                    .get_file_id(path)?
+                    .with_context(|| format!("file not indexed: {path}"))?;
+                let imports = store.get_file_imports(file_id)?;
+                imports.into_iter().map(|i| i.source_module).collect()
+            }
+            DepDirection::Dependents => {
+                let dep_ids = store.get_dependents(path)?;
+                let files = store.list_files()?;
+                dep_ids
+                    .into_iter()
+                    .filter_map(|id| {
+                        files
+                            .iter()
+                            .find(|f| store.get_file_id(&f.path).ok().flatten() == Some(id))
+                    })
+                    .map(|f| f.path.clone())
+                    .collect()
+            }
+        };
+        Ok(Some(deps))
     }
 
     /// Get index status and statistics.

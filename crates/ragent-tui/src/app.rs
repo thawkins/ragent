@@ -797,15 +797,45 @@ impl App {
             ),
         ];
 
-                  // Indicate which backend features are compiled in.
-                  let candle_compiled = cfg!(feature = "embedded-llm");
-                  let foundry_available = ragent_core::provider::foundry_local_provider::is_foundry_local_available();
-                  let feature_info = match (foundry_available, candle_compiled) {
-                      (true, true) => "foundry ✅, candle ✅".to_string(),
-                      (true, false) => "foundry ✅".to_string(),
-                      (false, true) => "candle ✅".to_string(),
-                      (false, false) => "none ⚠️ (install Foundry Local or rebuild with --features embedded-llm)".to_string(),
-                  };        rows.push(format!("| compiled backends | {} |", feature_info));
+        // Indicate which backend features are compiled in.
+        let candle_compiled = cfg!(feature = "embedded-llm");
+        let foundry_available =
+            ragent_core::provider::foundry_local_provider::is_foundry_local_available();
+        let foundry_mode = if self.internal_llm_config.backend == "foundry" {
+            match ragent_config::Config::load() {
+                Ok(cfg) => {
+                    let in_process = cfg
+                        .provider
+                        .get("foundry_local")
+                        .and_then(|p| p.options.get("in_process"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+                    if in_process {
+                        "in-process"
+                    } else {
+                        "web-service"
+                    }
+                    .to_string()
+                }
+                Err(_) => "unknown".to_string(),
+            }
+        } else {
+            "-".to_string()
+        };
+        let feature_info = match (foundry_available, candle_compiled) {
+            (true, true) => "foundry ✅, candle ✅".to_string(),
+            (true, false) => "foundry ✅".to_string(),
+            (false, true) => "candle ✅".to_string(),
+            (false, false) => {
+                "none ⚠️ (install Foundry Local or rebuild with --features embedded-llm)"
+                    .to_string()
+            }
+        };
+        rows.push(format!("| compiled backends | {} |", feature_info));
+
+        if self.internal_llm_config.backend == "foundry" {
+            rows.push(format!("| foundry mode | {} |", foundry_mode));
+        }
 
         rows.push(format!(
             "| session title | {} |",
@@ -3000,18 +3030,19 @@ impl App {
                 "codeindex".to_string(),
                 "help".to_string(),
             ],
-                          "internal-llm" => vec![
-                              "show".to_string(),
-                              "on".to_string(),
-                              "off".to_string(),
-                              "help".to_string(),
-                              "chat".to_string(),
-                              "foundry".to_string(),
-                              "embedded".to_string(),
-                              "sessiontitle".to_string(),
-                              "promptcontext".to_string(),
-                              "memoryextraction".to_string(),
-                          ],            "theme" => {
+            "internal-llm" => vec![
+                "show".to_string(),
+                "on".to_string(),
+                "off".to_string(),
+                "help".to_string(),
+                "chat".to_string(),
+                "foundry".to_string(),
+                "embedded".to_string(),
+                "sessiontitle".to_string(),
+                "promptcontext".to_string(),
+                "memoryextraction".to_string(),
+            ],
+            "theme" => {
                 vec![
                     "toggle".to_string(),
                     "light".to_string(),
@@ -3998,12 +4029,22 @@ impl App {
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.001);
 
-        models
+        let mut entries: Vec<ModelPickerEntry> = models
             .into_iter()
             .map(|m| self.model_to_picker_entry(m, baseline_cost))
-            .collect()
-    }
+            .collect();
 
+        // Sort alphabetically by display name (case-insensitive), falling back to
+        // the model id for stable ordering when display names are identical.
+        entries.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.id.to_lowercase().cmp(&b.id.to_lowercase()))
+        });
+
+        entries
+    }
     fn cache_discovered_models(
         &self,
         provider_id: &str,
@@ -4090,7 +4131,7 @@ impl App {
                 .unwrap_or_default()
         };
 
-        let mut models = match provider_id {
+        match provider_id {
             "ollama" | "ollama_cloud" => {
                 let cached = self.cached_model_entries(provider_id);
                 if !cached.is_empty() {
@@ -4113,7 +4154,7 @@ impl App {
                     if !discovered.is_empty() {
                         self.picker_entries_from_models(discovered)
                     } else {
-                        Vec::new()
+                        self.hf_default_model_entries()
                     }
                 } else {
                     self.hf_default_model_entries()
@@ -4155,14 +4196,9 @@ impl App {
                     default_entries()
                 }
             }
-        };
-
-        models.sort_by(|a, b| a.name.cmp(&b.name));
-        models
+        }
     }
-
-    /// Load model entries for a given provider.
-    ///
+    /// Load model entries for a given provider.    ///
     /// Returns cached models if available, otherwise falls back to synchronous
     /// discovery when an async runtime is present. Providers with static defaults
     /// (e.g. openai, foundry_local) use those defaults when discovery is
@@ -4179,12 +4215,10 @@ impl App {
             return self.selected_model_fallback_entries(provider_id);
         }
 
-        models.sort_by(|a, b| a.name.cmp(&b.name));
         models
     }
 
-    /// Start an async background discovery for the given provider.
-    ///
+    /// Start an async background discovery for the given provider.    ///
     /// Publishes [`Event::ProviderLoadingStarted`] immediately and
     /// [`Event::ProviderLoadingFinished`] when discovery completes.
     pub fn start_model_discovery(&self, provider_id: String, provider_name: String) {
@@ -6460,8 +6494,8 @@ Usage: /provider [show]
                         self.append_assistant_text(&self.render_internal_llm_status());
                         self.status = "internal-llm".to_string();
                     }
-                                          ["help"] | ["usage"] => {
-                                              self.append_assistant_text(
+                    ["help"] | ["usage"] => {
+                        self.append_assistant_text(
                                                                         "From: /internal-llm\n\
                                                                       \n\
                                                                       **Usage:**\n\
@@ -6482,8 +6516,9 @@ Usage: /provider [show]
                                                                       **Accelerator:**\n\
                                                                       Set `internal_llm.accelerator` to `\"cpu\"` (default), `\"gpu\"`, or `\"npu\"`.",
                                                                     );
-                                              self.status = "internal-llm help".to_string();
-                                          }                    ["chat"] => {
+                        self.status = "internal-llm help".to_string();
+                    }
+                    ["chat"] => {
                         if !self.internal_llm_config.enabled {
                             self.append_assistant_text(
                                 "From: /internal-llm\n⚠ Enable the internal LLM before opening the chat panel.",
@@ -6508,89 +6543,90 @@ Usage: /provider [show]
                             self.status = "internal-llm chat".to_string();
                         }
                     }
-                                          ["on"] | ["enable"] | ["off"] | ["disable"] => {
-                                              let enabled = matches!(parts[0], "on" | "enable");
-                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                                              cfg.internal_llm.enabled = enabled;
-                                              self.sync_internal_llm_from_config(&cfg);
-                                              match cfg.save_to_source() {
-                                                  Ok(()) => {
-                                                      self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n✅ Internal LLM is now **{}**.",
-                                                          if enabled { "on" } else { "off" }
-                                                      ));
-                                                      self.status =
-                                                          format!("internal-llm: {}", if enabled { "on" } else { "off" });
-                                                  }
-                                                  Err(error) => {
-                                                      self.append_assistant_text(&format!(
+                    ["on"] | ["enable"] | ["off"] | ["disable"] => {
+                        let enabled = matches!(parts[0], "on" | "enable");
+                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                        cfg.internal_llm.enabled = enabled;
+                        self.sync_internal_llm_from_config(&cfg);
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /internal-llm\n✅ Internal LLM is now **{}**.",
+                                    if enabled { "on" } else { "off" }
+                                ));
+                                self.status =
+                                    format!("internal-llm: {}", if enabled { "on" } else { "off" });
+                            }
+                            Err(error) => {
+                                self.append_assistant_text(&format!(
                                                           "From: /internal-llm\n⚠ Internal LLM changed to **{}**, but saving config failed: {}",
                                                           if enabled { "on" } else { "off" },
                                                           error
                                                       ));
-                                                      self.status = format!(
-                                                          "internal-llm: {} (unsaved)",
-                                                          if enabled { "on" } else { "off" }
-                                                      );
-                                                  }
-                                              }
-                                          }
-                                          ["foundry"] | ["foundry_local"] => {
-                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                                              cfg.internal_llm.backend = "foundry".to_string();
-                                              // Set a Foundry Local appropriate default model if the
-                                              // current model_id looks like a candle-embedded model.
-                                              let current = &cfg.internal_llm.model_id;
-                                              let foundry_default = "phi-4";
-                                              if current.contains("smollm") || current.contains("qwen") {
-                                                  cfg.internal_llm.model_id = foundry_default.to_string();
-                                              }
-                                              self.sync_internal_llm_from_config(&cfg);
-                                              match cfg.save_to_source() {
-                                                  Ok(()) => {
-                                                      self.append_assistant_text(&format!(
+                                self.status = format!(
+                                    "internal-llm: {} (unsaved)",
+                                    if enabled { "on" } else { "off" }
+                                );
+                            }
+                        }
+                    }
+                    ["foundry"] | ["foundry_local"] => {
+                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                        cfg.internal_llm.backend = "foundry".to_string();
+                        // Set a Foundry Local appropriate default model if the
+                        // current model_id looks like a candle-embedded model.
+                        let current = &cfg.internal_llm.model_id;
+                        let foundry_default = "phi-4";
+                        if current.contains("smollm") || current.contains("qwen") {
+                            cfg.internal_llm.model_id = foundry_default.to_string();
+                        }
+                        self.sync_internal_llm_from_config(&cfg);
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
                                                           "From: /internal-llm\n✅ Backend switched to **foundry** (model: `{}`).",
                                                           cfg.internal_llm.model_id,
                                                       ));
-                                                      self.status = "internal-llm: foundry".to_string();
-                                                  }
-                                                  Err(error) => {
-                                                      self.append_assistant_text(&format!(
+                                self.status = "internal-llm: foundry".to_string();
+                            }
+                            Err(error) => {
+                                self.append_assistant_text(&format!(
                                                           "From: /internal-llm\n⚠ Backend switched to **foundry**, but saving config failed: {}",
                                                           error
                                                       ));
-                                                      self.status = "internal-llm: foundry (unsaved)".to_string();
-                                                  }
-                                              }
-                                          }
-                                          ["embedded"] | ["candle"] => {
-                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                                              cfg.internal_llm.backend = "candle".to_string();
-                                              // Set a candle-appropriate default model if the current
-                                              // model_id looks like a Foundry Local model.
-                                              let current = &cfg.internal_llm.model_id;
-                                              let candle_default = "smollm2-360m-instruct-q4";
-                                              if !current.contains("smollm") && !current.contains("qwen") {
-                                                  cfg.internal_llm.model_id = candle_default.to_string();
-                                              }
-                                              self.sync_internal_llm_from_config(&cfg);
-                                              match cfg.save_to_source() {
-                                                  Ok(()) => {
-                                                      self.append_assistant_text(&format!(
+                                self.status = "internal-llm: foundry (unsaved)".to_string();
+                            }
+                        }
+                    }
+                    ["embedded"] | ["candle"] => {
+                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                        cfg.internal_llm.backend = "candle".to_string();
+                        // Set a candle-appropriate default model if the current
+                        // model_id looks like a Foundry Local model.
+                        let current = &cfg.internal_llm.model_id;
+                        let candle_default = "smollm2-360m-instruct-q4";
+                        if !current.contains("smollm") && !current.contains("qwen") {
+                            cfg.internal_llm.model_id = candle_default.to_string();
+                        }
+                        self.sync_internal_llm_from_config(&cfg);
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
                                                           "From: /internal-llm\n✅ Backend switched to **candle** (model: `{}`).",
                                                           cfg.internal_llm.model_id,
                                                       ));
-                                                      self.status = "internal-llm: embedded".to_string();
-                                                  }
-                                                  Err(error) => {
-                                                      self.append_assistant_text(&format!(
+                                self.status = "internal-llm: embedded".to_string();
+                            }
+                            Err(error) => {
+                                self.append_assistant_text(&format!(
                                                           "From: /internal-llm\n⚠ Backend switched to **candle**, but saving config failed: {}",
                                                           error
                                                       ));
-                                                      self.status = "internal-llm: embedded (unsaved)".to_string();
-                                                  }
-                                              }
-                                          }                    ["sessiontitle"] | ["promptcontext"] | ["memoryextraction"] => {
+                                self.status = "internal-llm: embedded (unsaved)".to_string();
+                            }
+                        }
+                    }
+                    ["sessiontitle"] | ["promptcontext"] | ["memoryextraction"] => {
                         let (label, enabled) = match parts[0] {
                             "sessiontitle" => (
                                 "session title",
@@ -6673,12 +6709,13 @@ Usage: /provider [show]
                             }
                         }
                     }
-                                          _ => {
-                                              self.append_assistant_text(
+                    _ => {
+                        self.append_assistant_text(
                                                   "From: /internal-llm\n⚠ Usage: `/internal-llm show|help|on|off|chat|foundry|embedded|sessiontitle on|off|promptcontext on|off|memoryextraction on|off`.",
                                               );
-                                              self.status = "internal-llm error".to_string();
-                                          }                }
+                        self.status = "internal-llm error".to_string();
+                    }
+                }
             }
             "skills" => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
@@ -12967,9 +13004,14 @@ Type `/swarm help` for more info.\n";
                 ref session_id,
                 ref message,
             } if self.is_current_session(session_id) => {
-                let summary = summarise_error(message);
                 self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
-                self.status = summary.clone();
+                // The instruction-file-discovery summary is multi-line and is
+                // also rendered into the message window. Suppressing it in
+                // the status bar avoids a duplicated, truncated/overflowing
+                // copy on the right of status line 1.
+                if !is_discovery_notice(message) {
+                    self.status = summarise_error(message);
+                }
                 // Also display in the message window for visibility
                 self.append_assistant_text(&format!("📋 **Agent Notice**\n{}", message));
             }
@@ -13497,7 +13539,14 @@ Type `/swarm help` for more info.\n";
                     .iter()
                     .filter_map(|v| serde_json::from_value(v.clone()).ok())
                     .collect();
-                self.cache_discovered_models(provider_id, &parsed_models);
+
+                // Only persist successful non-empty discovery results; an empty
+                // result from a failed discovery should not wipe a previously
+                // useful cache or prevent fallback to static defaults.
+                if !parsed_models.is_empty() {
+                    self.cache_discovered_models(provider_id, &parsed_models);
+                }
+
                 if let Some(err) = error {
                     self.push_log_no_agent(
                         LogLevel::Error,
@@ -13514,6 +13563,7 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
+
                 // Advance the provider-setup dialog if it is waiting on this provider.
                 if let Some(ProviderSetupStep::LoadingModels {
                     provider_id: ref pid,
@@ -13521,7 +13571,18 @@ Type `/swarm help` for more info.\n";
                 }) = self.provider_setup
                 {
                     if pid == provider_id {
-                        let entries = self.picker_entries_from_models(parsed_models);
+                        let entries = if parsed_models.is_empty() {
+                            // Fall back to static defaults so the user still sees
+                            // models even when dynamic discovery fails.
+                            self.picker_entries_from_models(
+                                self.provider_registry
+                                    .get(provider_id)
+                                    .map(|p| p.default_models())
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            self.picker_entries_from_models(parsed_models)
+                        };
                         self.provider_setup = Some(ProviderSetupStep::SelectModel {
                             provider_id: provider_id.clone(),
                             provider_name: provider_name.clone(),
@@ -13530,8 +13591,7 @@ Type `/swarm help` for more info.\n";
                         });
                     }
                 }
-            }
-            // ── Model download progress (progress bar popup) ───────────────
+            } // ── Model download progress (progress bar popup) ───────────────
             Event::ModelDownloadStarted {
                 ref provider_id,
                 ref model_id,
@@ -14819,9 +14879,60 @@ fn summarise_error(raw: &str) -> String {
     }
 }
 
+/// Returns `true` when an `Event::AgentNotice` message is the
+/// `InstructionFileDiscovery::format_summary()` output emitted by
+/// `run_init_exchange`. The discovery summary is multi-line and is also
+/// rendered into the message window, so the TUI suppresses it in the status
+/// bar to avoid a duplicated, truncated/overflowing copy.
+fn is_discovery_notice(message: &str) -> bool {
+    message.starts_with("📋 Instruction File Discovery")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ragent_core::{
+        agent, permission::PermissionChecker, provider, session::SessionManager, tool,
+    };
+
+    fn test_app() -> App {
+        let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
+        let event_bus = Arc::new(EventBus::default());
+        let provider_registry = Arc::new(provider::create_default_registry());
+        let tool_registry = Arc::new(tool::create_default_registry());
+        let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
+        let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
+        let session_processor = Arc::new(SessionProcessor {
+            session_manager,
+            provider_registry: provider_registry.clone(),
+            tool_registry,
+            permission_checker,
+            event_bus: event_bus.clone(),
+            task_manager: std::sync::OnceLock::new(),
+            team_manager: std::sync::OnceLock::new(),
+            mcp_client: std::sync::OnceLock::new(),
+            code_index: std::sync::OnceLock::new(),
+            extraction_engine: std::sync::OnceLock::new(),
+            stream_config: ragent_core::config::StreamConfig::default(),
+            active_spec: tokio::sync::RwLock::new(None),
+            spec_manager: std::sync::OnceLock::new(),
+            cached_tool_definitions: parking_lot::RwLock::new(None),
+            auto_approve: false,
+            system_prompt_cache: parking_lot::RwLock::new(None),
+        });
+        let agent_info =
+            agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
+
+        App::new(
+            event_bus,
+            storage,
+            provider_registry,
+            session_processor,
+            agent_info,
+            false,
+            std::path::PathBuf::new(),
+        )
+    }
 
     #[test]
     fn test_format_thinking_levels_handles_empty_and_full_lists() {
@@ -14838,6 +14949,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_models_for_provider_sorts_case_insensitively() {
+        let app = test_app();
+
+        // Anthropic defaults are static; ensure they are returned and sorted.
+        let models = app.models_for_provider("anthropic");
+        assert!(
+            !models.is_empty(),
+            "anthropic should always return default models"
+        );
+
+        let names: Vec<String> = models.iter().map(|m| m.name.to_lowercase()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(
+            names, sorted,
+            "models_for_provider must return models sorted case-insensitively"
+        );
+    }
+
+    #[test]
+    fn test_huggingface_models_fallback_to_defaults_without_key() {
+        let app = test_app();
+
+        // Ensure no HuggingFace credential is stored in the in-memory storage.
+        let _ = app.storage.delete_provider_auth("huggingface");
+
+        let models = app.models_for_provider("huggingface");
+        assert!(
+            !models.is_empty(),
+            "huggingface should fall back to default models when no token is available"
+        );
+
+        // All fallback entries should come from the huggingface provider's defaults.
+        let expected: std::collections::HashSet<&str> = [
+            "meta-llama/Llama-3.1-8B-Instruct",
+            "meta-llama/Llama-3.1-70B-Instruct",
+            "Qwen/Qwen2.5-Coder-32B-Instruct",
+            "Qwen/Qwen2.5-72B-Instruct",
+            "deepseek-ai/DeepSeek-R1",
+        ]
+        .into_iter()
+        .collect();
+        for entry in &models {
+            assert!(
+                expected.contains(entry.id.as_str()),
+                "unexpected fallback model id: got {}",
+                entry.id
+            );
+        }
+    }
+    #[test]
+    fn test_picker_entries_sort_case_insensitively() {
+        // openai defaults include "GPT-4o" and "GPT-4o-mini", which would sort
+        // incorrectly with case-sensitive ASCII.
+        let app = test_app();
+
+        let models = app.models_for_provider("openai");
+        assert!(
+            !models.is_empty(),
+            "openai should always return default models"
+        );
+
+        let names: Vec<String> = models.iter().map(|m| m.name.to_lowercase()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(
+            names, sorted,
+            "openai models should be sorted case-insensitively"
+        );
+    }
     #[test]
     fn test_default_thinking_level_defaults_to_off_when_unconfigured() {
         let entry = ModelPickerEntry {
@@ -14916,6 +15098,59 @@ mod tests {
     }
 
     #[test]
+    fn test_picker_entries_from_models_sorts_unsorted_input() {
+        let app = test_app();
+        let unsorted = vec![
+            ragent_core::provider::ModelInfo {
+                id: "z".to_string(),
+                provider_id: "test".to_string(),
+                name: "Zebra".to_string(),
+                cost: ragent_config::Cost {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                capabilities: ragent_config::Capabilities::default(),
+                context_window: 128_000,
+                max_output: None,
+                request_multiplier: None,
+                thinking_config: None,
+            },
+            ragent_core::provider::ModelInfo {
+                id: "a".to_string(),
+                provider_id: "test".to_string(),
+                name: "apple".to_string(),
+                cost: ragent_config::Cost {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                capabilities: ragent_config::Capabilities::default(),
+                context_window: 128_000,
+                max_output: None,
+                request_multiplier: None,
+                thinking_config: None,
+            },
+            ragent_core::provider::ModelInfo {
+                id: "m".to_string(),
+                provider_id: "test".to_string(),
+                name: "Mango".to_string(),
+                cost: ragent_config::Cost {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                capabilities: ragent_config::Capabilities::default(),
+                context_window: 128_000,
+                max_output: None,
+                request_multiplier: None,
+                thinking_config: None,
+            },
+        ];
+
+        let entries = app.picker_entries_from_models(unsorted);
+        let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
+        assert_eq!(names, vec!["apple", "Mango", "Zebra"]);
+    }
+
+    #[test]
     fn test_load_persisted_thinking_level_ignores_legacy_auto_default() {
         let storage = Storage::open_in_memory().expect("in-memory storage");
         storage
@@ -14939,5 +15174,39 @@ mod tests {
             App::load_persisted_thinking_level(&storage),
             Some(ThinkingLevel::Auto)
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // is_discovery_notice: matches the multi-line discovery summary
+    // emitted by `InstructionFileDiscovery::format_summary()` so the
+    // TUI can suppress it in the status bar (it is also rendered into
+    // the message window).
+    // ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_discovery_notice_matches_canonical_heading() {
+        let msg =
+            "📋 Instruction File Discovery\n  Searched for: AGENTS.md\n  Working directory: /tmp\n";
+        assert!(is_discovery_notice(msg));
+    }
+
+    #[test]
+    fn test_is_discovery_notice_matches_with_dash_variant() {
+        // Loader may pass either the heading line on its own or as the
+        // first line of a multi-line summary; both should be detected.
+        let heading_only = "📋 Instruction File Discovery";
+        assert!(is_discovery_notice(heading_only));
+    }
+
+    #[test]
+    fn test_is_discovery_notice_rejects_other_notices() {
+        // The other AgentNotice producers (retry hints, stream errors)
+        // must still flow through to the status bar.
+        assert!(!is_discovery_notice(
+            "Retrying LLM request (attempt 1/3), waiting 1s..."
+        ));
+        assert!(!is_discovery_notice("rate limit exceeded — will retry"));
+        assert!(!is_discovery_notice(""));
+        assert!(!is_discovery_notice("instruction file missing"));
     }
 }

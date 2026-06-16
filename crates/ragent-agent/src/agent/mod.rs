@@ -232,6 +232,11 @@ async fn collect_readme_context(working_dir: &Path) -> String {
 }
 
 /// Collect git, README, and agents-md context snippets for prompt injection.
+///
+/// The result is cached in [`PROMPT_CONTEXT_CACHE`] for 30 seconds keyed by
+/// the working directory.  This is the default path called from
+/// `process_user_message`; the `AgentPerf` specification (FR-012) requires
+/// that the agent loop consults this cache before touching the filesystem.
 pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, String, String) {
     const TTL: std::time::Duration = std::time::Duration::from_secs(30);
     let key = prompt_context_cache_key(working_dir);
@@ -275,6 +280,38 @@ pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, Stri
     }
 
     (git, readme, agents_md, file_tree)
+}
+
+/// Read a single context component (git, README, agents-md, or file-tree)
+/// from the prompt-context cache, computing and inserting it on miss.
+///
+/// This is a thin, ergonomic wrapper around [`collect_prompt_context`]
+/// that callers can use when they only need a single component, without
+/// paying the cost of all four.  Used by tests and ad-hoc helpers; the
+/// `process_user_message` path always calls [`collect_prompt_context`]
+/// because it needs all four components in one go.
+pub async fn prompt_context_component(working_dir: &Path, component: PromptContextComponent) -> String {
+    let (git, readme, agents_md, file_tree) = collect_prompt_context(working_dir).await;
+    match component {
+        PromptContextComponent::Git => git,
+        PromptContextComponent::Readme => readme,
+        PromptContextComponent::AgentsMd => agents_md,
+        PromptContextComponent::FileTree => file_tree,
+    }
+}
+
+/// Identifier for a single context component returned by
+/// [`collect_prompt_context`] / [`prompt_context_component`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PromptContextComponent {
+    /// Git branch, status, recent commits.
+    Git,
+    /// README preview.
+    Readme,
+    /// AGENTS.md project guidelines.
+    AgentsMd,
+    /// File-tree summary.
+    FileTree,
 }
 
 fn build_file_tree(dir: &Path, max_depth: usize) -> String {
@@ -1725,10 +1762,77 @@ pub fn build_system_prompt_with_context(
     )
 }
 
+/// System-prompt section that explains the difference between `task_complete`
+/// (autonomous loop signal) and `team_task_complete` (team workflow).  This
+/// is injected into every primary agent's system prompt so the model
+/// understands the distinction and stops confusing the two tools.
+pub const TASK_TOOL_FAMILY_GUIDANCE: &str = "\
+## Task Tool Family\n\
+\n\
+There are TWO distinct task-completion tools, plus a small family of sub-agent \
+management tools. Mixing them up is one of the most common mistakes — read this \
+section carefully before calling any of them.\n\
+\n\
+### Sub-agent management (NON-team) — use these OUTSIDE teams\n\
+\n\
+| Tool | Required parameters | Purpose |\n\
+|------|---------------------|---------|\n\
+| `new_task`     | `agent` (string), `task` (string) | Spawn a sub-agent to perform a focused task. **Both `agent` AND `task` are required** — calls with only one of them will fail with `Missing required parameter: …`. |\n\
+| `list_tasks`   | _(none)_ | List sub-agent tasks for the current session (running and completed). |\n\
+| `wait_tasks`   | _(none)_ | Block until one or more background sub-agent tasks complete. |\n\
+| `cancel_task`  | `task_id` (string) | Cancel a running background sub-agent task. |\n\
+| `task_complete` | `summary` (string) | **TERMINAL signal**: the current autonomous task is done; ends the session loop and returns control to the user. **Takes ONLY `summary` — no `task_id`, no `team_name`, no `result`/`output`.** |\n\
+\n\
+### Team workflow — use these ONLY inside an active team\n\
+\n\
+| Tool | Required parameters | Purpose |\n\
+|------|---------------------|---------|\n\
+| `team_spawn`         | `team_name`, `teammate_name`, `agent_type`, `prompt` | Spawn a teammate. |\n\
+| `team_task_claim`    | _(none, reads context)_ | Claim a task from the shared task list. |\n\
+| `team_task_complete` | `team_name` (string), `task_id` (string) | Mark a **team task** as completed. **Takes `team_name` + `task_id` — NOT `summary`.** |\n\
+| `team_wait`          | _(none)_ | Block until spawned teammates finish. |\n\
+| `team_idle`          | _(none)_ | Signal that the teammate is idle. |\n\
+\n\
+### Anti-confusion rules (MUST follow)\n\
+\n\
+1. **`task_complete` takes ONLY `summary`.** Do not pass `task_id`, `team_name`, \
+   `result`, or `output` — they will be ignored and the call will fail with \
+   \"Missing required 'summary' parameter\".\n\
+2. **`team_task_complete` takes `team_name` + `task_id`.** Do not call it with \
+   only `summary` — it will fail.\n\
+3. **If you have a `task_id` to mark complete, you almost certainly want \
+   `team_task_complete` (inside a team) — NOT `task_complete`.**\n\
+4. **If you want to signal \"I am done with the user's request\", call \
+   `task_complete(summary: \"…\")` — NOT `team_task_complete`.**\n\
+5. **`task_complete` is a TERMINAL tool — it ENDS the session loop.** Do not \
+   call it to \"submit\" a result mid-task or before all requested files/outputs \
+   have been produced. Only call it when the work is genuinely complete.\n\
+6. **`new_task` requires BOTH `agent` AND `task`.** If you call it with just one, \
+   the call will fail and you will need to retry with both supplied.\n\
+\n\
+Examples:\n\
+```\n\
+# Correct: signal the autonomous task is done\n\
+task_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")\n\
+\n\
+# Correct: mark a team task complete (inside a team)\n\
+team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")\n\
+\n\
+# WRONG — don't pass task_id to task_complete:\n\
+task_complete(task_id: \"task-001\", summary: \"done\")  # will fail\n\
+\n\
+# WRONG — don't call team_task_complete to end the autonomous loop:\n\
+team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team\n\
+```\n\
+\n";
 /// Build a system prompt with storage access for structured memory injection.
 ///
 /// This is the full-featured variant that can load relevant structured memories
 /// from SQLite when storage is provided.
+///
+/// The system prompt always ends with [`TASK_TOOL_FAMILY_GUIDANCE`] so the
+/// model understands the difference between `task_complete` (autonomous loop
+/// signal) and `team_task_complete` (team workflow).
 pub fn build_system_prompt_with_storage(
     agent: &AgentInfo,
     working_dir: &Path,
@@ -2159,35 +2263,18 @@ pub fn build_system_prompt_with_storage(
          - Explain what you're doing and why\n\n",
     );
 
-    // Specific guidance on using line ranges for file reads
+    // Specific guidance on using line ranges for file reads.
+    // Built into the system prompt (not just AGENTS.md) so the guidance
+    // travels with the agent across all projects.  AGENTS.md is project-
+    // specific and can vary widely; putting Read-tool guidance there
+    // means models only see it on projects that happen to include it.
+    // Emphasising `start_line` + `num_lines` (the most intuitive pair)
+    // removes the historical "end_line as count" mistake that tripped
+    // up many models.  `end_line` is kept as a documented escape hatch
+    // in the tool schema for callers that need an absolute last line.
     prompt.push_str(
-                                    "## File Reading Best Practices\n\n\
-                                     When reading files with the `read` tool:\n\
-                                     - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
-                                       to read the file in focused sections rather than all at once\n\
-                                     - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
-                                       The tool will return an error if they do. The error message includes the total line count.\n\
-                                       When you read a file, the response metadata includes `total_lines` — use that value\n\
-                                       to stay within range on subsequent reads of the same file.\n\
-                                     - **CRITICAL — end_line is an absolute line number, NOT a length or count**:\n\
-                                       - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)\n\
-                                       - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200\n\
-                                       - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100\n\
-                                       - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines\n\
-                                     - `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).\n\
-                                     - **ALTERNATIVE — use `num_lines` instead of `end_line`**: When `start_line` is provided,\n\
-                                       you may pass `num_lines` to specify the COUNT of lines to read from that start.\n\
-                                       Example: `start_line=201, num_lines=100` reads lines 201–300 (inclusive).\n\
-                                         This is useful if you naturally think in start + count rather than start + end.
-\
-                                       If both `end_line` and `num_lines` are provided, `end_line` takes precedence.\n\
-                                     - Strategy:\n\
-                                       1. Read the file without start_line/end_line first — for large files this returns\n\
-                                          the first 100 lines plus a section map with the total line count\n\
-                                       2. Use the total_lines from the response to plan your subsequent reads\n\
-                                       3. Then read specific sections using valid line ranges\n\
-                                       4. Never read an entire file >100 lines in a single call\n",
-                                ); // Guidance on using edit / multiedit tools
+                                      "## File Reading Best Practices\n\n                                       When reading files with the `read` tool:\n                                       - **PREFERRED**: use `start_line` + `num_lines`.  `start_line` is the 1-based\n                                         absolute line number where reading begins, and `num_lines` is the COUNT of\n                                         lines to read from that start.  Example: `start_line=201, num_lines=100`\n                                         reads lines 201–300 (inclusive).  This pair expresses the same intent as\n                                         `start_line` + `end_line` but is much harder to get wrong.\n                                       - `end_line` is the absolute last line number to include (NOT a count).\n                                         It is still supported, but only use it when you specifically need an\n                                         absolute last-line boundary.  If you do, remember: `end_line` must be\n                                         ≥ `start_line` and is the ACTUAL last line number — e.g.\n                                         `start_line=200, end_line=300` reads lines 200–300 (101 lines total).\n                                       - Common mistake: writing `end_line=100` to mean \"100 lines\".  That is\n                                         wrong; `end_line` is absolute.  If you meant \"100 lines starting at 200\"\n                                         use `start_line=200, num_lines=100` (preferred) or `end_line=299`.\n                                       - The tool rejects `end_line < start_line` with a diagnostic that points\n                                         at the right fix; read the error message and retry with `num_lines`.\n                                       - For files > 100 lines, do not read the whole file in one call — read\n                                         in focused sections.  First call without a range returns the first 100\n                                         lines plus a section map; the response metadata always includes `total_lines`.\n                                       - Strategy:\n                                         1. Read the file without `start_line`/`num_lines` first — for large files\n                                            this returns the first 100 lines plus a section map with the total\n                                            line count.\n                                         2. Use `total_lines` from the response metadata to plan subsequent reads.\n                                         3. Then read specific sections with `start_line` + `num_lines`.\n                                         4. Never read an entire file > 100 lines in a single call.\n\n",
+                                  ); // Guidance on using edit / multiedit tools
     prompt.push_str(
                   "\n## Editing Files\n\n\
                    Use the `edit` tool for single surgical text replacements in one file.\n\
@@ -2199,12 +2286,22 @@ pub fn build_system_prompt_with_storage(
                    - Calls to `edit` without `old_str` will fail with an error\n\
                    - The `old_str` must match exactly one location in the file\n\
                    - Read the relevant section of the file first to get the exact text for `old_str`\n\
-                   \n\
-                   When using the `multiedit` tool:\n\
-                   - Provide an `edits` array, where each entry has `path`, `old_str`, and `new_str`\n\
-                   - All edits are validated before any files are written\n\
-                   - If any `old_str` match fails, no files are modified\n",
-              );
+                                       \n\
+                                       When using the `multiedit` tool:\n\
+                                       - Provide an `edits` array, where each entry has `path`, `old_str`, and `new_str`\n\
+                                       - All edits are validated before any files are written\n\
+                                       - If any `old_str` match fails, no files are modified\n",
+                                   );
+
+    // -------------------------------------------------------------------
+    // Task tool family — the difference between `task_complete` and
+    // `team_task_complete` trips up many models, leading to the wrong
+    // tool being called with the wrong parameters.  This section is
+    // injected into every primary agent's system prompt so the
+    // distinction is always visible.
+    // -------------------------------------------------------------------
+    prompt.push_str(TASK_TOOL_FAMILY_GUIDANCE);
+
     prompt
 }
 
@@ -2221,6 +2318,49 @@ mod tests {
 
         assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
         assert!(ask.options.is_empty());
+    }
+
+    #[test]
+    fn test_task_tool_family_guidance_is_injected_into_system_prompt() {
+        // The system prompt must always end with the task tool family
+        // guidance so the model understands the difference between
+        // `task_complete` (autonomous loop signal) and
+        // `team_task_complete` (team workflow).  This guards against
+        // regressions where someone removes the append at the end of
+        // `build_system_prompt_with_storage`.
+        let mut agent = AgentInfo::new("general", "general agent");
+        agent.prompt = Some("You are a helpful assistant.".to_string());
+        agent.max_steps = Some(10);
+
+        let prompt = build_system_prompt_with_storage(
+            &agent,
+            Path::new("/tmp"),
+            "",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        assert!(
+            prompt.contains("## Task Tool Family"),
+            "system prompt must include the '## Task Tool Family' section, got tail: {}",
+            &prompt[prompt.len().saturating_sub(2000)..]
+        );
+        assert!(
+            prompt.contains("task_complete") && prompt.contains("team_task_complete"),
+            "system prompt must reference both task_complete and team_task_complete"
+        );
+        // The guidance must call out that `task_complete` only takes
+        // `summary` and `team_task_complete` takes `team_name` + `task_id`.
+        assert!(
+            prompt.contains("summary")
+                && prompt.contains("team_name")
+                && prompt.contains("task_id"),
+            "system prompt guidance must list the required parameters of each tool"
+        );
     }
 
     #[test]

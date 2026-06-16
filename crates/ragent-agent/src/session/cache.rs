@@ -227,14 +227,18 @@ impl SystemPromptCache {
     }
 
     /// Get or compute the cached codeindex guidance section.
+    ///
+    /// The two compute closures are passed as a single `compute` callback
+    /// that receives a `bool` indicating the active/disabled state, which
+    /// sidesteps the "no two closures have the same type" issue without
+    /// requiring callers to box their closures.
     pub fn get_codeindex_guidance<F>(
         &self,
         code_index_active: bool,
-        compute_active: F,
-        compute_disabled: F,
+        compute: F,
     ) -> Option<String>
     where
-        F: FnOnce() -> String,
+        F: FnOnce(bool) -> String,
     {
         self.refresh_version();
         let version = self.version();
@@ -248,16 +252,32 @@ impl SystemPromptCache {
             }
         }
 
-        let value = if code_index_active {
-            compute_active()
-        } else {
-            compute_disabled()
-        };
-
+        let value = compute(code_index_active);
         cache.set(value.clone());
         *last_active = code_index_active;
 
         Some(value)
+    }
+
+    /// Backwards-compatible wrapper that accepts two separate closures.
+    /// Provided so existing call sites that already pass two closures
+    /// continue to work after the API change to `get_codeindex_guidance`.
+    pub fn get_codeindex_guidance_with<F>(
+        &self,
+        code_index_active: bool,
+        compute_active: F,
+        compute_disabled: F,
+    ) -> Option<String>
+    where
+        F: FnOnce() -> String,
+    {
+        self.get_codeindex_guidance(code_index_active, |is_active| {
+            if is_active {
+                compute_active()
+            } else {
+                compute_disabled()
+            }
+        })
     }
 
     /// Get or compute the cached team guidance section.
@@ -376,6 +396,20 @@ pub struct SessionState {
     session_id: String,
     /// Current session-level thinking configuration.
     thinking: ThinkingConfig,
+    /// History version last time the cache was populated.
+    ///
+    /// FR-006 / FR-007 (AgentPerf T-007): the agent loop computes a
+    /// `history_version` (count, last-id, last-modified-ms) at the start
+    /// of each step and only re-runs `history_to_chat_messages` when the
+    /// version changes.  This avoids re-converting the same message list
+    /// to provider-specific chat messages on every iteration of the
+    /// tool-call loop.
+    last_history_version: u64,
+    /// Cached serialised form of the most recent `ChatRequest` whose
+    /// history did not change.  Used by the FR-007 fast path so a step
+    /// that does not mutate the history can skip the JSON serialisation
+    /// step as well.
+    cached_serialised: Option<Vec<u8>>,
 }
 
 impl SessionState {
@@ -389,6 +423,8 @@ impl SessionState {
             last_updated: std::time::Instant::now(),
             session_id: session_id.into(),
             thinking: ThinkingConfig::default(),
+            last_history_version: 0,
+            cached_serialised: None,
         }
     }
 
@@ -415,6 +451,45 @@ impl SessionState {
         self.last_message_count = 0;
         self.estimated_token_count = 0;
         self.last_updated = std::time::Instant::now();
+        self.last_history_version = 0;
+        self.cached_serialised = None;
+    }
+
+    /// Return the cached chat-message list when the supplied history
+    /// version is unchanged (FR-006).
+    ///
+    /// The caller is responsible for computing the version (typically
+    /// `(count, last_id, last_modified_ms)`).  When the version matches
+    /// the cached one, the previously-converted list is returned
+    /// without re-running `history_to_chat_messages`.  When it differs,
+    /// the version is recorded and `None` is returned, signalling that
+    /// the caller should rebuild the list.
+    pub fn cached_chat_messages_for_version(
+        &mut self,
+        history_version: u64,
+    ) -> Option<&[ChatMessage]> {
+        if self.last_history_version == history_version && !self.cached_chat_messages.is_empty() {
+            Some(&self.cached_chat_messages)
+        } else {
+            self.last_history_version = history_version;
+            None
+        }
+    }
+
+    /// Store the rebuilt chat-message list and a serialised snapshot for
+    /// the FR-007 fast path.  Companion to
+    /// [`Self::cached_chat_messages_for_version`].
+    pub fn store_chat_messages(&mut self, messages: Vec<ChatMessage>, serialised: Option<Vec<u8>>) {
+        self.cached_chat_messages = messages;
+        self.last_message_count = self.cached_chat_messages.len();
+        self.cached_serialised = serialised;
+    }
+
+    /// Return the cached serialised `ChatRequest` body from the previous
+    /// step, if any (FR-007).
+    #[must_use]
+    pub fn cached_serialised(&self) -> Option<&[u8]> {
+        self.cached_serialised.as_deref()
     }
 
     /// Get the current estimated token count.

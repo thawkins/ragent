@@ -6,6 +6,7 @@
 
 pub mod processor;
 pub mod profiler;
+pub mod cache;
 
 // Re-export compression types when the feature is enabled.
 #[cfg(feature = "compression")]
@@ -21,7 +22,9 @@ use std::sync::Arc;
 
 use crate::event::{Event, EventBus};
 use crate::message::Message;
+use crate::session::cache::SessionState;
 use crate::storage::Storage;
+use std::sync::Mutex;
 
 /// A conversation session between a user and an agent.
 ///
@@ -95,6 +98,32 @@ impl SessionManager {
     /// ```
     pub const fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
         Self { storage, event_bus }
+    }
+
+    /// Return the per-session [`SessionState`] cache (FR-006 / FR-007).
+    ///
+    /// The cache is allocated on first use and held in a process-wide
+    /// `Mutex<HashMap<String, Arc<Mutex<SessionState>>>>`.  It is used by
+    /// the agent loop to skip redundant `Message -> ChatMessage` and
+    /// `ChatRequest` serialisation work between iterations of the
+    /// tool-call loop.
+    pub fn session_state_cache(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
+        use std::collections::HashMap;
+        use std::sync::OnceLock;
+
+        static CACHE: OnceLock<
+            Mutex<HashMap<String, Arc<Mutex<SessionState>>>>,
+        > = OnceLock::new();
+
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = cache.lock().expect("session_state_cache poisoned");
+        if let Some(existing) = guard.get(session_id) {
+            existing.clone()
+        } else {
+            let new = Arc::new(Mutex::new(SessionState::new(session_id)));
+            guard.insert(session_id.to_string(), new.clone());
+            new
+        }
     }
 
     /// Returns a reference to the underlying storage backend.

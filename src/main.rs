@@ -469,6 +469,7 @@ async fn main() -> Result<()> {
         extraction_engine: std::sync::OnceLock::new(),
         stream_config,
         auto_approve: cli.yes,
+        system_prompt_cache: parking_lot::RwLock::new(None),
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
 

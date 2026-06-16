@@ -9,6 +9,7 @@ pub mod codeindex_reindex;
 pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
+pub(crate) mod codeindex_utils;
 pub mod http_request;
 pub mod libreoffice_common;
 pub mod libreoffice_info;

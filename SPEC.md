@@ -687,40 +687,64 @@ ragent models --provider azure_resource
 - Duplicate IDs are deduplicated (first wins)
 - Invalid entries are skipped with a warning
 
-#### Microsoft Foundry Local Provider
+  #### Microsoft Foundry Local Provider
 
-The `foundry_local` provider connects to locally-hosted Microsoft models via the official `foundry-local-sdk`. It does not require an API key and exposes a static default catalog (Phi-4, Phi-3.5 Mini, Phi-3.5 MoE) when the Foundry Local service is not running. When the service is running, dynamic model discovery via the SDK catalog is used.
-
-**Authentication:**
-- No API key required.
-
-**Configuration Example (`ragent.json`):**
-```json
-{
-  "provider": {
-    "foundry_local": {
-      "auto_start": true,
-      "device": "auto",
-      "models_path": "~/.foundry-local/models"
-    }
-  }
-}
-```
-
-**Features:**
-- **Local Inference** — Runs Microsoft models on the same machine as ragent
-- **No API Key** — Zero cloud credentials required
-- **Auto-Start Service** — Optionally starts the Foundry Local web service on first use
-- **Device Selection** — `auto`, `cpu`, `gpu`, or `npu` preference (passed to SDK where supported)
-- **Model Cache Path** — Override the default model cache directory
-
-**Model Listing:**
-```bash
-ragent models --provider foundry_local
-```
-
-### 3.2 Tool System
-
+      The `foundry_local` provider connects to locally-hosted Microsoft models via the official `foundry-local-sdk`. It does not require an API key and exposes a static default catalog (Phi-4, Phi-3.5 Mini, Phi-3.5 MoE) when the Foundry Local service is not running. When the service is running, dynamic model discovery via the SDK catalog is used.
+  
+      The provider can operate in two modes:
+  
+      - **Web-service mode** (default, `in_process: false`) — starts the local Foundry
+        Local web service and routes chat requests to its OpenAI-compatible endpoint.
+        Before each chat request the provider ensures the requested model is downloaded
+        and loaded into the web service's memory. It uses the web service's
+        `/models/load/{variant_id}` endpoint rather than the SDK's in-process loader,
+        because inference requests go to the web service and the in-process loader
+        leaves the web service unaware of the model. Readiness is verified by polling
+        `/models/loaded`, with a fallback to `/v1/models` for compatibility with older
+        Foundry Local builds.
+  
+      - **In-process mode** (`in_process: true`) — loads and runs the model inside the
+        ragent process using the SDK's native core library, avoiding the separate web
+        service entirely.  The model is downloaded if necessary and then loaded via the
+        SDK's in-process `Model::load()` API before the first chat token is produced.
+  
+      **Authentication:**
+      - No API key required.
+  
+      **Configuration Example (`ragent.json`):**
+      ```json
+      {
+        "provider": {
+          "foundry_local": {
+            "in_process": true,
+            "auto_start": true,
+            "device": "auto",
+            "models_path": "~/.foundry-local/models"
+          }
+        }
+      }
+      ```
+  
+      **Features:**
+      - **Local Inference** — Runs Microsoft models on the same machine as ragent
+      - **No API Key** — Zero cloud credentials required
+      - **Dual Backend** — Web-service or in-process native core inference (`in_process`)
+      - **Auto-Start Service** — Optionally starts the Foundry Local web service on first use (web-service mode)
+      - **Device Selection** — `auto`, `cpu`, `gpu`, or `npu` preference used to select a matching model variant
+      - **Model Cache Path** — Override the default model cache directory
+      - **Automatic Download/Load** — Downloads uncached models and loads them into the active backend before streaming
+      - **Robust Readiness Polling** — Web-service mode uses `/models/loaded` to confirm the model is actually in memory, preventing empty SSE streams
+      - **Web-Service Escape Hatch** — Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when `in_process: true` is configured
+  
+      **Internal LLM:**
+      - `/internal-llm foundry` routes internal helper tasks through Microsoft Foundry Local.
+      - The TUI status panel shows the configured **foundry mode** (`in-process` or `web-service`) when the internal LLM backend is `foundry`.
+  
+      **Model Listing:**
+      ```bash
+      ragent models --provider foundry_local
+      ```
+    ### 3.2 Tool System
 #### File Operations Tools (14)
 
 | Tool | Purpose |
@@ -3010,6 +3034,24 @@ task_complete(summary: "Implemented feature X with tests and documentation")
 ```
 
 This publishes a `TaskCompleted` event, displays the summary to the user, and exits autopilot mode.
+
+> ⚠️ **Do not confuse with `team_task_complete`.** The two tools have similar
+> names but very different signatures. `task_complete` takes **only**
+> `summary` and ends the autonomous loop. `team_task_complete` takes
+> `team_name` + `task_id` and is used inside team workflows to mark a
+> claimed task complete.  Calling `task_complete(task_id=...)` is one of the
+> most common model mistakes — the system prompt carries a `## Task Tool
+> Family` section that explicitly calls this out.
+
+### 16.4.1 `new_task` parameter contract
+
+`new_task` is the sub-agent spawn tool. It has **two required parameters**
+(`agent` AND `task`) and both must be supplied — calls with only one of
+them will fail with `Missing required parameter: …`.  This is encoded in
+the JSON schema (`required: ["agent", "task"]`,
+`additionalProperties: false`) and in the tool description.  The system
+prompt also includes the contract in the `## Task Tool Family` section
+so models do not omit `task` or `agent` by mistake.
 
 ### 16.5 Status Display
 

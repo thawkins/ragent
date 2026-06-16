@@ -179,3 +179,76 @@ async fn test_read_num_lines_zero_is_error() {
     let err = result.unwrap_err().to_string();
     assert!(err.contains("num_lines"));
 }
+
+#[tokio::test]
+async fn test_read_end_line_smaller_than_start_line_gives_actionable_error() {
+    // The most common mistake we see in practice: a model writes
+    //   { "start_line": 200, "end_line": 100 }
+    // meaning "give me 100 lines starting at 200".  The old behaviour produced
+    // a generic "start_line must be <= end_line" error.  The new behaviour
+    // recognises the likely intent and tells the caller to use num_lines.
+    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    {
+        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        for i in 1..=500 {
+            writeln!(f, "Line {i}").unwrap();
+        }
+    }
+
+    let input = read_input(
+        tmp.path().to_str().unwrap(),
+        json!({ "start_line": 200, "end_line": 100 }),
+    );
+    let result = ReadTool.execute(input, &make_ctx()).await;
+
+    assert!(result.is_err(), "expected error for end_line < start_line");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("num_lines=100"),
+        "should suggest num_lines: {err}"
+    );
+    assert!(err.contains("end_line"), "should mention end_line: {err}");
+}
+
+#[tokio::test]
+async fn test_read_end_line_smaller_than_start_line_with_explicit_num_lines_still_errors() {
+    // When num_lines is already provided explicitly, we trust the caller; the
+    // end_line < start_line check still applies but the diagnostic doesn't
+    // suggest num_lines (the caller already has it right).  We just report the
+    // range error normally.
+    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    {
+        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        for i in 1..=500 {
+            writeln!(f, "Line {i}").unwrap();
+        }
+    }
+
+    let input = read_input(
+        tmp.path().to_str().unwrap(),
+        json!({ "start_line": 200, "end_line": 50, "num_lines": 100 }),
+    );
+    let result = ReadTool.execute(input, &make_ctx()).await;
+
+    assert!(
+        result.is_err(),
+        "end_line still takes precedence and is invalid"
+    );
+}
+
+#[tokio::test]
+async fn test_read_end_line_zero_is_error() {
+    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    {
+        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        writeln!(f, "Line 1").unwrap();
+    }
+
+    let input = read_input(
+        tmp.path().to_str().unwrap(),
+        json!({ "start_line": 1, "end_line": 0 }),
+    );
+    let result = ReadTool.execute(input, &make_ctx()).await;
+
+    assert!(result.is_err());
+}

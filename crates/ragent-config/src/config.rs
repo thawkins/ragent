@@ -87,6 +87,14 @@ pub struct Config {
     /// When a switch is `false`, all tools in that family are hidden from the LLM.
     #[serde(default)]
     pub tool_visibility: ToolVisibilityConfig,
+    /// Agent-loop performance configuration (AgentPerf FR-027).
+    ///
+    /// Controls the per-step wall-clock budget, the per-stream stall
+    /// timeout, the maximum number of concurrent tool calls, and the
+    /// master enable / profiling switches.  See
+    /// `specs/AgentPerf/SPEC.md` for the full schema.
+    #[serde(default)]
+    pub agent_perf: AgentPerfConfig,
     /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
     /// Hidden tools remain registered and executable; they are simply not advertised to the model.
     ///
@@ -153,6 +161,111 @@ pub struct ToolVisibilityConfig {
     pub codeindex: bool,
     #[serde(skip)]
     specified: ToolVisibilitySpecified,
+}
+
+/// Agent-loop performance configuration (AgentPerf FR-027).
+///
+/// All fields are optional and have sensible defaults; the agent
+/// action loop consults this struct at startup and on every step.
+///
+/// # Example
+///
+/// ```jsonc
+/// {
+///   "agent_perf": {
+///     "enabled": true,
+///     "profiling": true,
+///     "step_budget_secs": 300,
+///     "stall_timeout_secs": 60,
+///     "max_concurrent_tools": 4,
+///     "parallel_independent_tools": true
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentPerfConfig {
+    /// Master switch for the entire perf subsystem.
+    /// When `false`, every performance optimisation short-circuits.
+    #[serde(default = "agent_perf_default_true")]
+    pub enabled: bool,
+    /// Emit detailed per-scope timing logs at `info` level.
+    #[serde(default)]
+    pub profiling: bool,
+    /// Maximum wall-clock seconds per agent step.
+    #[serde(default = "default_step_budget_secs")]
+    pub step_budget_secs: u64,
+    /// Maximum seconds without a stream delta before stall recovery
+    /// fires.
+    #[serde(default = "default_stall_timeout_secs")]
+    pub stall_timeout_secs: u64,
+    /// Maximum parallel tool calls per turn.
+    #[serde(default = "default_max_concurrent_tools")]
+    pub max_concurrent_tools: u32,
+    /// Execute independent tool calls in parallel.
+    #[serde(default = "agent_perf_default_true")]
+    pub parallel_independent_tools: bool,
+}
+
+fn agent_perf_default_true() -> bool {
+    true
+}
+
+fn default_step_budget_secs() -> u64 {
+    300
+}
+
+fn default_stall_timeout_secs() -> u64 {
+    60
+}
+
+fn default_max_concurrent_tools() -> u32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(4)
+        .min(4)
+}
+
+impl Default for AgentPerfConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            profiling: false,
+            step_budget_secs: default_step_budget_secs(),
+            stall_timeout_secs: default_stall_timeout_secs(),
+            max_concurrent_tools: default_max_concurrent_tools(),
+            parallel_independent_tools: true,
+        }
+    }
+}
+
+impl AgentPerfConfig {
+    /// Validate the configuration and return a list of any problems.
+    ///
+    /// The agent loop calls this on startup and refuses to start
+    /// if `validate()` returns a non-empty list.
+    #[must_use]
+    pub fn validate(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.step_budget_secs < 5 {
+            problems.push(format!(
+                "agent_perf.step_budget_secs must be >= 5 (got {})",
+                self.step_budget_secs
+            ));
+        }
+        if self.stall_timeout_secs < 5 {
+            problems.push(format!(
+                "agent_perf.stall_timeout_secs must be >= 5 (got {})",
+                self.stall_timeout_secs
+            ));
+        }
+        if self.max_concurrent_tools < 1 {
+            problems.push(format!(
+                "agent_perf.max_concurrent_tools must be >= 1 (got {})",
+                self.max_concurrent_tools
+            ));
+        }
+        problems
+    }
 }
 
 impl Default for ToolVisibilityConfig {

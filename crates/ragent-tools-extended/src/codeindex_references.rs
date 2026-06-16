@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Find all references to a named symbol across the codebase.
 pub struct CodeIndexReferencesTool;
@@ -69,7 +70,10 @@ impl Tool for CodeIndexReferencesTool {
             .map(|n| n.min(200) as usize)
             .unwrap_or(50);
 
-        let refs = idx.references(symbol, limit)?;
+        let refs = match with_retry(|| idx.try_references(symbol, limit)).await? {
+            Some(r) => r,
+            None => return Ok(busy_output("codeindex_references")),
+        };
 
         if refs.is_empty() {
             return Ok(ToolOutput {

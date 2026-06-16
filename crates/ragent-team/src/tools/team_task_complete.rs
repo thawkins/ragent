@@ -17,8 +17,15 @@ impl Tool for TeamTaskCompleteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Mark a task as completed. The task must be currently assigned to the caller. \
-         Completing a task automatically unblocks any tasks that depend on it."
+        "Mark a TEAM task as completed (used inside a team session). \
+         The task must be currently assigned to the caller. \
+         Completing a task automatically unblocks any tasks that depend on it. \
+         \n\n\
+         ⚠️ DO NOT confuse with `task_complete` (a different tool used OUTSIDE teams to \
+         signal the end of the autonomous loop, which takes `summary` as its only parameter). \
+         This tool takes `team_name` + `task_id` — NOT `summary`. \
+         \n\n\
+         Example: team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -27,14 +34,18 @@ impl Tool for TeamTaskCompleteTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "REQUIRED. Name of the team. \
+                                   If you are NOT inside a team session, this tool will fail — \
+                                   use `task_complete(summary: ...)` instead to end the autonomous loop."
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "ID of the task to mark as completed (e.g. 'task-001')"
+                    "description": "REQUIRED. ID of the task to mark as completed (e.g. 'task-001'). \
+                                   This must be a task ID you claimed via `team_task_claim`."
                 }
             },
-            "required": ["team_name", "task_id"]
+            "required": ["team_name", "task_id"],
+            "additionalProperties": false
         })
     }
 

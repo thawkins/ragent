@@ -371,4 +371,117 @@ mod compression_feature_tests {
         // With enabled=false, messages pass through unchanged.
         assert_eq!(result.messages.len(), messages.len());
     }
+
+    // ── Per-iteration threshold with LLM-reported count ─────────────────
+
+    #[test]
+    fn test_should_compress_with_reported_uses_reported_count_when_available() {
+        // When the LLM has reported an input token count from a previous
+        // call, the threshold check must use that count (it matches the
+        // provider's tokenizer exactly) instead of the local Headroom
+        // estimate. This prevents the estimate from triggering compression
+        // earlier than the configured `auto_threshold`.
+        use ragent_agent::llm::{ChatContent, ChatMessage as LlmChatMessage};
+        use ragent_agent::session::processor::should_compress_with_reported;
+
+        let chat_messages = vec![LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("Hello".to_string()),
+        }];
+        let context_window = 128_000_usize;
+        let auto_threshold = 0.80_f64;
+
+        // LLM reported 70% of context — below 80% threshold, no compression.
+        assert!(
+            !should_compress_with_reported(
+                &chat_messages,
+                context_window,
+                auto_threshold,
+                (context_window as f64 * 0.70) as u64,
+            ),
+            "70% reported count should not trigger compression at 80% threshold"
+        );
+
+        // LLM reported 80% of context — at the threshold, should compress.
+        assert!(
+            should_compress_with_reported(
+                &chat_messages,
+                context_window,
+                auto_threshold,
+                (context_window as f64 * 0.80) as u64,
+            ),
+            "80% reported count should trigger compression at 80% threshold"
+        );
+
+        // LLM reported 95% of context — well above, should compress.
+        assert!(
+            should_compress_with_reported(
+                &chat_messages,
+                context_window,
+                auto_threshold,
+                (context_window as f64 * 0.95) as u64,
+            ),
+            "95% reported count should trigger compression at 80% threshold"
+        );
+    }
+
+    #[test]
+    fn test_should_compress_with_reported_falls_back_to_estimate_when_zero() {
+        // When `last_reported_input_tokens` is 0 (first call in a turn, or
+        // provider omits usage), the helper must fall back to the local
+        // Headroom estimate so the threshold check still works.
+        use ragent_agent::llm::{ChatContent, ChatMessage as LlmChatMessage};
+        use ragent_agent::session::processor::should_compress_with_reported;
+
+        let context_window = 128_000_usize;
+        let auto_threshold = 0.80_f64;
+
+        // Small payload — estimate should be well under threshold.
+        let small_payload = vec![LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("Hello, world!".to_string()),
+        }];
+        assert!(
+            !should_compress_with_reported(&small_payload, context_window, auto_threshold, 0,),
+            "Small payload with zero reported count should fall back to estimate (under threshold)"
+        );
+
+        // Large payload — estimate should be over threshold.
+        let large_text = "x ".repeat(50_000);
+        let large_payload = vec![LlmChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text(large_text),
+        }];
+        // Use a small context window so the estimate exceeds the threshold.
+        assert!(
+            should_compress_with_reported(&large_payload, 1_000, auto_threshold, 0,),
+            "Large payload with zero reported count should fall back to estimate (over threshold)"
+        );
+    }
+
+    #[test]
+    fn test_should_compress_with_reported_reported_takes_precedence_over_estimate() {
+        // Critical regression test: if the LLM reports 70% but the local
+        // estimate would say 95%, the helper must trust the LLM's count
+        // (more accurate) and NOT trigger compression. This is the core
+        // fix for the "triggering before 80%" bug.
+        use ragent_agent::llm::{ChatContent, ChatMessage as LlmChatMessage};
+        use ragent_agent::session::processor::should_compress_with_reported;
+
+        // A large payload that, by the local estimate, would exceed 80%
+        // of a small context window — but the LLM only saw 70%.
+        let large_text = "x ".repeat(20_000);
+        let chat_messages = vec![LlmChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text(large_text),
+        }];
+        let context_window = 1_000_usize; // Tiny window so estimate is huge
+        let auto_threshold = 0.80_f64;
+        // LLM reported 700 tokens = 70% of 1000 — should NOT compress
+        // even though the local estimate would say we're way over.
+        assert!(
+            !should_compress_with_reported(&chat_messages, context_window, auto_threshold, 700,),
+            "LLM-reported 70% must override an estimate that would say >80%"
+        );
+    }
 }

@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
+use crate::perf;
+
 /// Aggregated timing statistics for one profiled operation.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileOperationSnapshot {
@@ -126,6 +128,13 @@ impl AgentLoopProfiler {
             profiler: Some(self.clone()),
             label,
             started_at: Instant::now(),
+            // FR-002: Only emit per-scope log lines when the
+            // `RAGENT_AGENT_PERF=1` env var (or the `agent_perf.profiling`
+            // config field) is set.  This keeps the hot path quiet by
+            // default — every `tracing::info!` is a no-op when no
+            // subscriber is listening — but the toggle is a single
+            // relaxed load.
+            log_on_drop: perf::is_profiling_enabled(),
         }
     }
 
@@ -291,6 +300,8 @@ pub struct ProfileScope {
     profiler: Option<Arc<AgentLoopProfiler>>,
     label: String,
     started_at: Instant,
+    /// Whether this scope should emit a `tracing::info!` log line on drop.
+    log_on_drop: bool,
 }
 
 impl ProfileScope {
@@ -299,6 +310,7 @@ impl ProfileScope {
             profiler: None,
             label: String::new(),
             started_at: Instant::now(),
+            log_on_drop: false,
         }
     }
 }
@@ -306,7 +318,18 @@ impl ProfileScope {
 impl Drop for ProfileScope {
     fn drop(&mut self) {
         if let Some(profiler) = &self.profiler {
-            profiler.record_duration(&self.label, self.started_at.elapsed());
+            let elapsed = self.started_at.elapsed();
+            profiler.record_duration(&self.label, elapsed);
+            // FR-002: When `RAGENT_AGENT_PERF=1` is set, emit a
+            // per-scope `info!` line so operators can see live timings
+            // without having to attach a debugger.
+            if self.log_on_drop {
+                tracing::info!(
+                    scope = %self.label,
+                    duration_us = elapsed.as_micros() as u64,
+                    "agent loop scope"
+                );
+            }
         }
     }
 }

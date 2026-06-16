@@ -24,6 +24,7 @@ pub mod mcp;
 pub mod memory;
 pub mod message;
 pub mod orchestrator;
+pub mod perf;
 pub mod permission;
 pub mod predictive;
 pub mod reference;

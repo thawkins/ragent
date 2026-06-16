@@ -117,12 +117,15 @@ impl FoundryLocalExecutor {
                     .enable_all()
                     .build()
                     .map_err(|e| InternalLlmError::Unavailable {
-                        message: format!("Failed to create tokio runtime for Foundry Local start: {e}"),
+                        message: format!(
+                            "Failed to create tokio runtime for Foundry Local start: {e}"
+                        ),
                     })?;
-                rt.block_on(manager.start_web_service())
-                    .map_err(|e| InternalLlmError::Unavailable {
+                rt.block_on(manager.start_web_service()).map_err(|e| {
+                    InternalLlmError::Unavailable {
                         message: format!("Foundry Local web service failed to start: {e}"),
-                    })?;
+                    }
+                })?;
 
                 // Poll for URLs (up to 60 seconds — less than the 120s used by
                 // the full provider because internal-LLM tasks are best-effort).
@@ -141,14 +144,19 @@ impl FoundryLocalExecutor {
                 }
             }
 
-            let endpoint = urls.into_iter().next().ok_or_else(|| InternalLlmError::Unavailable {
-                message: if auto_start {
-                    "Foundry Local web service did not report any URLs after auto-start".to_string()
-                } else {
-                    "Foundry Local web service is not running and auto_start is disabled. \
-                     Start it manually with `foundry service start`.".to_string()
-                },
-            })?;
+            let endpoint =
+                urls.into_iter()
+                    .next()
+                    .ok_or_else(|| InternalLlmError::Unavailable {
+                        message: if auto_start {
+                            "Foundry Local web service did not report any URLs after auto-start"
+                                .to_string()
+                        } else {
+                            "Foundry Local web service is not running and auto_start is disabled. \
+                     Start it manually with `foundry service start`."
+                                .to_string()
+                        },
+                    })?;
 
             Ok(endpoint)
         })
@@ -216,11 +224,13 @@ impl InternalLlmExecutor for FoundryLocalExecutor {
             });
         }
 
-        let parsed: ChatCompletionResponse = response.json().await.map_err(|e| {
-            InternalLlmError::Execution {
-                message: format!("Failed to parse Foundry Local response: {e}"),
-            }
-        })?;
+        let parsed: ChatCompletionResponse =
+            response
+                .json()
+                .await
+                .map_err(|e| InternalLlmError::Execution {
+                    message: format!("Failed to parse Foundry Local response: {e}"),
+                })?;
 
         let content = parsed
             .choices

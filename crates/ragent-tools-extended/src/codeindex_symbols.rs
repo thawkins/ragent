@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Query structured symbol information from the code index.
 ///
@@ -105,7 +106,10 @@ impl Tool for CodeIndexSymbolsTool {
             limit: Some(limit),
         };
 
-        let symbols = idx.symbols(&filter)?;
+        let symbols = match with_retry(|| idx.try_symbols(&filter)).await? {
+            Some(s) => s,
+            None => return Ok(busy_output("codeindex_symbols")),
+        };
 
         if symbols.is_empty() {
             return Ok(ToolOutput {

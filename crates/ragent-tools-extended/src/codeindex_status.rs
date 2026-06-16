@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Show status and statistics of the codebase index.
 pub struct CodeIndexStatusTool;
@@ -49,7 +50,10 @@ impl Tool for CodeIndexStatusTool {
             None => return Ok(not_available()),
         };
 
-        let stats = idx.status()?;
+        let stats = match with_retry(|| Ok(idx.try_status())).await? {
+            Some(s) => s,
+            None => return Ok(busy_output("codeindex_status")),
+        };
 
         let mut output = String::from("## Code Index Status\n\n");
         output.push_str(&format!("Files indexed:  {}\n", stats.files_indexed));

@@ -9,6 +9,7 @@
 pub mod embedded;
 pub mod llm;
 pub mod providers;
+pub mod shared_request;
 
 /// Compatibility re-export matching the historic `provider` module path.
 pub use providers as provider;
@@ -32,6 +33,7 @@ pub use providers::{
     create_default_registry,
     foundry_local_client::FoundryLocalClient,
     foundry_local_error::FoundryServiceError,
+    foundry_local_inproc_client::FoundryLocalInProcClient,
     foundry_local_provider::FoundryLocalProvider,
     foundry_local_provider::{
         discover_foundry_local_models, foundry_local_default_models, is_foundry_local_available,
@@ -50,3 +52,5 @@ pub use embedded::{
     EmbeddedRuntimeLifecycle, EmbeddedRuntimeSettings, EmbeddedRuntimeStatus, RuntimeAvailability,
     SUB_1G_MAX_BYTES,
 };
+
+pub use shared_request::SharedChatRequest;

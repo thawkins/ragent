@@ -148,14 +148,18 @@ native Ollama integration.
   9. **Azure AI Foundry** — Azure-hosted models with dynamic model discovery
   10. **Azure Resource (File)** — Azure file/resource provider with
       `azureresources.json` support
-  11. **Amazon Bedrock** — AWS-hosted models (Claude, Nova, Llama, Mistral)
-      with AWS SigV4 authentication, dual API support (Anthropic Messages +
-      Converse), and dynamic model discovery
-- **Local model support**: Ollama (native, first-class)
-- **Custom providers**: Generic OpenAI-compatible endpoint with configurable
-  `base_url` — covers LM Studio, vLLM, LocalAI, and any OpenAI API-compatible
-  server
-- **Configuration**: `ragent.json` (or `.jsonc`) with per-provider sections;
+      11. **Amazon Bedrock** — AWS-hosted models (Claude, Nova, Llama, Mistral)
+          with AWS SigV4 authentication, dual API support (Anthropic Messages +
+          Converse), and dynamic model discovery
+      12. **Microsoft Foundry Local** — Local MAI models (Phi-4, Phi-3.5) via the
+          `foundry-local-sdk`.  Can run either as an in-process native core
+          backend (`in_process: true`) or through the local Foundry web service
+          (`in_process: false`, default).
+    - **Local model support**: Ollama (native, first-class), Microsoft Foundry Local
+      (native, in-process or web-service)
+    - **Custom providers**: Generic OpenAI-compatible endpoint with configurable
+      `base_url` — covers LM Studio, vLLM, LocalAI, and any OpenAI API-compatible
+      server- **Configuration**: `ragent.json` (or `.jsonc`) with per-provider sections;
   environment variable support (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `AWS_ACCESS_KEY_ID`, etc.)
 - **Pricing**: Free open-source tool; model costs through individual provider
@@ -210,3 +214,46 @@ native Ollama integration.
 6. **Local model support**: OpenCode, Copilot CLI, and ragent all support
    local inference via Ollama. Codex CLI can work through proxies. Claude Code
    has no local model path.
+## Microsoft Foundry Local
+
+Microsoft Foundry Local hosts MAI models such as Phi-4 and Phi-3.5 directly on the
+same machine as ragent.  ragent supports two operating modes:
+
+- **In-process** (`in_process: true`) — loads and runs the model inside the
+  ragent process using the `foundry-local-sdk` native core.  This avoids the
+  separate Foundry Local web service and removes the HTTP hop.
+- **Web service** (`in_process: false`, the default) — starts the local Foundry
+  Local web service and routes chat requests to its OpenAI-compatible endpoint,
+  matching the original behaviour.
+
+### Configuration
+
+```jsonc
+{
+  "provider": {
+    "foundry_local": {
+      "in_process": true,
+      "device": "auto",
+      "models_path": "~/.foundry-local/models"
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `in_process` | boolean | `false` | Use the in-process native core backend |
+| `device` | string | `"auto"` | Preferred inference device: `auto`, `cpu`, `gpu`, or `npu` |
+| `models_path` | string | — | Override path for the local model cache directory |
+
+### Environment escape hatch
+
+Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when
+`in_process: true` is configured.  Useful for debugging or compatibility.
+
+### Internal LLM
+
+The `/internal-llm foundry` slash command routes internal helper tasks through
+Microsoft Foundry Local.  When the internal LLM backend is `foundry`, the TUI
+status panel shows whether the main provider is configured for in-process or
+web-service inference under the **foundry mode** row.

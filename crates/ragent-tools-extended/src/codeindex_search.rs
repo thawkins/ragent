@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Search the codebase index for symbols, functions, types, and documentation
 /// using full-text search with optional structured filters.
@@ -101,7 +102,10 @@ impl Tool for CodeIndexSearchTool {
             include_body: false,
         };
 
-        let results = idx.search(&search_query)?;
+        let results = match with_retry(|| idx.try_search(&search_query)).await? {
+            Some(r) => r,
+            None => return Ok(busy_output("codeindex_search")),
+        };
 
         if results.is_empty() {
             return Ok(ToolOutput {

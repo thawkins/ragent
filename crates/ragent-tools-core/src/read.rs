@@ -98,20 +98,13 @@ impl Tool for ReadTool {
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Read file contents. For large files (>100 lines) called without a line range, \
-                             returns the first 100 lines plus a section map of the file's structure. \
-                             Use start_line/end_line to read specific sections. \
-                             CRITICAL: start_line and end_line are ABSOLUTE 1-based line numbers (NOT offsets or counts). \
-                             To read lines 200-300, use start_line=200, end_line=300 (NOT end_line=100). \
-                             end_line is the LAST line number to include, NOT the number of lines to read. \
-                             Both must be ≤ total_lines and start_line ≤ end_line. \
-                             The response always includes total_lines in metadata. \
-                             Example: file has 500 lines, to read lines 201-300: start_line=201, end_line=300. \
-                             Anti-pattern: start_line=201, end_line=100 (fails: 100 < 201). \
-                             Alternative: use num_lines instead of end_line — when start_line is provided, \
-                             num_lines gives the COUNT of lines to read from that start. \
-                             Example: start_line=201, num_lines=100 reads lines 201-300."
+                                   returns the first 100 lines plus a section map of the file's structure. \
+                                   Use start_line + num_lines to read a specific range. \
+                                   start_line is the 1-based absolute line number where reading begins. \
+                                   num_lines is the COUNT of lines to read from start_line \
+                                   (e.g. start_line=201, num_lines=100 reads lines 201-300). \
+                                   If both end_line and num_lines are provided, end_line takes precedence."
     }
-
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -123,17 +116,17 @@ impl Tool for ReadTool {
                 "start_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Starting line number (1-based, absolute, inclusive). This is the actual line number in the file, NOT an offset or count. Must be <= total_lines."
-                },
-                "end_line": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Ending line number (1-based, absolute, inclusive). This is the actual line number in the file, NOT a length or count. Must be >= start_line and <= total_lines."
+                    "description": "PREFERRED: 1-based absolute line number where reading begins. Combine with num_lines to read a specific range. Example: start_line=201, num_lines=100 reads lines 201-300."
                 },
                 "num_lines": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "ALTERNATIVE to end_line: when start_line is provided, num_lines gives the COUNT of lines to read from that start. Example: start_line=201, num_lines=100 reads lines 201-300 (inclusive). If both end_line and num_lines are provided, end_line takes precedence."
+                    "description": "PREFERRED: how many lines to read from start_line. Example: start_line=201, num_lines=100 reads lines 201-300. If omitted and start_line is set, reads to end of file."
+                },
+                "end_line": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "ADVANCED/LEGACY: 1-based absolute last line number to include. Prefer num_lines — it expresses the same intent without the absolute/count ambiguity that trips up most models. If both end_line and num_lines are provided, end_line takes precedence."
                 }
             },
             "required": ["path"],
@@ -187,6 +180,24 @@ impl Tool for ReadTool {
             anyhow::bail!("Invalid 'num_lines': must be >= 1");
         }
 
+        // Auto-detect the very common "end_line used as count" mistake. If the
+        // caller supplied an end_line that is smaller than start_line and looks
+        // like a count (e.g. 100, 200, 50, 25), they almost certainly meant
+        // num_lines. Bail with an actionable diagnostic instead of producing a
+        // silent wrong answer or a confusing range error.
+        if let (Some(start), Some(end)) = (start_line, end_line)
+            && end < start
+            && num_lines.is_none()
+        {
+            anyhow::bail!(
+                "Invalid 'end_line' ({end}): it is smaller than start_line ({start}). \
+                         end_line is the ABSOLUTE last line number to include, NOT a count. \
+                         You almost certainly want num_lines={end} (which reads {end} lines starting at line {start}, i.e. lines {start}..={}). \
+                         Or set end_line to a value >= start_line.",
+                start + end - 1
+            );
+        }
+
         // If num_lines is provided without end_line, compute end_line from it.
         if end_line.is_none()
             && num_lines.is_some()
@@ -201,9 +212,8 @@ impl Tool for ReadTool {
         {
             anyhow::bail!(
                 "Invalid line range: start_line ({start}) must be less than or equal to end_line ({end}). \
-                           HINT: end_line is the absolute last line number to include, NOT a count. \
-                           To read 100 lines starting at line {start}, use end_line={start_end} (not {end}).",
-                start_end = start + 99
+                                    HINT: end_line is the absolute last line number to include, NOT a count. \
+                                    To read 100 lines starting at line {start}, use num_lines=100 (not end_line={end}).",
             );
         }
         let lines: Vec<&str> = content.lines().collect();
@@ -281,7 +291,7 @@ impl Tool for ReadTool {
         if summarised {
             meta["summarised"] = serde_json::json!(true);
             meta["message"] = serde_json::json!(
-                "File is large. Only the first lines and a section map are shown. Use start_line/end_line to read specific sections."
+                "File is large. Only the first lines and a section map are shown. Use start_line + num_lines to read specific sections."
             );
         }
 

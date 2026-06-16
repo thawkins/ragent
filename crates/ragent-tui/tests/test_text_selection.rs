@@ -51,6 +51,7 @@ fn make_app() -> App {
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
         auto_approve: false,
+        system_prompt_cache: parking_lot::RwLock::new(None),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

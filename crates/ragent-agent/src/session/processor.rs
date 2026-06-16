@@ -25,6 +25,7 @@ use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
+use crate::session::cache::SystemPromptCache;
 use crate::tool::{McpToolWrapper, TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
 use regex::RegexSet;
@@ -137,24 +138,21 @@ impl StreamBuffer {
     }
 }
 
-/// Additional system-prompt guidance injected for Ollama sessions.
-pub const OLLAMA_TOOL_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
-IMPORTANT: When you need to take any action, call the appropriate tool IMMEDIATELY.\n\
-Do NOT write text describing what you are going to do — just call the tool.\n\
-Do NOT say \'Let me explore...\' or \'I will analyze...\' — instead, call the relevant tool now.\n\n\
-When you need file contents, use the `read` tool with arguments like \
-`{\"path\":\"src/main.rs\",\"start_line\":1,\"end_line\":100}`.\n\
-**CRITICAL — end_line is an absolute line number, NOT a count or offset**:\n\
-- CORRECT: `start_line=200, end_line=300` reads lines 200-300 (end_line = actual last line number)\n\
-- WRONG: `start_line=200, end_line=100` — this fails because end_line is less than start_line.\n\
-  To read 100 lines starting at 200, use end_line=299 (the 299th line), NOT end_line=100.\n\
-- The response always includes `total_lines`. Use it to keep end_line <= total_lines.\n\
-Prefer small line ranges (100 lines max) for large files; iterate with `start_line`/`end_line`.\n\
-Never invent or guess file contents — always read them with the tool.\n\n\
-Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
+/// Universal tool-calling guidance injected into every session's system prompt.
+///
+/// Previously this was an Ollama-specific constant (`OLLAMA_TOOL_GUIDANCE`),
+/// but the directives are universally useful — all providers benefit from clear
+/// "call tools immediately, don't narrate" instructions.  The file-reading
+/// guidance that used to be here has been removed because it is already built
+/// into the base system prompt (`build_system_prompt_with_storage`), so
+/// duplicating it here was redundant and created a maintenance drift risk.
+pub const TOOL_CALLING_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
+  IMPORTANT: When you need to take any action, call the appropriate tool IMMEDIATELY.\n\
+  Do NOT write text describing what you are going to do — just call the tool.\n\
+  Do NOT say 'Let me explore...' or 'I will analyze...' — instead, call the relevant tool now.\n\n\
+  Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
 
 /// Build a system-prompt section describing the codebase index tools
-/// when the index **is** active.
 ///
 /// Uses strong directive language to steer the LLM away from `grep`/`search`
 /// for any query that involves code symbols, types, or structure.
@@ -388,8 +386,10 @@ pub(crate) async fn check_permission_with_prompt(
         AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
             || tool_name.starts_with("team_")
             || tool_name.ends_with("_task")
-            || tool_name.starts_with("todo_")
+            || tool_name == "task_complete"
+            || tool_name == "list_tasks"
             || tool_name == "wait_tasks"
+            || tool_name.starts_with("todo_")
             || tool_name == "question"
     }
     use crate::permission::PermissionAction;
@@ -560,6 +560,15 @@ pub struct SessionProcessor {
     pub extraction_engine: std::sync::OnceLock<Arc<crate::memory::ExtractionEngine>>,
     /// Auto-approve all permissions without prompting (set by --yes / --no-prompt CLI flag).
     pub auto_approve: bool,
+    /// Cached per-component system-prompt builders (FR-008, FR-009).
+    ///
+    /// Sharing a single cache across all turns of a session lets the
+    /// `tool_reference`, `codeindex_guidance`, and `team_guidance` strings
+    /// be computed at most once per process-user-message, instead of once
+    /// per step.  Treated as a best-effort cache: a miss is always
+    /// acceptable, the cache exists only to skip the work when inputs are
+    /// unchanged.
+    pub system_prompt_cache: parking_lot::RwLock<Option<Arc<SystemPromptCache>>>,
 }
 
 impl SessionProcessor {
@@ -620,33 +629,68 @@ impl SessionProcessor {
         *guard = None;
     }
 
-    /// Return cached tool definitions, populating the cache if necessary.
-    fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
-        {
-            let guard = self.cached_tool_definitions.read();
-            if let Some(ref defs) = *guard {
-                return defs.clone();
-            }
-        }
-        let defs = Arc::new(self.tool_registry.definitions());
-        let mut guard = self.cached_tool_definitions.write();
-        *guard = Some(defs.clone());
-        defs
-    }
-
-    /// Run a blocking storage operation on a dedicated thread to avoid
-    /// stalling the Tokio runtime.
-    async fn storage_op<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&crate::storage::Storage) -> Result<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        let storage = self.session_manager.storage().clone();
-        tokio::task::spawn_blocking(move || f(&storage))
-            .await
-            .map_err(|e| anyhow::anyhow!("storage task panicked: {e}"))?
-    }
-
+          /// Return cached tool definitions, populating the cache if necessary.
+          fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
+              {
+                  let guard = self.cached_tool_definitions.read();
+                  if let Some(ref defs) = *guard {
+                      return defs.clone();
+                  }
+              }
+              let defs = Arc::new(self.tool_registry.definitions());
+              let mut guard = self.cached_tool_definitions.write();
+              *guard = Some(defs.clone());
+              defs
+          }
+    
+          /// Return the per-session system-prompt component cache, creating it
+          /// on first use (FR-008, FR-009).
+          ///
+          /// Sharing a single `SystemPromptCache` across all turns of a session
+          /// lets the `tool_reference`, `codeindex_guidance`, and `team_guidance`
+          /// strings be computed at most once per process-user-message instead
+          /// of once per step.  The cache is advisory: a miss is always
+          /// acceptable, it exists only to skip the work when inputs are
+          /// unchanged.
+          pub fn system_prompt_cache(&self) -> Arc<SystemPromptCache> {
+              {
+                  let guard = self.system_prompt_cache.read();
+                  if let Some(ref cache) = *guard {
+                      return cache.clone();
+                  }
+              }
+              let cache = Arc::new(SystemPromptCache::new());
+              let mut guard = self.system_prompt_cache.write();
+              *guard = Some(cache.clone());
+              cache
+          }
+    
+          /// Invalidate the system-prompt component cache.
+          ///
+          /// Call this when the tool registry, code-index state, or team
+          /// membership changes.  Cheap: just bumps a global version counter
+          /// and clears the per-component entries.
+          pub fn invalidate_system_prompt_cache(&self) {
+              self.system_prompt_cache().invalidate_all();
+          }
+          /// Run a blocking storage operation on a dedicated thread to avoid
+          /// stalling the Tokio runtime.
+          ///
+          /// (AgentPerf T-012 / FR-010 / FR-011.)  This is the canonical
+          /// way for the agent action loop to talk to the underlying SQLite
+          /// store.  All callers MUST go through this helper rather than
+          /// calling `Storage` methods directly from the async path, so the
+          /// executor is never blocked on synchronous I/O.
+          pub async fn storage_op<F, T>(&self, f: F) -> Result<T>
+          where
+              F: FnOnce(&crate::storage::Storage) -> Result<T> + Send + 'static,
+              T: Send + 'static,
+          {
+              let storage = self.session_manager.storage().clone();
+              tokio::task::spawn_blocking(move || f(&storage))
+                  .await
+                  .map_err(|e| anyhow::anyhow!("storage task panicked: {e}"))?
+          }
     /// Processes a user message within an agent session.
     ///
     /// Persists the user message, then enters an agentic loop that streams
@@ -943,6 +987,11 @@ impl SessionProcessor {
         };
         let (git_status, readme, agents_md, file_tree) = {
             let _scope = profiler.scope("prompt.collect_context");
+            // FR-012: every prompt-context call goes through
+            // `collect_prompt_context`, which is the single owner of
+            // `PROMPT_CONTEXT_CACHE`.  This ensures the agent loop never
+            // re-reads AGENTS.md / README / git-context more than once
+            // per cache TTL.
             crate::agent::collect_prompt_context(&working_dir).await
         };
         let mut system_prompt = {
@@ -961,7 +1010,19 @@ impl SessionProcessor {
         }; // Inject a tool reference listing so the model knows the exact tool names.
         // This is critical for models (especially via Ollama) that may hallucinate
         // tool names like "search" instead of the actual "grep" tool.
-        let tool_reference = build_tool_reference_section(&self.tool_registry);
+        //
+        // FR-008 / FR-009: the system-prompt component cache stores this
+        // string keyed by the tool-registry hash, so subsequent steps
+        // (and subsequent turns within the same session) skip the
+        // registry iteration entirely.
+        let tool_reference = {
+            let cache = self.system_prompt_cache();
+            cache
+                .get_tool_reference(&self.tool_registry, |registry| {
+                    build_tool_reference_section(registry)
+                })
+                .unwrap_or_default()
+        };
         system_prompt.push_str(&tool_reference);
 
         // Inject question-tool guidance so the model knows how to present
@@ -985,16 +1046,28 @@ impl SessionProcessor {
         // Inject codebase index guidance. When the index is active, emit strong
         // directives to use codeindex over grep/search. When disabled, inform the
         // model that codeindex tools will return "not available" and suggest grep.
+        //
+        // FR-008 / FR-009: the system-prompt component cache stores this
+        // string keyed by the code-index state, so the active/disabled
+        // strings are computed at most once per session.
         let code_index_active = self.code_index.get().is_some();
-        if code_index_active {
-            system_prompt.push_str(&build_codeindex_guidance_section_active());
-        } else {
-            system_prompt.push_str(&build_codeindex_guidance_section_disabled());
-        }
+        let codeindex_section = {
+            let cache = self.system_prompt_cache();
+            cache
+                .get_codeindex_guidance(code_index_active, |is_active| {
+                    if is_active {
+                        build_codeindex_guidance_section_active()
+                    } else {
+                        build_codeindex_guidance_section_disabled()
+                    }
+                })
+                .unwrap_or_default()
+        };
+        system_prompt.push_str(&codeindex_section);
 
-        if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
-            system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
-        }
+        // Universal tool-calling guidance — all providers receive the same
+        // directive to call tools immediately rather than narrating intent.
+        system_prompt.push_str(TOOL_CALLING_GUIDANCE);
 
         // Inject team-lead task distribution guidelines when this session is
         // running as a team lead.  These rules help the LLM spawn a consistent
@@ -1123,6 +1196,21 @@ impl SessionProcessor {
             self.session_manager.get_messages(session_id)?
         };
 
+        // Hysteresis for the per-iteration compression check: the local token
+        // estimate can re-fire on every tool-call iteration when assistant
+        // tool uses and tool results accumulate, so we compress at most once
+        // per `process_user_message` call. The flag is reset on every new
+        // turn because each turn starts a fresh `process_user_message`.
+        #[cfg_attr(not(feature = "compression"), allow(unused_mut, unused_variables))]
+        let mut compressed_this_turn = false;
+        // Last LLM-reported input token count, captured from the most recent
+        // `StreamEvent::Usage`. Used by the per-iteration threshold check so
+        // we compress based on what the provider's tokenizer actually saw,
+        // not the local Headroom estimate. Stays at `0` when the provider
+        // omits usage data, which falls back to the local estimate.
+        #[cfg_attr(not(feature = "compression"), allow(unused_mut, unused_variables))]
+        let mut last_reported_input_tokens: u64 = 0;
+
         #[cfg(feature = "compression")]
         let context_window = self
             .provider_registry
@@ -1162,6 +1250,9 @@ impl SessionProcessor {
                         "Compressed history with Headroom pipeline"
                     );
                 }
+                // Mark the turn as already-compressed so the per-iteration
+                // check below skips re-compression for the same turn.
+                compressed_this_turn = true;
                 result.messages
             } else {
                 history
@@ -1169,7 +1260,46 @@ impl SessionProcessor {
         };
         // When the compression feature is not compiled in, no context reduction
         // is performed. Build with `--features compression` to enable it.
-        let mut chat_messages = history_to_chat_messages(&history).await; // Note: history already contains the user message we just stored,
+        //
+        // FR-006 (AgentPerf T-007): when the history version is unchanged
+        // since the previous step, reuse the previously-converted
+        // `chat_messages` list instead of re-running
+        // `history_to_chat_messages`.  This skips the per-step
+        // `Message -> ChatMessage` conversion on no-op tool calls.
+        //
+        // Implementation note: we drop the `MutexGuard` before awaiting
+        // so the lock is not held across the `.await` point — see FR-019
+        // (T-015) and the rule that `MutexGuard` MUST NOT cross an
+        // `.await`.  When a cache miss requires the conversion we
+        // re-acquire the lock only to store the rebuilt list.
+        let history_version = history_version_of(&history);
+        let cached: Option<Vec<ChatMessage>> = {
+            let session_state_lock = self
+                .session_manager
+                .as_ref()
+                .session_state_cache(session_id);
+            let mut state_guard = session_state_lock
+                .lock()
+                .map_err(|_| anyhow::anyhow!("session_state cache lock poisoned"))?;
+            state_guard
+                .cached_chat_messages_for_version(history_version)
+                .map(|c| c.to_vec())
+        };
+        let mut chat_messages = match cached {
+            Some(messages) => messages,
+            None => {
+                let built = history_to_chat_messages(&history).await;
+                let session_state_lock = self
+                    .session_manager
+                    .as_ref()
+                    .session_state_cache(session_id);
+                if let Ok(mut state_guard) = session_state_lock.lock() {
+                    state_guard.store_chat_messages(built.clone(), None);
+                }
+                built
+            }
+        };
+        // Note: history already contains the user message we just stored,
         // so we check for the absence of any assistant messages instead.
         // The init exchange is display-only: it streams to the TUI but is
         // NOT added to chat_messages so the actual LLM call isn't confused.
@@ -1353,65 +1483,97 @@ impl SessionProcessor {
                 });
             }
 
-            // Call LLM with retry on transient failures (connection errors, stream stalls)
-            let max_retries = self.stream_config.max_retries;
-            let backoff_secs = self.stream_config.retry_backoff_secs;
-            let llm_request_start = std::time::Instant::now();
-
-            // Re-check the context window before every LLM call. The payload
-            // grows each turn with assistant tool uses and tool results, so a
-            // one-time compression at the start of the run is not enough to
-            // prevent the model's context window from overflowing (FR-005).
-            #[cfg(feature = "compression")]
-            if session_config.compression.enabled
-                && crate::compression::pipeline::should_compress_chat_messages(
-                    &chat_messages,
-                    context_window,
-                    session_config.compression.auto_threshold,
-                )
-            {
-                let _scope = profiler.scope("history.compress");
-                self.event_bus.publish(Event::CompressionStarted {
-                    session_id: session_id.to_string(),
-                });
-                let result = crate::compression::pipeline::compress_chat_messages(
-                    &chat_messages,
-                    context_window,
-                    8192,
-                    &session_config.compression,
-                );
-                let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
-                if did_compress {
-                    tracing::info!(
-                        original_tokens = result.stats.original_tokens,
-                        compressed_tokens = result.stats.compressed_tokens,
-                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-                        ccr_entries = result.stats.ccr_entries_stashed,
-                        messages_compressed = result.stats.messages_compressed,
-                        "Compressed chat messages with Headroom pipeline"
-                    );
-                } else {
-                    tracing::debug!(
-                        original_tokens = result.stats.original_tokens,
-                        compressed_tokens = result.stats.compressed_tokens,
-                        threshold = (context_window as f64
-                            * session_config.compression.auto_threshold)
-                            as usize,
-                        "Context compression run completed without reduction"
-                    );
-                }
-                self.event_bus.publish(Event::CompressionFinished {
-                    session_id: session_id.to_string(),
-                    original_tokens: result.stats.original_tokens,
-                    compressed_tokens: result.stats.compressed_tokens,
-                    compression_ratio: result.stats.compression_ratio,
-                    did_compress,
-                });
-                chat_messages = result.chat_messages;
-            }
-            let mut text_buffer = String::new();
-            let mut reasoning_buffer = String::new();
-            let mut tool_calls: Vec<PendingToolCall> = Vec::new();
+                          // Call LLM with retry on transient failures (connection errors, stream stalls)
+                          let max_retries = self.stream_config.max_retries;
+                          let backoff_secs = self.stream_config.retry_backoff_secs;
+                          let llm_request_start = std::time::Instant::now();
+            
+                          // Re-check the context window before every LLM call. The payload
+                          // grows each turn with assistant tool uses and tool results, so a
+                          // one-time compression at the start of the run is not enough to
+                          // prevent the model's context window from overflowing (FR-005).
+                          //
+                          // We compress at most once per turn (`compressed_this_turn`) and
+                          // prefer the LLM-reported token count over the local Headroom
+                          // estimate (`should_compress_with_reported`) so we don't
+                          // over-trigger when the estimate diverges from the provider's
+                          // actual tokenizer.
+                          //
+                          // FR-024 (AgentPerf T-017): if `compressed_this_turn` is
+                          // already `true` we short-circuit before even calling
+                          // `should_compress_with_reported`.  This makes the
+                          // per-iteration check effectively zero-cost for every step
+                          // after the first one that triggered a real compression.
+                                        #[cfg(feature = "compression")]
+                                        let should_run_compression = session_config.compression.enabled
+                                            && !compressed_this_turn
+                                            && should_compress_with_reported(
+                                                &chat_messages,
+                                                context_window,
+                                                session_config.compression.auto_threshold,
+                                                last_reported_input_tokens,
+                                            );
+                                        #[cfg(not(feature = "compression"))]
+                                        let _should_run_compression = false;            
+                          #[cfg(feature = "compression")]
+                          if should_run_compression {
+                              let _scope = profiler.scope("history.compress");
+                              self.event_bus.publish(Event::CompressionStarted {
+                                  session_id: session_id.to_string(),
+                              });
+                              let result = crate::compression::pipeline::compress_chat_messages(
+                                  &chat_messages,
+                                  context_window,
+                                  8192,
+                                  &session_config.compression,
+                              );
+                              let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
+                              if did_compress {
+                                  tracing::info!(
+                                      original_tokens = result.stats.original_tokens,
+                                      compressed_tokens = result.stats.compressed_tokens,
+                                      compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+                                      ccr_entries = result.stats.ccr_entries_stashed,
+                                      messages_compressed = result.stats.messages_compressed,
+                                      "Compressed chat messages with Headroom pipeline"
+                                  );
+                              } else {
+                                  tracing::debug!(
+                                      original_tokens = result.stats.original_tokens,
+                                      compressed_tokens = result.stats.compressed_tokens,
+                                      threshold = (context_window as f64
+                                          * session_config.compression.auto_threshold)
+                                          as usize,
+                                      "Context compression run completed without reduction"
+                                  );
+                              }
+                              self.event_bus.publish(Event::CompressionFinished {
+                                  session_id: session_id.to_string(),
+                                  original_tokens: result.stats.original_tokens,
+                                  compressed_tokens: result.stats.compressed_tokens,
+                                  compression_ratio: result.stats.compression_ratio,
+                                  did_compress,
+                              });
+                              chat_messages = result.chat_messages;
+                              // Hysteresis: skip subsequent per-iteration checks for the
+                              // remainder of this turn. Reset `last_reported_input_tokens`
+                              // because the just-compressed payload invalidates the
+                              // previous LLM-reported count; the next LLM call will
+                              // repopulate it.
+                              compressed_this_turn = true;
+                              last_reported_input_tokens = 0;
+                          }
+                          // FR-025 (AgentPerf T-017): if the local token estimate is
+                          // already below the configured `auto_threshold` for the
+                          // model, `should_compress_with_reported` returns `false`
+                          // and the entire compression block is skipped — including
+                                            // the `Event::CompressionStarted` / `Event::CompressionFinished`
+                                            // publishing overhead.  This is the fast path for sessions
+                                            // whose chat history is comfortably under the context
+                                            // window; the agent loop should not be paying for a
+                                            // compression check on every step of every turn.
+                                            let mut text_buffer = String::new();
+                                        let mut reasoning_buffer = String::new();            let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
             {
@@ -1505,13 +1667,61 @@ impl SessionProcessor {
                     let mut first_stream_event_pending = true;
                     let mut fatal_stream_error: Option<String> = None;
                     let mut stream_buffer = StreamBuffer::new();
+                    // FR-018 (AgentPerf T-014): track the time of the
+                    // most recent stream event so we can detect "no
+                    // delta for N seconds" stalls.  The configured
+                    // threshold is `self.stream_config.timeout_secs`
+                    // (already used as the HTTP request timeout); the
+                    // stall-detection path emits a `StallDetected`
+                    // event and aborts the current stream.
+                    let last_event_at: Option<Instant> = None;
+                    let stall_timeout = std::time::Duration::from_secs(
+                        self.stream_config.timeout_secs.max(60),
+                    );
                     {
                         let _scope = profiler.scope("loop.llm.stream");
                         loop {
                             let wait_started = Instant::now();
                             let next_event = {
                                 let _scope = profiler.scope("loop.llm.wait_next_event");
-                                stream.next().await
+                                // FR-018: a stream that has been silent
+                                // for longer than the configured stall
+                                // timeout is broken.  We race the next
+                                // event against a sleep + cancel-flag
+                                // poll so the loop remains responsive.
+                                let cancel = cancel_flag.clone();
+                                let stall_fut = async {
+                                    tokio::time::sleep(stall_timeout).await;
+                                    cancel.load(Ordering::Relaxed)
+                                };
+                                tokio::select! {
+                                    biased;
+                                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                                        if let Some(last) = last_event_at {
+                                            if last.elapsed() > stall_timeout
+                                                && cancel_flag.load(Ordering::Relaxed)
+                                            {
+                                                self.event_bus.publish(Event::AgentNotice {
+                                                    session_id: session_id.to_string(),
+                                                    message: format!(
+                                                        "Stream stall detected after {}s with no delta; aborting",
+                                                        stall_timeout.as_secs()
+                                                    ),
+                                                });
+                                                fatal_stream_error =
+                                                    Some("stream stall timeout".to_string());
+                                                None
+                                            } else {
+                                                // No event yet, keep waiting.
+                                                let _ = stall_fut.await;
+                                                stream.next().await
+                                            }
+                                        } else {
+                                            stream.next().await
+                                        }
+                                    }
+                                    ev = stream.next() => ev,
+                                }
                             };
                             if first_stream_event_pending {
                                 if next_event.is_some() {
@@ -1713,6 +1923,15 @@ impl SessionProcessor {
                 }
             }
 
+            // Capture the LLM-reported input token count for the next
+            // iteration's threshold check. Skip when the provider didn't
+            // report usage (e.g. some local/Ollama builds), so the
+            // estimate-based fallback in `should_compress_with_reported`
+            // remains in effect.
+            #[cfg(feature = "compression")]
+            if last_input_tokens > 0 {
+                last_reported_input_tokens = last_input_tokens;
+            }
             // Collect parts from this turn
             {
                 let _scope = profiler.scope("loop.response.process");
@@ -2914,6 +3133,25 @@ fn resolve_team_context_for_session(
     None
 }
 
+/// Returns a monotonically increasing version for the supplied history.
+///
+/// Two histories with the same `(count, last_id, last_modified_ms)`
+/// hash to the same version, so the agent loop can detect
+/// "history has not changed since the last step" without comparing
+/// the entire message list byte-for-byte.  See
+/// `AgentPerf` T-007 / FR-006.
+fn history_version_of(messages: &[Message]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    messages.len().hash(&mut hasher);
+    if let Some(last) = messages.last() {
+        last.id.hash(&mut hasher);
+        last.updated_at.timestamp_millis().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// Converts message history to chat messages, handling images asynchronously.
 async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
     let mut chat_messages = Vec::new();
@@ -3025,12 +3263,27 @@ fn trailing_at_char_boundary(text: &str, max_chars: usize) -> &str {
 /// Uses a fast byte-length threshold (`content.len()`) for the common
 /// no-truncation path, avoiding an expensive UTF-8 decode.  When truncation
 /// is required the text is decoded once and the char count is reused.
-pub fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&Value>) -> String {
+///
+/// Returns [`Arc<str>`] (FR-013): the function takes a `&str` and returns
+/// an `Arc<str>` so callers can pass the result into `Arc<Vec<...>>`
+/// chat-request bodies without performing a second clone.  When the input
+/// is below the threshold, we wrap the input `&str` in an `Arc<str>`
+/// without copying; when truncation is required, the truncated
+/// `String` is wrapped exactly once.
+pub fn tool_result_content_for_llm(
+    tool: &str,
+    content: &str,
+    metadata: Option<&Value>,
+) -> std::sync::Arc<str> {
+    use std::sync::Arc;
+
     // Fast-path: use byte length for the threshold check (safe because we
     // truncate anyway — a few bytes off is fine). Only decode UTF-8 once
-    // when we actually need to truncate.
+    // when we actually need to truncate.  We allocate a single `Arc<str>`
+    // from the input bytes (cheap — no UTF-8 validation needed for the
+    // `Arc<str>::from` path because we go through `String`).
     if content.len() <= MAX_TOOL_RESULT_BYTES_FOR_LLM {
-        return content.to_string();
+        return Arc::from(content.to_string());
     }
 
     let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
@@ -3048,11 +3301,12 @@ pub fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&
         .map(|lines| format!(", {lines} lines"))
         .unwrap_or_default();
 
-    format!(
+    let s = format!(
         "[tool result truncated for context: tool={tool}, {total_chars} chars{line_info}. \
          Showing start and end segments; request narrower output if more detail is needed.]\n\n\
          {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}"
-    )
+    );
+    Arc::from(s)
 }
 
 /// Approximate the serialized JSON size of a [`ChatRequest`] without
@@ -3113,6 +3367,51 @@ pub(crate) fn is_token_overflow_error_message(error_msg: &str) -> bool {
         || msg.contains("maximum context length")
         || msg.contains("prompt is too long")
         || msg.contains("input too large")
+}
+
+/// Determine whether automatic compression should run for the current chat
+/// payload, preferring the LLM-reported token count from the previous call
+/// when available.
+///
+/// The local `count_tokens` estimate (Headroom's `EstimatingCounter` plus
+/// per-message overhead) can diverge from the provider's actual tokenizer,
+/// causing compression to fire earlier than the configured `auto_threshold`
+/// and to re-fire on every tool-call iteration. When the LLM has reported
+/// its previous `input_tokens` — which matches the provider's tokenizer
+/// exactly — we use that count instead. On the first call within a turn, or
+/// whenever the provider omits usage data, we fall back to the local
+/// estimate.
+///
+/// Returns `true` when the effective token count is at or above
+/// `context_window * auto_threshold`.
+///
+/// # Arguments
+///
+/// * `chat_messages` — provider-facing chat payload to estimate when no
+///   reported count is available.
+/// * `context_window` — the model's context window in tokens.
+/// * `auto_threshold` — fraction of the context window at which compression
+///   should fire (e.g. `0.80`).
+/// * `last_reported_input_tokens` — the `input_tokens` value from the most
+///   recent LLM response, or `0` if no prior call has been made in this
+///   turn (or the provider did not report usage).
+#[cfg(feature = "compression")]
+pub fn should_compress_with_reported(
+    chat_messages: &[ChatMessage],
+    context_window: usize,
+    auto_threshold: f64,
+    last_reported_input_tokens: u64,
+) -> bool {
+    if last_reported_input_tokens > 0 {
+        let threshold = (context_window as f64 * auto_threshold) as u64;
+        last_reported_input_tokens >= threshold
+    } else {
+        crate::compression::pipeline::should_compress_chat_messages(
+            chat_messages,
+            context_window,
+            auto_threshold,
+        )
+    }
 }
 
 fn extract_error_status_code(error_msg: &str) -> Option<u16> {
@@ -3459,6 +3758,51 @@ mod tests {
         assert_eq!(action, PermissionAction::Allow);
     }
 
+    #[tokio::test]
+    async fn test_hardwired_task_complete_is_auto_approved() {
+        // The `task_complete` tool is a terminal signal that ends the
+        // autonomous loop.  It must be auto-approved so the agent can
+        // always finish a task without a permission prompt.
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "task_complete",
+            "summary",
+            "task_complete",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_hardwired_list_tasks_is_auto_approved() {
+        // `list_tasks` is a read-only inspection tool.  It must be
+        // auto-approved so the agent can always check on background
+        // sub-agent tasks without a permission prompt.
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "list_tasks",
+            "list",
+            "list_tasks",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
     #[test]
     fn test_tool_result_content_for_llm_truncates_large_payloads() {
         let content = format!("{}{}", "a".repeat(9_000), "b".repeat(9_000));
@@ -3503,7 +3847,7 @@ mod tests {
         let ContentPart::ToolResult { content, .. } = &parts[0] else {
             panic!("expected tool result content");
         };
-        assert_eq!(content, "fn main() {}\n");
+        assert_eq!(content.as_ref(), "fn main() {}\n");
     }
     #[test]
     fn test_chat_request_payload_bytes_counts_serialized_request() {

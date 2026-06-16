@@ -169,14 +169,34 @@ pub enum ContentPart {
     ToolResult {
         /// Identifier of the tool call this result answers.
         tool_use_id: String,
-        /// The tool's output as a string.
-        content: String,
+        /// The tool's output as a string.  Held as `Arc<str>` (FR-013)
+        /// to avoid the per-step `String::clone()` previously paid on
+        /// every tool call result.
+        #[serde(with = "arc_str_serde")]
+        content: std::sync::Arc<str>,
     },
     /// An image specified as a URL or `data:` URI.
     ImageUrl {
         /// The image URL or `data:image/png;base64,...` data URI.
         url: String,
     },
+}
+
+/// Serde adapter for `Arc<str>` so the JSON wire format is unchanged
+/// (still a plain string) but the in-memory representation is
+/// reference-counted and cheaply cloneable.
+mod arc_str_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<S: Serializer>(value: &Arc<str>, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(value)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Arc<str>, D::Error> {
+        let s = String::deserialize(de)?;
+        Ok(Arc::from(s))
+    }
 }
 
 /// Schema describing a tool that the LLM may invoke.

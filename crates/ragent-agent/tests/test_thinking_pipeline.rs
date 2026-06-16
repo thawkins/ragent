@@ -123,6 +123,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::config::StreamConfig::default(),
         auto_approve: false,
+        system_prompt_cache: parking_lot::RwLock::new(None),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

@@ -52,12 +52,18 @@ impl Provider for HuggingFaceProvider {
     }
 
     /// Discover available chat-completions models from HuggingFace router.
+    ///
+    /// The `/v1/models` endpoint on HuggingFace's router is public and does not
+    /// require authentication for listing models, so this method attempts
+    /// discovery even when no API token is configured.  A token is still required
+    /// to actually perform chat completions via [`create_client`].
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let api_key = std::env::var("HF_TOKEN")
             .or_else(|_| std::env::var("HUGGINGFACE_API_KEY"))
+            .or_else(|_| std::env::var("HUGGING_FACE_HUB_TOKEN"))
             .ok()
             .filter(|k| !k.is_empty())
-            .context("HuggingFace model discovery requires HF_TOKEN or HUGGINGFACE_API_KEY")?;
+            .unwrap_or_default();
         let models = discover_models(&api_key)
             .await
             .with_context(|| "HuggingFace model discovery failed")?;
@@ -711,17 +717,15 @@ struct HfErrorResponse {
 ///
 /// Returns an error on network failures or invalid API responses.
 pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
-    if api_key.is_empty() {
-        bail!("HuggingFace model discovery requires an API token.");
-    }
-
     let client = crate::provider::http_client::create_http_client();
     let url = format!("{HF_API_BASE}/v1/models");
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {api_key}"))
-        .timeout(std::time::Duration::from_secs(15))
+    let mut request = client.get(&url).timeout(std::time::Duration::from_secs(15));
+    if !api_key.is_empty() {
+        request = request.header("Authorization", format!("Bearer {api_key}"));
+    }
+
+    let response = request
         .send()
         .await
         .inspect_err(|e| {
@@ -1200,7 +1204,7 @@ mod tests {
                 role: "tool".to_string(),
                 content: ChatContent::Parts(vec![ContentPart::ToolResult {
                     tool_use_id: "call_123".to_string(),
-                    content: "file contents here".to_string(),
+                    content: "file contents here".to_string().into(),
                 }]),
             }]),
             tools: Arc::new(vec![]),

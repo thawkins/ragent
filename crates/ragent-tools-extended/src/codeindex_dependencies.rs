@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Query file-level dependency relationships from the code index.
 pub struct CodeIndexDependenciesTool;
@@ -71,7 +72,10 @@ impl Tool for CodeIndexDependenciesTool {
             _ => ragent_codeindex::types::DepDirection::Imports,
         };
 
-        let deps = idx.dependencies(path, direction)?;
+        let deps = match with_retry(|| idx.try_dependencies(path, direction)).await? {
+            Some(d) => d,
+            None => return Ok(busy_output("codeindex_dependencies")),
+        };
 
         if deps.is_empty() {
             let dir_label = match direction {

@@ -79,20 +79,17 @@ Do NOT use `execute_bash`, `execute_code`, `execute_python`, `run_shell_command`
 
 When reading files with the `read` tool:
 
-- **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters to read the file in focused sections rather than all at once.
-- **CRITICAL — end_line is an absolute line number, NOT a length or count**:
-  - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)
-  - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200
-  - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100
-  - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines
-- `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).
-- **ALTERNATIVE — use `num_lines` instead of `end_line`**: When `start_line` is provided, you may pass `num_lines` to specify the COUNT of lines to read from that start. Example: `start_line=201, num_lines=100` reads lines 201–300 (inclusive). This is useful if you naturally think in "start + count" rather than "start + end". If both `end_line` and `num_lines` are provided, `end_line` takes precedence.
-- The tool will return an error if they exceed the file's total line count. The error message includes `total_lines`.
+- **REQUIRED for files larger than 100 lines**: Always use `start_line` and `num_lines` parameters to read the file in focused sections rather than all at once.
+- **PREFERRED parameters**: `start_line` + `num_lines` (the most intuitive pair — `start_line` is the 1-based absolute line number where reading begins, `num_lines` is the COUNT of lines to read from that start). Example: `start_line=201, num_lines=100` reads lines 201–300 (inclusive).
+- **CRITICAL — avoid `end_line` unless you really need an absolute last-line**: `end_line` is the 1-based absolute last line number to include (NOT a count). The common mistake is to pass `end_line=100` meaning "100 lines" — that is wrong; use `num_lines=100` for that. If you do use `end_line`, set it to a value `>= start_line`, e.g. `start_line=201, end_line=300` reads lines 201–300.
+- **Auto-detect help**: If you accidentally pass `end_line` smaller than `start_line`, the tool will refuse with an actionable error suggesting `num_lines`. Re-read the message and retry with the suggested fix.
+- `start_line` is **absolute 1-based** (not an offset from start).
+- The tool will return an error if you exceed the file's total line count. The error message includes `total_lines`.
 - When you read a file, the response metadata includes `total_lines` — use that value to plan subsequent reads.
 - **Strategy**:
-  1. Read the file without `start_line`/`end_line` first — for large files this returns the first 100 lines plus a section map with the total line count
+  1. Read the file without `start_line`/`num_lines` first — for large files this returns the first 100 lines plus a section map with the total line count
   2. Use `total_lines` from the response to plan your subsequent reads
-  3. Then read specific sections using valid line ranges
+  3. Then read specific sections using `start_line` + `num_lines`
   4. Never read an entire file >100 lines in a single call
 
 ## Technology Stack

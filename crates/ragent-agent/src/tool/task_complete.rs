@@ -3,6 +3,25 @@
 //! Used by agents in autopilot mode to indicate that a task has finished
 //! and to provide a human-readable summary. The TUI displays the summary
 //! and exits autopilot mode.
+//!
+//! ## ⚠️ DO NOT CONFUSE WITH `team_task_complete`
+//!
+//! These two tools have similar names but VERY different purposes and
+//! parameter signatures:
+//!
+//! | Tool | Purpose | Required parameters |
+//! |------|---------|---------------------|
+//! | `task_complete`     | Signal the **current autonomous task** is done — ends the session loop. | `summary` (string) |
+//! | `team_task_complete` | Mark a **team task** as completed (used inside a team session). | `team_name` (string), `task_id` (string) |
+//!
+//! `team_task_complete` takes `task_id` and `team_name` — NOT `summary`.
+//! `task_complete` takes `summary` — NOT `task_id` or `team_name`.
+//!
+//! NOTE: This module is currently registered via the ragent-tools-core
+//! `task_complete::TaskCompleteTool` (the live one). This file is kept in
+//! sync so the schema/description appear correctly in IDEs and the local
+//! test suite. The runtime registry prefers the ragent-tools-core version
+//! through the `ExtractedCoreToolAdapter`.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -13,8 +32,16 @@ use super::{Tool, ToolContext, ToolOutput};
 
 /// Signals that the agent's current autonomous task is complete.
 ///
-/// Call this tool when the requested task has been fully accomplished.
-/// It will display the summary to the user and stop the autonomous loop.
+/// Call this tool **only** when the requested task has been fully accomplished
+/// and you are ready to return control to the user. It will display the
+/// `summary` to the user and stop the autonomous loop.
+///
+/// ## Required parameter
+/// - `summary` (string) — a concise summary of what was accomplished.
+///
+/// This tool takes ONLY a `summary`. It does NOT take `task_id`, `team_name`,
+/// `result`, or any other key. If you are inside a team session and have a
+/// team task to mark complete, use `team_task_complete` instead.
 pub struct TaskCompleteTool;
 
 #[async_trait::async_trait]
@@ -24,9 +51,19 @@ impl Tool for TaskCompleteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Signal that the current task is fully complete. Call this when you have \
-         finished all requested work. Provide a concise summary of what was \
-         accomplished. This stops the autonomous loop and returns control to the user."
+        "TERMINAL SIGNAL — call ONLY when the current autonomous task is fully done. \
+         This ends the agent loop and returns control to the user. \
+         Takes exactly ONE required parameter: `summary` (string). \
+         \n\n\
+         ⚠️ DO NOT confuse with `team_task_complete` (a different tool used inside teams, \
+         which takes `team_name` + `task_id`, NOT `summary`). \
+         \n\n\
+         Common mistakes to avoid:\n\
+         - Do NOT pass `task_id`, `team_name`, `result`, or `output` — the only valid key is `summary`.\n\
+         - Do NOT call this to 'submit' a result mid-task — calling it ENDS the loop.\n\
+         - Do NOT call this before all requested files/outputs have been produced.\n\
+         \n\n\
+         Example: task_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -35,10 +72,14 @@ impl Tool for TaskCompleteTool {
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "A concise summary of what was accomplished"
+                    "description": "REQUIRED. A concise summary of what was accomplished. \
+                                   This is the ONLY parameter this tool accepts — do not pass \
+                                   `task_id`, `team_name`, `result`, or any other key. \
+                                   If you are marking a team task complete, use `team_task_complete` instead."
                 }
             },
-            "required": ["summary"]
+            "required": ["summary"],
+            "additionalProperties": false
         })
     }
 
@@ -49,7 +90,9 @@ impl Tool for TaskCompleteTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let summary = input["summary"]
             .as_str()
-            .context("Missing required 'summary' parameter")?;
+            .context("Missing required 'summary' parameter for task_complete. \
+                      The only valid parameter is `summary` (string). \
+                      If you intended to mark a team task complete, use `team_task_complete` with `team_name` and `task_id`.")?;
 
         ctx.event_bus.publish(Event::TaskCompleted {
             session_id: ctx.session_id.clone(),

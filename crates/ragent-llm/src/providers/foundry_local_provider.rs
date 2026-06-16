@@ -16,6 +16,9 @@ use tokio::sync::Mutex;
 
 use crate::llm::LlmClient;
 use crate::provider::foundry_local_client::FoundryLocalClient;
+use crate::provider::foundry_local_inproc_client::{
+    FoundryLocalInProcClient, device_type_from_str,
+};
 use crate::provider::foundry_local_service::FoundryLocalService;
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -26,6 +29,25 @@ use tracing::info;
 /// Alias for the SDK's catalog metadata type to avoid clashing with ragent's
 /// own [`ModelInfo`].
 use foundry_local_sdk::ModelInfo as SdkModelInfo;
+
+/// Resolved per-request options for the Foundry Local provider.
+#[derive(Debug, Clone)]
+struct FoundryLocalOptions {
+    auto_start: bool,
+    device: Option<String>,
+    models_path: Option<String>,
+    in_process: bool,
+}
+
+/// Validate a Foundry Local device preference string.
+fn validate_device(device: &str) -> Result<()> {
+    match device {
+        "auto" | "cpu" | "gpu" | "npu" => Ok(()),
+        _ => anyhow::bail!(
+            "Invalid Foundry Local device '{device}'. Must be one of: auto, cpu, gpu, npu"
+        ),
+    }
+}
 
 static TEST_OVERRIDE: std::sync::Mutex<Option<bool>> = std::sync::Mutex::new(None);
 
@@ -187,10 +209,10 @@ pub struct FoundryLocalProvider {
     /// is requested and it is not already running.
     auto_start: bool,
     /// Preferred inference device (`auto`, `cpu`, `gpu`, `npu`).
-    /// Stored for future model-loading calls; currently not passed to the
-    /// service wrapper because the SDK does not expose a device selector at
-    /// the service level.
     device: Option<String>,
+    /// Whether to use the in-process native core backend instead of the
+    /// Foundry Local web service.
+    in_process: Option<bool>,
     /// Override path for the local model cache directory.
     models_path: Option<String>,
     /// Optional event bus for publishing download/lifecycle events.
@@ -205,6 +227,7 @@ impl FoundryLocalProvider {
             service: Mutex::new(None),
             auto_start: true,
             device: None,
+            in_process: None,
             models_path: None,
             event_bus: std::sync::Mutex::new(None),
         }
@@ -227,9 +250,74 @@ impl FoundryLocalProvider {
             service: Mutex::new(None),
             auto_start,
             device,
+            in_process: None,
             models_path,
             event_bus: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Create a new provider with explicit configuration values, including
+    /// the in-process backend flag.
+    ///
+    /// # Arguments
+    ///
+    /// * `auto_start` — Automatically start the Foundry service on first use.
+    /// * `device` — Preferred inference device (`auto`, `cpu`, `gpu`, `npu`).
+    /// * `models_path` — Override path for the local model cache.
+    /// * `in_process` — Use the in-process native core backend when `true`.
+    #[must_use]
+    pub fn with_full_config(
+        auto_start: bool,
+        device: Option<String>,
+        models_path: Option<String>,
+        in_process: Option<bool>,
+    ) -> Self {
+        Self {
+            service: Mutex::new(None),
+            auto_start,
+            device,
+            in_process,
+            models_path,
+            event_bus: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Resolve provider options from the per-request `options` hashmap and the
+    /// provider-level defaults, validating the `device` value.
+    fn resolve_options(&self, options: &HashMap<String, Value>) -> Result<FoundryLocalOptions> {
+        let auto_start = options
+            .get("auto_start")
+            .and_then(Value::as_bool)
+            .unwrap_or(self.auto_start);
+
+        let device = options
+            .get("device")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| self.device.clone());
+
+        if let Some(ref d) = device {
+            validate_device(d)?;
+        }
+
+        let models_path = options
+            .get("models_path")
+            .and_then(Value::as_str)
+            .map(String::from)
+            .or_else(|| self.models_path.clone());
+
+        let in_process = options
+            .get("in_process")
+            .and_then(Value::as_bool)
+            .or(self.in_process)
+            .unwrap_or(false);
+
+        Ok(FoundryLocalOptions {
+            auto_start,
+            device,
+            models_path,
+            in_process,
+        })
     }
 
     /// Ensure the service wrapper is initialised and return it.
@@ -366,7 +454,8 @@ impl Provider for FoundryLocalProvider {
         }
     }
 
-    /// Creates a [`FoundryLocalClient`] pointed at the Foundry Local endpoint.
+    /// Creates a [`FoundryLocalClient`] or [`FoundryLocalInProcClient`] depending
+    /// on the `in_process` configuration flag.
     ///
     /// The service wrapper is initialised lazily on the first call and cached
     /// for the lifetime of the provider.  Configuration values are read from
@@ -378,39 +467,47 @@ impl Provider for FoundryLocalProvider {
         options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
         // Parse configuration with fallback to stored defaults (FR-019, FR-022).
-        let auto_start = options
-            .get("auto_start")
-            .and_then(Value::as_bool)
-            .unwrap_or(self.auto_start);
+        let opts = self.resolve_options(options)?;
 
-        let device = options
-            .get("device")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .or_else(|| self.device.clone());
+        // Environment escape hatch to force the web-service path (FR-030).
+        let force_web = std::env::var("RAGENT_FOUNDRY_LOCAL_FORCE_WEB")
+            .ok()
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+        let in_process = opts.in_process && !force_web;
 
-        let models_path = options
-            .get("models_path")
-            .and_then(Value::as_str)
-            .map(String::from)
-            .or_else(|| self.models_path.clone());
-
-        // Log device preference for diagnostics (FR-020, FR-021).
-        if let Some(ref d) = device {
+        // Log backend and device preference for diagnostics (FR-020, FR-021, FR-027).
+        if in_process {
+            info!("Foundry Local in-process backend selected");
+        }
+        if let Some(ref d) = opts.device {
             info!(device = %d, "Foundry Local device preference");
         }
 
-        let svc = if auto_start == self.auto_start && models_path == self.models_path {
+        // We always need the SDK manager; ensure_service only creates the
+        // singleton and does not start the web service.
+        let svc = if opts.auto_start == self.auto_start && opts.models_path == self.models_path {
             self.ensure_service().await?
         } else {
             // Per-request override differs from default; create a one-off service (FR-022).
-            Arc::new(FoundryLocalService::new(auto_start, models_path).await?)
+            Arc::new(FoundryLocalService::new(opts.auto_start, opts.models_path).await?)
         };
-
-        let endpoint = svc.ensure_endpoint().await?;
+        let manager = svc.manager();
         let event_bus = self.event_bus.lock().ok().and_then(|g| g.clone());
-        let client = FoundryLocalClient::new(&endpoint, Some(svc.manager()), event_bus);
-        Ok(Box::new(client))
+
+        if in_process {
+            let device = opts
+                .device
+                .as_deref()
+                .map(device_type_from_str)
+                .transpose()?;
+            let client = FoundryLocalInProcClient::new(manager, event_bus, device);
+            Ok(Box::new(client))
+        } else {
+            let endpoint = svc.ensure_endpoint().await?;
+            let client = FoundryLocalClient::new(&endpoint, Some(manager), event_bus);
+            Ok(Box::new(client))
+        }
     }
 }
 
@@ -494,5 +591,58 @@ mod tests {
         );
         assert_eq!(p.device, Some("gpu".to_string()));
         assert_eq!(p.models_path, Some("/tmp/models".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_options_defaults() {
+        let p = FoundryLocalProvider::new();
+        let opts = p.resolve_options(&HashMap::new()).unwrap();
+        assert!(opts.auto_start);
+        assert_eq!(opts.device, None);
+        assert_eq!(opts.models_path, None);
+        assert!(!opts.in_process);
+    }
+
+    #[test]
+    fn test_resolve_options_in_process_from_options() {
+        let p = FoundryLocalProvider::new();
+        let mut options = HashMap::new();
+        options.insert("in_process".to_string(), serde_json::json!(true));
+        options.insert("device".to_string(), serde_json::json!("gpu"));
+        options.insert("auto_start".to_string(), serde_json::json!(false));
+        let opts = p.resolve_options(&options).unwrap();
+        assert!(!opts.auto_start);
+        assert_eq!(opts.device, Some("gpu".to_string()));
+        assert!(opts.in_process);
+    }
+
+    #[test]
+    fn test_resolve_options_in_process_from_provider_default() {
+        let p = FoundryLocalProvider::with_full_config(true, None, None, Some(true));
+        let opts = p.resolve_options(&HashMap::new()).unwrap();
+        assert!(opts.in_process);
+    }
+
+    #[test]
+    fn test_resolve_options_invalid_device() {
+        let p = FoundryLocalProvider::new();
+        let mut options = HashMap::new();
+        options.insert("device".to_string(), serde_json::json!("cuda"));
+        let err = p.resolve_options(&options).unwrap_err();
+        assert!(err.to_string().contains("Invalid Foundry Local device"));
+    }
+
+    #[test]
+    fn test_with_full_config_stores_in_process() {
+        let p = FoundryLocalProvider::with_full_config(
+            false,
+            Some("cpu".to_string()),
+            Some("/tmp".to_string()),
+            Some(true),
+        );
+        assert!(!p.auto_start);
+        assert_eq!(p.device, Some("cpu".to_string()));
+        assert_eq!(p.models_path, Some("/tmp".to_string()));
+        assert_eq!(p.in_process, Some(true));
     }
 }

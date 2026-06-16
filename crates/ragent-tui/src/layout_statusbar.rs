@@ -200,6 +200,19 @@ fn build_line1(
 ) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
+    // Application name and version prefix — identifies the running build at a glance.
+    spans.push(Span::styled(
+        format!(
+            "{} {} v{} ",
+            indicators::HEALTHY,
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        ),
+        Style::default()
+            .fg(colors::HEALTHY)
+            .add_modifier(Modifier::BOLD),
+    ));
+
     // Left section: Working directory
     let left = build_line1_left(app, config, mode);
     spans.extend(left);

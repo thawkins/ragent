@@ -10,12 +10,22 @@ use super::{Tool, ToolContext, ToolOutput};
 
 /// Spawns a sub-agent to perform a focused task.
 ///
-/// Parameters:
-/// - `agent` (string, required): Agent name (e.g. `"explore"`, `"build"`, `"plan"`).
-/// - `task` (string, required): The prompt/instructions for the sub-agent.
-/// - `background` (bool, optional): If `true`, spawns in the background and returns
-///   immediately with a task ID. Defaults to `false` (synchronous).
-/// - `model` (string, optional): Model override in `provider/model` or `provider:model` format.
+/// Supports both synchronous (blocking) and background (non-blocking) modes.
+/// Background tasks publish [`Event::SubagentComplete`] when finished.
+///
+/// ## Parameters (TWO required)
+/// - `agent` (string, **REQUIRED**) — Agent name (e.g. `"explore"`, `"build"`,
+///   `"plan"`, `"general"`). Both `agent` AND `task` must be supplied —
+///   omitting either will fail with "Missing required parameter: …".
+/// - `task` (string, **REQUIRED**) — The prompt/instructions for the sub-agent.
+///   Be specific: include context, the exact question(s) to answer, and the
+///   format you want for the answer. The sub-agent has no access to the
+///   parent's history.
+/// - `background` (bool, optional) — If `true`, spawns in the background and
+///   returns immediately with a task ID. Use this whenever you spawn more than
+///   one task in the same response so they can run concurrently. Default: `false`.
+/// - `model` (string, optional) — Model override in `provider/model` or
+///   `provider:model` format. Inherits the parent session's model when omitted.
 pub struct NewTaskTool;
 
 #[async_trait::async_trait]
@@ -30,7 +40,16 @@ impl Tool for NewTaskTool {
     fn description(&self) -> &'static str {
         "Spawn a sub-agent to perform a focused task. Supports synchronous (blocking) \
          and background (non-blocking) modes. Use agent names like 'explore', 'build', \
-         'plan', or any custom agent."
+         'plan', or any custom agent. \n\n\
+         REQUIRED parameters (BOTH must be supplied — omitting either will fail):\n\
+         - `agent` (string) — the agent name to run\n\
+         - `task`  (string) — the prompt/instructions for the sub-agent\n\
+         \n\
+         Optional:\n\
+         - `background` (bool, default false) — set to `true` to spawn in the background\n\
+         - `model` (string) — provider/model override, e.g. 'anthropic/claude-sonnet-4-20250514'\n\
+         \n\
+         Example: new_task(agent: \"explore\", task: \"Find all callers of X in src/\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -39,22 +58,23 @@ impl Tool for NewTaskTool {
             "properties": {
                 "agent": {
                     "type": "string",
-                    "description": "Name of the agent to run (e.g. 'explore', 'build', 'plan', 'general')"
+                    "description": "REQUIRED. Name of the agent to run (e.g. 'explore', 'build', 'plan', 'general'). BOTH `agent` AND `task` must be supplied — calls with only one of them will fail."
                 },
                 "task": {
                     "type": "string",
-                    "description": "The task prompt / instructions for the sub-agent"
+                    "description": "REQUIRED. The task prompt / instructions for the sub-agent. Be specific — the sub-agent has no access to the parent's history, so include all necessary context, the exact question(s) to answer, and the format you want for the answer. BOTH `agent` AND `task` must be supplied — calls with only one of them will fail."
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "If true, spawn in the background and return immediately — the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)"
+                    "description": "If true, spawn in the background and return immediately — the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)."
                 },
                 "model": {
                     "type": "string",
-                    "description": "Optional model override (e.g. 'anthropic/claude-sonnet-4-20250514' or 'openai:gpt-4o')"
+                    "description": "Optional model override (e.g. 'anthropic/claude-sonnet-4-20250514' or 'openai:gpt-4o'). If omitted, the sub-agent inherits the parent session's model."
                 }
             },
-            "required": ["agent", "task"]
+            "required": ["agent", "task"],
+            "additionalProperties": false
         })
     }
 
