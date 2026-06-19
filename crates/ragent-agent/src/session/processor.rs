@@ -390,7 +390,7 @@ pub(crate) async fn check_permission_with_prompt(
             || tool_name == "list_tasks"
             || tool_name == "wait_tasks"
             || tool_name.starts_with("todo_")
-            || tool_name == "question"
+            || tool_name == "ask_user"
     }
     use crate::permission::PermissionAction;
     use tokio::sync::broadcast::error::RecvError;
@@ -3655,7 +3655,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hardwired_question_tool_is_auto_approved() {
+    async fn test_hardwired_ask_user_tool_is_auto_approved() {
         let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
@@ -3663,9 +3663,9 @@ mod tests {
             &checker,
             &event_bus,
             "session-1",
-            "question",
+            "ask_user",
             "Which provider?",
-            "question",
+            "ask_user",
             false,
         )
         .await

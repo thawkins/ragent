@@ -1,5 +1,16 @@
 # Changelog
 
+## Version: 0.1.0-alpha.111
+
+### Changed
+- **`ask_user` tool promoted from alias to standalone** — The previously-delegating `ask_user` tool in `crates/ragent-agent/src/tool/aliases.rs` now publishes `Event::QuestionRequested` and awaits `Event::QuestionAnswered` directly via the event bus. The standalone `question` tool has been deleted from `ragent-agent`, `ragent-tools-core`, and the TUI question-dialog widget module; question rendering is now driven entirely by the existing TUI event handler in `ragent-tui/src/app.rs`.
+- **`ask_user` supports multiple-choice** — The optional `options` array parameter renders a selectable list in the TUI question dialog; omitting `options` keeps the previous free-text input behaviour. The tool description and JSON schema now document the new parameter, and `permission_category` is reported as `ask_user` (was `question`).
+- **Permission auto-approval key renamed** — `check_permission_with_prompt`'s hardwired always-allow list now matches `ask_user` (was `question`); the corresponding unit test was renamed accordingly.
+
+### Added
+- **`ragent-research` crate scaffold** — New workspace member under `crates/ragent-research/` providing `ResearchName` (validated, URL-safe identifier newtype with FR-002 validation), `Source` (Web/Local/Spec/Other enum backing the references index), and `ResearchStatus` (draft/in-progress/complete/archived covering FR-013). Depends only on `ragent-types` and common workspace deps so it can be reused by both the TUI and HTTP layers once the manager/session/io modules are added in follow-up releases.
+- **Research system spec + plan** — New `specs/researchsystem/SPEC.md` and `specs/researchsystem/PLAN.md` describing the `/research` slash command, directory conventions, information-gathering session, references index, and integration with the existing spec workflow.
+
 ## Version: 0.1.0-alpha.110
 
 ### Removed

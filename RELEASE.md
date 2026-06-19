@@ -1,6 +1,18 @@
 # Release
 
-## Current Version: 0.1.0-alpha.110
+## Current Version: 0.1.0-alpha.111
+
+### Changed
+- **`ask_user` tool promoted from alias to standalone** — The previously-delegating `ask_user` tool in `crates/ragent-agent/src/tool/aliases.rs` now publishes `Event::QuestionRequested` / awaits `Event::QuestionAnswered` directly via the event bus. The standalone `question` tool has been deleted from `ragent-agent`, `ragent-tools-core`, and the TUI question-dialog widget module; the question-rendering responsibility now lives in the TUI's existing event-driven `QuestionRequested` handler in `ragent-tui/src/app.rs`.
+- **`ask_user` supports multiple-choice** — The optional `options` array parameter renders a selectable list in the TUI question dialog; omitting `options` keeps the previous free-text input. The tool description and JSON schema now document the new parameter and the `permission_category` is reported as `ask_user` (was `question`).
+- **Permission auto-approval key renamed** — `check_permission_with_prompt`'s hardwired always-allow list now matches `ask_user` (was `question`); the corresponding unit test was renamed accordingly.
+- **Workspace version** — Bumped to `0.1.0-alpha.111`.
+
+### Added
+- **`ragent-research` crate scaffold** — New workspace member under `crates/ragent-research/` providing `ResearchName` (validated, URL-safe identifier newtype), `Source` (Web/Local/Spec/Other enum for the references index), and `ResearchStatus` (draft/in-progress/complete/archived). Follows the requirements in `specs/researchsystem/SPEC.md` (FR-002, FR-011, FR-013). The crate depends only on `ragent-types` and the common workspace deps so it can be reused by both the TUI and HTTP layers once the manager/session/io modules are added.
+- **Research system spec + plan** — New `specs/researchsystem/SPEC.md` and `specs/researchsystem/PLAN.md` describing the `/research` slash command, directory conventions, information-gathering session, references index, and integration with the existing spec workflow.
+
+## Previous Version: 0.1.0-alpha.110
 
 ### Removed
 - **Internal LLM subsystem removed** — The embedded local LLM (Candle GGUF + Foundry Local + LiteRT-LM), the `/internal-llm` slash command family, the TUI `InternalLLM` chat overlay panel, the `InternalLlmConfig` block, the `internal_llm` Cargo feature flag, the `ragent_llm::embedded` module, and all related test files have been removed. Compaction now always uses the provider-compaction fallback. Session titles default to empty. Memory extraction no longer has an LLM prefilter step. The `internal_llm` key in `ragent.json` is silently ignored.

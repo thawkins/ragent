@@ -91,7 +91,6 @@ pub mod patch;
 pub mod pdf_read;
 pub mod pdf_write;
 pub mod plan;
-pub mod question;
 pub mod read;
 pub mod rm;
 /// Structured memory store, recall, and forget tools.

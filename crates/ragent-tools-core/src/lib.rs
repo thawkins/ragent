@@ -30,7 +30,6 @@ pub mod bash;
 pub mod bash_reset;
 
 // Interaction tools
-pub mod question;
 pub mod task_complete;
 pub mod think;
 
@@ -318,7 +317,6 @@ pub fn create_core_registry() -> ToolRegistry {
     registry.register(Arc::new(bash_reset::BashResetTool));
 
     // Interaction tools
-    registry.register(Arc::new(question::QuestionTool));
     registry.register(Arc::new(task_complete::TaskCompleteTool));
     registry.register(Arc::new(think::ThinkTool));
 
