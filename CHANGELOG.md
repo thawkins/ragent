@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.113
+
+### Fixed
+- **Research-system spec status overstated (second occurrence)** — `specs/researchsystem/SPEC.md` was again tagged `status: implemented` with a three-step audit trail even though only six of the 56 plan tasks had shipped (T-001/T-002/T-003 foundational types, T-005 crate scaffold, T-004 `ResearchItem`, T-014 web-gatherer, T-016 local-gatherer, T-040 plan-dep parser, T-045 path-traversal rejection, T-051 name-validation tests). The frontmatter is now `status: in_progress` with a two-step audit (`none → draft → in_progress`) that correctly reflects "framework implemented, integration pending". The remaining ~50 tasks (manager CRUD, session orchestrator, supporting-file writers, `RESEARCH.md` assembler, References Index generator, `INDEX.md` cache, TUI slash-command wiring, CLI/HTTP endpoints, spec-integration glue, benchmarks, user docs) remain `pending` and will be promoted in subsequent releases.
+
 ## Version: 0.1.0-alpha.112
 
 ### Fixed
