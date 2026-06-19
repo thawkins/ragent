@@ -38,7 +38,6 @@ pin-project-lite = { workspace = true }
 bytes = { workspace = true }
 regex = { workspace = true }
 base64 = { workspace = true }
-foundry-local-sdk = "1.2.3"
 rmcp = { workspace = true }
 docx-rust = { workspace = true }
 calamine = { workspace = true }
@@ -72,8 +71,6 @@ ragent-specs = { path = "../ragent-specs" }
 
 [features]
 default = []
-embeddings = ["ort", "tokenizers", "ndarray"]
-embedded-llm = ["ragent-llm/embedded-llm"]
 # ── Context compression (Headroom integration) ───────────────────────
 # Enables content-aware compression, CCR reversible storage, accurate
 # token counting, and relevance filtering via the headroom-core crate.
@@ -86,6 +83,7 @@ compression = ["dep:headroom-core"]
 # This feature flag is reserved for future use when headroom-core adds
 # feature flags for its heavier ML dependencies (fastembed, magika).
 compression-ml = ["compression"]
+
 
 [dependencies.ort]
 version = "2.0.0-rc.12"

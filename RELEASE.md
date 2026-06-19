@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.109
+## Current Version: 0.1.0-alpha.110
+
+### Removed
+- **Internal LLM subsystem removed** — The embedded local LLM (Candle GGUF + Foundry Local + LiteRT-LM), the `/internal-llm` slash command family, the TUI `InternalLLM` chat overlay panel, the `InternalLlmConfig` block, the `internal_llm` Cargo feature flag, the `ragent_llm::embedded` module, and all related test files have been removed. Compaction now always uses the provider-compaction fallback. Session titles default to empty. Memory extraction no longer has an LLM prefilter step. The `internal_llm` key in `ragent.json` is silently ignored.
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.110`.
+
+## Previous Version: 0.1.0-alpha.109
 
 ### Added
 - **In-process Microsoft Foundry Local backend** — New `FoundryLocalInProcClient` in `crates/ragent-llm/src/providers/foundry_local_inproc_client.rs` loads and runs Foundry Local models inside the ragent process via the `foundry-local-sdk` native core, bypassing the local web service.  Supports model alias resolution, download progress events, device selection (`auto`/`cpu`/`gpu`/`npu`), temperature/max_tokens, tools, and full `StreamEvent` translation (text, tool calls, usage, finish reason).

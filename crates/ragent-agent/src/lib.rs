@@ -19,7 +19,6 @@ pub use ragent_types::event::{Event, EventBus, FinishReason};
 pub mod file_ops;
 pub mod hooks;
 pub mod id;
-pub mod internal_llm;
 pub mod mcp;
 pub mod memory;
 pub mod message;
@@ -42,21 +41,15 @@ pub mod updater;
 
 pub use ragent_config::config::StreamConfig;
 pub use ragent_config::{
-    AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, InternalLlmConfig,
-    InternalLlmDownloadPolicy, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig,
-    bash_lists, dir_lists, tool_family_names,
+    AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, GitLabIntegrationConfig,
+    MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig, bash_lists, dir_lists,
+    tool_family_names,
 };
-pub use ragent_llm::{embedded, llm, provider};
+pub use ragent_llm::{llm, provider};
 pub use ragent_tools_vcs::{github, gitlab};
 
-pub use internal_llm::{
-    InternalLlmError, InternalLlmExecutionRequest, InternalLlmExecutor, InternalLlmMetricsSnapshot,
-    InternalLlmQueueStatus, InternalLlmResult, InternalLlmService, InternalLlmStatusSnapshot,
-    InternalLlmTaskKind, InternalTaskLimits,
-};
-
 pub use ragent_llm::{
-    AnthropicProvider, CopilotProvider, FoundryLocalProvider, GeminiProvider,
-    GenericOpenAiProvider, HuggingFaceProvider, ModelInfo, OllamaCloudProvider, OllamaProvider,
-    OpenAiProvider, Provider, ProviderInfo, ProviderRegistry, UsageInfo, create_default_registry,
+    AnthropicProvider, CopilotProvider, GeminiProvider, GenericOpenAiProvider, HuggingFaceProvider,
+    ModelInfo, OllamaCloudProvider, OllamaProvider, OpenAiProvider, Provider, ProviderInfo,
+    ProviderRegistry, UsageInfo, create_default_registry,
 };

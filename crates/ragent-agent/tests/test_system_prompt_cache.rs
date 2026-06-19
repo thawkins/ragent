@@ -68,7 +68,10 @@ fn invalidate_system_prompt_cache_clears_entries() {
     let populated = cache.get_tool_reference(&processor.tool_registry, |_r| {
         "## Available Tools\n\n- `read`\n".to_string()
     });
-    assert_eq!(populated, Some("## Available Tools\n\n- `read`\n".to_string()));
+    assert_eq!(
+        populated,
+        Some("## Available Tools\n\n- `read`\n".to_string())
+    );
     // The cache now has the entry.
     let second = cache
         .get_tool_reference(&processor.tool_registry, |_r| {
@@ -78,9 +81,8 @@ fn invalidate_system_prompt_cache_clears_entries() {
     assert_eq!(second, "## Available Tools\n\n- `read`\n");
     // Invalidate and try again — the compute fn runs again.
     processor.invalidate_system_prompt_cache();
-    let after_invalidate = cache.get_tool_reference(&processor.tool_registry, |_r| {
-        "fresh".to_string()
-    });
+    let after_invalidate =
+        cache.get_tool_reference(&processor.tool_registry, |_r| "fresh".to_string());
     assert_eq!(after_invalidate, Some("fresh".to_string()));
 }
 
@@ -91,9 +93,8 @@ fn codeindex_guidance_caches_active_state() {
     let active_a = cache.get_codeindex_guidance(true, |is_active| {
         if is_active { "active" } else { "disabled" }.to_string()
     });
-    let active_b = cache.get_codeindex_guidance(true, |_| {
-        panic!("compute must not be called on hit")
-    });
+    let active_b =
+        cache.get_codeindex_guidance(true, |_| panic!("compute must not be called on hit"));
     assert_eq!(active_a, Some("active".to_string()));
     assert_eq!(active_b, Some("active".to_string()));
 }

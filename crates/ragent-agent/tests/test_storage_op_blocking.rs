@@ -9,20 +9,20 @@
 //! `get_messages` call after a long `tokio::time::sleep` would still
 //! see the new message — proving the closure ran.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ragent_agent::message::{Message, MessagePart, Role};
-use ragent_agent::storage::Storage;
-use ragent_llm::provider::ProviderRegistry;
 use parking_lot::RwLock;
 use ragent_agent::event::EventBus;
+use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::permission::PermissionChecker;
 use ragent_agent::session::SessionManager;
-use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::session::cache::SystemPromptCache;
+use ragent_agent::session::processor::SessionProcessor;
+use ragent_agent::storage::Storage;
 use ragent_agent::tool::ToolRegistry;
+use ragent_llm::provider::ProviderRegistry;
 use ragent_types::EventBus as _;
 
 fn test_processor() -> (SessionProcessor, Arc<Storage>) {
@@ -56,9 +56,7 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn storage_op_runs_closure_and_returns_value() {
     let (processor, _storage) = test_processor();
-    let result: anyhow::Result<u32> = processor
-        .storage_op(|_s| Ok(42u32))
-        .await;
+    let result: anyhow::Result<u32> = processor.storage_op(|_s| Ok(42u32)).await;
     assert_eq!(result.unwrap(), 42);
 }
 
@@ -102,11 +100,7 @@ async fn storage_op_create_then_get_messages_round_trip() {
         .session_manager
         .list_sessions()
         .expect("list_sessions");
-    let session_id = sessions
-        .first()
-        .expect("at least one session")
-        .id
-        .clone();
+    let session_id = sessions.first().expect("at least one session").id.clone();
     let user_msg = Message {
         id: "m1".to_string(),
         session_id: session_id.clone(),

@@ -297,8 +297,9 @@ fn chat_messages_to_messages(chat_messages: &[crate::llm::ChatMessage]) -> Vec<M
                                 for p in &mut prev.parts {
                                     if let MessagePart::ToolCall { call_id, state, .. } = p {
                                         if call_id == tool_use_id && state.output.is_none() {
-                                            state.output =
-                                                Some(serde_json::Value::String(content.to_string()));
+                                            state.output = Some(serde_json::Value::String(
+                                                content.to_string(),
+                                            ));
                                             paired = true;
                                             break;
                                         }
@@ -388,10 +389,11 @@ fn messages_to_chat_messages(messages: &[Message]) -> Vec<crate::llm::ChatMessag
                     } else {
                         result_text
                     };
-                                          tool_results.push(ContentPart::ToolResult {
-                                              tool_use_id: call_id.clone(),
-                                              content: content.into(),
-                                          });                }
+                    tool_results.push(ContentPart::ToolResult {
+                        tool_use_id: call_id.clone(),
+                        content: content.into(),
+                    });
+                }
             }
         }
         let content = if parts.len() == 1 {
@@ -1401,13 +1403,14 @@ mod tests {
                     },
                 ]),
             },
-                          LlmChatMessage {
-                              role: "user".to_string(),
-                              content: ChatContent::Parts(vec![ContentPart::ToolResult {
-                                  tool_use_id: "call_1".to_string(),
-                                  content: "4".to_string().into(),
-                              }]),
-                          },        ];
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Parts(vec![ContentPart::ToolResult {
+                    tool_use_id: "call_1".to_string(),
+                    content: "4".to_string().into(),
+                }]),
+            },
+        ];
 
         let messages = chat_messages_to_messages(&chat_messages);
         assert_eq!(messages.len(), 3);

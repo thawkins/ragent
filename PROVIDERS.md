@@ -251,9 +251,13 @@ same machine as ragent.  ragent supports two operating modes:
 Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when
 `in_process: true` is configured.  Useful for debugging or compatibility.
 
+## Removed Features
+
 ### Internal LLM
 
-The `/internal-llm foundry` slash command routes internal helper tasks through
-Microsoft Foundry Local.  When the internal LLM backend is `foundry`, the TUI
-status panel shows whether the main provider is configured for in-process or
-web-service inference under the **foundry mode** row.
+The embedded internal LLM subsystem (`/internal-llm` slash command family,
+`InternalLlmConfig`, Candle / Foundry Local / LiteRT-LM backends, TUI
+`InternalLLM` chat panel, and `internal_llm` Cargo feature) was removed in
+`0.1.0-alpha.110`.  Compaction always uses the provider-compaction fallback
+and session titles default to empty.  The `internal_llm` key in `ragent.json`
+is silently ignored for backward compatibility.

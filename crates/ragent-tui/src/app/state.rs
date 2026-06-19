@@ -13,9 +13,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
 use ragent_core::agent::{AgentInfo, CustomAgentDef};
-use ragent_core::config::{InternalLlmConfig, ToolVisibilityConfig};
+use ragent_core::config::ToolVisibilityConfig;
 use ragent_core::event::EventBus;
-use ragent_core::internal_llm::InternalLlmService;
 use ragent_core::mcp::{McpServer, discovery::DiscoveredMcpServer};
 use ragent_core::message::Message;
 use ragent_core::permission::PermissionRequest;
@@ -268,7 +267,6 @@ pub enum ScreenMode {
 /// followed by cloud providers in rough priority order.
 pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("ollama", "Ollama (Local)"),
-    ("foundry_local", "Microsoft Foundry Local"),
     ("ollama_cloud", "Ollama Cloud"),
     ("anthropic", "Anthropic (Claude)"),
     ("openai", "OpenAI (GPT)"),
@@ -704,10 +702,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
     SlashCommandDef {
-        trigger: "internal-llm",
-        description: "Manage the embedded internal LLM: /internal-llm show|on|off|chat|foundry|embedded|sessiontitle|promptcontext|memoryextraction",
-    },
-    SlashCommandDef {
         trigger: "codeindex",
         description: "Manage codebase index: /codeindex on|off|show|lang|reindex|help",
     },
@@ -956,34 +950,6 @@ pub struct QuestionRequest {
     pub question: String,
     /// Optional multiple-choice options.
     pub options: Vec<String>,
-}
-
-/// Completion payload from an async internal-LLM UI task.
-#[derive(Debug, Clone)]
-pub enum InternalLlmUiCompletion {
-    /// Internal-LLM chat turn completed.
-    Chat {
-        /// Prompt text (for logging).
-        prompt: String,
-        /// Result text or a surfaced error.
-        result: std::result::Result<String, String>,
-    },
-    /// Internal compaction request completed.
-    Compaction {
-        /// Session being compacted.
-        session_id: String,
-        /// Whether compaction was auto-triggered.
-        auto_triggered: bool,
-        /// Result text or a surfaced error.
-        result: std::result::Result<String, String>,
-    },
-    /// Session title generation completed.
-    SessionTitle {
-        /// Session being titled.
-        session_id: String,
-        /// Result text or a surfaced error.
-        result: std::result::Result<String, String>,
-    },
 }
 
 /// Core TUI application state.
@@ -1314,18 +1280,6 @@ pub struct App {
     pub bench_mock_outputs: Option<Vec<String>>,
     /// Pending result from an async `/opt` LLM call.
     pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-    /// Persisted internal-LLM config currently active in the TUI.
-    pub internal_llm_config: InternalLlmConfig,
-    /// Internal-LLM service used for chat, compaction, and title generation.
-    pub internal_llm_service: Option<Arc<InternalLlmService>>,
-    /// Last service-construction error, if the embedded config could not be activated.
-    pub internal_llm_init_error: Option<String>,
-    /// Pending results from async internal-LLM UI tasks.
-    pub internal_llm_results: Arc<std::sync::Mutex<Vec<InternalLlmUiCompletion>>>,
-    /// Active internal-LLM chat overlay panel. `None` when the panel is closed.
-    pub internal_llm_chat_panel: Option<crate::panels::InternalLlmChatState>,
-    /// Whether a background title generation request is currently active.
-    pub internal_llm_title_pending: bool,
     /// Whether input history has been modified since last save.
     pub history_dirty: bool,
     /// Deadline after which a dirty history should be flushed to disk.

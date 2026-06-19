@@ -408,16 +408,15 @@ impl OpenAiClient {
                         error = %e,
                         "SSE stream decode error"
                     );
-                    let message = if content_type.contains("event-stream")
-                        && e.to_string().to_lowercase().contains("error decoding response body")
-                    {
-                        format!(
-                            "{} returned an empty/malformed event stream (status {}, content-type {}). \
-                            For Microsoft Foundry Local this usually means the requested model is not loaded.",
-                            provider_name, status, content_type
-                        )
-                    } else {
-                        e.to_string()
+                                          let message = if content_type.contains("event-stream")
+                                              && e.to_string().to_lowercase().contains("error decoding response body")
+                                          {
+                                              format!(
+                                                  "{} returned an empty/malformed event stream (status {}, content-type {}). \
+                                                  For local OpenAI-compatible providers this usually means the requested model is not loaded.",
+                                                  provider_name, status, content_type
+                                              )
+                                          } else {                        e.to_string()
                     };
                     yield StreamEvent::Error { message };
                     break;
@@ -542,12 +541,11 @@ impl OpenAiClient {
                                           content_type = %content_type,
                                           "SSE stream ended without yielding any events"
                                       );
-                                      let message = format!(
-                                          "{} response stream ended without producing any events (status {}, content-type {}). \
-                                          For Microsoft Foundry Local this usually means the requested model is not loaded or the service returned an empty body.",
-                                          provider_name, status, content_type
-                                      );
-                                      yield StreamEvent::Error { message };
+                                                                              let message = format!(
+                                                                                  "{} response stream ended without producing any events (status {}, content-type {}). \
+                                                                                  For local OpenAI-compatible providers this usually means the requested model is not loaded or the service returned an empty body.",
+                                                                                  provider_name, status, content_type
+                                                                              );                                      yield StreamEvent::Error { message };
                                   }
                               };
         Ok(Box::pin(event_stream))

@@ -732,20 +732,15 @@ ragent models --provider azure_resource
       - **Auto-Start Service** — Optionally starts the Foundry Local web service on first use (web-service mode)
       - **Device Selection** — `auto`, `cpu`, `gpu`, or `npu` preference used to select a matching model variant
       - **Model Cache Path** — Override the default model cache directory
-      - **Automatic Download/Load** — Downloads uncached models and loads them into the active backend before streaming
-      - **Robust Readiness Polling** — Web-service mode uses `/models/loaded` to confirm the model is actually in memory, preventing empty SSE streams
-      - **Web-Service Escape Hatch** — Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when `in_process: true` is configured
-  
-      **Internal LLM:**
-      - `/internal-llm foundry` routes internal helper tasks through Microsoft Foundry Local.
-      - The TUI status panel shows the configured **foundry mode** (`in-process` or `web-service`) when the internal LLM backend is `foundry`.
-  
-      **Model Listing:**
-      ```bash
-      ragent models --provider foundry_local
-      ```
-    ### 3.2 Tool System
-#### File Operations Tools (14)
+              - **Automatic Download/Load** — Downloads uncached models and loads them into the active backend before streaming
+              - **Robust Readiness Polling** — Web-service mode uses `/models/loaded` to confirm the model is actually in memory, preventing empty SSE streams
+              - **Web-Service Escape Hatch** — Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when `in_process: true` is configured
+      
+              **Model Listing:**
+              ```bash
+              ragent models --provider foundry_local
+              ```
+            ### 3.2 Tool System#### File Operations Tools (14)
 
 | Tool | Purpose |
 |------|---------|
@@ -1237,28 +1232,16 @@ graph TD
     "allowlist": [],
     "denylist": []
   },
-  "gitlab": {
-    "instance_url": "https://gitlab.com",
-    "token": null,
-    "username": null
-  },
-  "internal_llm": {
-    "enabled": false,
-    "model": null,
-    "threads": 4,
-    "gpu_layers": 0,
-    "context_window": 8192,
-    "max_output_tokens": 2048,
-    "timeout_ms": 30000,
-    "max_parallel_requests": 2,
-    "allowed_tasks": ["session_title", "prompt_context", "memory_extraction"]
-  },
-  "stream": {
-    "timeout_secs": 120,
-    "max_retries": 3,
-    "retry_backoff_secs": 2
-  },
-  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
+      "gitlab": {
+        "instance_url": "https://gitlab.com",
+        "token": null,
+        "username": null
+      },
+      "stream": {
+        "timeout_secs": 120,
+        "max_retries": 3,
+        "retry_backoff_secs": 2
+      },  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
   "hooks": [
     { "trigger": "on_session_start", "command": "echo 'Session started'" }
   ]
@@ -1272,7 +1255,6 @@ Additional top-level configuration keys:
 - `dirs` — Directory and file path allowlist / denylist for the permission system.
 - `bash` — User-defined bash command allowlist and denylist.
 - `gitlab` — GitLab instance URL and personal access token for native integration.
-- `internal_llm` — Embedded local LLM configuration for helper tasks (session titles, prompt context, memory extraction).
 - `stream` — LLM streaming timeouts and retry behaviour.
 - `memory` — Full memory system configuration with `structured`, `semantic`, `auto_extract`, `compaction`, `eviction`, and `decay` sub-sections.
 - `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.

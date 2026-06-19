@@ -12,7 +12,9 @@ fn user_message(id: &str, text: &str) -> Message {
         id: id.to_string(),
         session_id: "s".to_string(),
         role: Role::User,
-        parts: vec![MessagePart::Text { text: text.to_string() }],
+        parts: vec![MessagePart::Text {
+            text: text.to_string(),
+        }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     }

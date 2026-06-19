@@ -20,8 +20,7 @@ pub use compression::{
 };
 pub use config::{
     AgentConfig, AgentPerfConfig, AutoExtractConfig, Capabilities, Config, Cost,
-    CrossProjectConfig, InternalLlmConfig, InternalLlmDownloadPolicy, McpServerConfig,
-    McpTransport, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig,
-    tool_family_names,
+    CrossProjectConfig, GitLabIntegrationConfig, McpServerConfig, McpTransport, MemoryConfig,
+    ModelConfig, ProviderConfig, ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{PermissionAction, PermissionChecker, PermissionRule};

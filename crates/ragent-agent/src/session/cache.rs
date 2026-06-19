@@ -232,11 +232,7 @@ impl SystemPromptCache {
     /// that receives a `bool` indicating the active/disabled state, which
     /// sidesteps the "no two closures have the same type" issue without
     /// requiring callers to box their closures.
-    pub fn get_codeindex_guidance<F>(
-        &self,
-        code_index_active: bool,
-        compute: F,
-    ) -> Option<String>
+    pub fn get_codeindex_guidance<F>(&self, code_index_active: bool, compute: F) -> Option<String>
     where
         F: FnOnce(bool) -> String,
     {

@@ -230,10 +230,6 @@ fn test_slash_help_shows_commands() {
     assert!(text.contains("/agent"), "help should mention /agent");
     assert!(text.contains("/model"), "help should mention /model");
     assert!(
-        text.contains("/internal-llm"),
-        "help should mention /internal-llm"
-    );
-    assert!(
         text.contains("/inputdiag"),
         "help should mention /inputdiag"
     );
@@ -329,58 +325,6 @@ fn test_slash_system_replaces_existing() {
     assert_eq!(app.agent_info.prompt.as_deref(), Some("Second prompt"));
 }
 
-#[test]
-fn test_slash_internal_llm_toggle_and_feature_switch_persist() {
-    let _lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
-    let _temp = enter_temp_config_dir();
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-
-    app.execute_slash_command("/internal-llm on");
-    assert!(app.internal_llm_config.enabled);
-    assert_eq!(app.status, "internal-llm: on");
-
-    app.execute_slash_command("/internal-llm sessiontitle on");
-    assert!(app.internal_llm_config.session_title_enabled);
-    assert_eq!(app.status, "internal-llm: sessiontitle on");
-
-    let cfg = ragent_core::config::Config::load().expect("load saved config");
-    assert!(cfg.internal_llm.enabled);
-    assert!(cfg.internal_llm.session_title_enabled);
-}
-
-#[test]
-fn test_slash_internal_llm_show_displays_feature_switches() {
-    let _lock = cwd_lock();
-    let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
-    let _temp = enter_temp_config_dir();
-
-    let mut app = make_app();
-    app.session_id = Some("test-session".to_string());
-    app.internal_llm_config.enabled = true;
-    app.internal_llm_config.session_title_enabled = true;
-    app.internal_llm_config.prompt_context_enabled = false;
-    app.internal_llm_config.memory_extraction_enabled = true;
-
-    app.execute_slash_command("/internal-llm show");
-
-    let text = app.messages.last().expect("message").text_content();
-    assert!(text.contains("enabled"));
-    assert!(text.contains("backend"));
-    assert!(text.contains("model"));
-    assert!(text.contains("accelerator"));
-    assert!(text.contains("compiled backends"));
-    assert!(text.contains("session title"));
-    assert!(text.contains("prompt/context compaction"));
-    assert!(text.contains("memory extraction"));
-    assert!(text.contains("prefilter") || text.contains("pre-filter"));
-    assert!(text.contains("off"));
-    assert!(text.matches("on").count() >= 3);
-}
 // ── /agent ──────────────────────────────────────────────────────────
 
 #[test]
@@ -839,14 +783,7 @@ fn test_provider_list_includes_generic_openai() {
             .any(|(id, name)| *id == "ollama_cloud" && *name == "Ollama Cloud"),
         "provider list should include Ollama Cloud"
     );
-    assert!(
-        ragent_tui::app::PROVIDER_LIST
-            .iter()
-            .any(|(id, name)| *id == "foundry_local" && *name == "Microsoft Foundry Local"),
-        "provider list should include Microsoft Foundry Local"
-    );
 }
-
 #[test]
 fn test_model_selector_navigation_wraps_top_and_bottom() {
     let mut app = make_app();
@@ -2424,170 +2361,6 @@ fn test_slash_config_no_args_shows_usage() {
     assert!(
         text.contains("Usage: `/config show`"),
         "should show usage hint"
-    );
-}
-
-#[test]
-fn test_models_for_provider_foundry_local_falls_back_to_defaults_when_discovery_empty() {
-    let app = make_app();
-    // When the Foundry Local SDK is not installed or returns an empty catalog,
-    // models_for_provider should fall back to the hard-coded default entries
-    // so the provider remains usable.
-    let models = app.models_for_provider("foundry_local");
-    assert!(
-        models.iter().any(|m| m.id == "phi-4"),
-        "foundry_local should always include the default Phi-4 model: {:?}",
-        models
-    );
-}
-
-#[test]
-fn test_get_configured_providers_includes_foundry_local_when_available() {
-    let _guard = cwd_lock();
-    let _temp = enter_temp_config_dir();
-
-    // Simulate an available Foundry Local runtime without needing the actual SDK.
-    ragent_core::provider::foundry_local_provider::set_foundry_local_available_for_tests(true);
-    // Clear the real-runtime cache so any previous run doesn't leak.
-    ragent_core::provider::foundry_local_provider::clear_availability_cache();
-
-    let app = make_app();
-    let providers = App::get_configured_providers(&app.storage);
-
-    let foundry = providers
-        .iter()
-        .find(|p| p.id == "foundry_local")
-        .expect("foundry_local should appear when runtime is available");
-    assert_eq!(foundry.name, "Microsoft Foundry Local");
-    assert_eq!(foundry.source, ProviderSource::AutoDiscovered);
-
-    ragent_core::provider::foundry_local_provider::clear_foundry_local_test_override();
-    ragent_core::provider::foundry_local_provider::clear_availability_cache();
-}
-
-#[tokio::test]
-async fn test_provider_setup_select_foundry_local_skips_key_prompt() {
-    let _guard = cwd_lock();
-    let _temp = enter_temp_config_dir();
-
-    ragent_core::provider::foundry_local_provider::set_foundry_local_available_for_tests(true);
-    ragent_core::provider::foundry_local_provider::clear_availability_cache();
-
-    let mut app = make_app();
-    let foundry_index = ragent_tui::app::PROVIDER_LIST
-        .iter()
-        .position(|(id, _)| *id == "foundry_local")
-        .expect("foundry_local in PROVIDER_LIST");
-
-    app.provider_setup = Some(ProviderSetupStep::SelectProvider {
-        selected: foundry_index,
-    });
-
-    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    assert!(
-        !matches!(app.provider_setup, Some(ProviderSetupStep::EnterKey { .. })),
-        "selecting foundry_local should not prompt for an API key"
-    );
-    match app.provider_setup {
-        Some(ProviderSetupStep::LoadingModels { provider_id, .. }) => {
-            assert_eq!(provider_id, "foundry_local");
-        }
-        ref other => panic!("expected LoadingModels step, got {:?}", other),
-    }
-
-    ragent_core::provider::foundry_local_provider::clear_foundry_local_test_override();
-    ragent_core::provider::foundry_local_provider::clear_availability_cache();
-}
-
-#[test]
-fn test_provider_picker_scrolls_to_foundry_local() {
-    let mut app = make_app();
-    // Position the selection on Microsoft Foundry Local.
-    let foundry_index = PROVIDER_LIST
-        .iter()
-        .position(|(id, _)| *id == "foundry_local")
-        .expect("foundry_local in PROVIDER_LIST");
-    app.provider_setup = Some(ProviderSetupStep::SelectProvider {
-        selected: foundry_index,
-    });
-
-    // Render on a very small terminal (18 rows) where the full list cannot fit
-    // even with the taller provider-setup dialog.
-    let backend = TestBackend::new(80, 18);
-    let mut terminal = Terminal::new(backend).expect("test terminal");
-    terminal
-        .draw(|frame| layout::render(frame, &mut app))
-        .expect("render provider picker");
-
-    let rendered = render_terminal_to_string(&terminal);
-    assert!(
-        rendered.contains("Microsoft Foundry Local"),
-        "provider picker should scroll so the selected foundry_local entry is visible"
-    );
-    assert!(
-        rendered.contains("more above") || rendered.contains("more below"),
-        "provider picker should show strong scroll indicators on a small terminal"
-    );
-}
-
-#[test]
-fn test_provider_list_orders_local_providers_first() {
-    // Regression guard: the provider picker must list local/keyless providers
-    // before cloud providers so users can find them quickly. This ordering has
-    // regressed multiple times.
-    let ids: Vec<&str> = PROVIDER_LIST.iter().map(|(id, _)| *id).collect();
-    let first_local_pos = ids
-        .iter()
-        .position(|id| *id == "ollama")
-        .unwrap_or(usize::MAX);
-    let foundry_pos = ids
-        .iter()
-        .position(|id| *id == "foundry_local")
-        .unwrap_or(usize::MAX);
-    let first_cloud_pos = ids
-        .iter()
-        .position(|id| matches!(*id, "anthropic" | "openai" | "gemini"))
-        .unwrap_or(usize::MAX);
-
-    assert!(
-        first_local_pos < first_cloud_pos,
-        "Ollama (Local) should appear before cloud providers"
-    );
-    assert!(
-        foundry_pos < first_cloud_pos,
-        "Microsoft Foundry Local should appear before cloud providers"
-    );
-
-    // The list must actually contain Foundry Local.
-    assert!(
-        PROVIDER_LIST
-            .iter()
-            .any(|(id, name)| *id == "foundry_local" && *name == "Microsoft Foundry Local"),
-        "Microsoft Foundry Local must be present in the provider list"
-    );
-}
-
-#[test]
-fn test_provider_picker_shows_foundry_local_on_tall_terminal() {
-    let mut app = make_app();
-    app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
-
-    // Render on a tall terminal (40 rows) where the full list fits.
-    let backend = TestBackend::new(80, 40);
-    let mut terminal = Terminal::new(backend).expect("test terminal");
-    terminal
-        .draw(|frame| layout::render(frame, &mut app))
-        .expect("render provider picker");
-
-    let rendered = render_terminal_to_string(&terminal);
-    assert!(
-        rendered.contains("Microsoft Foundry Local"),
-        "full provider list should be visible on a tall terminal without scrolling"
-    );
-    assert!(
-        !rendered.contains("more providers below"),
-        "scroll hint should not appear when the whole list fits"
     );
 }
 

@@ -67,9 +67,6 @@ pub struct Config {
     /// LLM streaming configuration (timeouts, retries).
     #[serde(default)]
     pub stream: StreamConfig,
-    /// Embedded internal LLM configuration for local helper tasks.
-    #[serde(default)]
-    pub internal_llm: InternalLlmConfig,
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
@@ -345,12 +342,6 @@ const fn default_false() -> bool {
 /// from serialised output so that code-level defaults take precedence.
 const fn is_true(v: &bool) -> bool {
     *v
-}
-
-/// Helper for `#[serde(skip_serializing_if = "is_false")]` — omits `false` booleans
-/// from serialised output so that code-level defaults take precedence.
-const fn is_false(v: &bool) -> bool {
-    !*v
 }
 
 /// Map a visibility switch to the list of tool names it governs.
@@ -1225,57 +1216,6 @@ impl Config {
             base.code_index.extra_exclude_patterns = overlay.code_index.extra_exclude_patterns;
         }
 
-        // internal_llm: overlay takes precedence only for explicitly set fields
-        if overlay.internal_llm.specified.enabled {
-            base.internal_llm.enabled = overlay.internal_llm.enabled;
-        }
-        if overlay.internal_llm.specified.backend {
-            base.internal_llm.backend = overlay.internal_llm.backend;
-        }
-        if overlay.internal_llm.specified.model_id {
-            base.internal_llm.model_id = overlay.internal_llm.model_id;
-        }
-        if overlay.internal_llm.specified.artifact_max_bytes {
-            base.internal_llm.artifact_max_bytes = overlay.internal_llm.artifact_max_bytes;
-        }
-        if overlay.internal_llm.specified.threads {
-            base.internal_llm.threads = overlay.internal_llm.threads;
-        }
-        if overlay.internal_llm.specified.gpu_layers {
-            base.internal_llm.gpu_layers = overlay.internal_llm.gpu_layers;
-        }
-        if overlay.internal_llm.specified.context_window {
-            base.internal_llm.context_window = overlay.internal_llm.context_window;
-        }
-        if overlay.internal_llm.specified.max_output_tokens {
-            base.internal_llm.max_output_tokens = overlay.internal_llm.max_output_tokens;
-        }
-        if overlay.internal_llm.specified.timeout_ms {
-            base.internal_llm.timeout_ms = overlay.internal_llm.timeout_ms;
-        }
-        if overlay.internal_llm.specified.max_parallel_requests {
-            base.internal_llm.max_parallel_requests = overlay.internal_llm.max_parallel_requests;
-        }
-        if overlay.internal_llm.specified.download_policy {
-            base.internal_llm.download_policy = overlay.internal_llm.download_policy;
-        }
-        if overlay.internal_llm.specified.allowed_tasks {
-            base.internal_llm.allowed_tasks = overlay.internal_llm.allowed_tasks;
-        }
-        if overlay.internal_llm.specified.session_title_enabled {
-            base.internal_llm.session_title_enabled = overlay.internal_llm.session_title_enabled;
-        }
-        if overlay.internal_llm.specified.prompt_context_enabled {
-            base.internal_llm.prompt_context_enabled = overlay.internal_llm.prompt_context_enabled;
-        }
-        if overlay.internal_llm.specified.memory_extraction_enabled {
-            base.internal_llm.memory_extraction_enabled =
-                overlay.internal_llm.memory_extraction_enabled;
-        }
-        if overlay.internal_llm.specified.accelerator {
-            base.internal_llm.accelerator = overlay.internal_llm.accelerator;
-        }
-
         // tool_visibility: overlay takes precedence only for explicitly set fields
         if overlay.tool_visibility.specified.office {
             base.tool_visibility.office = overlay.tool_visibility.office;
@@ -1307,46 +1247,24 @@ impl Config {
     }
 
     fn merge_provider_config(mut base: ProviderConfig, overlay: ProviderConfig) -> ProviderConfig {
+        if overlay.thinking.is_some() {
+            base.thinking = overlay.thinking;
+        }
+        // Provider-level api/env/models/options come from the overlay if it
+        // specifies them; the base value is preserved otherwise.  Deep
+        // model-level merge happens at the `provider.<id>.models.<model>` level
+        // when callers go through `Config::merge`.
+        if overlay.api.is_some() {
+            base.api = overlay.api;
+        }
         if !overlay.env.is_empty() {
             base.env = overlay.env;
         }
-        if let Some(overlay_api) = overlay.api {
-            if let Some(base_api) = base.api.as_mut() {
-                if overlay_api.base_url.is_some() {
-                    base_api.base_url = overlay_api.base_url;
-                }
-                base_api.headers.extend(overlay_api.headers);
-            } else {
-                base.api = Some(overlay_api);
-            }
+        if !overlay.models.is_empty() {
+            base.models = overlay.models;
         }
-        if overlay.thinking.is_some() {
-            base.thinking = overlay.thinking;
-        }
-        for (model_id, overlay_model) in overlay.models {
-            let merged = if let Some(existing) = base.models.remove(&model_id) {
-                Self::merge_model_config(existing, overlay_model)
-            } else {
-                overlay_model
-            };
-            base.models.insert(model_id, merged);
-        }
-        base.options.extend(overlay.options);
-        base
-    }
-
-    fn merge_model_config(mut base: ModelConfig, overlay: ModelConfig) -> ModelConfig {
-        if overlay.name.is_some() {
-            base.name = overlay.name;
-        }
-        if overlay.cost.is_some() {
-            base.cost = overlay.cost;
-        }
-        if overlay.capabilities.is_some() {
-            base.capabilities = overlay.capabilities;
-        }
-        if overlay.thinking.is_some() {
-            base.thinking = overlay.thinking;
+        if !overlay.options.is_empty() {
+            base.options = overlay.options;
         }
         base
     }
@@ -1368,354 +1286,6 @@ impl Config {
                 .or_else(|| provider.thinking.clone())
         })
     }
-}
-// ── GitLab integration configuration ─────────────────────────────────────────
-
-/// GitLab integration configuration.
-///
-/// Provides connection details for a GitLab instance. Values set here
-/// override those stored in the ragent database (set via `/gitlab setup`).
-/// Environment variables (`GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_USERNAME`)
-/// take the highest priority.
-///
-/// Override in `ragent.json`:
-/// ```json
-/// {
-///   "gitlab": {
-///     "instance_url": "https://gitlab.example.com",
-///     "token": "glpat-xxxxxxxxxxxx",
-///     "username": "myuser"
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GitLabIntegrationConfig {
-    /// GitLab instance base URL, e.g. `https://gitlab.com`.
-    pub instance_url: Option<String>,
-    /// Personal Access Token for the GitLab API.
-    pub token: Option<String>,
-    /// GitLab username / identity.
-    pub username: Option<String>,
-}
-
-// ── Embedded internal LLM configuration ───────────────────────────────────────
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct InternalLlmSpecified {
-    enabled: bool,
-    backend: bool,
-    model_id: bool,
-    artifact_max_bytes: bool,
-    threads: bool,
-    gpu_layers: bool,
-    context_window: bool,
-    max_output_tokens: bool,
-    timeout_ms: bool,
-    max_parallel_requests: bool,
-    download_policy: bool,
-    allowed_tasks: bool,
-    session_title_enabled: bool,
-    prompt_context_enabled: bool,
-    memory_extraction_enabled: bool,
-    accelerator: bool,
-}
-
-/// Download policy for embedded internal-LLM assets.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum InternalLlmDownloadPolicy {
-    /// Download missing artifacts only when the runtime first needs them.
-    #[default]
-    OnDemand,
-    /// Never download automatically; require the files to already exist locally.
-    Never,
-    /// Download proactively during future startup/setup flows.
-    Prefetch,
-}
-
-/// Embedded internal-LLM configuration.
-///
-/// Controls the dormant local-runtime scaffold used for internal helper tasks.
-/// The runtime stays disabled unless `enabled` is set to `true`, and later
-/// phases decide which internal call sites may consume it.
-///
-/// ```json
-/// {
-///   "internal_llm": {
-///     "enabled": false,
-///     "backend": "candle",
-///     "model_id": "smollm2-360m-instruct-q4",
-///     "artifact_max_bytes": 1073741824,
-///     "threads": 4,
-///     "gpu_layers": 0,
-///     "context_window": 4096,
-///     "max_output_tokens": 1024,
-///     "timeout_ms": 300000,
-///     "max_parallel_requests": 2,
-///     "download_policy": "on_demand",
-///     "allowed_tasks": ["session_title", "summarize_tool_output"],
-///     "session_title_enabled": false,
-///     "prompt_context_enabled": false,
-///     "memory_extraction_enabled": false,
-///     "accelerator": "cpu"
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct InternalLlmConfig {
-    /// Whether the embedded internal LLM is enabled.
-    ///
-    /// Defaults to `false`. When serialised, the default value (`false`) is omitted
-    /// so that code-level default changes take effect without manual config edits.
-    #[serde(
-        default = "default_internal_llm_enabled",
-        skip_serializing_if = "is_false"
-    )]
-    pub enabled: bool,
-    /// Backend identifier for the embedded runtime.
-    #[serde(default = "default_internal_llm_backend")]
-    pub backend: String,
-    /// Model identifier used by the embedded runtime.
-    #[serde(default = "default_internal_llm_model_id")]
-    pub model_id: String,
-    /// Maximum allowed artifact size in bytes.
-    #[serde(default = "default_internal_llm_artifact_max_bytes")]
-    pub artifact_max_bytes: u64,
-    /// Requested CPU thread count for Candle's Rayon-backed CPU execution path.
-    ///
-    /// The effective value is reported at startup and in `/internal-llm show`
-    /// because the process-global Rayon pool can only be configured once.
-    #[serde(default = "default_internal_llm_threads")]
-    pub threads: usize,
-    /// Requested number of model layers to place on the GPU.
-    ///
-    /// The current internal Candle runtime does not implement GGUF layer
-    /// offload, so non-zero values are surfaced in status output but forced to
-    /// `0` effective GPU layers.
-    #[serde(default)]
-    pub gpu_layers: u32,
-    /// Maximum context window reserved for the internal model.
-    #[serde(default = "default_internal_llm_context_window")]
-    pub context_window: usize,
-    /// Maximum tokens the internal model may generate.
-    #[serde(default = "default_internal_llm_max_output_tokens")]
-    pub max_output_tokens: u32,
-    /// Per-request timeout in milliseconds.
-    #[serde(default = "default_internal_llm_timeout_ms")]
-    pub timeout_ms: u64,
-    /// Maximum active + queued requests allowed against the single-worker runtime.
-    #[serde(default = "default_internal_llm_max_parallel_requests")]
-    pub max_parallel_requests: usize,
-    /// Policy for obtaining model artifacts.
-    #[serde(default)]
-    pub download_policy: InternalLlmDownloadPolicy,
-    /// Allowlisted internal tasks that may use the embedded model.
-    #[serde(default = "default_internal_llm_allowed_tasks")]
-    pub allowed_tasks: Vec<String>,
-    /// Whether session titles may be generated with the embedded model.
-    #[serde(default = "default_internal_llm_session_title_enabled")]
-    pub session_title_enabled: bool,
-    /// Whether prompt/context compaction may use the embedded model.
-    #[serde(default = "default_internal_llm_prompt_context_enabled")]
-    pub prompt_context_enabled: bool,
-    /// Whether memory extraction prefiltering may use the embedded model.
-    #[serde(default = "default_internal_llm_memory_extraction_enabled")]
-    pub memory_extraction_enabled: bool,
-    /// Hardware accelerator for the embedded-LLM backend.
-    ///
-    /// One of "cpu" (default), "gpu", or "npu". Ignored by the Candle backend.
-    #[serde(
-        default = "default_internal_llm_accelerator",
-        skip_serializing_if = "is_default_accelerator"
-    )]
-    pub accelerator: String,
-    #[serde(skip_serializing, default)]
-    specified: InternalLlmSpecified,
-}
-
-impl Default for InternalLlmConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_internal_llm_enabled(),
-            backend: default_internal_llm_backend(),
-            model_id: default_internal_llm_model_id(),
-            artifact_max_bytes: default_internal_llm_artifact_max_bytes(),
-            threads: default_internal_llm_threads(),
-            gpu_layers: 0,
-            context_window: default_internal_llm_context_window(),
-            max_output_tokens: default_internal_llm_max_output_tokens(),
-            timeout_ms: default_internal_llm_timeout_ms(),
-            max_parallel_requests: default_internal_llm_max_parallel_requests(),
-            download_policy: InternalLlmDownloadPolicy::default(),
-            allowed_tasks: default_internal_llm_allowed_tasks(),
-            session_title_enabled: default_internal_llm_session_title_enabled(),
-            prompt_context_enabled: default_internal_llm_prompt_context_enabled(),
-            memory_extraction_enabled: default_internal_llm_memory_extraction_enabled(),
-            accelerator: default_internal_llm_accelerator(),
-            specified: InternalLlmSpecified::default(),
-        }
-    }
-}
-
-impl InternalLlmConfig {
-    /// Returns `true` when the named internal task is allowlisted.
-    #[must_use]
-    pub fn allows_task(&self, task: &str) -> bool {
-        self.allowed_tasks.iter().any(|allowed| allowed == task)
-    }
-}
-
-impl<'de> Deserialize<'de> for InternalLlmConfig {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize, Default)]
-        struct RawInternalLlmConfig {
-            enabled: Option<bool>,
-            backend: Option<String>,
-            model_id: Option<String>,
-            artifact_max_bytes: Option<u64>,
-            threads: Option<usize>,
-            gpu_layers: Option<u32>,
-            context_window: Option<usize>,
-            max_output_tokens: Option<u32>,
-            timeout_ms: Option<u64>,
-            max_parallel_requests: Option<usize>,
-            download_policy: Option<InternalLlmDownloadPolicy>,
-            allowed_tasks: Option<Vec<String>>,
-            session_title_enabled: Option<bool>,
-            prompt_context_enabled: Option<bool>,
-            memory_extraction_enabled: Option<bool>,
-            accelerator: Option<String>,
-        }
-
-        let raw = RawInternalLlmConfig::deserialize(deserializer)?;
-        let specified = InternalLlmSpecified {
-            enabled: raw.enabled.is_some(),
-            backend: raw.backend.is_some(),
-            model_id: raw.model_id.is_some(),
-            artifact_max_bytes: raw.artifact_max_bytes.is_some(),
-            threads: raw.threads.is_some(),
-            gpu_layers: raw.gpu_layers.is_some(),
-            context_window: raw.context_window.is_some(),
-            max_output_tokens: raw.max_output_tokens.is_some(),
-            timeout_ms: raw.timeout_ms.is_some(),
-            max_parallel_requests: raw.max_parallel_requests.is_some(),
-            download_policy: raw.download_policy.is_some(),
-            allowed_tasks: raw.allowed_tasks.is_some(),
-            session_title_enabled: raw.session_title_enabled.is_some(),
-            prompt_context_enabled: raw.prompt_context_enabled.is_some(),
-            memory_extraction_enabled: raw.memory_extraction_enabled.is_some(),
-            accelerator: raw.accelerator.is_some(),
-        };
-        Ok(Self {
-            enabled: raw.enabled.unwrap_or_else(default_internal_llm_enabled),
-            backend: raw.backend.unwrap_or_else(default_internal_llm_backend),
-            model_id: raw.model_id.unwrap_or_else(default_internal_llm_model_id),
-            artifact_max_bytes: raw
-                .artifact_max_bytes
-                .unwrap_or_else(default_internal_llm_artifact_max_bytes),
-            threads: raw.threads.unwrap_or_else(default_internal_llm_threads),
-            gpu_layers: raw.gpu_layers.unwrap_or_default(),
-            context_window: raw
-                .context_window
-                .unwrap_or_else(default_internal_llm_context_window),
-            max_output_tokens: raw
-                .max_output_tokens
-                .unwrap_or_else(default_internal_llm_max_output_tokens),
-            timeout_ms: raw
-                .timeout_ms
-                .unwrap_or_else(default_internal_llm_timeout_ms),
-            max_parallel_requests: raw
-                .max_parallel_requests
-                .unwrap_or_else(default_internal_llm_max_parallel_requests),
-            download_policy: raw.download_policy.unwrap_or_default(),
-            allowed_tasks: raw
-                .allowed_tasks
-                .unwrap_or_else(default_internal_llm_allowed_tasks),
-            session_title_enabled: raw
-                .session_title_enabled
-                .unwrap_or_else(default_internal_llm_session_title_enabled),
-            prompt_context_enabled: raw
-                .prompt_context_enabled
-                .unwrap_or_else(default_internal_llm_prompt_context_enabled),
-            memory_extraction_enabled: raw
-                .memory_extraction_enabled
-                .unwrap_or_else(default_internal_llm_memory_extraction_enabled),
-            accelerator: raw
-                .accelerator
-                .unwrap_or_else(default_internal_llm_accelerator),
-            specified,
-        })
-    }
-}
-
-fn default_internal_llm_enabled() -> bool {
-    false
-}
-
-fn default_internal_llm_backend() -> String {
-    "candle".to_string()
-}
-
-fn default_internal_llm_model_id() -> String {
-    "smollm2-360m-instruct-q4".to_string()
-}
-
-const fn default_internal_llm_artifact_max_bytes() -> u64 {
-    1_073_741_824
-}
-
-const fn default_internal_llm_threads() -> usize {
-    4
-}
-
-const fn default_internal_llm_context_window() -> usize {
-    4096
-}
-
-const fn default_internal_llm_max_output_tokens() -> u32 {
-    1_024
-}
-
-const fn default_internal_llm_timeout_ms() -> u64 {
-    // 300 seconds: must cover cold model load plus slower local helper tasks on
-    // constrained CPUs.
-    300_000
-}
-
-const fn default_internal_llm_max_parallel_requests() -> usize {
-    2
-}
-
-fn default_internal_llm_allowed_tasks() -> Vec<String> {
-    vec![
-        "session_title".to_string(),
-        "summarize_tool_output".to_string(),
-        "memory_prefilter".to_string(),
-        "chat".to_string(),
-    ]
-}
-
-const fn default_internal_llm_session_title_enabled() -> bool {
-    false
-}
-
-const fn default_internal_llm_prompt_context_enabled() -> bool {
-    false
-}
-
-const fn default_internal_llm_memory_extraction_enabled() -> bool {
-    false
-}
-
-fn default_internal_llm_accelerator() -> String {
-    "cpu".to_string()
-}
-
-fn is_default_accelerator(accelerator: &str) -> bool {
-    accelerator == "cpu"
 }
 
 // ── Memory configuration ─────────────────────────────────────────────────────
@@ -2084,4 +1654,33 @@ fn default_search_global() -> bool {
 
 fn default_project_override() -> bool {
     true
+}
+
+// ── GitLab integration configuration ─────────────────────────────────────────
+
+/// GitLab integration configuration.
+///
+/// Provides connection details for a GitLab instance. Values set here
+/// override those stored in the ragent database (set via `/gitlab setup`).
+/// Environment variables (`GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_USERNAME`)
+/// take the highest priority.
+///
+/// Override in `ragent.json`:
+/// ```json
+/// {
+///   "gitlab": {
+///     "instance_url": "https://gitlab.example.com",
+///     "token": "glpat-xxxxxxxxxxxx",
+///     "username": "myuser"
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitLabIntegrationConfig {
+    /// GitLab instance base URL, e.g. `https://gitlab.com`.
+    pub instance_url: Option<String>,
+    /// Personal Access Token for the GitLab API.
+    pub token: Option<String>,
+    /// GitLab username / identity.
+    pub username: Option<String>,
 }

@@ -11,31 +11,20 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-      check-and-test:
-        name: Check & Test (default features)
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
-          - uses: dtolnay/rust-toolchain@stable
-            with:
-              toolchain: stable
-          - uses: Swatinem/rust-cache@v2
-          - name: Check
-            run: cargo check --workspace
-          - name: Test
-            run: cargo test --workspace
-    
-      check-embedded-llm:
-        name: Check (embedded-llm feature)
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
-          - uses: dtolnay/rust-toolchain@stable
-            with:
-              toolchain: stable
-          - uses: Swatinem/rust-cache@v2
-          - name: Check with embedded-llm
-            run: cargo check --workspace --no-default-features --features embedded-llm,compression
+  check-and-test:
+    name: Check & Test (default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --workspace
+      - name: Test
+        run: cargo test --workspace
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

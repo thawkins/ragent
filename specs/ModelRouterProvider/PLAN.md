@@ -404,7 +404,7 @@ should be reset to `false` / `None`.
 ### T-033 — Render Router status indicator in status bar Line 2 right (M, High)
 
 Extend `build_line2_right()` in `layout_statusbar.rs` to render a Router
-indicator alongside the existing CodeIdx, InternalLLM, and YOLO indicators.
+indicator alongside the existing CodeIdx and YOLO indicators.
 The indicator is only shown when `app.router_enabled` is true **or**
 `app.router_current_tier` is `Some` (covers the case where router is the active
 provider).

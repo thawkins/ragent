@@ -383,16 +383,6 @@ impl App {
 
         // Load persisted model selection
         let app_config = ragent_core::config::Config::load().unwrap_or_default();
-        let (internal_llm_service, internal_llm_init_error) =
-            match ragent_core::internal_llm::InternalLlmService::from_config(
-                app_config.internal_llm.clone(),
-            ) {
-                Ok(service) => (service.map(Arc::new), None),
-                Err(error) => {
-                    tracing::warn!(error = %error, "Failed to initialise internal LLM service in TUI");
-                    (None, Some(error.to_string()))
-                }
-            };
         let selected_model = storage.get_setting("selected_model").ok().flatten();
         let selected_model_ctx_window = storage
             .get_setting("selected_model_ctx_window")
@@ -540,12 +530,6 @@ impl App {
             bench_mock_outputs: None,
             opt_result: Arc::new(std::sync::Mutex::new(None)),
             db_path,
-            internal_llm_config: app_config.internal_llm.clone(),
-            internal_llm_service,
-            internal_llm_init_error,
-            internal_llm_results: Arc::new(std::sync::Mutex::new(Vec::new())),
-            internal_llm_chat_panel: None,
-            internal_llm_title_pending: false,
             history_dirty: false,
             history_save_deadline: None,
             md_render_cache: LruCache::new(NonZeroUsize::new(256).unwrap()),
@@ -638,334 +622,6 @@ impl App {
                     self.push_log_no_agent(LogLevel::Warn, format!("opt error: {}", msg));
                 }
             }
-        }
-    }
-
-    /// Poll for completed internal-LLM UI tasks and apply their results.
-    pub fn poll_pending_internal_llm(&mut self) {
-        let completions = {
-            let mut guard = match self.internal_llm_results.lock() {
-                Ok(g) => g,
-                Err(poisoned) => {
-                    tracing::error!("internal_llm_results mutex poisoned, recovering");
-                    poisoned.into_inner()
-                }
-            };
-            std::mem::take(&mut *guard)
-        };
-
-        for completion in completions {
-            match completion {
-                InternalLlmUiCompletion::Chat {
-                    prompt: _prompt,
-                    result,
-                } => match result {
-                    Ok(text) => {
-                        if let Some(panel) = &mut self.internal_llm_chat_panel {
-                            panel.push_assistant(text);
-                        }
-                        self.status = "internal-llm chat".to_string();
-                        self.push_log_no_agent(
-                            LogLevel::Info,
-                            "Internal LLM chat reply received".to_string(),
-                        );
-                    }
-                    Err(message) => {
-                        if let Some(panel) = &mut self.internal_llm_chat_panel {
-                            panel.push_error(&message);
-                        }
-                        self.status = format!("⚠ internal-llm chat failed: {message}");
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("Internal LLM chat failed: {message}"),
-                        );
-                    }
-                },
-                InternalLlmUiCompletion::Compaction {
-                    session_id,
-                    auto_triggered,
-                    result,
-                } => {
-                    self.compact_in_progress = false;
-                    self.auto_compact_in_progress = false;
-                    self.needs_redraw = true;
-                    let mut dispatch_queued_after_completion = true;
-                    match result {
-                        Ok(summary) => {
-                            if self.apply_compaction_summary(&session_id, &summary) {
-                                self.status = "ready".to_string();
-                            }
-                        }
-                        Err(message) => {
-                            self.auto_compact_failed = auto_triggered;
-                            self.status = format!("⚠ compaction failed: {message}");
-                            self.push_log_no_agent(
-                                LogLevel::Warn,
-                                format!("Internal LLM compaction failed: {message}"),
-                            );
-                            self.record_internal_llm_fallback(
-                                ragent_core::internal_llm::InternalLlmTaskKind::PromptCompaction,
-                                format!("internal compaction failed: {message}"),
-                            );
-                            self.push_log_no_agent(
-                                LogLevel::Warn,
-                                "Falling back to provider compaction".to_string(),
-                            );
-                            self.start_provider_compaction_for_session(&session_id, auto_triggered);
-                            dispatch_queued_after_completion = false;
-                        }
-                    }
-                    if dispatch_queued_after_completion
-                        && auto_triggered
-                        && let Some((queued_text, queued_images)) =
-                            self.pending_send_after_compact.take()
-                    {
-                        self.dispatch_user_message(queued_text, queued_images);
-                    }
-                }
-                InternalLlmUiCompletion::SessionTitle { session_id, result } => {
-                    self.internal_llm_title_pending = false;
-                    match result {
-                        Ok(title) => {
-                            let should_update = self
-                                .storage
-                                .get_session(&session_id)
-                                .ok()
-                                .flatten()
-                                .is_some_and(|session| session.title.trim().is_empty());
-                            if should_update {
-                                match self.storage.update_session(&session_id, title.trim()) {
-                                    Ok(()) => self.push_log_no_agent(
-                                        LogLevel::Info,
-                                        format!("Internal LLM titled session: {}", title.trim()),
-                                    ),
-                                    Err(error) => self.push_log_no_agent(
-                                        LogLevel::Warn,
-                                        format!(
-                                            "Internal LLM title save failed for {}: {}",
-                                            session_id, error
-                                        ),
-                                    ),
-                                }
-                            }
-                        }
-                        Err(message) => self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("Internal LLM title generation failed: {message}"),
-                        ),
-                    }
-                }
-            }
-        }
-    }
-
-    fn sync_internal_llm_from_config(&mut self, cfg: &ragent_core::config::Config) {
-        self.internal_llm_config = cfg.internal_llm.clone();
-        self.internal_llm_service = match ragent_core::internal_llm::InternalLlmService::from_config(
-            self.internal_llm_config.clone(),
-        ) {
-            Ok(service) => {
-                self.internal_llm_init_error = None;
-                service.map(Arc::new)
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, "Failed to refresh internal LLM service");
-                self.internal_llm_init_error = Some(error.to_string());
-                None
-            }
-        };
-        if !self.internal_llm_config.enabled {
-            self.internal_llm_chat_panel = None;
-        }
-    }
-
-    fn render_internal_llm_status(&self) -> String {
-        let mut rows = vec![
-            format!(
-                "| enabled | {} |",
-                if self.internal_llm_config.enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            format!("| backend | `{}` |", self.internal_llm_config.backend),
-            format!("| model | `{}` |", self.internal_llm_config.model_id),
-            format!(
-                "| accelerator | `{}` |",
-                self.internal_llm_config.accelerator
-            ),
-        ];
-
-        // Indicate which backend features are compiled in.
-        let candle_compiled = cfg!(feature = "embedded-llm");
-        let foundry_available =
-            ragent_core::provider::foundry_local_provider::is_foundry_local_available();
-        let foundry_mode = if self.internal_llm_config.backend == "foundry" {
-            match ragent_config::Config::load() {
-                Ok(cfg) => {
-                    let in_process = cfg
-                        .provider
-                        .get("foundry_local")
-                        .and_then(|p| p.options.get("in_process"))
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false);
-                    if in_process {
-                        "in-process"
-                    } else {
-                        "web-service"
-                    }
-                    .to_string()
-                }
-                Err(_) => "unknown".to_string(),
-            }
-        } else {
-            "-".to_string()
-        };
-        let feature_info = match (foundry_available, candle_compiled) {
-            (true, true) => "foundry ✅, candle ✅".to_string(),
-            (true, false) => "foundry ✅".to_string(),
-            (false, true) => "candle ✅".to_string(),
-            (false, false) => {
-                "none ⚠️ (install Foundry Local or rebuild with --features embedded-llm)"
-                    .to_string()
-            }
-        };
-        rows.push(format!("| compiled backends | {} |", feature_info));
-
-        if self.internal_llm_config.backend == "foundry" {
-            rows.push(format!("| foundry mode | {} |", foundry_mode));
-        }
-
-        rows.push(format!(
-            "| session title | {} |",
-            if self.internal_llm_config.session_title_enabled {
-                "on"
-            } else {
-                "off"
-            }
-        ));
-        rows.push(format!(
-            "| prompt/context compaction | {} |",
-            if self.internal_llm_config.prompt_context_enabled {
-                "on"
-            } else {
-                "off"
-            }
-        ));
-        rows.push(format!(
-            "| memory extraction prefilter | {} |",
-            if self.internal_llm_config.memory_extraction_enabled {
-                "on"
-            } else {
-                "off"
-            }
-        ));
-        rows.push(format!(
-            "| chat mode | {} |",
-            if self.internal_llm_chat_panel.is_some() {
-                "active"
-            } else {
-                "inactive"
-            }
-        ));
-
-        if let Some(service) = &self.internal_llm_service {
-            let snapshot = service.status_snapshot();
-            rows.push(format!("| attempts | {} |", snapshot.metrics.attempts));
-            rows.push(format!("| successes | {} |", snapshot.metrics.successes));
-            rows.push(format!("| failures | {} |", snapshot.metrics.failures));
-            rows.push(format!("| timeouts | {} |", snapshot.metrics.timeouts));
-            rows.push(format!("| fallbacks | {} |", snapshot.metrics.fallbacks));
-            if let Some(last_error) = snapshot.metrics.last_error {
-                rows.push(format!("| last error | {} |", last_error));
-            }
-            if let Some(last_fallback) = snapshot.metrics.last_fallback {
-                rows.push(format!("| last fallback | {} |", last_fallback));
-            }
-            if let Some(runtime) = snapshot.runtime {
-                rows.push(format!(
-                    "| runtime availability | `{:?}` |",
-                    runtime.availability
-                ));
-                rows.push(format!("| runtime lifecycle | `{:?}` |", runtime.lifecycle));
-                rows.push(format!(
-                    "| execution device | `{}` |",
-                    runtime.settings.execution_device
-                ));
-                rows.push(format!(
-                    "| quantized runtime | `{}` |",
-                    runtime.settings.quantized_runtime
-                ));
-                rows.push(format!(
-                    "| requested threads | {} |",
-                    runtime.settings.requested_threads
-                ));
-                rows.push(format!(
-                    "| effective threads | {} |",
-                    runtime.settings.effective_threads
-                ));
-                rows.push(format!("| threading | {} |", runtime.settings.threading));
-                rows.push(format!(
-                    "| requested gpu layers | {} |",
-                    runtime.settings.requested_gpu_layers
-                ));
-                rows.push(format!(
-                    "| effective gpu layers | {} |",
-                    runtime.settings.effective_gpu_layers
-                ));
-                rows.push(format!(
-                    "| gpu offload | {} |",
-                    runtime.settings.gpu_offload
-                ));
-                if let Some(backend_name) = runtime.backend_name {
-                    rows.push(format!("| runtime backend | `{}` |", backend_name));
-                }
-                if let Some(detail) = runtime.detail {
-                    rows.push(format!("| runtime detail | {} |", detail));
-                }
-                rows.push(format!(
-                    "| cache root | `{}` |",
-                    runtime.cache_root.display()
-                ));
-                rows.push(format!("| model dir | `{}` |", runtime.model_dir.display()));
-            }
-            if let Some(queue) = snapshot.queue {
-                rows.push("| worker model | single active decode |".to_string());
-                rows.push(format!("| worker capacity | {} |", queue.capacity));
-                rows.push(format!("| worker in flight | {} |", queue.in_flight));
-                rows.push(format!("| worker queued | {} |", queue.queued));
-                rows.push(format!(
-                    "| worker busy | {} |",
-                    if queue.worker_busy { "yes" } else { "no" }
-                ));
-            }
-        } else {
-            rows.push("| service status | unavailable |".to_string());
-            if let Some(error) = &self.internal_llm_init_error {
-                rows.push(format!("| init error | {} |", error));
-            }
-        }
-
-        format!(
-            "From: /internal-llm\n| Setting | Value |\n| --- | --- |\n{}\n",
-            rows.join("\n")
-        )
-    }
-    fn record_internal_llm_fallback(
-        &mut self,
-        task_kind: ragent_core::internal_llm::InternalLlmTaskKind,
-        reason: impl Into<String>,
-    ) {
-        let reason = reason.into();
-        if let Some(service) = &self.internal_llm_service {
-            service.record_fallback(task_kind, reason);
-        } else {
-            tracing::warn!(
-                task = task_kind.as_config_key(),
-                reason = %reason,
-                "Internal LLM fallback used without active service"
-            );
         }
     }
 
@@ -1366,137 +1022,6 @@ impl App {
             self.status = "compress: feature unavailable".to_string();
             let _ = mode_str;
         }
-    }
-
-    fn maybe_request_internal_session_title(&mut self, session_id: &str) {
-        if self.internal_llm_title_pending
-            || !self.internal_llm_config.enabled
-            || !self.internal_llm_config.session_title_enabled
-            || self.internal_llm_chat_panel.is_some()
-        {
-            return;
-        }
-        let Some(service) = self.internal_llm_service.clone() else {
-            return;
-        };
-        let Ok(Some(session)) = self.storage.get_session(session_id) else {
-            return;
-        };
-        if !session.title.trim().is_empty() {
-            return;
-        }
-
-        let conversation: String = self
-            .messages
-            .iter()
-            .filter_map(|message| {
-                let text = message.text_content();
-                if text.trim().is_empty() {
-                    None
-                } else {
-                    Some(format!("{:?}: {}", message.role, text))
-                }
-            })
-            .take(6)
-            .collect::<Vec<_>>()
-            .join("\n");
-        if conversation.trim().is_empty() {
-            return;
-        }
-
-        self.internal_llm_title_pending = true;
-        let results = Arc::clone(&self.internal_llm_results);
-        let session_id = session_id.to_string();
-        tokio::spawn(async move {
-            let result = service
-                .run_internal_task(
-                    ragent_core::internal_llm::InternalLlmTaskKind::SessionTitle,
-                    &conversation,
-                    ragent_core::internal_llm::InternalTaskLimits::default(),
-                )
-                .await
-                .map(|response| response.output)
-                .map_err(|error| error.to_string());
-            if let Ok(mut guard) = results.lock() {
-                guard.push(InternalLlmUiCompletion::SessionTitle { session_id, result });
-            } else {
-                tracing::error!("internal_llm_results mutex poisoned, title result dropped");
-            }
-        });
-    }
-
-    fn start_internal_llm_compaction(&mut self, session_id: &str, auto_triggered: bool) -> bool {
-        let Some(service) = self.internal_llm_service.clone() else {
-            return false;
-        };
-        let transcript = self
-            .messages
-            .iter()
-            .map(|message| format!("{:?}: {}", message.role, message.text_content()))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        if transcript.trim().is_empty() {
-            return false;
-        }
-
-        let prompt =
-            "Summarise the conversation so far into a concise representation that preserves all \
-             important context, decisions, code changes, file paths, and outstanding tasks.\n\n"
-                .to_string()
-                + &transcript;
-        let results = Arc::clone(&self.internal_llm_results);
-        let session_id = session_id.to_string();
-        tokio::spawn(async move {
-            let result = service
-                .run_internal_task(
-                    ragent_core::internal_llm::InternalLlmTaskKind::PromptCompaction,
-                    &prompt,
-                    ragent_core::internal_llm::InternalTaskLimits::default(),
-                )
-                .await
-                .map(|response| response.output)
-                .map_err(|error| error.to_string());
-            if let Ok(mut guard) = results.lock() {
-                guard.push(InternalLlmUiCompletion::Compaction {
-                    session_id,
-                    auto_triggered,
-                    result,
-                });
-            } else {
-                tracing::error!("internal_llm_results mutex poisoned, compaction result dropped");
-            }
-        });
-        true
-    }
-
-    /// Start an async internal-LLM chat request and push the result into the
-    /// pending completions queue.  Returns `false` if the service is unavailable.
-    pub fn start_internal_llm_chat(&mut self, prompt: &str) -> bool {
-        let Some(service) = self.internal_llm_service.clone() else {
-            return false;
-        };
-        let results = Arc::clone(&self.internal_llm_results);
-        let prompt_text = prompt.to_string();
-        tokio::spawn(async move {
-            let result = service
-                .run_internal_task(
-                    ragent_core::internal_llm::InternalLlmTaskKind::Chat,
-                    &prompt_text,
-                    ragent_core::internal_llm::InternalTaskLimits::default(),
-                )
-                .await
-                .map(|response| response.output)
-                .map_err(|error| error.to_string());
-            if let Ok(mut guard) = results.lock() {
-                guard.push(InternalLlmUiCompletion::Chat {
-                    prompt: prompt_text,
-                    result,
-                });
-            } else {
-                tracing::error!("internal_llm_results mutex poisoned, chat result dropped");
-            }
-        });
-        true
     }
 
     /// Poll for a completed `/swarm` LLM decomposition.  When the async
@@ -2475,37 +2000,6 @@ impl App {
         }
 
         let sid = self.session_id.clone().unwrap_or_default();
-        if self.internal_llm_config.enabled && self.internal_llm_config.prompt_context_enabled {
-            if self.start_internal_llm_compaction(&sid, auto_triggered) {
-                self.auto_compact_in_progress = auto_triggered;
-                self.compact_in_progress = true;
-                self.needs_redraw = true;
-                if auto_triggered {
-                    self.auto_compact_failed = false;
-                    self.status = "compacting before send…".to_string();
-                    self.push_log_no_agent(
-                        LogLevel::Warn,
-                        "Auto-compaction triggered (internal LLM)".to_string(),
-                    );
-                } else {
-                    self.status = "compacting…".to_string();
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        "Compaction started with internal LLM".to_string(),
-                    );
-                }
-                return true;
-            }
-            self.record_internal_llm_fallback(
-                ragent_core::internal_llm::InternalLlmTaskKind::PromptCompaction,
-                "internal compaction request could not be started",
-            );
-            self.push_log_no_agent(
-                LogLevel::Warn,
-                "Internal LLM compaction unavailable, falling back to provider compaction"
-                    .to_string(),
-            );
-        }
         self.start_provider_compaction_for_session(&sid, auto_triggered)
     }
 
@@ -2802,13 +2296,6 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
-                "foundry_local" => {
-                    if ragent_core::provider::foundry_local_provider::is_foundry_local_available() {
-                        Some(ProviderSource::AutoDiscovered)
-                    } else {
-                        None
-                    }
-                }
                 "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
                     .ok()
                     .filter(|k| !k.is_empty())
@@ -3030,18 +2517,6 @@ impl App {
                 "codeindex".to_string(),
                 "help".to_string(),
             ],
-            "internal-llm" => vec![
-                "show".to_string(),
-                "on".to_string(),
-                "off".to_string(),
-                "help".to_string(),
-                "chat".to_string(),
-                "foundry".to_string(),
-                "embedded".to_string(),
-                "sessiontitle".to_string(),
-                "promptcontext".to_string(),
-                "memoryextraction".to_string(),
-            ],
             "theme" => {
                 vec![
                     "toggle".to_string(),
@@ -3105,10 +2580,7 @@ impl App {
             "tools" => Some(
                 "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
-                          "internal-llm" => Some(
-                              "[show|help|on|off|chat|foundry|embedded|sessiontitle|promptcontext|memoryextraction] [on|off]"
-                                  .to_string(),
-                          ),            "model" => Some("[show]".to_string()),
+            "model" => Some("[show]".to_string()),
             "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),
             "router" => {
                 Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
@@ -4201,9 +3673,9 @@ impl App {
     /// Load model entries for a given provider.    ///
     /// Returns cached models if available, otherwise falls back to synchronous
     /// discovery when an async runtime is present. Providers with static defaults
-    /// (e.g. openai, foundry_local) use those defaults when discovery is
-    /// unavailable. Use [`Self::start_model_discovery`] to trigger an explicit
-    /// async reload with a spinner popup.
+    /// (e.g. openai) use those defaults when discovery is unavailable. Use
+    /// [`Self::start_model_discovery`] to trigger an explicit async reload with
+    /// a spinner popup.
     pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
         let mut models = self.resolved_model_entries_for_provider(provider_id);
         let cached = self.cached_model_entries(provider_id);
@@ -6245,7 +5717,6 @@ Usage: /provider [show]
                                 Self::load_persisted_thinking_level(self.storage.as_ref());
                             self.code_index_enabled = cfg.code_index.enabled;
                             self.sync_tool_visibility_from_config(&cfg);
-                            self.sync_internal_llm_from_config(&cfg);
                             report.push_str("✓ Config reloaded (ragent.json)\n");
                             self.push_log_no_agent(
                                 LogLevel::Info,
@@ -6487,236 +5958,7 @@ Usage: /provider [show]
                     }
                 }
             }
-            "internal-llm" => {
-                let parts: Vec<&str> = args.split_whitespace().collect();
-                match parts.as_slice() {
-                    [] | ["show"] => {
-                        self.append_assistant_text(&self.render_internal_llm_status());
-                        self.status = "internal-llm".to_string();
-                    }
-                    ["help"] | ["usage"] => {
-                        self.append_assistant_text(
-                                                                        "From: /internal-llm\n\
-                                                                      \n\
-                                                                      **Usage:**\n\
-                                                                      `/internal-llm show` — Display current status and configuration\n\
-                                                                      `/internal-llm on|off` — Enable or disable the internal LLM\n\
-                                                                      `/internal-llm chat` — Open an interactive chat panel\n\
-                                                                      `/internal-llm foundry` — Switch to Microsoft Foundry Local backend\n\
-                                                                      `/internal-llm embedded` — Switch to Candle embedded backend\n\
-                                                                      `/internal-llm sessiontitle on|off` — Toggle session title generation\n\
-                                                                      `/internal-llm promptcontext on|off` — Toggle prompt/context compaction\n\
-                                                                      `/internal-llm memoryextraction on|off` — Toggle memory extraction\n\
-                                                                      \n\
-                                                                      **Backends:**\n\
-                                                                      - `foundry` — Microsoft Foundry Local (OpenAI-compatible endpoint).\n\
-                                                                        Auto-discovers the local service URL and routes requests via HTTP.\n\
-                                                                      - `candle` — Pure-Rust GGUF inference (Candle). Requires `--features embedded-llm`.\n\
-                                                                      \n\
-                                                                      **Accelerator:**\n\
-                                                                      Set `internal_llm.accelerator` to `\"cpu\"` (default), `\"gpu\"`, or `\"npu\"`.",
-                                                                    );
-                        self.status = "internal-llm help".to_string();
-                    }
-                    ["chat"] => {
-                        if !self.internal_llm_config.enabled {
-                            self.append_assistant_text(
-                                "From: /internal-llm\n⚠ Enable the internal LLM before opening the chat panel.",
-                            );
-                            self.status = "internal-llm error".to_string();
-                            return;
-                        }
-                        if self.internal_llm_service.is_none() {
-                            self.append_assistant_text(
-                                "From: /internal-llm\n⚠ Internal LLM is configured but unavailable.",
-                            );
-                            self.status = "internal-llm error".to_string();
-                            return;
-                        }
-                        if self.internal_llm_chat_panel.is_some() {
-                            // Toggle: close the panel if already open.
-                            self.internal_llm_chat_panel = None;
-                            self.status = "internal-llm".to_string();
-                        } else {
-                            self.internal_llm_chat_panel =
-                                Some(crate::panels::InternalLlmChatState::new());
-                            self.status = "internal-llm chat".to_string();
-                        }
-                    }
-                    ["on"] | ["enable"] | ["off"] | ["disable"] => {
-                        let enabled = matches!(parts[0], "on" | "enable");
-                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.internal_llm.enabled = enabled;
-                        self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n✅ Internal LLM is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status =
-                                    format!("internal-llm: {}", if enabled { "on" } else { "off" });
-                            }
-                            Err(error) => {
-                                self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n⚠ Internal LLM changed to **{}**, but saving config failed: {}",
-                                                          if enabled { "on" } else { "off" },
-                                                          error
-                                                      ));
-                                self.status = format!(
-                                    "internal-llm: {} (unsaved)",
-                                    if enabled { "on" } else { "off" }
-                                );
-                            }
-                        }
-                    }
-                    ["foundry"] | ["foundry_local"] => {
-                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.internal_llm.backend = "foundry".to_string();
-                        // Set a Foundry Local appropriate default model if the
-                        // current model_id looks like a candle-embedded model.
-                        let current = &cfg.internal_llm.model_id;
-                        let foundry_default = "phi-4";
-                        if current.contains("smollm") || current.contains("qwen") {
-                            cfg.internal_llm.model_id = foundry_default.to_string();
-                        }
-                        self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n✅ Backend switched to **foundry** (model: `{}`).",
-                                                          cfg.internal_llm.model_id,
-                                                      ));
-                                self.status = "internal-llm: foundry".to_string();
-                            }
-                            Err(error) => {
-                                self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n⚠ Backend switched to **foundry**, but saving config failed: {}",
-                                                          error
-                                                      ));
-                                self.status = "internal-llm: foundry (unsaved)".to_string();
-                            }
-                        }
-                    }
-                    ["embedded"] | ["candle"] => {
-                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.internal_llm.backend = "candle".to_string();
-                        // Set a candle-appropriate default model if the current
-                        // model_id looks like a Foundry Local model.
-                        let current = &cfg.internal_llm.model_id;
-                        let candle_default = "smollm2-360m-instruct-q4";
-                        if !current.contains("smollm") && !current.contains("qwen") {
-                            cfg.internal_llm.model_id = candle_default.to_string();
-                        }
-                        self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n✅ Backend switched to **candle** (model: `{}`).",
-                                                          cfg.internal_llm.model_id,
-                                                      ));
-                                self.status = "internal-llm: embedded".to_string();
-                            }
-                            Err(error) => {
-                                self.append_assistant_text(&format!(
-                                                          "From: /internal-llm\n⚠ Backend switched to **candle**, but saving config failed: {}",
-                                                          error
-                                                      ));
-                                self.status = "internal-llm: embedded (unsaved)".to_string();
-                            }
-                        }
-                    }
-                    ["sessiontitle"] | ["promptcontext"] | ["memoryextraction"] => {
-                        let (label, enabled) = match parts[0] {
-                            "sessiontitle" => (
-                                "session title",
-                                self.internal_llm_config.session_title_enabled,
-                            ),
-                            "promptcontext" => (
-                                "prompt/context compaction",
-                                self.internal_llm_config.prompt_context_enabled,
-                            ),
-                            "memoryextraction" => (
-                                "memory extraction prefilter",
-                                self.internal_llm_config.memory_extraction_enabled,
-                            ),
-                            _ => unreachable!(),
-                        };
-                        self.append_assistant_text(&format!(
-                            "From: /internal-llm\n`{label}` is currently **{}**.",
-                            if enabled { "on" } else { "off" }
-                        ));
-                        self.status = "internal-llm".to_string();
-                    }
-                    [switch, state] => {
-                        let enabled = match *state {
-                            "on" | "enable" => true,
-                            "off" | "disable" => false,
-                            _ => {
-                                self.append_assistant_text(
-                                    "From: /internal-llm\n⚠ Usage: `/internal-llm <sessiontitle|promptcontext|memoryextraction> on|off`.",
-                                );
-                                self.status = "internal-llm error".to_string();
-                                return;
-                            }
-                        };
-                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        let switch_label = match *switch {
-                            "sessiontitle" => {
-                                cfg.internal_llm.session_title_enabled = enabled;
-                                "session title"
-                            }
-                            "promptcontext" => {
-                                cfg.internal_llm.prompt_context_enabled = enabled;
-                                "prompt/context compaction"
-                            }
-                            "memoryextraction" => {
-                                cfg.internal_llm.memory_extraction_enabled = enabled;
-                                "memory extraction prefilter"
-                            }
-                            _ => {
-                                self.append_assistant_text(
-                                    "From: /internal-llm\n⚠ Invalid switch. Use `sessiontitle`, `promptcontext`, `memoryextraction`, `foundry`, or `embedded`.",
-                                );
-                                self.status = "internal-llm error".to_string();
-                                return;
-                            }
-                        };
-                        self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n✅ `{switch_label}` is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status = format!(
-                                    "internal-llm: {} {}",
-                                    switch,
-                                    if enabled { "on" } else { "off" }
-                                );
-                            }
-                            Err(error) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n⚠ `{switch_label}` changed to **{}**, but saving config failed: {}",
-                                    if enabled { "on" } else { "off" },
-                                    error
-                                ));
-                                self.status = format!(
-                                    "internal-llm: {} {} (unsaved)",
-                                    switch,
-                                    if enabled { "on" } else { "off" }
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        self.append_assistant_text(
-                                                  "From: /internal-llm\n⚠ Usage: `/internal-llm show|help|on|off|chat|foundry|embedded|sessiontitle on|off|promptcontext on|off|memoryextraction on|off`.",
-                                              );
-                        self.status = "internal-llm error".to_string();
-                    }
-                }
-            }
+
             "skills" => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
@@ -12769,10 +12011,10 @@ Type `/swarm help` for more info.\n";
                     self.compact_in_progress = false;
                     self.needs_redraw = true;
                 }
-                if *reason != FinishReason::Cancelled {
-                    self.maybe_request_internal_session_title(session_id);
-                }
-
+                // Session title generation has been removed along with the
+                // internal LLM subsystem; sessions default to an empty
+                // title and rely on the user to rename them.
+                let _ = (session_id, reason);
                 // Handle pending plan delegation: switch agent and auto-send task
                 if let Some((task, context)) = self.pending_plan_task.take() {
                     self.execute_plan_delegation(session_id, task, context);
@@ -13651,7 +12893,7 @@ Type `/swarm help` for more info.\n";
                         format!("Download finished for {}/{}", provider_id, model_id),
                     );
                 }
-            } // ── Service start errors (e.g. Foundry Local failed to start) ────
+            } // ── Service start errors (local runtime failed to start) ──
             Event::ServiceStartError {
                 ref session_id,
                 ref service,

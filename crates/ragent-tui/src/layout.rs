@@ -264,11 +264,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 } else {
                     ""
                 };
-                let badge = if *pid == "foundry_local" || *pid == "ollama" {
-                    " [local]"
-                } else {
-                    ""
-                };
+                let badge = if *pid == "ollama" { " [local]" } else { "" };
                 provider_lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
@@ -1053,11 +1049,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     ("  ", Style::default().fg(Color::White))
                 };
                 let active_marker = if is_active { " ●" } else { "" };
-                let badge = if *pid == "foundry_local" || *pid == "ollama" {
-                    " [local]"
-                } else {
-                    ""
-                };
+                let badge = if *pid == "ollama" { " [local]" } else { "" };
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
@@ -1828,9 +1820,6 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     }
 
     // Internal-LLM chat overlay (rendered above everything except output view).
-    if app.internal_llm_chat_panel.is_some() {
-        crate::panels::render_internal_llm_chat(frame, app);
-    }
 
     // Model loading / download progress popups (rendered above normal UI).
     if app.model_loading_state.is_some() {

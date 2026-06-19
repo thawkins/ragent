@@ -629,68 +629,68 @@ impl SessionProcessor {
         *guard = None;
     }
 
-          /// Return cached tool definitions, populating the cache if necessary.
-          fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
-              {
-                  let guard = self.cached_tool_definitions.read();
-                  if let Some(ref defs) = *guard {
-                      return defs.clone();
-                  }
-              }
-              let defs = Arc::new(self.tool_registry.definitions());
-              let mut guard = self.cached_tool_definitions.write();
-              *guard = Some(defs.clone());
-              defs
-          }
-    
-          /// Return the per-session system-prompt component cache, creating it
-          /// on first use (FR-008, FR-009).
-          ///
-          /// Sharing a single `SystemPromptCache` across all turns of a session
-          /// lets the `tool_reference`, `codeindex_guidance`, and `team_guidance`
-          /// strings be computed at most once per process-user-message instead
-          /// of once per step.  The cache is advisory: a miss is always
-          /// acceptable, it exists only to skip the work when inputs are
-          /// unchanged.
-          pub fn system_prompt_cache(&self) -> Arc<SystemPromptCache> {
-              {
-                  let guard = self.system_prompt_cache.read();
-                  if let Some(ref cache) = *guard {
-                      return cache.clone();
-                  }
-              }
-              let cache = Arc::new(SystemPromptCache::new());
-              let mut guard = self.system_prompt_cache.write();
-              *guard = Some(cache.clone());
-              cache
-          }
-    
-          /// Invalidate the system-prompt component cache.
-          ///
-          /// Call this when the tool registry, code-index state, or team
-          /// membership changes.  Cheap: just bumps a global version counter
-          /// and clears the per-component entries.
-          pub fn invalidate_system_prompt_cache(&self) {
-              self.system_prompt_cache().invalidate_all();
-          }
-          /// Run a blocking storage operation on a dedicated thread to avoid
-          /// stalling the Tokio runtime.
-          ///
-          /// (AgentPerf T-012 / FR-010 / FR-011.)  This is the canonical
-          /// way for the agent action loop to talk to the underlying SQLite
-          /// store.  All callers MUST go through this helper rather than
-          /// calling `Storage` methods directly from the async path, so the
-          /// executor is never blocked on synchronous I/O.
-          pub async fn storage_op<F, T>(&self, f: F) -> Result<T>
-          where
-              F: FnOnce(&crate::storage::Storage) -> Result<T> + Send + 'static,
-              T: Send + 'static,
-          {
-              let storage = self.session_manager.storage().clone();
-              tokio::task::spawn_blocking(move || f(&storage))
-                  .await
-                  .map_err(|e| anyhow::anyhow!("storage task panicked: {e}"))?
-          }
+    /// Return cached tool definitions, populating the cache if necessary.
+    fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
+        {
+            let guard = self.cached_tool_definitions.read();
+            if let Some(ref defs) = *guard {
+                return defs.clone();
+            }
+        }
+        let defs = Arc::new(self.tool_registry.definitions());
+        let mut guard = self.cached_tool_definitions.write();
+        *guard = Some(defs.clone());
+        defs
+    }
+
+    /// Return the per-session system-prompt component cache, creating it
+    /// on first use (FR-008, FR-009).
+    ///
+    /// Sharing a single `SystemPromptCache` across all turns of a session
+    /// lets the `tool_reference`, `codeindex_guidance`, and `team_guidance`
+    /// strings be computed at most once per process-user-message instead
+    /// of once per step.  The cache is advisory: a miss is always
+    /// acceptable, it exists only to skip the work when inputs are
+    /// unchanged.
+    pub fn system_prompt_cache(&self) -> Arc<SystemPromptCache> {
+        {
+            let guard = self.system_prompt_cache.read();
+            if let Some(ref cache) = *guard {
+                return cache.clone();
+            }
+        }
+        let cache = Arc::new(SystemPromptCache::new());
+        let mut guard = self.system_prompt_cache.write();
+        *guard = Some(cache.clone());
+        cache
+    }
+
+    /// Invalidate the system-prompt component cache.
+    ///
+    /// Call this when the tool registry, code-index state, or team
+    /// membership changes.  Cheap: just bumps a global version counter
+    /// and clears the per-component entries.
+    pub fn invalidate_system_prompt_cache(&self) {
+        self.system_prompt_cache().invalidate_all();
+    }
+    /// Run a blocking storage operation on a dedicated thread to avoid
+    /// stalling the Tokio runtime.
+    ///
+    /// (AgentPerf T-012 / FR-010 / FR-011.)  This is the canonical
+    /// way for the agent action loop to talk to the underlying SQLite
+    /// store.  All callers MUST go through this helper rather than
+    /// calling `Storage` methods directly from the async path, so the
+    /// executor is never blocked on synchronous I/O.
+    pub async fn storage_op<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&crate::storage::Storage) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let storage = self.session_manager.storage().clone();
+        tokio::task::spawn_blocking(move || f(&storage))
+            .await
+            .map_err(|e| anyhow::anyhow!("storage task panicked: {e}"))?
+    }
     /// Processes a user message within an agent session.
     ///
     /// Persists the user message, then enters an agentic loop that streams
@@ -875,11 +875,6 @@ impl SessionProcessor {
                         .map(String::from)
                 })
                 .filter(|s| !s.trim().is_empty()),
-            "foundry_local" => {
-                // Foundry Local options (auto_start, device, models_path) are read from
-                // ragent.json and merged into the create_client options below.
-                None
-            }
             _ => None,
         };
         tracing::info!(
@@ -897,7 +892,8 @@ impl SessionProcessor {
                 serde_json::Value::String(model_ref.model_id.clone()),
             );
 
-            // Merge provider-specific config options (e.g. foundry_local auto_start/device/models_path).
+            // Merge provider-specific config options (auto_start, device,
+            // models_path) for providers that consume them.
             if let Ok(cfg) = crate::Config::load() {
                 if let Some(provider_cfg) = cfg.provider.get(&model_ref.provider_id) {
                     if let Some(auto_start) = provider_cfg.options.get("auto_start") {
@@ -918,26 +914,12 @@ impl SessionProcessor {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    // Check if the error is a FoundryServiceError — if so, also
-                    // publish a ServiceStartError event so the TUI can show a
-                    // detailed dialog with the command path and captured output.
-                    if let Some(fse) = e.downcast_ref::<ragent_llm::provider::foundry_local_error::FoundryServiceError>() {
-                        self.event_bus.publish(Event::ServiceStartError {
-                            session_id: session_id.to_string(),
-                            service: "Foundry Local".to_string(),
-                            command_path: fse.command_path.clone(),
-                            stdout: fse.stdout.clone(),
-                            stderr: fse.stderr.clone(),
-                            error: fse.error.clone(),
-                        });
-                    }
                     let err = e.to_string();
                     publish_error(&self.event_bus, session_id, &user_msg.id, &err);
                     return Err(e);
                 }
             }
         };
-
         // 3. Build system prompt
         let working_dir = {
             let _scope = profiler.scope("session.resolve_working_dir");
@@ -1483,97 +1465,98 @@ impl SessionProcessor {
                 });
             }
 
-                          // Call LLM with retry on transient failures (connection errors, stream stalls)
-                          let max_retries = self.stream_config.max_retries;
-                          let backoff_secs = self.stream_config.retry_backoff_secs;
-                          let llm_request_start = std::time::Instant::now();
-            
-                          // Re-check the context window before every LLM call. The payload
-                          // grows each turn with assistant tool uses and tool results, so a
-                          // one-time compression at the start of the run is not enough to
-                          // prevent the model's context window from overflowing (FR-005).
-                          //
-                          // We compress at most once per turn (`compressed_this_turn`) and
-                          // prefer the LLM-reported token count over the local Headroom
-                          // estimate (`should_compress_with_reported`) so we don't
-                          // over-trigger when the estimate diverges from the provider's
-                          // actual tokenizer.
-                          //
-                          // FR-024 (AgentPerf T-017): if `compressed_this_turn` is
-                          // already `true` we short-circuit before even calling
-                          // `should_compress_with_reported`.  This makes the
-                          // per-iteration check effectively zero-cost for every step
-                          // after the first one that triggered a real compression.
-                                        #[cfg(feature = "compression")]
-                                        let should_run_compression = session_config.compression.enabled
-                                            && !compressed_this_turn
-                                            && should_compress_with_reported(
-                                                &chat_messages,
-                                                context_window,
-                                                session_config.compression.auto_threshold,
-                                                last_reported_input_tokens,
-                                            );
-                                        #[cfg(not(feature = "compression"))]
-                                        let _should_run_compression = false;            
-                          #[cfg(feature = "compression")]
-                          if should_run_compression {
-                              let _scope = profiler.scope("history.compress");
-                              self.event_bus.publish(Event::CompressionStarted {
-                                  session_id: session_id.to_string(),
-                              });
-                              let result = crate::compression::pipeline::compress_chat_messages(
-                                  &chat_messages,
-                                  context_window,
-                                  8192,
-                                  &session_config.compression,
-                              );
-                              let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
-                              if did_compress {
-                                  tracing::info!(
-                                      original_tokens = result.stats.original_tokens,
-                                      compressed_tokens = result.stats.compressed_tokens,
-                                      compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-                                      ccr_entries = result.stats.ccr_entries_stashed,
-                                      messages_compressed = result.stats.messages_compressed,
-                                      "Compressed chat messages with Headroom pipeline"
-                                  );
-                              } else {
-                                  tracing::debug!(
-                                      original_tokens = result.stats.original_tokens,
-                                      compressed_tokens = result.stats.compressed_tokens,
-                                      threshold = (context_window as f64
-                                          * session_config.compression.auto_threshold)
-                                          as usize,
-                                      "Context compression run completed without reduction"
-                                  );
-                              }
-                              self.event_bus.publish(Event::CompressionFinished {
-                                  session_id: session_id.to_string(),
-                                  original_tokens: result.stats.original_tokens,
-                                  compressed_tokens: result.stats.compressed_tokens,
-                                  compression_ratio: result.stats.compression_ratio,
-                                  did_compress,
-                              });
-                              chat_messages = result.chat_messages;
-                              // Hysteresis: skip subsequent per-iteration checks for the
-                              // remainder of this turn. Reset `last_reported_input_tokens`
-                              // because the just-compressed payload invalidates the
-                              // previous LLM-reported count; the next LLM call will
-                              // repopulate it.
-                              compressed_this_turn = true;
-                              last_reported_input_tokens = 0;
-                          }
-                          // FR-025 (AgentPerf T-017): if the local token estimate is
-                          // already below the configured `auto_threshold` for the
-                          // model, `should_compress_with_reported` returns `false`
-                          // and the entire compression block is skipped — including
-                                            // the `Event::CompressionStarted` / `Event::CompressionFinished`
-                                            // publishing overhead.  This is the fast path for sessions
-                                            // whose chat history is comfortably under the context
-                                            // window; the agent loop should not be paying for a
-                                            // compression check on every step of every turn.
-                                            let mut text_buffer = String::new();
-                                        let mut reasoning_buffer = String::new();            let mut tool_calls: Vec<PendingToolCall> = Vec::new();
+            // Call LLM with retry on transient failures (connection errors, stream stalls)
+            let max_retries = self.stream_config.max_retries;
+            let backoff_secs = self.stream_config.retry_backoff_secs;
+            let llm_request_start = std::time::Instant::now();
+
+            // Re-check the context window before every LLM call. The payload
+            // grows each turn with assistant tool uses and tool results, so a
+            // one-time compression at the start of the run is not enough to
+            // prevent the model's context window from overflowing (FR-005).
+            //
+            // We compress at most once per turn (`compressed_this_turn`) and
+            // prefer the LLM-reported token count over the local Headroom
+            // estimate (`should_compress_with_reported`) so we don't
+            // over-trigger when the estimate diverges from the provider's
+            // actual tokenizer.
+            //
+            // FR-024 (AgentPerf T-017): if `compressed_this_turn` is
+            // already `true` we short-circuit before even calling
+            // `should_compress_with_reported`.  This makes the
+            // per-iteration check effectively zero-cost for every step
+            // after the first one that triggered a real compression.
+            #[cfg(feature = "compression")]
+            let should_run_compression = session_config.compression.enabled
+                && !compressed_this_turn
+                && should_compress_with_reported(
+                    &chat_messages,
+                    context_window,
+                    session_config.compression.auto_threshold,
+                    last_reported_input_tokens,
+                );
+            #[cfg(not(feature = "compression"))]
+            let _should_run_compression = false;
+            #[cfg(feature = "compression")]
+            if should_run_compression {
+                let _scope = profiler.scope("history.compress");
+                self.event_bus.publish(Event::CompressionStarted {
+                    session_id: session_id.to_string(),
+                });
+                let result = crate::compression::pipeline::compress_chat_messages(
+                    &chat_messages,
+                    context_window,
+                    8192,
+                    &session_config.compression,
+                );
+                let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
+                if did_compress {
+                    tracing::info!(
+                        original_tokens = result.stats.original_tokens,
+                        compressed_tokens = result.stats.compressed_tokens,
+                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+                        ccr_entries = result.stats.ccr_entries_stashed,
+                        messages_compressed = result.stats.messages_compressed,
+                        "Compressed chat messages with Headroom pipeline"
+                    );
+                } else {
+                    tracing::debug!(
+                        original_tokens = result.stats.original_tokens,
+                        compressed_tokens = result.stats.compressed_tokens,
+                        threshold = (context_window as f64
+                            * session_config.compression.auto_threshold)
+                            as usize,
+                        "Context compression run completed without reduction"
+                    );
+                }
+                self.event_bus.publish(Event::CompressionFinished {
+                    session_id: session_id.to_string(),
+                    original_tokens: result.stats.original_tokens,
+                    compressed_tokens: result.stats.compressed_tokens,
+                    compression_ratio: result.stats.compression_ratio,
+                    did_compress,
+                });
+                chat_messages = result.chat_messages;
+                // Hysteresis: skip subsequent per-iteration checks for the
+                // remainder of this turn. Reset `last_reported_input_tokens`
+                // because the just-compressed payload invalidates the
+                // previous LLM-reported count; the next LLM call will
+                // repopulate it.
+                compressed_this_turn = true;
+                last_reported_input_tokens = 0;
+            }
+            // FR-025 (AgentPerf T-017): if the local token estimate is
+            // already below the configured `auto_threshold` for the
+            // model, `should_compress_with_reported` returns `false`
+            // and the entire compression block is skipped — including
+            // the `Event::CompressionStarted` / `Event::CompressionFinished`
+            // publishing overhead.  This is the fast path for sessions
+            // whose chat history is comfortably under the context
+            // window; the agent loop should not be paying for a
+            // compression check on every step of every turn.
+            let mut text_buffer = String::new();
+            let mut reasoning_buffer = String::new();
+            let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
             {
@@ -1675,9 +1658,8 @@ impl SessionProcessor {
                     // stall-detection path emits a `StallDetected`
                     // event and aborts the current stream.
                     let last_event_at: Option<Instant> = None;
-                    let stall_timeout = std::time::Duration::from_secs(
-                        self.stream_config.timeout_secs.max(60),
-                    );
+                    let stall_timeout =
+                        std::time::Duration::from_secs(self.stream_config.timeout_secs.max(60));
                     {
                         let _scope = profiler.scope("loop.llm.stream");
                         loop {
@@ -3003,11 +2985,6 @@ impl SessionProcessor {
             return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
         }
 
-        // Foundry Local does not require an API key — it's a local service
-        if provider_id == "foundry_local" {
-            return Ok(String::new());
-        }
-
         // Copilot: prefer DB-stored device flow token (works for token
         // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
@@ -3442,7 +3419,6 @@ pub(crate) fn is_permanent_llm_api_error(error_msg: &str) -> bool {
         || lower.contains("model_not_supported")
         || lower.contains("access denied for model")
         || lower.contains("invalid or expired api token")
-        || lower.contains("not known to microsoft foundry local")
         || lower.contains("could not prepare model")
         || lower.contains("model is not loaded")
         || lower.contains("is not loaded")
@@ -3468,9 +3444,9 @@ pub(crate) fn is_permanent_llm_api_error(error_msg: &str) -> bool {
 fn is_retryable_stream_error(message: &str) -> bool {
     let lower = message.to_lowercase();
 
-    // These Foundry Local-specific diagnostics indicate the model is not loaded,
-    // the service returned an empty body, or inference crashed (e.g. OOM).
-    // They are not transient and should not be retried.
+    // These diagnostics indicate the model is not loaded, the service returned
+    // an empty body, or inference crashed (e.g. OOM).  They are not transient
+    // and should not be retried.
     if lower.contains("empty/malformed event stream")
         || lower.contains("response stream ended without producing any events")
         || lower.contains("model is not loaded")

@@ -10,11 +10,6 @@ pub mod bedrock;
 pub mod bedrock_credentials;
 pub mod bedrock_sigv4;
 pub mod copilot;
-pub mod foundry_local_client;
-pub mod foundry_local_error;
-pub mod foundry_local_inproc_client;
-pub mod foundry_local_provider;
-pub mod foundry_local_service;
 pub mod gemini;
 pub mod generic_openai;
 pub mod http_client;
@@ -338,6 +333,5 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry.register(Box::new(xai::XaiProvider));
     registry.register(Box::new(router::RouterProvider::with_defaults()));
-    registry.register(Box::new(foundry_local_provider::FoundryLocalProvider::new()));
     registry
 }

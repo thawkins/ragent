@@ -290,7 +290,10 @@ pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, Stri
 /// paying the cost of all four.  Used by tests and ad-hoc helpers; the
 /// `process_user_message` path always calls [`collect_prompt_context`]
 /// because it needs all four components in one go.
-pub async fn prompt_context_component(working_dir: &Path, component: PromptContextComponent) -> String {
+pub async fn prompt_context_component(
+    working_dir: &Path,
+    component: PromptContextComponent,
+) -> String {
     let (git, readme, agents_md, file_tree) = collect_prompt_context(working_dir).await;
     match component {
         PromptContextComponent::Git => git,

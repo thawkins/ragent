@@ -567,74 +567,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
-    // Internal-LLM chat panel captures all input when open.
-    if app.internal_llm_chat_panel.is_some() {
-        match key.code {
-            KeyCode::Esc => {
-                app.internal_llm_chat_panel = None;
-                app.status = "ready".to_string();
-            }
-            KeyCode::Enter => {
-                // Send the message if not already thinking.
-                let thinking = app
-                    .internal_llm_chat_panel
-                    .as_ref()
-                    .map(|p| p.thinking)
-                    .unwrap_or(false);
-                if !thinking {
-                    if let Some(panel) = &mut app.internal_llm_chat_panel {
-                        if let Some(prompt) = panel.take_input() {
-                            panel.push_user(&prompt);
-                            panel.thinking = true;
-                            // Fire the async request.
-                            if !app.start_internal_llm_chat(&prompt) {
-                                if let Some(p) = &mut app.internal_llm_chat_panel {
-                                    p.push_error("Internal LLM service is unavailable.");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    if !panel.thinking {
-                        panel.backspace();
-                    }
-                }
-            }
-            KeyCode::Left => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    panel.cursor_left();
-                }
-            }
-            KeyCode::Right => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    panel.cursor_right();
-                }
-            }
-            KeyCode::Up => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    panel.scroll_up(3);
-                }
-            }
-            KeyCode::Down => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    panel.scroll_down(3, u16::MAX);
-                }
-            }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(panel) = &mut app.internal_llm_chat_panel {
-                    if !panel.thinking {
-                        panel.insert_char(ch);
-                    }
-                }
-            }
-            _ => {}
-        }
-        return None;
-    }
-
     // Memory browser: Esc closes the panel
     if app.memory_browser.is_some() {
         return match key.code {
@@ -893,18 +825,6 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     app.start_model_discovery(pid.to_string(), pname.to_string());
                 } else if pid == "ollama" {
                     // Ollama doesn't require a key — store empty and mark configured
-                    let _ = app.storage.set_provider_auth(pid, "");
-                    let _ = app
-                        .storage
-                        .delete_setting(&format!("provider_{pid}_disabled"));
-                    app.refresh_provider();
-                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
-                        provider_id: pid.to_string(),
-                        provider_name: pname.to_string(),
-                    });
-                    app.start_model_discovery(pid.to_string(), pname.to_string());
-                } else if pid == "foundry_local" {
-                    // Microsoft Foundry Local is a local, keyless provider.
                     let _ = app.storage.set_provider_auth(pid, "");
                     let _ = app
                         .storage

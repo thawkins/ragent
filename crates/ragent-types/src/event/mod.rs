@@ -194,14 +194,15 @@ pub enum Event {
         /// Human-readable error description.
         error: String,
     },
-    /// A service (e.g. Foundry Local) failed to start within the timeout.
+    /// A local service (e.g. a keyless local provider's runtime) failed to
+    /// start within the configured timeout.
     ///
     /// Carries structured diagnostics so the TUI can show a detailed error
     /// dialog with the command path and captured output.
     ServiceStartError {
         /// Session in which the error occurred.
         session_id: String,
-        /// Name of the service (e.g. `"Foundry Local"`).
+        /// Name of the service (e.g. a local provider's runtime).
         service: String,
         /// Full path of the command that was run.
         command_path: String,
@@ -234,7 +235,7 @@ pub enum Event {
     // ── Provider model-list loading (TUI spinner) ────────────────────────
     /// The TUI has started loading the model list for a provider.
     ProviderLoadingStarted {
-        /// Provider identifier (e.g. `"foundry_local"`).
+        /// Provider identifier (e.g. `"ollama"`).
         provider_id: String,
         /// Human-readable provider name.
         provider_name: String,
@@ -252,7 +253,7 @@ pub enum Event {
         error: Option<String>,
     },
 
-    // ── Model download progress (e.g. Foundry Local) ─────────────────────
+    // ── Model download progress (e.g. local providers) ─────────────────
     /// A local provider started downloading a model.
     ModelDownloadStarted {
         /// Provider identifier.

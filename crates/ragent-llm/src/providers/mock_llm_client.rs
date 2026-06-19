@@ -145,7 +145,8 @@ impl MockLlmClient {
     /// Return the number of `chat` calls this client has served.
     #[must_use]
     pub fn request_count(&self) -> usize {
-        self.request_count.load(std::sync::atomic::Ordering::Relaxed)
+        self.request_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -274,7 +275,7 @@ const SIMPLE_TEXT_REPLY_CHUNKS: &[&str] = &[
     "rld from t", // 20
     "he mock L",  // 30
     "LM client",  // 40
-    ". Bye!\n",    // 50
+    ". Bye!\n",   // 50
 ];
 
 #[cfg(test)]

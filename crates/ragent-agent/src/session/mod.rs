@@ -4,9 +4,9 @@
 //! scoped to a working directory. [`SessionManager`] provides CRUD operations
 //! backed by persistent [`Storage`] and emits lifecycle events via [`EventBus`].
 
+pub mod cache;
 pub mod processor;
 pub mod profiler;
-pub mod cache;
 
 // Re-export compression types when the feature is enabled.
 #[cfg(feature = "compression")]
@@ -111,9 +111,7 @@ impl SessionManager {
         use std::collections::HashMap;
         use std::sync::OnceLock;
 
-        static CACHE: OnceLock<
-            Mutex<HashMap<String, Arc<Mutex<SessionState>>>>,
-        > = OnceLock::new();
+        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> = OnceLock::new();
 
         let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let mut guard = cache.lock().expect("session_state_cache poisoned");

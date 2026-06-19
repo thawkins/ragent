@@ -92,10 +92,6 @@ fn test_config_serialise_preserves_code_index_enabled() {
         roundtrip.code_index.enabled,
         "round-tripped config should have code_index.enabled = true"
     );
-    assert!(
-        !roundtrip.internal_llm.enabled,
-        "round-tripped config should have internal_llm.enabled = false"
-    );
 }
 
 #[test]
@@ -106,12 +102,6 @@ fn test_config_defaults_are_safe() {
     assert!(
         config.code_index.enabled,
         "code_index.enabled should default to true — agents need code search"
-    );
-
-    // Internal LLM should be OFF by default
-    assert!(
-        !config.internal_llm.enabled,
-        "internal_llm.enabled should default to false — requires explicit opt-in"
     );
 
     // Tool visibility: codeindex should be ON by default
@@ -128,7 +118,6 @@ fn test_config_roundtrip_preserves_defaults() {
     let restored: Config = serde_json::from_str(&json).unwrap();
 
     assert_eq!(restored.code_index.enabled, original.code_index.enabled);
-    assert_eq!(restored.internal_llm.enabled, original.internal_llm.enabled);
     assert_eq!(
         restored.tool_visibility.codeindex,
         original.tool_visibility.codeindex
@@ -150,24 +139,6 @@ fn test_serialised_default_omits_code_index_enabled() {
         code_index.get("enabled").is_none(),
         "code_index.enabled should be omitted from serialised default (it is true), but found: {:?}",
         code_index.get("enabled")
-    );
-}
-
-#[test]
-fn test_serialised_default_omits_internal_llm_enabled() {
-    // When serialising the default config, `internal_llm.enabled` (false) should
-    // be omitted so that code-level default changes take effect without manual
-    // config edits.
-    let config = Config::default();
-    let json = serde_json::to_string_pretty(&config).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    let internal_llm = &parsed["internal_llm"];
-    // The "enabled" key should be absent from serialised output when it equals false
-    assert!(
-        internal_llm.get("enabled").is_none(),
-        "internal_llm.enabled should be omitted from serialised default (it is false), but found: {:?}",
-        internal_llm.get("enabled")
     );
 }
 

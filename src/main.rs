@@ -314,41 +314,7 @@ async fn main() -> Result<()> {
     };
     tracing::info!("Configuration loaded successfully");
 
-    let internal_llm_service =
-        ragent_core::internal_llm::InternalLlmService::from_config(config.internal_llm.clone())?
-            .map(Arc::new);
     let auto_extract_config = config.memory.auto_extract.clone();
-    tracing::debug!(
-        internal_llm_enabled = internal_llm_service.is_some(),
-        "Internal LLM service initialized"
-    );
-    if let Some(service) = &internal_llm_service {
-        let snapshot = service.status_snapshot();
-        if let Some(runtime) = snapshot.runtime {
-            tracing::info!(
-                model_id = %snapshot.model_id,
-                backend = %snapshot.backend,
-                lifecycle = ?runtime.lifecycle,
-                execution_device = %runtime.settings.execution_device,
-                quantized_runtime = %runtime.settings.quantized_runtime,
-                requested_threads = runtime.settings.requested_threads,
-                effective_threads = runtime.settings.effective_threads,
-                requested_gpu_layers = runtime.settings.requested_gpu_layers,
-                effective_gpu_layers = runtime.settings.effective_gpu_layers,
-                gpu_offload = %runtime.settings.gpu_offload,
-                threading = %runtime.settings.threading,
-                "Internal LLM runtime settings"
-            );
-            if runtime.settings.requested_gpu_layers > runtime.settings.effective_gpu_layers {
-                tracing::warn!(
-                    requested_gpu_layers = runtime.settings.requested_gpu_layers,
-                    effective_gpu_layers = runtime.settings.effective_gpu_layers,
-                    gpu_offload = %runtime.settings.gpu_offload,
-                    "Internal LLM gpu_layers setting is not supported by the current runtime"
-                );
-            }
-        }
-    }
 
     // Initialize storage
     let db_path = data_dir().join("ragent.db");
@@ -474,13 +440,11 @@ async fn main() -> Result<()> {
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
 
     if auto_extract_config.enabled {
-        let extraction_engine = Arc::new(ragent_core::memory::ExtractionEngine::with_internal_llm(
+        let extraction_engine = Arc::new(ragent_core::memory::ExtractionEngine::new(
             auto_extract_config,
-            internal_llm_service.clone(),
         ));
         let _ = session_processor.extraction_engine.set(extraction_engine);
     }
-
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
     let task_manager = Arc::new(ragent_core::task::TaskManager::new(
         event_bus.clone(),

@@ -42,4 +42,3 @@ fn compression_module_is_feature_gated() {
     // compression fast-path tested in this file.
     let _ = ragent_agent::config::StreamConfig::default();
 }
-

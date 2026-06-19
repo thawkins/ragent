@@ -37,10 +37,7 @@ impl SharedChatRequest {
     }
 
     /// Construct a new shared request body from existing `Arc`s.
-    pub fn from_arc(
-        messages: Arc<Vec<ChatMessage>>,
-        tools: Arc<Vec<ToolDefinition>>,
-    ) -> Self {
+    pub fn from_arc(messages: Arc<Vec<ChatMessage>>, tools: Arc<Vec<ToolDefinition>>) -> Self {
         Self { messages, tools }
     }
 

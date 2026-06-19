@@ -207,7 +207,7 @@ pub async fn run_tui(
     );
 
     // Attach the event bus to providers that publish lifecycle events
-    // (e.g. Foundry Local download progress).
+    // (e.g. local model download progress).
     provider_registry.set_event_bus_all(Some(event_bus.clone()));
     // Pass through the config file paths loaded at startup so the TUI
     // can display them in the message window.
@@ -491,9 +491,6 @@ pub async fn run_tui(
 
         // Check for completed /opt LLM results.
         app.poll_pending_opt();
-
-        // Check for completed internal-LLM UI tasks.
-        app.poll_pending_internal_llm();
 
         // Check for completed /swarm LLM decomposition results.
         app.poll_pending_swarm();

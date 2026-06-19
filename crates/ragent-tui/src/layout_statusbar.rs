@@ -154,7 +154,6 @@ pub mod abbreviations {
             "copilot" => "CoPilot",
             "ollama" => "Oll",
             "azure_foundry" => "AzF",
-            "foundry_local" => "FndL",
             _ => name,
         }
     }
@@ -600,33 +599,6 @@ fn build_line2_right(
         };
         spans.push(Span::styled(
             format!("CodeIdx:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
-
-    // Internal LLM status
-    {
-        let (icon, color, label) = if app.internal_llm_config.enabled {
-            if app.internal_llm_init_error.is_some() {
-                // Enabled but failed to initialize
-                (indicators::ERROR, colors::ERROR, "InternalLLM")
-            } else if app.internal_llm_service.is_none() {
-                // Enabled but still loading
-                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM")
-            } else if app.internal_llm_title_pending {
-                // Enabled, loaded, but has pending work
-                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM")
-            } else {
-                // Enabled and ready
-                (indicators::SUCCESS, colors::HEALTHY, "InternalLLM")
-            }
-        } else {
-            // Disabled
-            (indicators::ERROR, colors::ERROR, "InternalLLM")
-        };
-
-        spans.push(Span::styled(
-            format!("{label}:{icon} "),
             Style::default().fg(color),
         ));
     }
