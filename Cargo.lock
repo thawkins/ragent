@@ -4249,6 +4249,7 @@ name = "ragent-research"
 version = "0.1.0-alpha.112"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "ragent-types",
  "serde",

@@ -27,10 +27,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Lifecycle status of a research item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ResearchStatus {
     /// Research item has been created but no gathering has run.
+    #[default]
     Draft,
     /// A gathering session is in flight; `RESEARCH.md` is being written.
     InProgress,
@@ -80,12 +81,6 @@ impl ResearchStatus {
             "archived" | "archive" => Some(Self::Archived),
             _ => None,
         }
-    }
-}
-
-impl Default for ResearchStatus {
-    fn default() -> Self {
-        Self::Draft
     }
 }
 

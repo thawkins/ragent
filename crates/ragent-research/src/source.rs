@@ -25,11 +25,12 @@ use std::path::PathBuf;
 
 /// Distinguishes in-project local sources from extra directories supplied
 /// via the `--sources-dir` flag (FR-019).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalSourceKind {
     /// A file inside the project root that was discovered by the default
     /// local-gathering phase.
+    #[default]
     InProject,
     /// A file supplied via `--sources-dir <path>` for an additional scan.
     /// Rendered as the "extra-local" type in the References Index.
@@ -43,12 +44,6 @@ impl LocalSourceKind {
             Self::InProject => "local",
             Self::Extra => "extra-local",
         }
-    }
-}
-
-impl Default for LocalSourceKind {
-    fn default() -> Self {
-        Self::InProject
     }
 }
 

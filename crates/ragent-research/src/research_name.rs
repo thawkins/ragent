@@ -55,6 +55,15 @@ pub enum ResearchNameError {
         /// The first offending character encountered.
         ch: char,
     },
+    /// The name contains a path-traversal sequence such as `..`, `.`, `/`,
+    /// or `\\`. This is the dedicated FR-017 error path so callers can
+    /// surface a security-flavoured message ("path traversal rejected")
+    /// instead of a generic "invalid character" one.
+    PathTraversal {
+        /// The traversal sequence that was rejected (e.g. `".."`, `"/"`,
+        /// `"\\"`, `"."`).
+        sequence: String,
+    },
 }
 
 impl fmt::Display for ResearchNameError {
@@ -80,6 +89,10 @@ impl fmt::Display for ResearchNameError {
                 f,
                 "research name may only contain lowercase ASCII letters, digits, and hyphens (got '{ch}')",
             ),
+            Self::PathTraversal { sequence } => write!(
+                f,
+                "research name '{sequence}' contains a path-traversal sequence and was rejected per FR-017",
+            ),
         }
     }
 }
@@ -90,6 +103,43 @@ impl std::error::Error for ResearchNameError {}
 pub const MIN_LEN: usize = 3;
 /// Maximum allowed length of a research name.
 pub const MAX_LEN: usize = 64;
+
+/// Check whether a string contains a path-traversal sequence per FR-017.
+///
+/// Returns `Some(sequence)` with the first detected traversal token (e.g.
+/// `".."`, `"/"`, `"\\"`, `"."`) when the input would let a caller escape
+/// the `research/<name>/` directory, and `None` otherwise. The check is
+/// intentionally a superset of FR-002 — any character that could appear in
+/// a traversal is flagged even if it also satisfies the `[a-z0-9-]` rule,
+/// so callers can decide policy at the call site.
+pub fn is_path_traversal(name: &str) -> bool {
+    detect_path_traversal(name).is_some()
+}
+
+/// Internal helper that locates the first path-traversal token in `name`.
+///
+/// The traversal tokens recognised here are:
+///
+/// - `..` — Unix/Windows parent-directory reference.
+/// - `/` — Unix path separator (always a traversal in a flat name).
+/// - `\` — Windows path separator.
+/// - `.` as the first character — leading dot files are reserved for hidden
+///   directories and may not be used as research names.
+fn detect_path_traversal(name: &str) -> Option<&'static str> {
+    if name.starts_with('.') {
+        return Some(".");
+    }
+    if name.contains("..") {
+        return Some("..");
+    }
+    if name.contains('/') {
+        return Some("/");
+    }
+    if name.contains('\\') {
+        return Some("\\");
+    }
+    None
+}
 
 /// Validated, URL-safe identifier for a research item.
 ///
@@ -118,6 +168,8 @@ impl ResearchName {
     /// 1. Length is between [`MIN_LEN`] and [`MAX_LEN`] inclusive.
     /// 2. The first character is an ASCII lowercase letter.
     /// 3. Every character is an ASCII lowercase letter, digit, or hyphen.
+    /// 4. The name does not contain a path-traversal sequence (`..`, `/`,
+    ///    `\\`, or a leading `.`) — see FR-017.
     pub fn try_new(name: impl Into<String>) -> Result<Self, ResearchNameError> {
         let name = name.into();
 
@@ -129,6 +181,15 @@ impl ResearchName {
         }
         if name.len() > MAX_LEN {
             return Err(ResearchNameError::TooLong { length: name.len() });
+        }
+
+        // FR-017: explicit path-traversal rejection. Runs before the generic
+        // character-class check so the caller gets a security-flavoured error
+        // instead of a generic InvalidCharacter one.
+        if let Some(sequence) = detect_path_traversal(&name) {
+            return Err(ResearchNameError::PathTraversal {
+                sequence: sequence.to_string(),
+            });
         }
 
         let mut chars = name.chars();
@@ -280,12 +341,84 @@ mod tests {
         );
     }
 
+    // ── FR-017: path-traversal rejection ────────────────────────────────
+
     #[test]
     fn rejects_path_traversal() {
         assert!(ResearchName::new("../etc").is_none());
         assert!(ResearchName::new("foo/bar").is_none());
         assert!(ResearchName::new("..").is_none());
         assert!(ResearchName::new(".hidden").is_none());
+    }
+
+    #[test]
+    fn rejects_parent_traversal_with_path_traversal_error() {
+        // `../etc` should produce a dedicated PathTraversal error, not
+        // a generic InvalidCharacter one, so callers can show a security
+        // message.
+        let err = ResearchName::try_new("../etc").unwrap_err();
+        assert!(
+            matches!(err, ResearchNameError::PathTraversal { .. }),
+            "expected PathTraversal error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_forward_slash_with_path_traversal_error() {
+        let err = ResearchName::try_new("foo/bar").unwrap_err();
+        assert!(
+            matches!(err, ResearchNameError::PathTraversal { .. }),
+            "expected PathTraversal error for '/', got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_backslash_with_path_traversal_error() {
+        let err = ResearchName::try_new("foo\\bar").unwrap_err();
+        assert!(
+            matches!(err, ResearchNameError::PathTraversal { .. }),
+            "expected PathTraversal error for backslash, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_leading_dot_with_path_traversal_error() {
+        let err = ResearchName::try_new(".hidden").unwrap_err();
+        assert!(
+            matches!(err, ResearchNameError::PathTraversal { .. }),
+            "expected PathTraversal error for leading dot, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_nested_traversal_with_path_traversal_error() {
+        let err = ResearchName::try_new("a/../b").unwrap_err();
+        assert!(matches!(err, ResearchNameError::PathTraversal { .. }));
+    }
+
+    #[test]
+    fn rejects_absolute_path_with_path_traversal_error() {
+        let err = ResearchName::try_new("/etc/passwd").unwrap_err();
+        assert!(matches!(err, ResearchNameError::PathTraversal { .. }));
+    }
+
+    #[test]
+    fn rejects_windows_absolute_path_with_path_traversal_error() {
+        let err = ResearchName::try_new("C:\\Windows").unwrap_err();
+        assert!(matches!(err, ResearchNameError::PathTraversal { .. }));
+    }
+
+    #[test]
+    fn is_path_traversal_helper_classifies_correctly() {
+        assert!(is_path_traversal(".."));
+        assert!(is_path_traversal("../etc"));
+        assert!(is_path_traversal("foo/bar"));
+        assert!(is_path_traversal("foo\\bar"));
+        assert!(is_path_traversal(".hidden"));
+        assert!(is_path_traversal("a/../b"));
+        assert!(!is_path_traversal("rust-async"));
+        assert!(!is_path_traversal("abc"));
+        assert!(!is_path_traversal("a-b-c"));
     }
 
     #[test]
@@ -327,5 +460,27 @@ mod tests {
         set.insert(a.clone());
         assert!(set.contains(&b));
         assert!(!set.contains(&c));
+    }
+
+    #[test]
+    fn path_traversal_error_displays_readably() {
+        let err = ResearchNameError::PathTraversal {
+            sequence: "../etc".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("path-traversal"), "msg: {msg}");
+        assert!(msg.contains("FR-017"), "msg: {msg}");
+    }
+
+    #[test]
+    fn non_traversal_invalid_character_still_surfaces_correctly() {
+        // A `?` is an invalid character but NOT a traversal sequence, so
+        // it should still produce InvalidCharacter (not PathTraversal).
+        let err = ResearchName::try_new("foo?bar").unwrap_err();
+        assert_eq!(
+            err,
+            ResearchNameError::InvalidCharacter { ch: '?' },
+            "expected InvalidCharacter, got {err:?}"
+        );
     }
 }
