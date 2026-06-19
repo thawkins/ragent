@@ -1,6 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.111
+## Current Version: 0.1.0-alpha.112
+
+### Fixed
+- **Research-system spec status overstated** — The `specs/researchsystem/SPEC.md` frontmatter was tagged `status: implemented` with a three-step audit trail (`none → draft → in_progress → implemented`) even though only four of the 22 plan tasks were completed (the three foundational type definitions and the crate scaffold). The spec frontmatter has been corrected to `status: draft` with a single `none → draft` audit transition that matches reality. The plan task statuses remain as-is: T-001, T-002, T-003, T-005 are `completed`; the remaining 18 tasks are still `pending` and will be re-promoted through the proper lifecycle as the rest of the research system lands.
+- **Workspace version** — Bumped to `0.1.0-alpha.112`.
+
+## Previous Version: 0.1.0-alpha.111
 
 ### Changed
 - **`ask_user` tool promoted from alias to standalone** — The previously-delegating `ask_user` tool in `crates/ragent-agent/src/tool/aliases.rs` now publishes `Event::QuestionRequested` / awaits `Event::QuestionAnswered` directly via the event bus. The standalone `question` tool has been deleted from `ragent-agent`, `ragent-tools-core`, and the TUI question-dialog widget module; the question-rendering responsibility now lives in the TUI's existing event-driven `QuestionRequested` handler in `ragent-tui/src/app.rs`.

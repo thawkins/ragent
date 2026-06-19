@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.112
+
+### Fixed
+- **Research-system spec status overstated** — `specs/researchsystem/SPEC.md` was committed with `status: implemented` and a three-step audit trail even though only four of the 22 plan tasks were actually completed (T-001 `ResearchName`, T-002 `ResearchStatus`, T-003 `Source`, T-005 crate scaffold). The frontmatter is now `status: draft` with a single `none → draft` audit transition, and the remaining 18 tasks remain `pending` in `specs/researchsystem/PLAN.md` until the gathering engine, TUI slash command, CLI/HTTP endpoints, and spec integration land in follow-up releases.
+
 ## Version: 0.1.0-alpha.111
 
 ### Changed

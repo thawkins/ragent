@@ -1,9 +1,7 @@
 ---
-status: implemented
+status: draft
 audit:
   - { time: 1781907407, from: "none", to: "draft", actor: "system" }
-  - { time: 1781907500, from: "draft", to: "in_progress", actor: "system" }
-  - { time: 1781907600, from: "in_progress", to: "implemented", actor: "system" }
 ---
 # Specification: Research System
 
