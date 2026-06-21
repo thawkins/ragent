@@ -42,7 +42,6 @@ pub mod create;
 /// File diff tool.
 pub mod diff;
 /// File editing tool.
-pub mod edit;
 /// File metadata / info tool.
 pub mod file_info;
 /// Per-file locking for concurrent edit operations.
@@ -81,7 +80,6 @@ pub mod memory_write;
 pub mod mkdir;
 /// File move / rename tool.
 pub mod move_file;
-pub mod multiedit;
 pub mod new_task;
 pub mod office_common;
 pub mod office_info;
