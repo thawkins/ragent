@@ -128,10 +128,19 @@ impl Tool for WaitTasksTool {
             }
         }
 
-        // Increment waiter count for all tasks we're about to wait for.
-        // This prevents redundant notification via drain_completed.
+        // M7-T3: Increment waiter count for all tasks we're about to wait for.
+        // Only tasks that are still Running get incremented (returns true).
+        // Already-completed tasks return false — we collect their results
+        // directly and do NOT increment (and thus do NOT decrement later,
+        // avoiding spurious decrements).
+        let mut still_waiting: Vec<String> = Vec::new();
         for task_id in &waiting_for {
-            task_manager.increment_waiter(task_id).await;
+            if task_manager.increment_waiter(task_id).await {
+                still_waiting.push(task_id.clone());
+            }
+            // If increment_waiter returned false, the task is already
+            // completed — its result was already collected above, so we
+            // just skip it for the wait loop.
         }
 
         // Wait for any remaining tasks via event bus (no polling).
@@ -170,11 +179,13 @@ impl Tool for WaitTasksTool {
             }
         }
 
-        // Decrement waiter count for all tasks we were waiting on (clean up).
-        // This needs to happen for both completed and timed-out tasks.
-        let all_waited_ids: Vec<String> =
-            results.keys().chain(waiting_for.iter()).cloned().collect();
-        for task_id in &all_waited_ids {
+        // M7-T3: Decrement waiter count only for tasks that were actually
+        // incremented (i.e. tasks that were still running when we called
+        // increment_waiter). Tasks that were already completed before the
+        // wait loop were never incremented, so we must not decrement them
+        // — a spurious decrement could cause drain_completed to inject
+        // results prematurely when another waiter is still waiting.
+        for task_id in &still_waiting {
             task_manager.decrement_waiter(task_id).await;
         }
         // Format the output.

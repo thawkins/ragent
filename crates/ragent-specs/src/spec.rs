@@ -255,6 +255,10 @@ pub struct Spec {
     pub reviewers: Vec<String>,
     /// Review comments text (contents of REVIEW.md if it exists).
     pub review_md: String,
+    /// Research names referenced from this spec (T-041, T-043). Populated
+    /// from the SPEC.md frontmatter `research:` field and the PLAN.md
+    /// `research: <name>` declarations.
+    pub research: Vec<String>,
     /// Last modified timestamp (Unix epoch seconds).
     pub modified_at: u64,
     /// Directory path where the spec lives.
@@ -285,6 +289,7 @@ impl Spec {
             )],
             reviewers: Vec::new(),
             review_md: String::new(),
+            research: Vec::new(),
             modified_at: now,
             path: None,
         }

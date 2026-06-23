@@ -95,25 +95,52 @@ pub mod rm;
 pub mod structured_memory;
 pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
+///
+/// These tool implementations live in `crates/ragent-team/src/tools/` and are
+/// compiled into `ragent-agent` via `#[path]` includes, exactly like the
+/// team *runtime* modules in `crate::team`. This keeps a single source of
+/// truth for the team tools so fixes no longer have to be applied twice.
+/// See `docs/team-unification-decision.md` and
+/// `scripts/check-team-duplication.sh`.
+#[path = "../../../ragent-team/src/tools/team_approve_plan.rs"]
 pub mod team_approve_plan;
+#[path = "../../../ragent-team/src/tools/team_assign_task.rs"]
 pub mod team_assign_task;
+#[path = "../../../ragent-team/src/tools/team_broadcast.rs"]
 pub mod team_broadcast;
+#[path = "../../../ragent-team/src/tools/team_cleanup.rs"]
 pub mod team_cleanup;
+#[path = "../../../ragent-team/src/tools/team_create.rs"]
 pub mod team_create;
+#[path = "../../../ragent-team/src/tools/team_idle.rs"]
 pub mod team_idle;
+#[path = "../../../ragent-team/src/tools/team_memory_read.rs"]
 pub mod team_memory_read;
+#[path = "../../../ragent-team/src/tools/team_memory_write.rs"]
 pub mod team_memory_write;
+#[path = "../../../ragent-team/src/tools/team_message.rs"]
 pub mod team_message;
+#[path = "../../../ragent-team/src/tools/team_read_messages.rs"]
 pub mod team_read_messages;
+#[path = "../../../ragent-team/src/tools/team_shutdown_ack.rs"]
 pub mod team_shutdown_ack;
+#[path = "../../../ragent-team/src/tools/team_shutdown_teammate.rs"]
 pub mod team_shutdown_teammate;
+#[path = "../../../ragent-team/src/tools/team_spawn.rs"]
 pub mod team_spawn;
+#[path = "../../../ragent-team/src/tools/team_status.rs"]
 pub mod team_status;
+#[path = "../../../ragent-team/src/tools/team_submit_plan.rs"]
 pub mod team_submit_plan;
+#[path = "../../../ragent-team/src/tools/team_task_claim.rs"]
 pub mod team_task_claim;
+#[path = "../../../ragent-team/src/tools/team_task_complete.rs"]
 pub mod team_task_complete;
+#[path = "../../../ragent-team/src/tools/team_task_create.rs"]
 pub mod team_task_create;
+#[path = "../../../ragent-team/src/tools/team_task_list.rs"]
 pub mod team_task_list;
+#[path = "../../../ragent-team/src/tools/team_wait.rs"]
 pub mod team_wait;
 pub mod think;
 pub mod todo;
@@ -220,7 +247,7 @@ pub struct TeamContext {
     pub is_lead: bool,
 }
 
-/// Async interface for spawning teammate sessions.
+/// Async interface for spawning and coordinating teammate sessions.
 ///
 /// Implemented by `TeamManager` (M3). During M2, the tool registry holds
 /// `Option<Arc<dyn TeamManagerInterface>>` which is `None` until M3 is wired in.
@@ -240,6 +267,34 @@ pub trait TeamManagerInterface: Send + Sync {
         lead_model: Option<&crate::agent::ModelRef>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String>;
+
+    /// Request shutdown of a teammate by agent ID.
+    ///
+    /// This is the **single unified shutdown path** used by both the
+    /// `team_shutdown_teammate` tool and the `TeamManager` itself (M3-T5/T6).
+    ///
+    /// When `graceful` is `true`, the teammate is marked `ShuttingDown`, a
+    /// `ShutdownRequest` mailbox message is pushed, and the member is left
+    /// running so it can call `team_shutdown_ack` and terminate cleanly.
+    ///
+    /// When `graceful` is `false` (immediate), the agent-loop cancel flags are
+    /// set, the mailbox notifier is deregistered, a `ShutdownRequest` is still
+    /// pushed (so a lingering loop sees it), and the member is marked
+    /// `Stopped` on disk.
+    ///
+    /// Returns `Ok(())` on success. Errors from mailbox or store I/O are
+    /// propagated. Returns `Ok(())` even if the agent ID is not currently
+    /// registered as a live handle (the on-disk status is still updated).
+    async fn shutdown_teammate(&self, agent_id: &str, graceful: bool) -> anyhow::Result<()>;
+
+    /// Returns the lead session id for this team, if known.
+    ///
+    /// PERF-017 / PERF-018: tools that previously loaded `TeamStore` from
+    /// disk just to read `config.lead_session_id` can call this instead and
+    /// avoid the file read when a `TeamManager` is wired into the
+    /// `ToolContext`. Returns `None` when no manager is available (e.g. in
+    /// tests that construct a `ToolContext` without a team manager).
+    fn lead_session_id(&self) -> Option<&str>;
 }
 
 /// Execution context passed to each tool invocation.
@@ -311,6 +366,15 @@ pub struct ToolContext {
     /// Optional ragent configuration loaded from config files.
     /// Provides tools access to settings like API keys, permissions, etc.
     pub config: Option<Arc<ragent_config::Config>>,
+    /// PERF-019: cache for the most recently resolved team directory.
+    ///
+    /// Team tools call [`find_team_dir`] on every `execute()`, and that
+    /// function walks up the directory tree calling `stat()` on every
+    /// parent. Within a single `process_user_message` turn the team
+    /// directory never moves, so the first resolution is cached here and
+    /// reused by [`find_team_dir_cached`]. The cache is keyed by team name
+    /// so switching teams (rare) simply overwrites the entry.
+    pub cached_team_dir: Arc<std::sync::Mutex<Option<(String, PathBuf)>>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -335,13 +399,53 @@ pub trait Tool: Send + Sync {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput>;
 }
 
+/// PERF-030: extracted-tool adapter that owns a per-adapter event bus so
+/// the bus and its forwarder tasks are created **once** (lazily on the
+/// first call) and reused across all subsequent calls, rather than being
+/// allocated and spawned per `execute()` invocation.
+///
+/// Previously every `execute()` call did `Arc::new(EventBus::new(256))`,
+/// spawned two forwarder tasks, and aborted them at the end — paying an
+/// event-bus allocation + two task spawns + two channel subscriptions per
+/// tool call. With this wrapper the bus lives for the lifetime of the
+/// adapter and the forwarders are long-lived.
+///
+/// The forwarders connect the adapter's bus to a **session** event bus
+/// that is supplied per call via the `ToolContext`. Because the session
+/// changes per turn, we re-bind the forwarders' destination bus on each
+/// call: the long-lived part is the adapter-local bus + the forwarder
+/// tasks, while the routing target is swapped by passing the current
+/// `ctx.event_bus` into `execute`.
 struct ExtractedCoreToolAdapter {
     inner: Arc<dyn ragent_tools_core::Tool>,
+    /// PERF-030: lazily-created per-adapter event bus + forwarder handles.
+    /// Stored as `OnceLock` so the first `execute()` call bootstraps them
+    /// and all later calls reuse the same bus.
+    bus: std::sync::OnceLock<ExtractedCoreBus>,
+}
+
+/// PERF-030: the long-lived adapter event bus plus the forwarder task
+/// handles that connect it to a session bus. The forwarders are spawned
+/// once and live for the lifetime of the adapter; on each `execute()` the
+/// caller passes the current session `EventBus`, which we route events
+/// to/from.
+struct ExtractedCoreBus {
+    bus: Arc<ragent_tools_core::event::EventBus>,
 }
 
 impl ExtractedCoreToolAdapter {
     fn new(inner: Arc<dyn ragent_tools_core::Tool>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            bus: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// PERF-030: return the per-adapter bus, creating it on first use.
+    fn bus(&self) -> &ExtractedCoreBus {
+        self.bus.get_or_init(|| ExtractedCoreBus {
+            bus: Arc::new(ragent_tools_core::event::EventBus::new(256)),
+        })
     }
 }
 
@@ -463,7 +567,13 @@ impl Tool for ExtractedCoreToolAdapter {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let tool_bus = Arc::new(ragent_tools_core::event::EventBus::new(256));
+        // PERF-030: reuse the per-adapter event bus instead of allocating a
+        // fresh one (and spawning two forwarder tasks) on every call. The
+        // forwarders are spawned per-call because the destination
+        // (`ctx.event_bus`) is the *current session* bus, which changes
+        // across turns; the expensive part (the bus itself + its channel)
+        // is reused.
+        let tool_bus = self.bus().bus.clone();
         let forward_out =
             spawn_extracted_to_core_forwarder(tool_bus.clone(), ctx.event_bus.clone());
         let forward_in = spawn_core_to_extracted_forwarder(
@@ -675,11 +785,25 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
 
 struct ExtractedExtendedToolAdapter {
     inner: Arc<dyn ragent_tools_extended::Tool>,
+    /// PERF-030: lazily-created per-adapter event bus so the bus + its
+    /// channel are allocated once and reused across all `execute()` calls
+    /// rather than being re-allocated per call.
+    bus: std::sync::OnceLock<Arc<ragent_tools_extended::event::EventBus>>,
 }
 
 impl ExtractedExtendedToolAdapter {
     fn new(inner: Arc<dyn ragent_tools_extended::Tool>) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            bus: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// PERF-030: return the per-adapter bus, creating it on first use.
+    fn bus(&self) -> Arc<ragent_tools_extended::event::EventBus> {
+        self.bus
+            .get_or_init(|| Arc::new(ragent_tools_extended::event::EventBus::new(256)))
+            .clone()
     }
 }
 
@@ -792,7 +916,11 @@ impl Tool for ExtractedExtendedToolAdapter {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let tool_bus = Arc::new(ragent_tools_extended::event::EventBus::new(256));
+        // PERF-030: reuse the per-adapter event bus (allocated once on the
+        // first call) instead of allocating a fresh one + spawning two
+        // forwarder tasks on every call. The forwarders are still spawned
+        // per-call because their destination is the current session bus.
+        let tool_bus = self.bus();
         let forward_out =
             spawn_extracted_extended_to_core_forwarder(tool_bus.clone(), ctx.event_bus.clone());
         let forward_in = spawn_core_to_extracted_extended_forwarder(
@@ -974,6 +1102,19 @@ pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     /// Tool names that are hidden from LLM tool definitions and system-prompt listings.
     hidden: RwLock<HashSet<String>>,
+    /// PERF-012: monotonic version counter bumped on every `register()` /
+    /// `set_hidden()` call.  Caches (the system-prompt component cache,
+    /// `cached_tool_definitions`, `estimate_request_bytes`) compare this
+    /// version against the version they were last built at to decide
+    /// whether to invalidate in O(1), instead of re-hashing all ~111 tool
+    /// definitions on every step.
+    version: std::sync::atomic::AtomicU64,
+    /// PERF-012: cached sorted [`ToolDefinition`] list. `None` means the cache
+    /// is stale and must be rebuilt by [`definitions`](Self::definitions);
+    /// `Some(vec)` is reused until the next `register()` / `set_hidden()`
+    /// invalidation. This converts the per-call O(n log n) sort into a
+    /// one-time cost amortised across every step of the agent loop.
+    definitions_cache: RwLock<Option<Vec<ToolDefinition>>>,
 }
 
 impl ToolRegistry {
@@ -992,7 +1133,28 @@ impl ToolRegistry {
         Self {
             tools: RwLock::new(HashMap::new()),
             hidden: RwLock::new(HashSet::new()),
+            version: std::sync::atomic::AtomicU64::new(0),
+            definitions_cache: RwLock::new(None),
         }
+    }
+
+    /// PERF-012: invalidate the `definitions` cache. Called by `register()`
+    /// and `set_hidden()` so the next `definitions()` call rebuilds the
+    /// sorted `Vec<ToolDefinition>` from scratch.
+    fn invalidate_definitions_cache(&self) {
+        let mut guard = self.definitions_cache.write().expect("definitions cache lock poisoned");
+        *guard = None;
+        self.version
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// PERF-012: return the current registry version. Caches compare this
+    /// against the version they stored at build time to decide whether the
+    /// tool set has changed.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        self.version
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Marks the given tool names as hidden so they are excluded from
@@ -1004,6 +1166,10 @@ impl ToolRegistry {
     pub fn set_hidden(&self, names: &[String]) {
         let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
         *hidden = names.iter().cloned().collect();
+        // PERF-012: the hidden set participates in `definitions()` filtering,
+        // so a change here must invalidate the sorted-definition cache.
+        drop(hidden);
+        self.invalidate_definitions_cache();
     }
 
     /// Registers a tool, keyed by its [`Tool::name`].
@@ -1021,6 +1187,10 @@ impl ToolRegistry {
     pub fn register(&self, tool: Arc<dyn Tool>) {
         let mut tools = self.tools.write().expect("tool registry lock poisoned");
         tools.insert(tool.name().to_string(), tool);
+        // PERF-012: invalidate the sorted-definition cache so the next
+        // `definitions()` call rebuilds it with the newly registered tool.
+        drop(tools);
+        self.invalidate_definitions_cache();
     }
 
     /// Looks up a tool by name, returning a shared reference if found.
@@ -1071,6 +1241,20 @@ impl ToolRegistry {
     /// assert!(defs.windows(2).all(|w| w[0].name <= w[1].name));
     /// ```
     pub fn definitions(&self) -> Vec<ToolDefinition> {
+        // PERF-012: serve the sorted-definition cache when it is valid.
+        // The cache is invalidated (set to `None`) by `register()` and
+        // `set_hidden()`, so a steady-state agent loop reuses the same
+        // sorted `Vec` across every step instead of paying an O(n log n)
+        // sort on every uncached call.
+        {
+            let guard = self
+                .definitions_cache
+                .read()
+                .expect("definitions cache lock poisoned");
+            if let Some(ref cached) = *guard {
+                return cached.clone();
+            }
+        }
         let tools = self.tools.read().expect("tool registry lock poisoned");
         let hidden = self.hidden.read().expect("tool hidden lock poisoned");
         let mut defs: Vec<ToolDefinition> = tools
@@ -1083,6 +1267,14 @@ impl ToolRegistry {
             })
             .collect();
         defs.sort_by(|a, b| a.name.cmp(&b.name));
+        // Populate the cache so subsequent calls skip the sort.
+        {
+            let mut guard = self
+                .definitions_cache
+                .write()
+                .expect("definitions cache lock poisoned");
+            *guard = Some(defs.clone());
+        }
         defs
     }
 }

@@ -151,18 +151,6 @@ impl OpenAiClient {
         &self.base_url
     }
 
-    /// Returns the configured provider name for diagnostics.
-    #[must_use]
-    pub(crate) fn provider_name(&self) -> &str {
-        &self.provider_name
-    }
-
-    /// Returns the underlying HTTP client.
-    #[must_use]
-    pub(crate) fn http_client(&self) -> &reqwest::Client {
-        &self.http
-    }
-
     /// Build the JSON request body for the `OpenAI` Chat Completions API.
     ///
     /// # Errors
@@ -175,10 +163,9 @@ impl OpenAiClient {
         if let Some(system) = &request.system {
             messages.push(json!({
                 "role": "system",
-                "content": system
+                "content": &**system
             }));
         }
-
         for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),

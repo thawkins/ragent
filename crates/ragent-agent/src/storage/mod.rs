@@ -204,6 +204,14 @@ pub fn deobfuscate_key(encoded: &str) -> String {
 /// SQLite-backed storage for sessions, messages, and provider credentials.
 pub struct Storage {
     conn: Mutex<Connection>,
+    /// PERF-004: cached result of the `format_version` column-existence
+    /// pragma query.  Populated once during [`Storage::migrate`] (or lazily
+    /// on the first session read if the storage was constructed without
+    /// running migrations) and reused by [`Storage::get_session`] and
+    /// [`Storage::list_sessions`] to skip one SQLite round-trip per call.
+    /// An `AtomicBool` is sufficient because the schema never loses the
+    /// column once it has been added.
+    pub has_format_version: std::sync::atomic::AtomicBool,
 }
 
 /// Acquires the database connection lock, mapping a poisoned mutex to an anyhow error.
@@ -217,9 +225,38 @@ macro_rules! lock_conn {
 }
 
 impl Storage {
-    /// Opens (or creates) a `SQLite` database at the given filesystem path and
-    /// runs migrations to ensure the schema is up to date.
+    /// PERF-004: return whether the `sessions.format_version` column
+    /// exists, using the cached `AtomicBool` when it has already been
+    /// populated (by [`migrate`](Self::migrate) or a prior call).
     ///
+    /// On the first call after construction — when the flag is still
+    /// `false` — this runs the `pragma_table_info` query once and records
+    /// the result so every subsequent `get_session` / `list_sessions`
+    /// call skips the SQLite round-trip.  The schema never loses the
+    /// column after it has been added, so caching is safe.
+    fn has_format_version_cached(&self, conn: &rusqlite::Connection) -> Result<bool> {
+        if self
+            .has_format_version
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(true);
+        }
+        let has: bool = conn
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        self.has_format_version
+            .store(has, std::sync::atomic::Ordering::Relaxed);
+        Ok(has)
+    }
+}
+
+impl Storage {
+    /// Opens (or creates) a `SQLite` database at the given filesystem path and
+    /// runs migrations to ensure the schema is up to date.    ///
     /// # Errors
     ///
     /// Returns an error if the parent directory cannot be created, the database
@@ -241,6 +278,7 @@ impl Storage {
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
         let storage = Self {
             conn: Mutex::new(conn),
+            has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
@@ -264,6 +302,7 @@ impl Storage {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
             conn: Mutex::new(conn),
+            has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
@@ -272,156 +311,156 @@ impl Storage {
     fn migrate(&self) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.execute_batch(
-            "
-                          CREATE TABLE IF NOT EXISTS sessions (
-                              id TEXT PRIMARY KEY,
-                              title TEXT NOT NULL DEFAULT '',
-                              project_id TEXT NOT NULL DEFAULT '',
-                              directory TEXT NOT NULL,
-                              parent_id TEXT,
-                              version INTEGER NOT NULL DEFAULT 1,
-                              format_version INTEGER NOT NULL DEFAULT 1,
-                              created_at TEXT NOT NULL,
-                              updated_at TEXT NOT NULL,
-                              archived_at TEXT,
-                              summary TEXT
-                          );
-            CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                parts TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
+      "
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        id TEXT PRIMARY KEY,
+                        title TEXT NOT NULL DEFAULT '',
+                        project_id TEXT NOT NULL DEFAULT '',
+                        directory TEXT NOT NULL,
+                        parent_id TEXT,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        format_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        archived_at TEXT,
+                        summary TEXT
+                    );
+      CREATE TABLE IF NOT EXISTS messages (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          parts TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
 
-            CREATE INDEX IF NOT EXISTS idx_messages_session
-                ON messages(session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_messages_session
+          ON messages(session_id, created_at);
 
-            CREATE TABLE IF NOT EXISTS provider_auth (
-                provider_id TEXT PRIMARY KEY,
-                api_key TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+      CREATE TABLE IF NOT EXISTS provider_auth (
+          provider_id TEXT PRIMARY KEY,
+          api_key TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+      );
 
-            CREATE TABLE IF NOT EXISTS mcp_servers (
-                id TEXT PRIMARY KEY,
-                config TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'disabled',
-                updated_at TEXT NOT NULL
-            );
+      CREATE TABLE IF NOT EXISTS mcp_servers (
+          id TEXT PRIMARY KEY,
+          config TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'disabled',
+          updated_at TEXT NOT NULL
+      );
 
-            CREATE TABLE IF NOT EXISTS snapshots (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                data TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
+      CREATE TABLE IF NOT EXISTS snapshots (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          data TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
 
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+      CREATE TABLE IF NOT EXISTS settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+      );
 
-            CREATE TABLE IF NOT EXISTS discovered_models (
-                provider_id TEXT PRIMARY KEY,
-                models_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
+      CREATE TABLE IF NOT EXISTS discovered_models (
+          provider_id TEXT PRIMARY KEY,
+          models_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+      );
 
-            CREATE TABLE IF NOT EXISTS todos (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                description TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
-            );
+      CREATE TABLE IF NOT EXISTS todos (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          description TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (session_id) REFERENCES sessions(id)
+      );
 
-                          CREATE INDEX IF NOT EXISTS idx_todos_session
-                              ON todos(session_id, status);
-            
-                                                      -- Structured memory store tables (Milestone 3)
-                                                      CREATE TABLE IF NOT EXISTS memories (
-                                                          id INTEGER PRIMARY KEY,
-                                                          content TEXT NOT NULL,
-                                                          category TEXT NOT NULL CHECK(category IN ('fact','pattern','preference','insight','error','workflow')),
-                                                          source TEXT NOT NULL DEFAULT '',
-                                                          confidence REAL NOT NULL DEFAULT 0.5,
-                                                          project TEXT NOT NULL DEFAULT '',
-                                                          session_id TEXT NOT NULL DEFAULT '',
-                                                          created_at TEXT NOT NULL,
-                                                          updated_at TEXT NOT NULL,
-                                                          access_count INTEGER NOT NULL DEFAULT 0,
-                                                          last_accessed TEXT
-                                                      );
-                          
-                                                      CREATE TABLE IF NOT EXISTS memory_tags (
-                                                          memory_id INTEGER NOT NULL,
-                                                          tag TEXT NOT NULL,
-                                                          PRIMARY KEY (memory_id, tag),
-                                                          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-                                                      );
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memory_tags_tag
-                                                          ON memory_tags(tag);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_category
-                                                          ON memories(category, confidence DESC);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_project
-                                                          ON memories(project, updated_at DESC);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_confidence
-                                                          ON memories(confidence DESC, updated_at DESC);
-                          
-                                                                                                                                                                                                                              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-                                                                                                                                                                                                                                  USING fts5(content, content=memories, content_rowid=rowid);
-                                                                                                                                                                      
-                                                                                                                                                                      -- Knowledge graph tables (Milestone 9)
-                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_entities (
-                                                                                                                                                                          id INTEGER PRIMARY KEY,
-                                                                                                                                                                          name TEXT NOT NULL,
-                                                                                                                                                                          entity_type TEXT NOT NULL CHECK(entity_type IN ('project','tool','language','pattern','person','concept')),
-                                                                                                                                                                          mention_count INTEGER NOT NULL DEFAULT 1,
-                                                                                                                                                                          first_memory_id INTEGER,
-                                                                                                                                                                          created_at TEXT NOT NULL,
-                                                                                                                                                                          updated_at TEXT NOT NULL,
-                                                                                                                                                                          UNIQUE(name, entity_type)
-                                                                                                                                                                      );
-                                                                                                              
-                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_relationships (
-                                                                                                                                                                          id INTEGER PRIMARY KEY,
-                                                                                                                                                                          source_id INTEGER NOT NULL,
-                                                                                                                                                                          target_id INTEGER NOT NULL,
-                                                                                                                                                                          relation_type TEXT NOT NULL CHECK(relation_type IN ('uses','prefers','depends_on','avoids','related_to')),
-                                                                                                                                                                          confidence REAL NOT NULL DEFAULT 0.7,
-                                                                                                                                                                          source_memory_id INTEGER,
-                                                                                                                                                                          created_at TEXT NOT NULL,
-                                                                                                                                                                          FOREIGN KEY (source_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
-                                                                                                                                                                          FOREIGN KEY (target_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
-                                                                                                                                                                          UNIQUE(source_id, target_id, relation_type)
-                                                                                                                                                                      );
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_name
-                                                                                                                                                                          ON kg_entities(name);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_type
-                                                                                                                                                                          ON kg_entities(entity_type);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_source
-                                                                                                                                                                          ON kg_relationships(source_id);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_target
-                                                                                                                                                                          ON kg_relationships(target_id);
-                                                                                                              
-                                                                                                                                                                    ",        )?;
+                    CREATE INDEX IF NOT EXISTS idx_todos_session
+                        ON todos(session_id, status);
+      
+                                                -- Structured memory store tables (Milestone 3)
+                                                CREATE TABLE IF NOT EXISTS memories (
+                                                    id INTEGER PRIMARY KEY,
+                                                    content TEXT NOT NULL,
+                                                    category TEXT NOT NULL CHECK(category IN ('fact','pattern','preference','insight','error','workflow')),
+                                                    source TEXT NOT NULL DEFAULT '',
+                                                    confidence REAL NOT NULL DEFAULT 0.5,
+                                                    project TEXT NOT NULL DEFAULT '',
+                                                    session_id TEXT NOT NULL DEFAULT '',
+                                                    created_at TEXT NOT NULL,
+                                                    updated_at TEXT NOT NULL,
+                                                    access_count INTEGER NOT NULL DEFAULT 0,
+                                                    last_accessed TEXT
+                                                );
+                    
+                                                CREATE TABLE IF NOT EXISTS memory_tags (
+                                                    memory_id INTEGER NOT NULL,
+                                                    tag TEXT NOT NULL,
+                                                    PRIMARY KEY (memory_id, tag),
+                                                    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                                                );
+                    
+                                                CREATE INDEX IF NOT EXISTS idx_memory_tags_tag
+                                                    ON memory_tags(tag);
+                    
+                                                CREATE INDEX IF NOT EXISTS idx_memories_category
+                                                    ON memories(category, confidence DESC);
+                    
+                                                CREATE INDEX IF NOT EXISTS idx_memories_project
+                                                    ON memories(project, updated_at DESC);
+                    
+                                                CREATE INDEX IF NOT EXISTS idx_memories_confidence
+                                                    ON memories(confidence DESC, updated_at DESC);
+                    
+                                                                                                                                                                                                                        CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                                                                                                                                                                                                                            USING fts5(content, content=memories, content_rowid=rowid);
+                                                                                                                                                                
+                                                                                                                                                                -- Knowledge graph tables (Milestone 9)
+                                                                                                                                                                CREATE TABLE IF NOT EXISTS kg_entities (
+                                                                                                                                                                    id INTEGER PRIMARY KEY,
+                                                                                                                                                                    name TEXT NOT NULL,
+                                                                                                                                                                    entity_type TEXT NOT NULL CHECK(entity_type IN ('project','tool','language','pattern','person','concept')),
+                                                                                                                                                                    mention_count INTEGER NOT NULL DEFAULT 1,
+                                                                                                                                                                    first_memory_id INTEGER,
+                                                                                                                                                                    created_at TEXT NOT NULL,
+                                                                                                                                                                    updated_at TEXT NOT NULL,
+                                                                                                                                                                    UNIQUE(name, entity_type)
+                                                                                                                                                                );
+                                                                                                        
+                                                                                                                                                                CREATE TABLE IF NOT EXISTS kg_relationships (
+                                                                                                                                                                    id INTEGER PRIMARY KEY,
+                                                                                                                                                                    source_id INTEGER NOT NULL,
+                                                                                                                                                                    target_id INTEGER NOT NULL,
+                                                                                                                                                                    relation_type TEXT NOT NULL CHECK(relation_type IN ('uses','prefers','depends_on','avoids','related_to')),
+                                                                                                                                                                    confidence REAL NOT NULL DEFAULT 0.7,
+                                                                                                                                                                    source_memory_id INTEGER,
+                                                                                                                                                                    created_at TEXT NOT NULL,
+                                                                                                                                                                    FOREIGN KEY (source_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+                                                                                                                                                                    FOREIGN KEY (target_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+                                                                                                                                                                    UNIQUE(source_id, target_id, relation_type)
+                                                                                                                                                                );
+                                                                                                        
+                                                                                                                                                                CREATE INDEX IF NOT EXISTS idx_kg_entities_name
+                                                                                                                                                                    ON kg_entities(name);
+                                                                                                        
+                                                                                                                                                                CREATE INDEX IF NOT EXISTS idx_kg_entities_type
+                                                                                                                                                                    ON kg_entities(entity_type);
+                                                                                                        
+                                                                                                                                                                CREATE INDEX IF NOT EXISTS idx_kg_relationships_source
+                                                                                                                                                                    ON kg_relationships(source_id);
+                                                                                                        
+                                                                                                                                                                CREATE INDEX IF NOT EXISTS idx_kg_relationships_target
+                                                                                                                                                                    ON kg_relationships(target_id);
+                                                                                                        
+                                                                                                                                                              ",        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
         for (table, col) in &[("memories", "embedding"), ("sessions", "format_version")] {
             let has_col: bool = conn
@@ -439,11 +478,19 @@ impl Storage {
                     &format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col)
                 };
                 conn.execute_batch(sql)?;
+            } else if *table == "sessions" && *col == "format_version" {
+                // PERF-004: cache the column existence so get_session /
+                // list_sessions can skip the pragma round-trip on every
+                // call. `migrate` runs exactly once per Storage handle, so
+                // recording the result here is safe.
+                self.has_format_version
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
 
         Ok(())
     }
+
     // ── Session CRUD ──────────────────────────────────────────────
 
     /// Inserts a new session row with the given `id` and `directory`.
@@ -489,22 +536,19 @@ impl Storage {
     /// ```
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
         let conn = lock_conn!(self)?;
-        // Check if format_version column exists (for backward compatibility)
-        let has_format_version: bool = conn
-            .prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
-            )?
-            .query_row([], |r| r.get::<_, i64>(0))
-            .unwrap_or(0)
-            > 0;
-
+        // PERF-004: skip the pragma_table_info round-trip when we already
+        // know from `migrate()` whether the `format_version` column exists.
+        // On the rare miss (storage constructed without migrate, or the
+        // flag was never set), fall back to the pragma query and cache the
+        // result so subsequent calls stay on the fast path.
+        let has_format_version = self.has_format_version_cached(&conn)?;
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
+       created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
                 .to_string()
         } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
+       created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
                 .to_string()
         };
 
@@ -564,24 +608,18 @@ impl Storage {
     /// ```
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let conn = lock_conn!(self)?;
-        // Check if format_version column exists (for backward compatibility)
-        let has_format_version: bool = conn
-            .prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
-            )?
-            .query_row([], |r| r.get::<_, i64>(0))
-            .unwrap_or(0)
-            > 0;
-
+        // PERF-004: reuse the cached column-existence flag (see
+        // `has_format_version_cached`).
+        let has_format_version = self.has_format_version_cached(&conn)?;
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
-             created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
+       created_at, updated_at, archived_at, summary \
+       FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
                 .to_string()
         } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
+       created_at, updated_at, archived_at, summary \
+       FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
                 .to_string()
         };
 
@@ -741,6 +779,32 @@ impl Storage {
     /// assert_eq!(messages.len(), 1);
     /// assert_eq!(messages[0].text_content(), "Hi");
     /// ```
+    /// Fetches all messages for a session, ordered by creation time.
+    ///
+    /// Loads and deserialises every message's `parts` JSON column.  For
+    /// callers that only need to know *whether* an assistant message exists
+    /// (e.g. the init-exchange gate), prefer [`Storage::has_assistant_messages`]
+    /// which runs a single `SELECT 1 ... LIMIT 1` instead of loading the
+    /// full history.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// let msg = Message::user_text("sess-1", "Hi");
+    /// storage.create_message(&msg).unwrap();
+    /// let messages = storage.get_messages("sess-1").unwrap();
+    /// assert_eq!(messages.len(), 1);
+    /// assert_eq!(messages[0].text_content(), "Hi");
+    /// ```
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -780,6 +844,45 @@ impl Storage {
             });
         }
         Ok(messages)
+    }
+
+    /// Returns `true` if the session has at least one assistant message.
+    ///
+    /// PERF-010: this is the cheap existence check used by the init-exchange
+    /// gate and the run-init-exchange path.  It runs a single
+    /// `SELECT 1 FROM messages WHERE session_id = ?1 AND role = 'assistant' LIMIT 1`
+    /// instead of calling [`get_messages`] (which loads and deserialises
+    /// every message's `parts` JSON column).  For sessions with many
+    /// messages this reduces the cost from O(n * parts_size) deserialisation
+    /// to a single indexed lookup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// assert!(!storage.has_assistant_messages("sess-1").unwrap());
+    /// let msg = Message::assistant_text("sess-1", "Hi");
+    /// storage.create_message(&msg).unwrap();
+    /// assert!(storage.has_assistant_messages("sess-1").unwrap());
+    /// ```
+    pub fn has_assistant_messages(&self, session_id: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM messages WHERE session_id = ?1 AND role = 'assistant' LIMIT 1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        Ok(exists.is_some())
     }
 
     /// Updates the parts and `updated_at` timestamp of an existing message.

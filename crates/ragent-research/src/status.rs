@@ -122,12 +122,30 @@ mod tests {
 
     #[test]
     fn parse_accepts_common_aliases() {
-        assert_eq!(ResearchStatus::parse("in_progress"), Some(ResearchStatus::InProgress));
-        assert_eq!(ResearchStatus::parse("in-progress"), Some(ResearchStatus::InProgress));
-        assert_eq!(ResearchStatus::parse("inprogress"), Some(ResearchStatus::InProgress));
-        assert_eq!(ResearchStatus::parse("completed"), Some(ResearchStatus::Complete));
-        assert_eq!(ResearchStatus::parse("done"), Some(ResearchStatus::Complete));
-        assert_eq!(ResearchStatus::parse("archive"), Some(ResearchStatus::Archived));
+        assert_eq!(
+            ResearchStatus::parse("in_progress"),
+            Some(ResearchStatus::InProgress)
+        );
+        assert_eq!(
+            ResearchStatus::parse("in-progress"),
+            Some(ResearchStatus::InProgress)
+        );
+        assert_eq!(
+            ResearchStatus::parse("inprogress"),
+            Some(ResearchStatus::InProgress)
+        );
+        assert_eq!(
+            ResearchStatus::parse("completed"),
+            Some(ResearchStatus::Complete)
+        );
+        assert_eq!(
+            ResearchStatus::parse("done"),
+            Some(ResearchStatus::Complete)
+        );
+        assert_eq!(
+            ResearchStatus::parse("archive"),
+            Some(ResearchStatus::Archived)
+        );
     }
 
     #[test]

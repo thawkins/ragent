@@ -165,8 +165,67 @@ enum Commands {
     },
     /// Show resolved configuration
     Config,
+    /// Manage research items under `research/`
+    Research {
+        #[command(subcommand)]
+        command: ResearchCommands,
+    },
 }
 
+/// Sub-commands for the `research` namespace.
+#[derive(Subcommand)]
+enum ResearchCommands {
+    /// Run a gathering session and create a research item.
+    Create {
+        /// Research name (URL-safe identifier)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Topic description (everything after the name)
+        #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
+        topic: Vec<String>,
+        /// Optional extra sources directory (FR-019)
+        #[arg(long)]
+        sources_dir: Option<String>,
+        /// Optional template name (FR-020)
+        #[arg(long)]
+        template: Option<String>,
+    },
+    /// List research items
+    List {
+        /// Include archived items
+        #[arg(long)]
+        all: bool,
+    },
+    /// Print the absolute path of a research item's RESEARCH.md
+    Open {
+        /// Research name
+        name: String,
+    },
+    /// Full-text search across all RESEARCH.md files
+    Search {
+        /// Search query
+        #[arg(value_name = "QUERY", trailing_var_arg = true)]
+        query: Vec<String>,
+    },
+    /// Show metadata for a single research item
+    Show {
+        /// Research name
+        name: String,
+    },
+    /// Delete a research item
+    Delete {
+        /// Research name
+        name: String,
+        /// Skip the confirmation prompt
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
+    /// Archive a research item
+    Archive {
+        /// Research name
+        name: String,
+    },
+}
 /// Sub-commands for the `session` namespace.
 #[derive(Subcommand)]
 enum SessionCommands {
@@ -427,11 +486,15 @@ async fn main() -> Result<()> {
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
+        cached_tool_names: parking_lot::RwLock::new(None),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config,
         auto_approve: cli.yes,
@@ -925,7 +988,179 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Some(Commands::Research { command }) => {
+            handle_research_command(command).await?;
+        }
     }
 
+    Ok(())
+}
+
+/// Dispatch `ragent research …` sub-commands to the `ragent-research`
+/// crate. Emits a `ragent-research:` JSON line for each event so the
+/// output is machine-parseable even when the session produces many
+/// sources (T-035).
+async fn handle_research_command(command: ResearchCommands) -> Result<()> {
+    use ragent_research::cli::ResearchCliCommand;
+    use ragent_research::{
+        ResearchManager, ResearchSession, SessionConfig, SessionEvent, SessionObserver,
+    };
+    use std::sync::Arc;
+    let working_dir = std::env::current_dir()?;
+    let research_root = working_dir.join("research");
+    let manager = ResearchManager::new(&research_root);
+
+    let cli_cmd = match command {
+        ResearchCommands::Create {
+            name,
+            topic,
+            sources_dir,
+            template,
+        } => {
+            let topic = topic.join(" ");
+            if topic.is_empty() {
+                eprintln!("ragent-research: usage: ragent research create <name> <topic...>");
+                std::process::exit(2);
+            }
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                sources_dir,
+                template,
+            }
+        }
+        ResearchCommands::List { all } => ResearchCliCommand::List { all },
+        ResearchCommands::Open { name } => ResearchCliCommand::Open { name },
+        ResearchCommands::Search { query } => ResearchCliCommand::Search {
+            query: query.join(" "),
+        },
+        ResearchCommands::Show { name } => ResearchCliCommand::Show { name },
+        ResearchCommands::Delete { name, yes } => ResearchCliCommand::Delete { name, yes },
+        ResearchCommands::Archive { name } => ResearchCliCommand::Archive { name },
+    };
+    match cli_cmd {
+        ResearchCliCommand::Help => {
+            println!("{}", ResearchCliCommand::build_help_message());
+        }
+        ResearchCliCommand::List { all } => {
+            let items = manager.list(all).await?;
+            let rows: Vec<(String, String, String, String, String)> = items
+                .into_iter()
+                .map(|i| {
+                    (
+                        i.name.to_string(),
+                        i.title,
+                        i.status.as_str().to_string(),
+                        i.created_at.to_rfc3339(),
+                        i.modified_at.to_rfc3339(),
+                    )
+                })
+                .collect();
+            print!("{}", ragent_research::render_list_output(&rows));
+        }
+        ResearchCliCommand::Open { name } => {
+            let item = manager.show(&name).await?;
+            let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
+            println!("{}", path.display());
+        }
+        ResearchCliCommand::Search { query } => {
+            let hits = manager.search(&query, 25).await?;
+            let rows: Vec<(String, String, String)> = hits
+                .into_iter()
+                .map(|h| (h.name, h.title, h.snippet))
+                .collect();
+            print!("{}", ragent_research::render_search_output(&rows));
+        }
+        ResearchCliCommand::Show { name } => {
+            let item = manager.show(&name).await?;
+            let sources: Vec<(String, String, String, String)> = item
+                .sources
+                .iter()
+                .map(|s| {
+                    (
+                        s.type_str().to_string(),
+                        s.path_or_url().to_string(),
+                        s.title().to_string(),
+                        s.captured_at().to_rfc3339(),
+                    )
+                })
+                .collect();
+                          print!(
+                              "{}",
+                              ragent_research::render_show_output(
+                                  item.name.as_ref(),
+                                  &item.title,
+                                  &item.topic,
+                                  item.status.as_str(),
+                                  &item.created_at.to_rfc3339(),
+                                  &item.modified_at.to_rfc3339(),
+                                  &sources,
+                              )
+                          );        }
+        ResearchCliCommand::Delete { name, yes } => {
+            if !yes {
+                eprint!("Are you sure you want to delete research/{name}? [y/N] ");
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
+                    println!("ragent-research: cancelled");
+                    return Ok(());
+                }
+            }
+            manager.delete(&name).await?;
+            println!("ragent-research: deleted research/{name}");
+        }
+        ResearchCliCommand::Archive { name } => {
+            manager.archive(&name).await?;
+            println!("ragent-research: archived research/{name}");
+        }
+        ResearchCliCommand::Create {
+            name,
+            topic,
+            sources_dir,
+            template,
+        } => {
+            // Wire the session through a streaming JSON observer so the
+            // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
+            struct CliObserver;
+            impl SessionObserver for CliObserver {
+                fn on_event(&self, event: SessionEvent) {
+                    println!("{}", ragent_research::render_session_event_json(&event));
+                }
+            }
+            let config = SessionConfig {
+                topic: topic.clone(),
+                sources_dir: sources_dir.map(std::path::PathBuf::from),
+                template,
+                ..SessionConfig::default()
+            };
+            let title = topic
+                .split_whitespace()
+                .next()
+                .unwrap_or(&topic)
+                .to_string();
+            let session = ResearchSession::new(manager.clone(), None, None);
+            match session
+                .run(&name, &title, &config, Arc::new(CliObserver))
+                .await
+            {
+                Ok(outcome) => {
+                    println!(
+                        "ragent-research: created research/{} ({} sources)",
+                        outcome.research_name,
+                        outcome.sources.len()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("ragent-research: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        ResearchCliCommand::Unknown(sub) => {
+            eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");
+            std::process::exit(2);
+        }
+    }
     Ok(())
 }

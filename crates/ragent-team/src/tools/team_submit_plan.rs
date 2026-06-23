@@ -74,13 +74,25 @@ impl Tool for TeamSubmitPlanTool {
         }
 
         // Send plan_request to lead mailbox.
+        let correlation_id = uuid::Uuid::new_v4().to_string();
         let lead_mailbox = Mailbox::open(&team_dir, "lead")?;
-        lead_mailbox.push(MailboxMessage::new(
+        lead_mailbox.push(MailboxMessage::new_correlated(
             agent_id.clone(),
             "lead".to_string(),
             MessageType::PlanRequest,
             plan,
+            &correlation_id,
         ))?;
+
+        // M5-T4: store the correlation id on the member so the eventual
+        // PlanApproved/PlanRejected reply can copy it.
+        {
+            let mut store = TeamStore::load(&team_dir)?;
+            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                m.plan_request_id = Some(correlation_id);
+            }
+            store.save()?;
+        }
 
         Ok(ToolOutput {
             content: "Plan submitted to lead for approval.\n\

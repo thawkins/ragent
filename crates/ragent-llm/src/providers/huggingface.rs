@@ -291,14 +291,13 @@ impl HuggingFaceClient {
             let rewritten = if !request.tools.is_empty() {
                 Self::rewrite_system_prompt(system, &request.tools)
             } else {
-                system.clone()
+                (**system).to_string()
             };
             messages.push(json!({
                 "role": "system",
                 "content": rewritten
             }));
         }
-
         for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
@@ -1123,7 +1122,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: None,
             max_tokens: Some(4096),
-            system: Some("You are helpful.".to_string()),
+            system: Some(std::sync::Arc::from("You are helpful.")),
             options: HashMap::new(),
             session_id: None,
             request_id: None,

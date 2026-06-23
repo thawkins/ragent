@@ -465,7 +465,7 @@ pub fn record_to_agent_info(
         skills: payload.skills,
         memory,
         thinking: payload.thinking,
-        options,
+        options: std::sync::Arc::new(options),
         model_pinned,
     };
 

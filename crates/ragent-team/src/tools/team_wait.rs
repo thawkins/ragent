@@ -75,6 +75,13 @@ impl Tool for TeamWaitTool {
             .and_then(|v| v.as_str())
             .map(std::string::ToString::to_string);
 
+        // M3-T1: subscribe to the event bus BEFORE reading the team store so
+        // that any `TeammateIdle` / `TeammateFailed` events that fire between
+        // the store read and the wait loop are captured in `rx` rather than
+        // lost. Events that arrive while we are computing the initial
+        // `waiting_for` set are reconciled below.
+        let mut rx = ctx.event_bus.subscribe();
+
         // Load the team store to discover current membership.
         let store = if let Some(ref name) = team_name {
             TeamStore::load_by_name(name, &working_dir)
@@ -90,6 +97,7 @@ impl Tool for TeamWaitTool {
         };
 
         let resolved_team_name = store.config.name.clone();
+        let lead_session_id = store.config.lead_session_id.clone();
 
         // Determine which agent IDs to wait for.
         let requested_ids: HashSet<String> = input
@@ -141,6 +149,37 @@ impl Tool for TeamWaitTool {
             waiting_for.remove(id);
         }
 
+        // M3-T1: drain any events that arrived between the subscribe and the
+        // store read. These may report teammates that the store scan still
+        // considered active. Reconcile them into `waiting_for`.
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                Event::TeammateIdle {
+                    session_id,
+                    team_name: ev_team,
+                    agent_id,
+                } if session_id == lead_session_id
+                    && ev_team == resolved_team_name
+                    && waiting_for.contains(&agent_id) =>
+                {
+                    waiting_for.remove(&agent_id);
+                }
+                // M3-T2: handle TeammateFailed events that arrived pre-loop.
+                Event::TeammateFailed {
+                    session_id,
+                    team_name: ev_team,
+                    agent_id,
+                    ..
+                } if session_id == lead_session_id
+                    && ev_team == resolved_team_name
+                    && waiting_for.contains(&agent_id) =>
+                {
+                    waiting_for.remove(&agent_id);
+                }
+                _ => continue,
+            }
+        }
+
         if waiting_for.is_empty() {
             let summary = summarise_store(&store.config.members);
             return Ok(ToolOutput {
@@ -153,9 +192,6 @@ impl Tool for TeamWaitTool {
             });
         }
 
-        // Subscribe BEFORE the wait loop to avoid the race where a teammate
-        // becomes idle between the store read and the subscribe.
-        let mut rx = ctx.event_bus.subscribe();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
 
         tracing::info!(
@@ -174,16 +210,67 @@ impl Tool for TeamWaitTool {
                     session_id,
                     team_name: ev_team,
                     agent_id,
-                })) if session_id == ctx.session_id
+                })) if session_id == lead_session_id
                     && ev_team == resolved_team_name
                     && waiting_for.contains(&agent_id) =>
                 {
                     tracing::info!(team = %resolved_team_name, agent_id = %agent_id, "team_wait: teammate became idle");
                     waiting_for.remove(&agent_id);
                 }
+                // M3-T2: a failed teammate will never become idle; treat it
+                // as finished and remove it from the waiting set so the lead
+                // does not wait the full timeout for a dead agent.
+                Ok(Ok(Event::TeammateFailed {
+                    session_id,
+                    team_name: ev_team,
+                    agent_id,
+                    error,
+                })) if session_id == lead_session_id
+                    && ev_team == resolved_team_name
+                    && waiting_for.contains(&agent_id) =>
+                {
+                    tracing::info!(
+                        team = %resolved_team_name,
+                        agent_id = %agent_id,
+                        error = %error,
+                        "team_wait: teammate failed; treating as finished"
+                    );
+                    waiting_for.remove(&agent_id);
+                }
                 Ok(Ok(_)) => continue,
                 Ok(Err(_)) => break, // channel closed
                 Err(_) => break,     // timeout
+            }
+        }
+
+        // M3-T3: before declaring a timeout, re-read the team store and treat
+        // any member whose on-disk status is `Idle`, `Failed`, or `Stopped` as
+        // finished. This covers the case where an `EventBus` event was
+        // dropped (buffer full / no subscribers) but the teammate legitimately
+        // reached a terminal state on disk.
+        if !waiting_for.is_empty() {
+            if let Ok(fresh) = TeamStore::load_by_name(&resolved_team_name, &working_dir) {
+                let finished_on_disk: Vec<String> = fresh
+                    .config
+                    .members
+                    .iter()
+                    .filter(|m| {
+                        matches!(
+                            m.status,
+                            MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped
+                        ) && waiting_for.contains(&m.agent_id)
+                    })
+                    .map(|m| m.agent_id.clone())
+                    .collect();
+                for id in &finished_on_disk {
+                    waiting_for.remove(id);
+                }
+                tracing::info!(
+                    team = %resolved_team_name,
+                    recovered = ?finished_on_disk,
+                    remaining = ?waiting_for,
+                    "team_wait: reconciled terminal teammates from disk after timeout window"
+                );
             }
         }
 
@@ -236,7 +323,7 @@ fn summarise_store(members: &[TeamMember]) -> String {
             MemberStatus::ShuttingDown => "🔄",
             MemberStatus::Stopped => "⏹️",
         };
-        let status_str = format!("{:?}", m.status).to_lowercase();
+        let status_str = m.status.as_str();
         out.push_str(&format!(
             "- {} **{}** ({}) — {}\n",
             status_icon, m.name, m.agent_id, status_str

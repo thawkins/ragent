@@ -8,10 +8,40 @@ pub struct SpecTemplate;
 impl SpecTemplate {
     /// Generate a SPEC.md from the EARS template with the given id and title.
     pub fn generate(id: &SpecId, title: &str) -> String {
+        Self::generate_with_research(id, title, &[])
+    }
+
+    /// Generate a SPEC.md with a pre-populated `## Related Research` section
+    /// listing the supplied research items (T-041). When `research_names` is
+    /// empty, the `## Related Research` section is omitted entirely so the
+    /// template matches the un-researched default.
+    pub fn generate_with_research(id: &SpecId, title: &str, research_names: &[String]) -> String {
+        let related_section = if research_names.is_empty() {
+            String::new()
+        } else {
+            let mut s = String::from("\n## Related Research\n\n");
+            s.push_str("This spec was informed by the following research items:\n\n");
+            for name in research_names {
+                s.push_str(&format!(
+                    "- [`{name}`](../research/{name}/RESEARCH.md) — see the captured references for context.\n",
+                ));
+            }
+            s.push('\n');
+            s
+        };
+        let frontmatter = if research_names.is_empty() {
+            format!("status: draft\nid: {}\n", id.as_str())
+        } else {
+            let yaml = research_names
+                .iter()
+                .map(|n| format!("\"{n}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("status: draft\nid: {}\nresearch: [{}]\n", id.as_str(), yaml)
+        };
         format!(
             r#"---
-status: draft
-id: {id}
+{frontmatter}
 ---
 
 # Specification: {title}
@@ -97,9 +127,8 @@ id: {id}
 | [crate] | [version] | [Purpose] |
 
 ---
-
+{related_section}
 ## Glossary
-
 | Term | Definition |
 |------|------------|
 | **[Term]** | [Definition] |
@@ -108,8 +137,9 @@ id: {id}
 
 *End of Specification*
 "#,
-            id = id.as_str(),
-            title = title
+            title = title,
+            related_section = related_section,
+            frontmatter = frontmatter,
         )
     }
 }
@@ -197,6 +227,29 @@ mod tests {
         assert!(md.contains("## Glossary"));
         assert!(md.contains("status: draft"));
         assert!(md.contains("id: test"));
+    }
+
+    #[test]
+    fn test_spec_template_with_research_emits_related_section() {
+        let id = SpecId::new("test").unwrap();
+        let md = SpecTemplate::generate_with_research(
+            &id,
+            "Test Title",
+            &["rust-async".to_string(), "tokio-runtime".to_string()],
+        );
+        assert!(md.contains("## Related Research"));
+        assert!(md.contains("`rust-async`"));
+        assert!(md.contains("../research/rust-async/RESEARCH.md"));
+        assert!(md.contains("`tokio-runtime`"));
+        assert!(md.contains("research: [\"rust-async\", \"tokio-runtime\"]"));
+    }
+
+    #[test]
+    fn test_spec_template_without_research_omits_related_section() {
+        let id = SpecId::new("test").unwrap();
+        let md = SpecTemplate::generate_with_research(&id, "Test Title", &[]);
+        assert!(!md.contains("## Related Research"));
+        assert!(!md.contains("research: ["));
     }
 
     #[test]

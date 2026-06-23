@@ -304,7 +304,12 @@ mod tests {
     fn rejects_too_long() {
         let too_long = "a".repeat(MAX_LEN + 1);
         let err = ResearchName::try_new(too_long.clone()).unwrap_err();
-        assert_eq!(err, ResearchNameError::TooLong { length: MAX_LEN + 1 });
+        assert_eq!(
+            err,
+            ResearchNameError::TooLong {
+                length: MAX_LEN + 1
+            }
+        );
     }
 
     #[test]

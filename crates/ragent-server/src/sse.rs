@@ -230,6 +230,7 @@ struct TeammateMessageP<'a> {
     team_name: &'a str,
     from: &'a str,
     to: &'a str,
+    message_type: &'a str,
     preview: &'a str,
 }
 
@@ -635,15 +636,16 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             team_name,
             from,
             to,
+            message_type,
             preview,
         } => to_data(&TeammateMessageP {
             session_id,
             team_name,
             from,
             to,
+            message_type,
             preview,
         }),
-
         Event::TeammateIdle {
             session_id,
             team_name,
@@ -716,15 +718,16 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             team_name,
             from,
             to,
+            message_type,
             preview,
         } => to_data(&TeammateMessageP {
             session_id,
             team_name,
             from,
             to,
+            message_type,
             preview,
         }),
-
         Event::TaskCompleted {
             session_id,
             summary,

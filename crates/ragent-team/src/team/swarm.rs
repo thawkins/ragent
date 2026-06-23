@@ -28,6 +28,23 @@ pub struct SwarmSubtask {
     pub model: Option<String>,
 }
 
+impl SwarmSubtask {
+    /// Resolve and store a concrete agent type for this subtask.
+    ///
+    /// Uses the classification fallback chain and strips any embedded
+    /// agent-type hint from the description so it is not shown to the user.
+    pub fn resolve_agent_type(&mut self, default_agent_type: Option<&str>) {
+        let resolved = crate::team::classify::resolve_agent_type(
+            &self.title,
+            &self.description,
+            self.agent_type.as_deref(),
+            default_agent_type,
+            crate::team::classify::is_known_agent_type,
+        );
+        self.description = crate::team::classify::strip_explicit_agent_type_hint(&self.description);
+        self.agent_type = Some(resolved);
+    }
+}
 /// Root of the LLM decomposition response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwarmDecomposition {
@@ -48,6 +65,9 @@ pub struct SwarmState {
     pub spawned: bool,
     /// Whether the orchestrator has collected results and finished.
     pub completed: bool,
+    /// Optional default agent type for subtasks that do not infer a specific type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_agent_type: Option<String>,
 }
 
 // ── Decomposition prompt ────────────────────────────────────────────────────
@@ -77,10 +97,17 @@ Respond with ONLY a JSON object (no markdown fences, no explanation) matching th
       "model": null
     }
   ]
-}
+  }
 
-The "agent_type" and "model" fields are optional — omit or set to null to use defaults.
-"depends_on" is an array of task IDs that must complete first (empty array for independent tasks)."#;
+Guidance for choosing `agent_type`:
+- Use the agent type that best matches the work described in this subtask.
+- Pick from the supported types: general, coder, architect, debug, code-review,
+  doc-writer, explore, build, plan, security-reviewer, task, ask, orchestrator.
+- If a subtask is a focused single skill (security review, documentation, testing,
+  build/CI, debugging), choose the matching specialist agent type.
+- If the work is mixed or unclear, use `"general"`.
+
+The "agent_type" and "model" fields are optional — omit or set to null to use defaults."depends_on" is an array of task IDs that must complete first (empty array for independent tasks)."#;
 
 /// Build the user prompt for decomposition, injecting the user's goal.
 #[must_use]
@@ -93,9 +120,21 @@ pub fn build_decomposition_user_prompt(goal: &str) -> String {
 /// Parse the LLM's JSON response into a `SwarmDecomposition`.
 ///
 /// Handles common LLM quirks: markdown fences, leading/trailing whitespace,
-/// and trailing commas.
+/// and trailing commas. Each subtask's `agent_type` is normalised through the
+/// classification fallback chain so that a concrete, known agent type is always
+/// stored for every team member.
 pub fn parse_decomposition(raw: &str) -> Result<SwarmDecomposition, String> {
-    // Strip markdown code fences if present
+    parse_decomposition_with_default(raw, None)
+}
+
+/// Parse the LLM's JSON response and apply a default agent type override.
+///
+/// `default_agent_type` is used for subtasks that do not explicitly specify or
+/// infer a more specific agent type.
+pub fn parse_decomposition_with_default(
+    raw: &str,
+    default_agent_type: Option<&str>,
+) -> Result<SwarmDecomposition, String> {
     let trimmed = raw.trim();
     let json_str = if trimmed.starts_with("```") {
         trimmed
@@ -107,11 +146,18 @@ pub fn parse_decomposition(raw: &str) -> Result<SwarmDecomposition, String> {
         trimmed
     };
 
-    // Remove trailing commas before } or ] (common LLM mistake)
     let cleaned = remove_trailing_commas(json_str);
 
-    serde_json::from_str::<SwarmDecomposition>(&cleaned)
-        .map_err(|e| format!("Failed to parse decomposition JSON: {e}\n\nRaw response:\n{raw}"))
+    let mut decomposition: SwarmDecomposition =
+        serde_json::from_str::<SwarmDecomposition>(&cleaned).map_err(|e| {
+            format!("Failed to parse decomposition JSON: {e}\n\nRaw response:\n{raw}")
+        })?;
+
+    for task in &mut decomposition.tasks {
+        task.resolve_agent_type(default_agent_type);
+    }
+
+    Ok(decomposition)
 }
 
 /// Remove trailing commas before `}` or `]` in JSON.
@@ -168,6 +214,28 @@ mod tests {
     fn test_parse_invalid_json() {
         let input = "not json at all";
         assert!(parse_decomposition(input).is_err());
+    }
+
+    #[test]
+    fn test_parse_normalises_agent_type() {
+        let input = r#"{"tasks":[{"id":"s1","title":"Write tests","description":"Add unit tests for parser","depends_on":[],"agent_type":null}]}"#;
+        let dec = parse_decomposition(input).unwrap();
+        assert_eq!(dec.tasks[0].agent_type.as_deref(), Some("coder"));
+    }
+
+    #[test]
+    fn test_parse_strips_embedded_agent_hint() {
+        let input = r#"{"tasks":[{"id":"s1","title":"Review","description":"Audit [agent: code-review] the API","depends_on":[],"agent_type":null}]}"#;
+        let dec = parse_decomposition(input).unwrap();
+        assert_eq!(dec.tasks[0].agent_type.as_deref(), Some("code-review"));
+        assert!(!dec.tasks[0].description.contains("[agent:"));
+    }
+
+    #[test]
+    fn test_parse_respects_default_agent_type_override() {
+        let input = r#"{"tasks":[{"id":"s1","title":"Vague","description":"Do something","depends_on":[],"agent_type":null}]}"#;
+        let dec = parse_decomposition_with_default(input, Some("explore")).unwrap();
+        assert_eq!(dec.tasks[0].agent_type.as_deref(), Some("explore"));
     }
 
     #[test]

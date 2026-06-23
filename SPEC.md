@@ -5,9 +5,9 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-      <strong>Version:</strong> 0.1.0-alpha.89</p>
+      <strong>Version:</strong> 0.1.0-alpha.113</p>
 <p style="font-size: 1.1em;">
-  <strong>Date:</strong> 2026-05-22
+  <strong>Date:</strong> 2026-08-07
 </p>
 <p style="font-size: 1.1em;">
   <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -26,8 +26,10 @@
 Ragent is an open-source AI coding agent for the terminal, written entirely in
 Rust and distributed as a single statically-linked binary with zero external
 runtime dependencies. It orchestrates multiple LLM providers — Anthropic,
-OpenAI, GitHub Copilot, Ollama (local and cloud), and any OpenAI-compatible
-endpoint — behind a unified streaming interface, giving developers a powerful,
+OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama (local and cloud), xAI
+Grok, Generic OpenAI-compatible endpoints, Azure AI Foundry, Azure Resource (File),
+and Amazon Bedrock — behind a unified streaming interface,
+giving developers a powerful,
 provider-agnostic assistant that runs wherever a terminal does.
 
 ### What It Does
@@ -66,7 +68,7 @@ graph LR
 
 | Capability | Summary |
 |-----------|---------|
-| **Multi-provider LLM** | 10 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
+| **Multi-provider LLM** | 12 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
 | **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, office/PDF, web, and MCP |
@@ -102,33 +104,23 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.88). The core architecture, tool system,
-TUI, HTTP server, memory system, teams, and security layer are functional and
-under active development. The specification below documents
-the current state of all subsystems.
+Ragent is in **alpha** (v0.1.0-alpha.113). The core architecture, tool system,
+TUI, HTTP server, memory system, spec management, skills system, research system,
+multi-agent coordination, and security layer are functional and under active
+development. The specification below documents the current state of all
+subsystems.
 
-**Current Release Highlights:**
-- **Version alpha.88** — Fixed context compaction bug in `compact_history_with_atomic_tool_calls`; resolved premature loop break when trimming tool call pairs
-- **Version alpha.87** — Fixed `read` tool instructions (clarified `end_line` is absolute line number); strengthened remote push prohibitions in `AGENTS.md`; reorganized SPEC.md sections and numbering
-- **Azure Resource (File) provider** — New `azure_resource` provider reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`, supporting multiple Azure endpoints with per-resource API keys, environment-variable auth, capability tags, and thinking configuration
-- **Permission System Milestones Complete:**
-  - Milestone 1: Core Permission System (7 tasks, 20 tests passing)
-  - Milestone 2: Bash Security — 7 Layers (8 tasks, 27+ tests passing)
-- Permission dialog countdown timer now redraws live in the TUI with a 120-second timeout and `EXPIRED` state
-- Slash-command autocomplete now closes cleanly on `Esc` while preserving input and clamping the cursor safely
-- Config parse errors now report the file path, line, column, problematic line, and a caret marker for faster recovery
-- Codeindex tools are hardwired as always-allowed read-only tools and no longer trigger permission prompts
-- Workspace crate reorganisation milestones extracted `ragent-types`, `ragent-config`, `ragent-storage`, and `ragent-llm`
-- Broad tool coverage including comprehensive team coordination tools
-- Native GitLab integration with issues, merge requests, and CI/CD pipeline management
-- **Azure AI Foundry provider** — New `azure_foundry` provider for Microsoft Azure AI Foundry with OpenAI-compatible endpoints, dynamic model discovery, streaming, tool calling, vision, and reasoning levels
-- **Azure endpoint logging** — Full endpoint URL displayed in TUI log panel for Azure AI Foundry requests
-- **`/config show` slash command** — Displays current resolved configuration in the TUI
-- **SPEC.md mermaid diagram fixes** — All 14 diagrams now pass syntax validation
-- **gen-spec-pdf.sh script** — Pandoc + Chromium-based Markdown-to-PDF conversion for specifications
-- **Startup ASCII art banner** — Application name rendered in ASCII art on TUI startup with compile timestamp
-- **`/codeindex lang` filtering** — Optional language parameter for code index results (e.g., `/codeindex lang rust`)
-- **Instruction file discovery logging** — Tracks which `AGENTS.md`-style files were found and where, with discovery summary logging
+**Current Release Highlights (alpha.104 → alpha.113):**
+- **Research System** — New `/research` slash-command family and `ragent research` CLI for structured web + local cross-referenced research, with `GET/POST/DELETE /research` HTTP endpoints and spec linkage via `--from-research`
+- **`ask_user` standalone** — `ask_user` promoted from alias to standalone event-driven tool with optional multiple-choice `options` support
+- **Internal LLM subsystem removed** — Embedded Candle / LiteRT-LM internal LLM, `/internal-llm` slash commands, `InternalLlmConfig`, and the `internal_llm` Cargo feature have been removed. Compaction, session titles, and memory extraction now use provider-based fallbacks, and the `internal_llm` config key is silently ignored
+- **Model Router Provider** — Intelligent 15-dimension classifier for automatic model selection (complexity, code, vision, reasoning, etc.)
+- **Amazon Bedrock provider** — AWS-hosted models with SigV4 signing, dual Anthropic Messages / Converse APIs, and credential discovery
+- **xAI Grok provider** — New `xai` provider for the xAI Grok API
+- **`/spec impl` and `/spec implement`** — Slash commands to transition a spec to `in_progress`
+- **YOLO mode persistence** — YOLO state is saved to `ragent.json` and restored on startup
+- **HuggingFace discovery robustness** — Public `/v1/models` discovery works without token; fallback to static catalog on empty discovery
+- **Task tool family guidance** — System prompts and JSON schemas now explicitly distinguish `task_complete` (autonomous loop signal) from `team_task_complete` (team task marker); `task_complete` and `list_tasks` are hardwired auto-approved
 
 ---
 
@@ -183,7 +175,8 @@ the current state of all subsystems.
 - [Appendix A: Version History](#appendix-a-version-history)
 - [Appendix B: Documentation](#appendix-b-documentation)
 - [Appendix C: Project Contact & Repository](#appendix-c-project-contact--repository)
-- [Appendix D: Changelog (2025-01-16)](#appendix-d-changelog-2025-01-16)
+- [Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.113)](#appendix-d-changelog-v010-alpha104--v010-alpha113)
+- [Appendix E: Earlier Changelog (2025-01-16 → 2025-04-21)](#appendix-e-earlier-changelog-2025-01-16--2025-04-21)
 
 ### List of Diagrams
 
@@ -220,7 +213,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 
 ### 1.1 Key Characteristics
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama, Generic OpenAI-compatible APIs, Azure AI Foundry, Azure Resource (File), Amazon Bedrock, and Microsoft Foundry Local
+- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama (local and cloud), xAI Grok, Generic OpenAI-compatible APIs, Azure AI Foundry, Azure Resource (File), and Amazon Bedrock
 - **Comprehensive tool system** — Extensive coverage across file operations, code analysis, GitHub/GitLab integration, web access, office documents, memory, teams, and more
 - **Built-in TUI** — Full-screen ratatui interface with streaming chat, slash commands, and real-time updates
 - **HTTP server** — REST + SSE API for external integrations
@@ -412,17 +405,17 @@ graph LR
 | Provider | ID | Authentication | Features |
 |----------|-----|---------------|----------|
 | **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | Streaming, tools, vision, reasoning |
-| **OpenAI** | `openai` | `OPENAI_API_KEY` | Streaming, tools, vision |
+| **OpenAI** | `openai` | `OPENAI_API_KEY` | Streaming, tools, vision, reasoning |
 | **GitHub Copilot** | `copilot` | Auto-discovered from VS Code | Streaming, tools, vision, reasoning levels |
 | **Ollama** | `ollama` | No key required | Local models, streaming |
 | **Ollama Cloud** | `ollama_cloud` | `OLLAMA_API_KEY` | Remote Ollama servers, dynamic model discovery, vision |
-| **Hugging Face** | `huggingface` | `HF_TOKEN` | Streaming, tools, vision, dynamic model discovery |
+| **Hugging Face** | `huggingface` | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Streaming, tools, vision, dynamic model discovery |
 | **Generic OpenAI** | `generic_openai` | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
 | **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
 | **Azure Resource (File)** | `azure_resource` | File-based (`azureresources.json`) | Multiple Azure endpoints from a JSON catalog, per-resource auth, capability tags |
 | **Azure AI Foundry** | `azure_foundry` | `AZURE_AI_FOUNDRY_API_KEY` | OpenAI-compatible endpoints, dynamic model discovery, streaming, tools, vision, reasoning |
+| **xAI Grok** | `xai` | `XAI_API_KEY` | Streaming, tools, reasoning |
 | **Amazon Bedrock** | `bedrock` | AWS credentials | AWS-hosted models (Claude, Nova, Llama, Mistral), streaming, tools, vision |
-| **Microsoft Foundry Local** | `foundry_local` | No key required | Local Microsoft models (Phi-4, Phi-3.5), streaming, tools |
 
 #### Provider Features
 
@@ -687,68 +680,16 @@ ragent models --provider azure_resource
 - Duplicate IDs are deduplicated (first wins)
 - Invalid entries are skipped with a warning
 
-  #### Microsoft Foundry Local Provider
-
-      The `foundry_local` provider connects to locally-hosted Microsoft models via the official `foundry-local-sdk`. It does not require an API key and exposes a static default catalog (Phi-4, Phi-3.5 Mini, Phi-3.5 MoE) when the Foundry Local service is not running. When the service is running, dynamic model discovery via the SDK catalog is used.
-  
-      The provider can operate in two modes:
-  
-      - **Web-service mode** (default, `in_process: false`) — starts the local Foundry
-        Local web service and routes chat requests to its OpenAI-compatible endpoint.
-        Before each chat request the provider ensures the requested model is downloaded
-        and loaded into the web service's memory. It uses the web service's
-        `/models/load/{variant_id}` endpoint rather than the SDK's in-process loader,
-        because inference requests go to the web service and the in-process loader
-        leaves the web service unaware of the model. Readiness is verified by polling
-        `/models/loaded`, with a fallback to `/v1/models` for compatibility with older
-        Foundry Local builds.
-  
-      - **In-process mode** (`in_process: true`) — loads and runs the model inside the
-        ragent process using the SDK's native core library, avoiding the separate web
-        service entirely.  The model is downloaded if necessary and then loaded via the
-        SDK's in-process `Model::load()` API before the first chat token is produced.
-  
-      **Authentication:**
-      - No API key required.
-  
-      **Configuration Example (`ragent.json`):**
-      ```json
-      {
-        "provider": {
-          "foundry_local": {
-            "in_process": true,
-            "auto_start": true,
-            "device": "auto",
-            "models_path": "~/.foundry-local/models"
-          }
-        }
-      }
-      ```
-  
-      **Features:**
-      - **Local Inference** — Runs Microsoft models on the same machine as ragent
-      - **No API Key** — Zero cloud credentials required
-      - **Dual Backend** — Web-service or in-process native core inference (`in_process`)
-      - **Auto-Start Service** — Optionally starts the Foundry Local web service on first use (web-service mode)
-      - **Device Selection** — `auto`, `cpu`, `gpu`, or `npu` preference used to select a matching model variant
-      - **Model Cache Path** — Override the default model cache directory
-              - **Automatic Download/Load** — Downloads uncached models and loads them into the active backend before streaming
-              - **Robust Readiness Polling** — Web-service mode uses `/models/loaded` to confirm the model is actually in memory, preventing empty SSE streams
-              - **Web-Service Escape Hatch** — Set `RAGENT_FOUNDRY_LOCAL_FORCE_WEB=1` to force the web-service path even when `in_process: true` is configured
+        ### 3.2 Tool System
       
-              **Model Listing:**
-              ```bash
-              ragent models --provider foundry_local
-              ```
-            ### 3.2 Tool System#### File Operations Tools (14)
-
+      #### File Operations Tools (14)
 | Tool | Purpose |
 |------|---------|
 | `read` | Read file contents with line range support |
 | `write` | Create or overwrite files |
 | `create` | Create new file (alternative to write) |
 | `edit` | Replace text in existing files |
-| `multiedit` | Atomic multi-file edits |
+| `multiedit` | Atomic multi-file edits (overlap-checked, applied highest-offset-first) |
 | `patch` | Apply unified diff patches |
 | `rm` | Delete single files |
 | `move_file` | Move/rename files and directories |
@@ -773,11 +714,11 @@ ragent models --provider azure_resource
 | `bash_reset` | Reset bash shell state |
 | `run_code` | Alias for `bash` (legacy name compatibility) |
 
-#### Interactive Tools (3)
+#### Interactive Tools (4)
 
 | Tool | Purpose |
 |------|---------|
-| `question` / `ask_user` | Interactive user prompts |
+| `ask_user` | Interactive user prompts (free-text or multiple-choice via `options`) |
 | `think` | Record reasoning notes (no-op) |
 | `todo_read` | Read TODO items |
 | `todo_write` | Manage TODO items |
@@ -807,7 +748,7 @@ ragent models --provider azure_resource
 | **Sub-agent** | 5 | new_task, cancel_task, list_tasks, wait_tasks, task_complete |
 | **Plan** | 2 | plan_enter, plan_exit |
 | **MCP** | 1 | mcp_tool (McpToolWrapper) |
-| **Interactive** | 4 | question, think, todo_read, todo_write |
+| **Interactive** | 4 | ask_user, think, todo_read, todo_write |
 | **Utility** | 3 | calculator, get_env |
 
 **Total registered tools: ~111** (across all three tool crates plus aliases).
@@ -1228,21 +1169,27 @@ graph TD
     "allowlist": [],
     "denylist": []
   },
-  "bash": {
-    "allowlist": [],
-    "denylist": []
-  },
+      "bash": {
+        "allowlist": [],
+        "denylist": []
+      },
       "gitlab": {
         "instance_url": "https://gitlab.com",
         "token": null,
         "username": null
       },
       "stream": {
-        "timeout_secs": 120,
-        "max_retries": 3,
-        "retry_backoff_secs": 2
-      },  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
-  "hooks": [
+                "initial_response_timeout_secs": 300,
+                "timeout_secs": 120,
+                "max_retries": 3,
+                "retry_backoff_secs": 2
+              },      "compression": {
+        "mode": "default",
+        "auto_threshold": 0.80,
+        "preserve_system": true,
+        "preserve_last_n": 6
+      },
+      "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],  "hooks": [
     { "trigger": "on_session_start", "command": "echo 'Session started'" }
   ]
 }
@@ -1255,7 +1202,14 @@ Additional top-level configuration keys:
 - `dirs` — Directory and file path allowlist / denylist for the permission system.
 - `bash` — User-defined bash command allowlist and denylist.
 - `gitlab` — GitLab instance URL and personal access token for native integration.
-- `stream` — LLM streaming timeouts and retry behaviour.
+- `stream` — LLM streaming timeouts and retry behaviour.  Two distinct timeouts:
+  - `initial_response_timeout_secs` (default `300`) bounds how long the HTTP client
+    waits for the **first byte** of a streaming response — covers network RTT and
+    provider-side cold-start.  Forwarded to providers as `ChatRequest.stream_timeout_secs`.
+  - `timeout_secs` (default `120`) bounds the gap between **subsequent stream deltas**
+    during an in-flight response; triggers the stall-detection / retry path.
+- `compression` — Headroom context-compression configuration (`mode`, `auto_threshold`, `preserve_system`, `preserve_last_N`).
+- `yolo` — Boolean bypass flag; persisted via `/yolo`.
 - `memory` — Full memory system configuration with `structured`, `semantic`, `auto_extract`, `compaction`, `eviction`, and `decay` sub-sections.
 - `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
 - `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
@@ -1280,6 +1234,8 @@ Thinking configuration uses the shared `ThinkingConfig` type:
 | `GEMINI_API_KEY` | Google Gemini API key |
 | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Hugging Face API token |
 | `RAGENT_API_KEY_HUGGINGFACE` | Hugging Face token (ragent convention) |
+| `XAI_API_KEY` | xAI Grok API key |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_PROFILE` / `AWS_SESSION_TOKEN` | Amazon Bedrock credentials |
 | `OLLAMA_API_KEY` | Ollama Cloud authentication |
 | `OLLAMA_HOST` | Ollama local server URL |
 | `AZURE_AI_FOUNDRY_API_KEY` | Azure AI Foundry API key |
@@ -1335,7 +1291,7 @@ Multi-step wizard for configuring LLM providers.
 
 | Step | Description |
 |------|-------------|
-| **Select Provider** | Choose from Anthropic, OpenAI, GitHub Copilot, Ollama, Ollama Cloud, or Generic OpenAI |
+| **Select Provider** | Choose from Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama, Ollama Cloud, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, or xAI |
 | **Enter API Key** | Secure input with masked characters and endpoint URL entry for Generic OpenAI |
 | **Device Flow** | GitHub Copilot OAuth flow with user code and verification URL |
 | **Select Model** | Browse available models with metadata (context window, cost, capabilities, and Copilot premium request multiplier where available) |
@@ -1644,6 +1600,9 @@ Various inline widgets rendered within the message panel.
 | `/codeindex on\|off` | Toggle code indexing |
 | `/codeindex reindex` | Force full re-index |
 | `/codeindex status` | Show index status |
+| `/codeindex lang <language>` | Optional language filter for code index results |
+| **Compression** ||
+| `/compress` | Run the Headroom context-compression pipeline manually |
 | **Spec Management** ||
 | `/spec create <id> <feature>` | Generate SPEC.md + PLAN.md via explore agent |
 | `/spec list [status]` | List specs with optional status filter |
@@ -1651,6 +1610,8 @@ Various inline widgets rendered within the message panel.
 | `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
 | `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
 | `/spec task <id>` | List tasks for a spec |
+| `/spec impl <id>` | Mark a spec as `in_progress` (alias: `/spec implement`) |
+| `/spec implement <id>` | Mark a spec as `in_progress` (alias: `/spec impl`) |
 | `/spec activate <id>` | Activate a spec for context injection into agent prompts |
 | `/spec deactivate` | Deactivate the active spec |
 | `/spec coverage <id>` | Show requirement coverage report with linked tasks |
@@ -1668,6 +1629,14 @@ Various inline widgets rendered within the message panel.
 | `/team broadcast <content>` | Broadcast to all teammates |
 | `/team spawn <agent>` | Spawn teammate agent |
 | `/team cleanup` | Cleanup team resources |
+| **Research** ||
+| `/research <name> <topic>` | Run a gathering session and create the research item |
+| `/research list [--all]` | List research items (default excludes archived) |
+| `/research open <name>` | Print the absolute path of RESEARCH.md |
+| `/research search <query>` | Full-text search across all RESEARCH.md files |
+| `/research show <name>` | Show research metadata |
+| `/research delete <name> --yes` | Remove a research item |
+| `/research archive <name>` | Transition a research item to archived status |
 | **MCP** ||
 | `/mcp discover` | Discover MCP servers |
 | `/mcp list` | List connected MCP servers |
@@ -2319,12 +2288,50 @@ The memory system provides persistent, structured storage of facts, patterns, pr
 |------|---------|
 | `memory_read` | Read a named memory block (e.g. `memory_read(label="patterns")`) |
 | `memory_write` | Write or append to a memory block with optional YAML frontmatter |
-| `memory_replace` | Replace a specific string within a named memory block |
+| `memory_replace` | Replace a specific string within a named memory block (whitespace-tolerant, shares the `edit`/`multiedit` matcher) |
 | `memory_store` | Store a structured memory with category, tags, and confidence score |
 | `memory_recall` | Full-text search across structured memories with filtering |
 | `memory_forget` | Delete memories by ID, age, confidence, category, or tags |
 | `memory_search` | Semantic similarity search (embeddings-based) |
 | `memory_migrate` | Analyse a flat `MEMORY.md` and propose splitting into named blocks |
+
+### 9.2.1 Unified Whitespace-Tolerant Matcher
+
+The `edit`, `multiedit`, and `memory_replace` tools share a single seven-pass
+replacement matcher implemented in `ragent_tools_core::replace`
+(`find_replacement_range` / `find_replacement_range_diag`). This eliminates
+`old_str not found` failures caused by common LLM output quirks where the
+supplied search string no longer byte-matches the file content. Passes are
+attempted in order; the first pass that yields a unique match wins:
+
+1. **Exact** — raw substring search.
+2. **CRLF-normalised** — strips `\r` from both sides, then maps the match back
+   to original byte offsets. Handles files with `\r\n` line endings when the
+   LLM generates `\n`-only search strings (the `read` tool strips `\r` via
+   `.lines()`).
+3. **Trailing-whitespace-stripped** — strips trailing spaces/tabs from every
+   line. Handles files with trailing whitespace the LLM silently omitted.
+4. **Leading-whitespace-stripped** — strips leading spaces/tabs from every
+   line. Handles LLMs that read line-numbered output and drop the code's
+   leading indentation. The **common** indentation of the matched file lines
+   is re-applied to `new_str` while preserving relative indentation.
+5. **Collapsed-whitespace** — collapses all whitespace runs to single spaces
+   for comparison, then replaces whole lines. Handles tabs-vs-spaces, double
+   spaces, and mixed indentation. On multiple candidates the one whose
+   per-line leading whitespace is closest to the needle's is preferred.
+6. **Blank-line-normalised** — tolerates at most one leading and one trailing
+   blank-line difference between `old_str` and the file, handling
+   `str::lines()` inconsistencies.
+7. **Final-newline-normalised** — tolerates trailing `\n` presence
+   disagreements in either direction (file has it / needle has it, both
+   directions, including CRLF variants).
+
+`multiedit` additionally resolves every edit against the **original** file
+content (so byte ranges are stable), pairwise-checks edits on the same file
+for overlap (rejecting with a clear error naming the edit indices and file
+path), and applies non-overlapping edits highest-end-offset-first so the JSON
+input order does not matter. `NotFound` diagnostics carry the last matching
+pass attempted and a best-effort closest-line hint.
 
 ### 9.3 Memory Browser
 
@@ -2377,6 +2384,7 @@ The Spec Management system provides a structured workflow for writing, tracking,
 - **Validation** — Automated checks for spec completeness and EARS syntax compliance
 - **Status tracking** — State machine for spec lifecycle (draft → review → approved → implemented → verified → archived)
 - **Plan linkage** — Mandatory `PLAN.md` pairing with every `SPEC.md`
+- **Research linkage** — Optional `research: <name>` declarations in `PLAN.md` or `## Related Research` section in `SPEC.md` link the spec to prior research captured under `research/<name>/RESEARCH.md`
 - **Tool integration** — Slash commands and programmatic APIs for spec operations
 - **Reporting** — Listing, filtering, and coverage summaries across a project
 
@@ -2414,12 +2422,14 @@ specs/
 
 | Command | Purpose |
 |---------|---------|
-| `/spec create <id> <feature>` | Generate `SPEC.md` + `PLAN.md` via explore agent |
+| `/spec create <id> <feature> [--from-research <name>]` | Generate `SPEC.md` + `PLAN.md` via explore agent. `--from-research` pre-populates a `## Related Research` section. |
 | `/spec list [status]` | List specs with optional status filter |
 | `/spec search <query>` | Full-text search across `SPEC.md`, `PLAN.md`, and `REVIEW.md` |
 | `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
 | `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
 | `/spec task <id>` | List tasks for a spec |
+| `/spec impl <id>` | Mark a spec as `in_progress` (alias: `/spec implement`) |
+| `/spec implement <id>` | Mark a spec as `in_progress` (alias: `/spec impl`) |
 | `/spec activate <id>` | Activate a spec for context injection into agent prompts |
 | `/spec deactivate` | Deactivate the active spec |
 | `/spec coverage <id>` | Show requirement coverage report with linked tasks |
@@ -2436,7 +2446,16 @@ Five spec tools are available to agents for programmatic access:
 | `spec_coverage` | Generate a requirement coverage report |
 | `spec_task_update` | Update the status of a task within a spec |
 
-### 10.6 EARS Notation
+### 10.6 Research Linkage
+
+A spec can reference one or more research items (see [§21. Research System](#21-research-system) below) in two ways:
+
+1. **`PLAN.md` dependency lines** — Anywhere outside a code fence, add `research: <name>`. Multiple declarations are allowed; duplicates are ignored.
+2. **`SPEC.md` frontmatter list** — `research: ["rust-async", "tokio-runtime"]` plus a `## Related Research` section that links to each captured `RESEARCH.md`.
+
+When the spec is created via `/spec create ... --from-research <name>`, the frontmatter and section are pre-populated automatically.
+
+### 10.7 EARS Notation
 
 Requirements are written in EARS (Easy Approach to Requirements Syntax) notation. The system validates that every requirement conforms to one of five templates:
 
@@ -2773,7 +2792,7 @@ graph LR
 | `team_message` | Send a direct message to one team member |
 | `team_broadcast` | Send a message to all active teammates simultaneously |
 | `team_read_messages` | Read unread messages from the teammate's mailbox |
-| `team_shutdown_teammate` | Request graceful shutdown of a teammate (lead-only) |
+| `team_shutdown_teammate` | Request graceful or immediate shutdown of a teammate (lead-only). Pass `immediate: true` to cancel the agent loop and mark `Stopped` without waiting for `team_shutdown_ack`. |
 | `team_shutdown_ack` | Acknowledge a shutdown request and terminate |
 | `team_submit_plan` | Submit a plan to the team lead for approval |
 | `team_approve_plan` | Approve or reject a teammate's submitted plan (lead-only) |
@@ -3276,6 +3295,103 @@ When an MCP server is connected, its exposed tools are wrapped by `McpToolWrappe
 
 ---
 
+## 21. Research System
+
+> **Status:** In progress — foundational types, gatherers, and TUI/HTTP integration are implemented; manager CRUD, session orchestrator, `RESEARCH.md` assembler, references index generator, and benchmarks are still pending (see [`specs/researchsystem/PLAN.md`](researchsystem/PLAN.md)).
+
+The Research System is the first stage of the standard ragent workflow: **research → spec → implement**. It runs a gathering session that combines web search and local file cross-referencing, then writes a self-contained `RESEARCH.md` you can reference later from a spec.
+
+### 21.1 Directory Layout
+
+```text
+research/
+├── INDEX.md                       derived cache (regenerated on every change)
+├── _templates/                    optional research templates
+│   └── deepdive.md
+└── <name>/
+    ├── RESEARCH.md                YAML frontmatter + 6 required sections
+    └── sources/
+        ├── web-NN.md
+        ├── local-NN.md
+        ├── spec-NN.md
+        └── other-NN.md
+```
+
+The directory name is the validated research name — lowercase ASCII letters/digits/hyphens, 3–64 chars, starting with a letter.
+
+### 21.2 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/research <name> <topic>` | Run a gathering session and create the item |
+| `/research list [--all]` | List every item (default excludes archived) |
+| `/research open <name>` | Print the absolute path of `RESEARCH.md` |
+| `/research search <query>` | Full-text search across all `RESEARCH.md` files |
+| `/research show <name>` | Show metadata: name, title, status, sources |
+| `/research delete <name> --yes` | Remove the item (with confirmation) |
+| `/research archive <name>` | Transition to `archived` status |
+| `/research help` | Show the help message |
+
+### 21.3 CLI Sub-Commands
+
+`ragent research create|list|open|search|show|delete|archive` mirrors the TUI. Progress is emitted as machine-readable JSON lines prefixed with `ragent-research:` so callers can pipe through `jq`:
+
+```bash
+ragent research create rust-async "async/await idioms" 2>&1 \
+  | grep ragent-research \
+  | jq -R 'fromjson? | .payload'
+```
+
+### 21.4 HTTP API
+
+When the server is running (`ragent serve`), the research API is mounted under the auth-protected prefix:
+
+| Verb | Path | Body / Query | Description |
+|------|------|--------------|-------------|
+| `GET` | `/research` | — | List every item (excludes archived). |
+| `POST` | `/research` | `{name, topic, sources_dir?, template?}` | Create + run a gathering session. |
+| `GET` | `/research/<name>` | — | Show a single item with related hits. |
+| `DELETE` | `/research/<name>` | `?confirm=delete-<name>` | Delete an item (confirmation token required). |
+
+### 21.5 RESEARCH.md Sections
+
+Every `RESEARCH.md` has six numbered sections plus a References Index:
+
+1. **Topic** — the description that triggered the research.
+2. **Summary** — a one-paragraph overview of the captured evidence.
+3. **Findings** — numbered findings, each citing references like `[#1]`.
+4. **In-Project Cross-References** — relevant project files with one-line relevance notes.
+5. **Open Questions** — items the LLM should answer in a follow-up.
+6. **References Index** — markdown table of every captured source.
+
+### 21.6 Lifecycle Status
+
+- `draft` — created, no gathering run yet.
+- `in-progress` — a session is mid-flight; `RESEARCH.md` is being written.
+- `complete` — `RESEARCH.md` is fully written and references are indexed.
+- `archived` — terminal; excluded from default list (pass `--all` to include).
+
+### 21.7 Spec Linkage
+
+A spec can reference one or more research items in two ways:
+
+1. **`PLAN.md` dependency lines** — Anywhere outside a code fence, add `research: <name>`. Multiple declarations are allowed; duplicates are ignored.
+2. **`SPEC.md` frontmatter list** — `research: ["rust-async", "tokio-runtime"]` plus a `## Related Research` section that links to each captured `RESEARCH.md`.
+
+When the spec is created via `/spec create ... --from-research <name>`, the frontmatter and section are pre-populated automatically.
+
+### 21.8 Non-Functional Properties
+
+- **Atomic writes** — every file write goes through `ResearchIo::atomic_write` (write to `.tmp` then rename) so concurrent viewers never see a partially-written file.
+- **Path traversal rejection** — names containing `..`, `/`, `\\`, or a leading dot are rejected by `ResearchName::try_new` per FR-017.
+- **Closest-name suggestions** — missing-item errors include the three closest existing names by Levenshtein distance per FR-018.
+- **Web source untrusted content** — supporting files fence captured page bodies in markdown ```text``` blocks per NFR-006.
+- **Per-source size cap** — captured bodies larger than 256 KiB are truncated with a marker so `RESEARCH.md` never balloons.
+- **Criterion benchmark** — `cargo bench -p ragent-research --bench gathering_bench` provides a baseline measurement of the gathering engine.
+
+Full user guide: [`docs/research.md`](docs/research.md).
+
+---
 
 ## 20. Auto-Update Mechanism
 
@@ -3299,6 +3415,12 @@ Until then, users should update via `cargo install` or by downloading the latest
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.1.0-alpha.113 | 2026-08-07 | Research-system TUI integration wired real gatherers and completion reporting; improved keyword matching and table rendering; corrected spec status to `in_progress` |
+| v0.1.0-alpha.112 | 2026-08-06 | Corrected research-system spec status from `implemented` to `draft` |
+| v0.1.0-alpha.111 | 2026-08-06 | `ask_user` promoted to standalone event-driven tool with multiple-choice `options`; removed standalone `question` tool |
+| v0.1.0-alpha.110 | 2026-08-06 | Removed internal LLM subsystem (Candle, LiteRT-LM, `/internal-llm` commands, `internal_llm` feature) |
+| v0.1.0-alpha.105 | 2026-08-02 | Headroom compression pipeline, Model Router Provider, compression config, YOLO persistence, `/compress`, `/spec impl`, TUI toggle persistence |
+| v0.1.0-alpha.104 | 2026-07-15 | Amazon Bedrock provider, xAI Grok provider, `/spec impl` and `/spec implement` slash commands |
 | v0.1.0-alpha.88 | 2025-01-22 | Fixed context compaction bug in `compact_history_with_atomic_tool_calls`; resolved premature loop break when trimming tool call pairs |
 | v0.1.0-alpha.87 | 2025-01-22 | Fixed `read` tool instructions (clarified `end_line` is absolute); strengthened remote push prohibitions in `AGENTS.md`; reorganized SPEC.md sections and numbering |
 | v0.1.0-alpha.86 | 2025-01-21 | Azure Resource (File) provider — file-based endpoint catalog, `azureresources.json` schema, TUI integration, integration tests |
@@ -3344,11 +3466,41 @@ All documentation markdown files are located in `docs/` except for these root fi
 
 ---
 
-## Appendix D: Changelog (2025-01-16 → 2025-04-21)
+## Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.113)
+
+### Added
+- Research System — `/research` slash commands, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, spec linkage via `--from-research` and `research:` lines in `PLAN.md`
+- `ragent-research` crate — `ResearchName`, `Source`, `ResearchStatus`, `ResearchItem`, web/local gatherers, and plan-dep parser
+- `ask_user` standalone tool — event-driven question prompts with optional multiple-choice `options`
+- Headroom compression pipeline — automatic per-iteration compaction, `/compress` slash command, `CompressionStarted`/`CompressionFinished` events
+- Model Router Provider — 15-dimension classifier for automatic model selection
+- Amazon Bedrock provider — SigV4 signing, dual Anthropic Messages / Converse APIs, 9 default models, credential discovery
+- xAI Grok provider — `xai` provider for the xAI Grok API
+- `/spec impl` and `/spec implement` slash commands
+- YOLO mode persistence — saved to `ragent.json` and restored on startup
+- `compression` config block in `ragent.json`
+
+### Removed
+- Internal LLM subsystem — Candle GGUF, LiteRT-LM, `/internal-llm` slash commands, `InternalLlmConfig`, and `internal_llm` Cargo feature
+- Standalone `question` tool (functionality moved into `ask_user`)
+
+### Changed
+- HuggingFace provider discovery now tolerates missing token and falls back to the static catalog on empty discovery
+- `task_complete` and `list_tasks` are hardwired auto-approved
+- Built-in agents no longer hardcode Anthropic Claude; they auto-resolve the first available model
+- Provider setup dialog scrolls and supports all 12 providers
+- TUI `/codeindex`, `/internal-llm` (before removal), and `/tools` toggles now persist to project-local `.ragent/ragent.json`
+
+### Fixed
+- Research-system spec status corrected from overstated `implemented` to `in_progress`
+- `/research create` now wires real gatherers and reports completion in the TUI
+- Research keyword matching improved for punctuation-heavy topics
+- Context window display lag after compression — `ctx:` refreshes immediately from `CompressionFinished` events
+
+## Appendix E: Earlier Changelog (2025-01-16 → 2025-04-21)
 
 ### Added (v0.1.0-alpha.82 → v0.1.0-alpha.86)
 - Azure Resource (File) provider — New `azure_resource` provider reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`
-- `azureresources.json` file format — JSON schema with version, resources array, per-entry auth (api_key/api_key_env), capabilities whitelist, thinking config, and context window
 - TUI integration for Azure Resource provider — Dedicated picker in provider setup dialog, last-selection persistence, stale-selection cleanup
 - Azure Resource integration tests — Provider listing, persistence round-trip, ModelInfo conversion, backend resolution
 - Azure Resource documentation — `docs/userdocs/azure-resource.md` with schema reference and troubleshooting
@@ -3365,7 +3517,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Instruction file discovery logging — Tracks AGENTS.md-style file discovery with summary
 
 ### Changed (v0.1.0-alpha.82 → v0.1.0-alpha.86)
-- Provider count updated from 7 to 8 (added `azure_resource`)
+- Provider count updated from 10 to 12 (added `bedrock`, `xai`)
 
 ### Changed (v0.1.0-alpha.68 → v0.1.0-alpha.75)
 - Improved TUI slash-command autocomplete with safe `Esc` handling
@@ -3398,5 +3550,6 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Plan agent with human-in-the-loop approval
 - Enhanced bash security with 7 layers and word-boundary matching
 - Permission system now supports per-agent rules and YOLO mode
+- **Research System** (`/research` slash command, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, with spec linkage via `--from-research` and `research:` lines in `PLAN.md`)
 
 ---

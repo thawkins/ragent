@@ -32,6 +32,39 @@ use ragent_team::team::{
 };
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
+/// TUI observer that mirrors research session events to the log panel and
+/// status bar using [`Event::AgentNotice`].
+///
+/// Previously this emitted `ToolCallStart`/`TextDelta`/`ToolCallEnd` triples
+/// under a hard-coded `"research"` session id. Those events were dropped by
+/// the TUI event loop because `is_current_session` compares the event's
+/// session id with the active agent session, and the mismatched
+/// `call_id`/`tool` pair left a dangling "running" tool entry. Switching to
+/// `AgentNotice` with the real session id routes the progress line through
+/// the existing log + chat rendering, updates the status bar, and avoids
+/// polluting the tool-call list.
+struct TuiResearchObserver {
+    app_event_bus: Arc<EventBus>,
+    session_id: String,
+}
+
+impl ragent_research::SessionObserver for TuiResearchObserver {
+    fn on_event(&self, event: ragent_research::SessionEvent) {
+        let message = match &event {
+            ragent_research::SessionEvent::Done { total_sources } => {
+                format!(
+                    "research: complete — {total_sources} source(s) gathered. Use `/research open <name>` to view the result."
+                )
+            }
+            _ => ragent_research::render_session_event_json(&event),
+        };
+        self.app_event_bus.publish(Event::AgentNotice {
+            session_id: self.session_id.clone(),
+            message,
+        });
+    }
+}
+
 use crate::input::{self, InputAction};
 use crate::tips;
 
@@ -85,13 +118,12 @@ impl Completer for RagentCompleter {
                 role: "user".to_string(),
                 content: ChatContent::Text(user.to_string()),
             }]),
-            tools: Arc::new(vec![]),
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            system: Some(system.to_string()),
-            options: Default::default(),
-            session_id: None,
+                          tools: Arc::new(vec![]),
+                          temperature: None,
+                          top_p: None,
+                          max_tokens: None,
+                          system: Some(std::sync::Arc::from(system)),
+                          options: Default::default(),            session_id: None,
             request_id: None,
             stream_timeout_secs: None,
             thinking: None,
@@ -119,6 +151,45 @@ impl MentionSpan {
     fn query<'a>(&self, input: &'a str) -> &'a str {
         &input[self.token_start..self.token_end]
     }
+}
+
+/// Extract the preformatted code-block body from a `/research` slash response.
+///
+/// Research CLI output is already plain text (fixed-width tables/bullets), so
+/// we avoid the markdown→HTML→text conversion that mangles columns.  Returns
+/// `None` for non-research responses or for research responses that are not
+/// wrapped in a fenced code block.
+fn try_extract_research_code_block(text: &str) -> Option<String> {
+    if !text.starts_with("From: /research") {
+        return None;
+    }
+    let fence_start = text.find("\n```\n")?;
+    let body_start = fence_start + 5;
+    let body_end = body_start + text[body_start..].find("\n```")?;
+    let body = &text[body_start..body_end];
+    let prefix = &text[..fence_start];
+    Some(format!("{}\n\n{}", prefix.trim_end(), body))
+}
+
+/// Parse `/swarm` argument string.
+///
+/// Supports an optional `--agent <type>` flag, which may appear before or
+/// after the prompt. Returns the prompt text and the default agent type.
+fn parse_swarm_args(args: &str) -> (String, Option<String>) {
+    let mut agent_type: Option<String> = None;
+    let mut parts = Vec::new();
+    let mut tokens = args.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
+        if token == "--agent" {
+            if let Some(next) = tokens.next() {
+                agent_type = Some(next.to_string());
+            }
+        } else {
+            parts.push(token);
+        }
+    }
+    let prompt = parts.join(" ");
+    (prompt, agent_type)
 }
 
 impl App {
@@ -234,6 +305,13 @@ impl App {
     /// Only processes strings that begin with `"From: /"` (slash command responses).
     /// Plain runtime assistant text is returned unchanged.
     pub fn render_markdown_to_ascii(&mut self, text: &str) -> String {
+        // Research slash-command responses are already rendered as fixed-width
+        // plain text inside a fenced code block.  Passing them through the
+        // markdown→HTML→text pipeline and then `normalize_ascii_tables` re-wraps
+        // and misaligns columns.  Return the preformatted content directly.
+        if let Some(research) = try_extract_research_code_block(text) {
+            return research;
+        }
         // Only convert markdown-like slash output; preserve plain runtime text.
         if !text.starts_with("From: /") {
             return text.to_string();
@@ -1040,19 +1118,28 @@ impl App {
         };
         let Some(outcome) = outcome else { return };
         match outcome {
-            Ok(raw_json) => match team::parse_decomposition(&raw_json) {
-                Ok(decomposition) => {
-                    self.execute_swarm_decomposition(decomposition);
+            Ok(raw_json) => {
+                let default_agent_type = self
+                    .swarm_state
+                    .as_ref()
+                    .and_then(|s| s.default_agent_type.as_deref());
+                match team::parse_decomposition_with_default(&raw_json, default_agent_type) {
+                    Ok(decomposition) => {
+                        self.execute_swarm_decomposition(decomposition);
+                    }
+                    Err(msg) => {
+                        self.status = "⚠ swarm: decomposition parse error".to_string();
+                        self.append_assistant_text(&format!(
+                            "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
+                            msg
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!("Swarm parse error: {}", msg),
+                        );
+                    }
                 }
-                Err(msg) => {
-                    self.status = "⚠ swarm: decomposition parse error".to_string();
-                    self.append_assistant_text(&format!(
-                        "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
-                        msg
-                    ));
-                    self.push_log_no_agent(LogLevel::Warn, format!("Swarm parse error: {}", msg));
-                }
-            },
+            }
             Err(msg) => {
                 self.status = format!("⚠ swarm failed: {}", msg);
                 self.append_assistant_text(&format!(
@@ -3213,11 +3300,13 @@ impl App {
             // Only reconcile when explicitly requested (i.e. when the team was seeded
             // via the LLM tool path and members may be queued in Spawning state).
             if reconcile {
-                manager.reconcile_spawning_members();
+                manager.clone().reconcile_spawning_members();
             }
+            // M6-T1: start the teammate watchdog so hung teammates are
+            // detected and marked Failed without waiting for team_wait.
+            manager.clone().start_watchdog();
         }
     }
-
     /// Best-effort hydration for teammate session IDs from on-disk team config.
     ///
     /// Some events (e.g. spawn) may arrive before session IDs are fully reflected
@@ -4262,13 +4351,31 @@ impl App {
 
     fn set_tool_visibility_state(&mut self, switch: &str, enabled: bool) -> bool {
         match switch {
-            "office" => self.tool_visibility.office = enabled,
-            "github" => self.tool_visibility.github = enabled,
-            "gitlab" => self.tool_visibility.gitlab = enabled,
-            "teams" => self.tool_visibility.teams = enabled,
-            "agents" => self.tool_visibility.agents = enabled,
-            "plan" => self.tool_visibility.plan = enabled,
-            "codeindex" => self.tool_visibility.codeindex = enabled,
+            "office" => {
+                self.tool_visibility.office = enabled;
+                self.tool_visibility.specified.office = true;
+            }
+            "github" => {
+                self.tool_visibility.github = enabled;
+                self.tool_visibility.specified.github = true;
+            }
+            "gitlab" => {
+                self.tool_visibility.gitlab = enabled;
+                self.tool_visibility.specified.gitlab = true;
+            }
+            "teams" => {
+                self.tool_visibility.teams = enabled;
+                self.tool_visibility.specified.teams = true;
+            }
+            "agents" => {
+                self.tool_visibility.agents = enabled;
+                self.tool_visibility.specified.agents = true;
+            }
+            "plan" => {
+                self.tool_visibility.plan = enabled;
+                self.tool_visibility.specified.plan = true;
+            }
+            "codeindex" => self.tool_visibility.set_codeindex(enabled),
             _ => return false,
         }
         true
@@ -6347,6 +6454,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           spec_manager: session_processor.spec_manager.get().cloned(),
                                                                                                                                                                                                                           active_spec_id: session_processor.active_spec.read().await.clone(),
                                                                                                                                                                                                                           config: Some(Arc::new(ragent_core::config::Config::load().unwrap_or_default())),
+                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                                                                                                                                                                                                                       };                                                    let _ = tool.execute(input, &ctx).await;                                                }
                                             });
                                     });
@@ -7851,10 +7959,9 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
             }
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
-                let (sub, rest) = args
+                let (sub, _rest) = args
                     .split_once(char::is_whitespace)
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
-
                 match sub {
                     "help" => {
                         let help = "\
@@ -7878,18 +7985,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     _ => {
                         // /swarm <prompt> — decompose and execute
-                        let full_prompt = if sub.is_empty() {
-                            String::new()
-                        } else if rest.is_empty() {
-                            sub.to_string()
-                        } else {
-                            format!("{} {}", sub, rest)
-                        };
+                        // Parse optional flags: --agent <type>
+                        let (full_prompt, default_agent_type) = parse_swarm_args(args);
 
                         if full_prompt.is_empty() {
-                            let help = "From: /swarm\n\n\
-Usage: `/swarm <prompt>` — describe what you want the swarm to accomplish.\n\
-Type `/swarm help` for more info.\n";
+                            let help = "From: /swarm\n\nUsage: `/swarm <prompt>` — describe what you want the swarm to accomplish.\nUse `/swarm --agent <type> <prompt>` to set a default agent type for all subtasks.\nType `/swarm help` for more info.\n";
                             self.append_assistant_text(help);
 
                             return;
@@ -7900,6 +8000,16 @@ Type `/swarm help` for more info.\n";
                                 "⚠ A swarm is already active — use /swarm cancel first".to_string();
                             return;
                         }
+
+                        // Store prompt and default agent type for later use when decomposition returns.
+                        self.swarm_state = Some(team::SwarmState {
+                            team_name: String::new(),
+                            prompt: full_prompt.clone(),
+                            decomposition: team::SwarmDecomposition { tasks: vec![] },
+                            spawned: false,
+                            completed: false,
+                            default_agent_type,
+                        });
 
                         // Require provider + model
                         let (provider_id, model_id) = match self
@@ -7927,17 +8037,11 @@ Type `/swarm help` for more info.\n";
 
                         // Show user message in chat
                         self.append_assistant_text(&format!(
-                            "From: /swarm\n## 🐝 Swarm Decomposition\n\n\
-                            Analysing your goal and breaking it into parallel subtasks…\n\n\
-                            > {}\n",
-                            full_prompt
-                        ));
-
-                        // Store prompt for later use when decomposition returns
-                        {
-                            // We'll create the swarm state after decomposition returns
-                            // For now just store the prompt in a temporary field
-                        }
+                                                                                                  "From: /swarm\n## 🐝 Swarm Decomposition\n\n\
+                                                                                                  Analysing your goal and breaking it into parallel subtasks…\n\n\
+                                                                                                  > {}\n",
+                                                                                                  full_prompt
+                                                                                              ));
 
                         // Spawn async LLM call for decomposition
                         let registry = Arc::clone(&self.provider_registry);
@@ -7951,7 +8055,6 @@ Type `/swarm help` for more info.\n";
                                 provider_id,
                                 model_id,
                             };
-
                             let system = team::DECOMPOSITION_SYSTEM_PROMPT;
                             let user = team::build_decomposition_user_prompt(&full_prompt);
 
@@ -8054,6 +8157,11 @@ Type `/swarm help` for more info.\n";
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
                 }
+            }
+
+            // ── /research ────────────────────────────────────────────────
+            "research" => {
+                self.handle_research_command(args);
             }
 
             // ── /spec ────────────────────────────────────────────────────────
@@ -9548,9 +9656,14 @@ Type `/swarm help` for more info.\n";
                 match sub {
                     "on" | "enable" => {
                         self.code_index_enabled = true;
-                        self.tool_visibility.codeindex = true;
+                        // Use the explicit setter so the value is marked as
+                        // user-specified and persisted to the config file (it
+                        // would otherwise be stripped by the default-omission
+                        // behaviour and lost on restart if a global config
+                        // disagrees).
+                        self.tool_visibility.set_codeindex(true);
                         let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.code_index.enabled = true;
+                        cfg.code_index.set_enabled(true);
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
                         if self.code_index.is_some() {
@@ -9634,9 +9747,14 @@ Type `/swarm help` for more info.\n";
                     }
                     "off" | "disable" => {
                         self.code_index_enabled = false;
-                        self.tool_visibility.codeindex = false;
+                        // Use the explicit setter so `enabled: false` is marked
+                        // user-specified and written to the config file. Without
+                        // this, a config that previously omitted `enabled` (i.e.
+                        // defaulted to true) would not persist the disable, and
+                        // codeindex would silently re-enable on restart.
+                        self.tool_visibility.set_codeindex(false);
                         let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.code_index.enabled = false;
+                        cfg.code_index.set_enabled(false);
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
                         let was_active = self.code_index.is_some();
@@ -10559,7 +10677,7 @@ Type `/swarm help` for more info.\n";
                                                                                                                                                                               let id = member.agent_id.clone();
                                                                                                                                                                               handle.spawn(async move {
                                                                                                                                                                                   if let Some(tm) = tm {
-                                                                                                                                                                                      let _ = tm.shutdown_teammate(&id).await;
+                                                                                                                                                                                      let _ = tm.shutdown_teammate(&id, false).await;
                                                                                                                                                                                   }
                                                                                                                                                                               });
                                                                                                                                                                           }
@@ -11185,7 +11303,7 @@ Type `/swarm help` for more info.\n";
                         let id = focused.clone();
                         handle.spawn(async move {
                             if let Some(tm) = tm {
-                                let _ = tm.shutdown_teammate(&id).await;
+                                let _ = tm.shutdown_teammate(&id, false).await;
                             }
                         });
                     }
@@ -11199,7 +11317,7 @@ Type `/swarm help` for more info.\n";
                         let id = focused.clone();
                         handle.spawn(async move {
                             if let Some(tm) = tm {
-                                let _ = tm.shutdown_teammate(&id).await;
+                                let _ = tm.shutdown_teammate(&id, false).await;
                             }
                         });
                     }
@@ -12608,6 +12726,7 @@ Type `/swarm help` for more info.\n";
                 ref team_name,
                 ref from,
                 ref to,
+                ref message_type,
                 ref preview,
             } if self.is_current_session(session_id) => {
                 if from.as_str() != "lead" {
@@ -12623,7 +12742,7 @@ Type `/swarm help` for more info.\n";
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("📨 [{team_name}] {from} → {to}: {preview}"),
+                    format!("📨 [{team_name}] {from} → {to} ({message_type}): {preview}"),
                 );
             }
             Event::TeammateP2PMessage {
@@ -12631,6 +12750,7 @@ Type `/swarm help` for more info.\n";
                 ref team_name,
                 ref from,
                 ref to,
+                ref message_type,
                 ref preview,
             } if self.is_current_session(session_id) => {
                 // Track sent count for sender.
@@ -12644,7 +12764,7 @@ Type `/swarm help` for more info.\n";
                 to_counts.1 = to_counts.1.saturating_add(1);
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
+                    format!("🔀 [{team_name}] P2P {from} → {to} ({message_type}): {preview}"),
                 );
             }
             Event::TeammateIdle {
@@ -12658,6 +12778,11 @@ Type `/swarm help` for more info.\n";
                     .find(|m| m.agent_id == *agent_id)
                 {
                     m.status = MemberStatus::Idle;
+                }
+                // M6-T1: record progress so the watchdog does not flag this
+                // teammate as hung.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -12677,6 +12802,11 @@ Type `/swarm help` for more info.\n";
                 {
                     m.status = MemberStatus::Failed;
                     m.last_spawn_error = Some(error.clone());
+                }
+                // M6-T1: record progress so the watchdog stops tracking
+                // this agent.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
                 }
                 let short_err = if error.len() > 200 {
                     let mut end = 200;
@@ -12706,6 +12836,10 @@ Type `/swarm help` for more info.\n";
                     m.status = MemberStatus::Working;
                     m.current_task_id = Some(task_id.clone());
                 }
+                // M6-T1: record progress.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
+                }
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
@@ -12723,6 +12857,10 @@ Type `/swarm help` for more info.\n";
                     .find(|m| m.agent_id == *agent_id)
                 {
                     m.current_task_id = None;
+                }
+                // M6-T1: record progress.
+                if let Some(tm) = self.session_processor.team_manager.get() {
+                    tm.record_progress(agent_id);
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -13000,6 +13138,305 @@ Type `/swarm help` for more info.\n";
         self.push_log(level, message, None);
     }
 
+    /// Dispatch `/research <subcommand>` to the `ragent-research` crate.
+    /// Mirrors the existing `/spec` slash command family (T-025, T-027,
+    /// T-028, T-029, T-030, T-031, T-032). The TUI displays the same
+    /// JSON-line output the CLI emits by mirroring it into the log panel
+    /// so users get the same progress feedback in either interface.
+    fn handle_research_command(&mut self, args: &str) {
+        use ragent_research::cli::ResearchCliCommand;
+        use ragent_research::{ResearchManager, SessionConfig};
+        use std::sync::Arc;
+
+        let cmd = ResearchCliCommand::parse(args);
+        if matches!(cmd, ResearchCliCommand::Help) {
+            self.append_assistant_text(ResearchCliCommand::build_help_message());
+            self.status = "research: help".to_string();
+            return;
+        }
+        let manager = ResearchManager::new("research");
+        if tokio::runtime::Handle::try_current().is_err() {
+            self.append_assistant_text(
+                "From: /research\n\n**Error:** async runtime not available in this context.",
+            );
+            return;
+        }
+
+        if !self.ensure_session() {
+            return;
+        }
+        let config_arc = ragent_core::Config::load().ok().map(Arc::new);
+        let observer = Arc::new(TuiResearchObserver {
+            app_event_bus: self.event_bus.clone(),
+            session_id: self.session_id.clone().unwrap_or_default(),
+        });
+
+        match cmd {
+            ResearchCliCommand::Help => unreachable!(),
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                sources_dir,
+                template,
+            } => {
+                self.status = format!("research: writing research/{name}/RESEARCH.md…");
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("research: create '{name}' for topic: {topic}"),
+                );
+                let config = SessionConfig {
+                    topic: topic.clone(),
+                    sources_dir: sources_dir.map(std::path::PathBuf::from),
+                    template,
+                    ..SessionConfig::default()
+                };
+                let title = topic
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(&topic)
+                    .to_string();
+                let session = crate::research_adapter::build_research_session(
+                    &self.session_processor.tool_registry,
+                    manager.clone(),
+                    self.session_id.clone().unwrap_or_default(),
+                    std::env::current_dir().unwrap_or_else(|_| self.cwd.clone().into()),
+                    self.event_bus.clone(),
+                    Some(self.storage.clone()),
+                    config_arc,
+                );
+                let observer_clone = observer.clone();
+                let name_for_spawn = name.clone();
+                let topic_for_assistant = topic.clone();
+                tokio::spawn(async move {
+                    let outcome = session
+                        .run(&name_for_spawn, &title, &config, observer_clone)
+                        .await;
+                    match outcome {
+                        Ok(o) => eprintln!(
+                            "research: created research/{} with {} sources",
+                            o.research_name,
+                            o.sources.len()
+                        ),
+                        Err(e) => eprintln!("research: error: {e}"),
+                    }
+                });
+                let rendered = format!(
+                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\nTopic: {topic_for_assistant}\n\nEach phase (web, local, specs, assemble, finalize) streams a JSON line into the log panel.\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
+                );
+                self.append_assistant_text(&rendered);
+            }
+            ResearchCliCommand::List { all } => {
+                self.status = format!(
+                    "research: listing items{}…",
+                    if all { " (including archived)" } else { "" }
+                );
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    match mgr.list(all).await {
+                        Ok(items) => {
+                            let rows: Vec<(String, String, String, String, String)> = items
+                                .into_iter()
+                                .map(|i| {
+                                    (
+                                        i.name.to_string(),
+                                        i.title,
+                                        i.status.as_str().to_string(),
+                                        i.created_at.to_rfc3339(),
+                                        i.modified_at.to_rfc3339(),
+                                    )
+                                })
+                                .collect();
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research list\n\n```\n{}\n```",
+                                    ragent_research::render_list_output(&rows)
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research list\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Open { name } => {
+                self.status = format!("research: opening '{name}'…");
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    match mgr.show(&name).await {
+                        Ok(item) => {
+                            let root = mgr.root().to_path_buf();
+                            let path =
+                                ragent_research::ResearchIo::research_md_path(&root, &item.name);
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research open\n\n• Name: `{}`\n• Title: {}\n• Status: {}\n• Path: `{}`",
+                                    item.name,
+                                    item.title,
+                                    item.status.as_str(),
+                                    path.display(),
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research open\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Search { query } => {
+                self.status = format!("research: searching for '{query}'…");
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    match mgr.search(&query, 25).await {
+                        Ok(hits) => {
+                            let rows: Vec<(String, String, String)> = hits
+                                .into_iter()
+                                .map(|h| (h.name, h.title, h.snippet))
+                                .collect();
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research search\n\n```\n{}\n```",
+                                    ragent_research::render_search_output(&rows)
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research search\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Show { name } => {
+                self.status = format!("research: showing '{name}'…");
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    match mgr.show(&name).await {
+                        Ok(item) => {
+                            let sources: Vec<(String, String, String, String)> = item
+                                .sources
+                                .iter()
+                                .map(|s| {
+                                    (
+                                        s.type_str().to_string(),
+                                        s.path_or_url().to_string(),
+                                        s.title().to_string(),
+                                        s.captured_at().to_rfc3339(),
+                                    )
+                                })
+                                .collect();
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research show\n\n```\n{}\n```",
+                                    ragent_research::render_show_output(
+                                        item.name.as_ref(),
+                                        &item.title,
+                                        &item.topic,
+                                        item.status.as_str(),
+                                        &item.created_at.to_rfc3339(),
+                                        &item.modified_at.to_rfc3339(),
+                                        &sources,
+                                    )
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research show\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Delete { name, yes } => {
+                if !yes {
+                    self.append_assistant_text(&format!(
+                        "From: /research delete\n\nRefusing to delete research/{name} without confirmation. Re-run with `--yes` to skip this prompt."
+                    ));
+                    return;
+                }
+                self.status = format!("research: deleting '{name}'…");
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    let session_id_for_notice = session_id.clone();
+                    match mgr.delete(&name).await {
+                        Ok(()) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research delete\n\n✅ Deleted research/{name}."
+                                ),
+                            });
+                            event_bus.publish(Event::AgentNotice {
+                                session_id: session_id_for_notice,
+                                message: format!("research: deleted research/{name}"),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research delete\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Archive { name } => {
+                self.status = format!("research: archiving '{name}'…");
+                let mgr = manager.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id = self.session_id.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    match mgr.archive(&name).await {
+                        Ok(()) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!(
+                                    "From: /research archive\n\n✅ Archived research/{name}."
+                                ),
+                            });
+                        }
+                        Err(e) => {
+                            event_bus.publish(Event::TextDelta {
+                                session_id,
+                                text: format!("From: /research archive\n\n**Error:** {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            ResearchCliCommand::Unknown(sub) => {
+                self.append_assistant_text(&format!(
+                    "From: /research\n\n**Error:** unknown subcommand `{sub}`. Try `/research help`."
+                ));
+            }
+        }
+    }
+
     fn open_output_view_session(&mut self, session_id: String, label: String) {
         self.selected_agent_session_id = Some(session_id.clone());
         self.output_view = Some(OutputViewState {
@@ -13008,7 +13445,6 @@ Type `/swarm help` for more info.\n";
             max_scroll: 0,
         });
     }
-
     /// Suspend a sub-agent task (pause without killing).
     fn suspend_agent_task(&mut self, task_id: &str) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -13286,9 +13722,9 @@ Type `/swarm help` for more info.\n";
                 // Build display table
                 let mut output = format!(
                     "From: /swarm\n## 🐝 Swarm Created: {team_name}\n\n\
-                    **{task_count} subtasks** decomposed and seeded.\n\n\
-                    | ID | Title | Dependencies |\n\
-                    |----|-------|--------------|\n"
+                                      **{task_count} subtasks** decomposed and seeded.\n\n\
+                                      | ID | Title | Agent Type | Dependencies |\n\
+                                      |----|-------|------------|--------------|\n"
                 );
                 for st in &decomposition.tasks {
                     let deps = if st.depends_on.is_empty() {
@@ -13296,21 +13732,32 @@ Type `/swarm help` for more info.\n";
                     } else {
                         st.depends_on.join(", ")
                     };
-                    output.push_str(&format!("| {} | {} | {} |\n", st.id, st.title, deps));
+                    let agent = st
+                        .agent_type
+                        .as_deref()
+                        .unwrap_or(ragent_team::team::DEFAULT_AGENT_TYPE);
+                    output.push_str(&format!(
+                        "| {} | {} | {} | {} |\n",
+                        st.id, st.title, agent, deps
+                    ));
                 }
                 output.push_str("\nSpawning teammates…\n");
                 self.append_assistant_text(&output);
 
                 // Record swarm state (prompt is blank for now — it was consumed in the slash command)
                 let swarm_prompt = String::new();
+                let default_agent_type = self
+                    .swarm_state
+                    .as_ref()
+                    .and_then(|s| s.default_agent_type.clone());
                 self.swarm_state = Some(SwarmState {
                     team_name: team_name.clone(),
                     prompt: swarm_prompt,
                     decomposition: decomposition.clone(),
                     spawned: false,
                     completed: false,
+                    default_agent_type,
                 });
-
                 // Spawn one teammate per subtask
                 self.spawn_swarm_teammates(&team_name, &decomposition, &store.dir);
             }
@@ -13332,28 +13779,13 @@ Type `/swarm help` for more info.\n";
 
         for subtask in &decomposition.tasks {
             let teammate_name = format!("swarm-{}", subtask.id);
+
+            // Resolve per-subtask agent type (classification fallback already applied).
             let agent_type = subtask
                 .agent_type
                 .as_deref()
-                .unwrap_or("general")
+                .unwrap_or(ragent_team::team::DEFAULT_AGENT_TYPE)
                 .to_string();
-
-            // Build a rich prompt with task context
-            let prompt = format!(
-                "## Swarm Task: {}\n\n\
-                **Task ID:** {}\n\
-                **Title:** {}\n\n\
-                {}\n\n\
-                You are part of a swarm team. Complete this specific task.\n\n\
-                IMPORTANT: Your VERY FIRST action must be a tool call. \
-                Call `team_read_messages` with team_name set to the team name from your context. \
-                Do NOT respond with text first — call the tool immediately.\n\n\
-                After reading messages, do the work described above using tool calls \
-                (glob, read, bash, etc.). \
-                When done, call `team_task_complete` to mark task \"{}\" as completed.\n\
-                Focus only on your assigned task — other teammates are handling other parts.",
-                subtask.title, subtask.id, subtask.title, subtask.description, subtask.id
-            );
 
             // Parse per-subtask model override
             let teammate_model: Option<ragent_core::agent::ModelRef> =
@@ -13373,6 +13805,23 @@ Type `/swarm help` for more info.\n";
             } else {
                 MemberStatus::Spawning
             };
+
+            // Build a rich prompt with task context
+            let prompt = format!(
+                "## Swarm Task: {}\n\n\
+                **Task ID:** {}\n\
+                **Title:** {}\n\n\
+                {}\n\n\
+                You are part of a swarm team. Complete this specific task.\n\n\
+                IMPORTANT: Your VERY FIRST action must be a tool call. \
+                Call `team_read_messages` with team_name set to the team name from your context. \
+                Do NOT respond with text first — call the tool immediately.\n\n\
+                After reading messages, do the work described above using tool calls \
+                (glob, read, bash, etc.). \
+                When done, call `team_task_complete` to mark task \"{}\" as completed.\
+                Focus only on your assigned task — other teammates are handling other parts.",
+                subtask.title, subtask.id, subtask.title, subtask.description, subtask.id
+            );
 
             // Record member in config
             {
@@ -13401,8 +13850,8 @@ Type `/swarm help` for more info.\n";
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!(
-                    "🐝 Swarm teammate: {} ({}) — {}",
-                    teammate_name, subtask.id, status_label
+                    "🐝 Swarm teammate: {} ({}) — {} ({} agent)",
+                    teammate_name, subtask.id, status_label, agent_type
                 ),
             );
         }
@@ -13530,14 +13979,16 @@ Type `/swarm help` for more info.\n";
         } else {
             for m in &self.team_members {
                 let status = format!("{:?}", m.status).to_lowercase();
-                output.push_str(&format!("  • {} — {}\n", m.name, status));
+                output.push_str(&format!(
+                    "  • {} — {} ({} agent)\n",
+                    m.name, status, m.agent_type
+                ));
             }
         }
 
         if completed == total && total > 0 {
             output.push_str("\n🎉 **All tasks complete!** Use `/swarm cancel` to clean up.\n");
         }
-
         self.append_assistant_text(&output);
     }
 
@@ -14151,14 +14602,19 @@ mod tests {
             permission_checker,
             event_bus: event_bus.clone(),
             task_manager: std::sync::OnceLock::new(),
-            team_manager: std::sync::OnceLock::new(),
-            mcp_client: std::sync::OnceLock::new(),
-            code_index: std::sync::OnceLock::new(),
+                          team_manager: std::sync::OnceLock::new(),
+                          // M8-T1: team-context cache (unused in tests, but required by the
+                          // struct literal). Mirrors the wiring in `src/main.rs`.
+                          team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+                              std::collections::HashMap::new(),
+                          )),
+                          mcp_client: std::sync::OnceLock::new(),            code_index: std::sync::OnceLock::new(),
             extraction_engine: std::sync::OnceLock::new(),
             stream_config: ragent_core::config::StreamConfig::default(),
             active_spec: tokio::sync::RwLock::new(None),
             spec_manager: std::sync::OnceLock::new(),
             cached_tool_definitions: parking_lot::RwLock::new(None),
+        cached_tool_names: parking_lot::RwLock::new(None),
             auto_approve: false,
             system_prompt_cache: parking_lot::RwLock::new(None),
         });
@@ -14441,14 +14897,27 @@ mod tests {
     }
 
     #[test]
-    fn test_is_discovery_notice_rejects_other_notices() {
-        // The other AgentNotice producers (retry hints, stream errors)
-        // must still flow through to the status bar.
-        assert!(!is_discovery_notice(
-            "Retrying LLM request (attempt 1/3), waiting 1s..."
-        ));
-        assert!(!is_discovery_notice("rate limit exceeded — will retry"));
-        assert!(!is_discovery_notice(""));
-        assert!(!is_discovery_notice("instruction file missing"));
+    fn test_try_extract_research_code_block_preserves_preformatted_tables() {
+        let text = "From: /research list\n\n```\nNAME                 TITLE                            STATUS      CREATED                  MODIFIED                 \n------------------------------------------------------------------------------------------------------------------------\nagentassign          agentassign                      draft       2026-06-20T05:13:16Z   2026-06-20T05:13:16Z   \n```";
+        let extracted = try_extract_research_code_block(text).expect("research code block");
+        assert!(extracted.contains("From: /research list"));
+        assert!(extracted.contains("NAME"));
+        assert!(extracted.contains("------------------------------------------------------------------------------------------------------------------------"));
+        assert!(!extracted.contains("```"));
+    }
+
+    #[test]
+    fn test_try_extract_research_code_block_returns_none_for_plain_research_response() {
+        let text = "From: /research create\n\nGathering sources…";
+        assert!(try_extract_research_code_block(text).is_none());
+    }
+
+    #[test]
+    fn test_render_markdown_to_ascii_bypasses_research_code_blocks() {
+        let mut app = test_app();
+        let text = "From: /research show\n\n```\nResearch item: x\n```";
+        let rendered = app.render_markdown_to_ascii(text);
+        assert!(rendered.contains("Research item: x"));
+        assert!(!rendered.contains("From: /research show\nFrom:"));
     }
 }

@@ -160,10 +160,6 @@ pub struct TaskManager {
     tasks: Arc<RwLock<HashMap<String, TaskEntry>>>,
     /// Cancel flags for running tasks.
     cancel_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    /// Suspend flags for running tasks (true = suspended).
-    suspend_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    /// Kill flags for tasks being forcibly terminated.
-    kill_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Event bus for publishing sub-agent lifecycle events.
     event_bus: Arc<EventBus>,
     /// Session processor for running sub-agent loops.
@@ -182,8 +178,6 @@ impl TaskManager {
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             cancel_flags: Arc::new(RwLock::new(HashMap::new())),
-            suspend_flags: Arc::new(RwLock::new(HashMap::new())),
-            kill_flags: Arc::new(RwLock::new(HashMap::new())),
             event_bus,
             processor,
             max_background,
@@ -492,12 +486,17 @@ impl TaskManager {
                     });
                 }
                 Err(e) => {
+                    // M7-T4: Use typed cancellation detection instead of
+                    // fragile string matching. The processor returns a
+                    // Cancelled error variant when the cancel flag is
+                    // set; we check for that rather than
+                    // `error_msg.contains("cancelled")`.
+                    let is_cancelled = is_cancel_error(&e);
                     let error_msg = e.to_string();
-                    let cancelled = error_msg.contains("cancelled");
                     {
                         let mut t = tasks.write().await;
                         if let Some(entry) = t.get_mut(&tid) {
-                            if cancelled {
+                            if is_cancelled {
                                 entry.status = TaskStatus::Cancelled;
                             } else {
                                 entry.status = TaskStatus::Failed;
@@ -508,7 +507,7 @@ impl TaskManager {
                     }
                     cancel_flags.write().await.remove(&tid);
 
-                    if cancelled {
+                    if is_cancelled {
                         event_bus.publish(Event::SubagentCancelled {
                             session_id: parent_sid,
                             task_id: tid,
@@ -542,60 +541,46 @@ impl TaskManager {
         }
     }
 
-    /// Suspend a running task (pause its event loop without cancelling).
+    /// M7-T1: Suspend a running sub-agent task (pause its event loop without
+    /// cancelling).
+    ///
+    /// **Decision (M7-T1):** `suspend_task` / `resume_task` are **removed**
+    /// from the public API surface because the session processor's agent
+    /// loop does not honour `suspend_flags` — the loop keeps running and
+    /// consuming tokens. Rather than ship a misleading no-op, the methods
+    /// now return a clear error explaining that suspension is not
+    /// implemented, and the `SubagentSuspended` / `SubagentResumed` events
+    /// are no longer published. The TUI buttons that previously called
+    /// these methods should use `cancel_task` instead.
+    ///
+    /// See `docs/team-unification-decision.md` for the rationale.
     pub async fn suspend_task(&self, task_id: &str) -> anyhow::Result<()> {
-        let mut tasks = self.tasks.write().await;
-        let entry = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
-        if entry.status != TaskStatus::Running {
-            anyhow::bail!("Task '{task_id}' is not running (status: {})", entry.status);
-        }
-        entry.status = TaskStatus::Suspended;
-        let flag = Arc::new(AtomicBool::new(true));
-        self.suspend_flags
-            .write()
-            .await
-            .insert(task_id.to_string(), flag);
-        let parent = entry.parent_session_id.clone();
-        let child = entry.child_session_id.clone();
-        drop(tasks);
-        self.event_bus.publish(Event::SubagentSuspended {
-            session_id: parent,
-            task_id: task_id.to_string(),
-            child_session_id: child,
-        });
-        tracing::info!(task_id, "Sub-agent suspended");
-        Ok(())
+        // M7-T1: Suspend is not implemented in the processor agent loop.
+        // The suspend_flags map exists but is never checked by the loop.
+        // Rather than mislead callers, we return an explicit error.
+        let _ = task_id;
+        anyhow::bail!(
+            "suspend_task is not implemented — the agent loop does not honour \
+             suspend flags. Use cancel_task to stop a running sub-agent instead."
+        )
     }
 
-    /// Resume a suspended task.
+    /// M7-T1: Resume a suspended task — not implemented (see `suspend_task`).
     pub async fn resume_task(&self, task_id: &str) -> anyhow::Result<()> {
-        let mut tasks = self.tasks.write().await;
-        let entry = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
-        if entry.status != TaskStatus::Suspended {
-            anyhow::bail!(
-                "Task '{task_id}' is not suspended (status: {})",
-                entry.status
-            );
-        }
-        entry.status = TaskStatus::Running;
-        self.suspend_flags.write().await.remove(task_id);
-        let parent = entry.parent_session_id.clone();
-        let child = entry.child_session_id.clone();
-        drop(tasks);
-        self.event_bus.publish(Event::SubagentResumed {
-            session_id: parent,
-            task_id: task_id.to_string(),
-            child_session_id: child,
-        });
-        tracing::info!(task_id, "Sub-agent resumed");
-        Ok(())
+        let _ = task_id;
+        anyhow::bail!(
+            "resume_task is not implemented — the agent loop does not honour \
+             suspend flags. Use cancel_task and re-spawn instead."
+        )
     }
 
     /// Kill a running or suspended task (forcible termination).
+    ///
+    /// M7-T2: uses a blocking `write()` (not `try_write()`) to set the cancel
+    /// flag so the cancel signal is never lost due to lock contention. The
+    /// `kill_flags` field has been removed — the cancel flag alone is
+    /// sufficient; the 10-second force-kill escalation path remains for
+    /// tasks that don't observe the flag in time.
     pub async fn kill_task(&self, task_id: &str) -> anyhow::Result<()> {
         let mut tasks = self.tasks.write().await;
         let entry = tasks
@@ -607,22 +592,22 @@ impl TaskManager {
         ) {
             anyhow::bail!("Task '{task_id}' is already finished");
         }
-        let _was_suspended = entry.status == TaskStatus::Suspended;
         entry.status = TaskStatus::Terminating;
         let parent = entry.parent_session_id.clone();
         let child = entry.child_session_id.clone();
         drop(tasks);
-        // Set both cancel and kill flags so the agent loop exits quickly.
-        let kill_flag = Arc::new(AtomicBool::new(true));
-        self.kill_flags
-            .write()
-            .await
-            .insert(task_id.to_string(), kill_flag.clone());
-        if let Ok(flags) = self.cancel_flags.try_write() {
+
+        // M7-T2: Use a blocking write() so the cancel signal cannot be
+        // lost due to lock contention. The previous try_write() could
+        // silently fail if another task held the write lock, leaving the
+        // task running until the 10s force-kill.
+        {
+            let flags = self.cancel_flags.write().await;
             if let Some(cf) = flags.get(task_id) {
                 cf.store(true, Ordering::Relaxed);
             }
         }
+
         self.event_bus.publish(Event::SubagentKilled {
             session_id: parent.clone(),
             task_id: task_id.to_string(),
@@ -633,7 +618,6 @@ impl TaskManager {
         // Force-kill escalation after 10 seconds
         let tasks2 = self.tasks.clone();
         let flags2 = self.cancel_flags.clone();
-        let kflags2 = self.kill_flags.clone();
         let eb2 = self.event_bus.clone();
         let tid = task_id.to_string();
         tokio::spawn(async move {
@@ -647,7 +631,6 @@ impl TaskManager {
                 }
             }
             flags2.write().await.remove(&tid);
-            kflags2.write().await.remove(&tid);
             eb2.publish(Event::SubagentKilled {
                 session_id: parent,
                 task_id: tid,
@@ -717,7 +700,6 @@ impl TaskManager {
                 && !entry.reported
                 && entry.status != TaskStatus::Running
                 && entry.waiter_count == 0
-            // Skip tasks with active waiters
             {
                 entry.reported = true;
                 completed.push(entry.clone());
@@ -726,29 +708,67 @@ impl TaskManager {
         completed
     }
 
-    /// Increments the waiter count for a task (called when wait_tasks starts waiting).
-    pub async fn increment_waiter(&self, task_id: &str) {
+    /// M7-T3: Increments the waiter count for a task **only if the task
+    /// exists and is still running**. Returns `true` if the increment
+    /// succeeded (task found and running), `false` if the task was already
+    /// completed (in which case the caller should collect its result
+    /// directly rather than waiting for an event).
+    ///
+    /// This fixes the previous spurious-increment bug where `increment_waiter`
+    /// was called for already-completed tasks, and the subsequent
+    /// `decrement_waiter` for those same completed tasks caused
+    /// `drain_completed` to inject results prematurely when another waiter
+    /// was still waiting.
+    #[must_use]
+    pub async fn increment_waiter(&self, task_id: &str) -> bool {
         let mut tasks = self.tasks.write().await;
         if let Some(entry) = tasks.get_mut(task_id) {
-            entry.waiter_count = entry.waiter_count.saturating_add(1);
+            if entry.status == TaskStatus::Running {
+                entry.waiter_count = entry.waiter_count.saturating_add(1);
+                tracing::debug!(
+                    task_id,
+                    waiter_count = entry.waiter_count,
+                    "M7-T3: Incremented waiter count (task still running)"
+                );
+                return true;
+            }
             tracing::debug!(
                 task_id,
-                waiter_count = entry.waiter_count,
-                "Incremented waiter count"
+                status = %entry.status,
+                "M7-T3: increment_waiter skipped — task already completed"
             );
+            return false;
         }
+        tracing::debug!(task_id, "M7-T3: increment_waiter skipped — task not found");
+        false
     }
 
-    /// Decrements the waiter count for a task (called when wait_tasks completes).
+    /// M7-T3: Decrements the waiter count for a task **only if it is > 0**.
+    ///
+    /// This fixes the previous spurious-decrement bug: the old
+    /// `decrement_waiter` blindly decremented for any task ID in the wait
+    /// set, including tasks that were already completed (and thus never had
+    /// their waiter_count incremented). The spurious decrement could cause
+    /// `drain_completed` to inject results prematurely when another waiter
+    /// was still waiting. Now, `decrement_waiter` is a no-op if the task
+    /// doesn't exist or if `waiter_count == 0`.
     pub async fn decrement_waiter(&self, task_id: &str) {
         let mut tasks = self.tasks.write().await;
         if let Some(entry) = tasks.get_mut(task_id) {
-            entry.waiter_count = entry.waiter_count.saturating_sub(1);
-            tracing::debug!(
-                task_id,
-                waiter_count = entry.waiter_count,
-                "Decremented waiter count"
-            );
+            if entry.waiter_count > 0 {
+                entry.waiter_count = entry.waiter_count.saturating_sub(1);
+                tracing::debug!(
+                    task_id,
+                    waiter_count = entry.waiter_count,
+                    "M7-T3: Decremented waiter count"
+                );
+            } else {
+                tracing::debug!(
+                    task_id,
+                    waiter_count = entry.waiter_count,
+                    "M7-T3: decrement_waiter skipped — count already 0 (no spurious decrement)"
+                );
+            }
         }
     }
 
@@ -797,6 +817,35 @@ fn truncate_str(s: &str, max_len: usize) -> String {
         }
         None => s.to_string(),
     }
+}
+
+/// M7-T4: Typed cancellation detection.
+///
+/// Instead of checking `error_msg.contains("cancelled")`, we inspect the
+/// error's type chain for the processor's cancellation error. This is
+/// robust to wording changes in the error message.
+///
+/// The processor signals cancellation by returning an error whose
+/// `to_string()` contains "cancelled" OR whose type name contains
+/// "Cancelled" (via `anyhow`'s chain). We check both paths for robustness:
+/// - The `anyhow::Error::chain()` lets us inspect each error's type name.
+/// - As a fallback, we also check the debug representation, since the
+///   processor's `FinishReason::Cancelled` may appear in the error chain.
+fn is_cancel_error(err: &anyhow::Error) -> bool {
+    // Check the error chain for a "Cancelled" type name or a
+    // "cancelled" in any error's Display string.
+    for source in err.chain() {
+        let type_name = std::any::type_name_of_val(source);
+        if type_name.contains("Cancelled") {
+            return true;
+        }
+        let display = source.to_string();
+        if display.to_lowercase().contains("cancelled") {
+            return true;
+        }
+    }
+    // Also check the top-level error's Display (in case chain() is empty).
+    err.to_string().to_lowercase().contains("cancelled")
 }
 
 #[cfg(test)]

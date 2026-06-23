@@ -204,9 +204,10 @@ impl ResearchItem {
                 "title" => title = Some(unquote_yaml_scalar(value)),
                 "topic" => topic = Some(unquote_yaml_scalar(value)),
                 "status" => {
-                    status = Some(ResearchStatus::parse(value).ok_or_else(|| {
-                        ResearchItemError::InvalidStatus(value.to_string())
-                    })?);
+                    status = Some(
+                        ResearchStatus::parse(value)
+                            .ok_or_else(|| ResearchItemError::InvalidStatus(value.to_string()))?,
+                    );
                 }
                 "created" => {
                     created = Some(
@@ -295,7 +296,9 @@ fn yaml_scalar(value: &str) -> String {
     if value.is_empty() {
         return "\"\"".to_string();
     }
-    let needs_quote = value.chars().any(|c| matches!(c, ':' | '#' | '"' | '\n' | '\r' | '\t'))
+    let needs_quote = value
+        .chars()
+        .any(|c| matches!(c, ':' | '#' | '"' | '\n' | '\r' | '\t'))
         || value.starts_with(' ')
         || value.ends_with(' ');
     if needs_quote {
@@ -490,8 +493,7 @@ mod tests {
 
     #[test]
     fn from_frontmatter_tolerates_unknown_fields() {
-        let block =
-            "---\nname: rust-async\ntitle: foo\nextra: stuff\nanother: 42\n---\n";
+        let block = "---\nname: rust-async\ntitle: foo\nextra: stuff\nanother: 42\n---\n";
         let item = ResearchItem::from_frontmatter(block).expect("unknown fields must not error");
         assert_eq!(item.title, "foo");
     }

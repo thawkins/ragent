@@ -25,6 +25,7 @@ static FILE_LOCKS: LazyLock<Arc<RwLock<HashMap<PathBuf, Arc<Mutex<()>>>>>> =
 /// Returns a guard that must be held for the duration of the read-modify-write
 /// sequence. Multiple edits to different files can proceed in parallel; edits
 /// to the same file are serialized.
+#[allow(dead_code)]
 pub async fn lock_file(path: &Path) -> OwnedMutexGuard<()> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 

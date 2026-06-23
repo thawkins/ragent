@@ -76,7 +76,7 @@ impl MockScenario {
 ///
 /// ```no_run
 /// use std::sync::Arc;
-/// use ragent_llm::llm::{ChatRequest, ChatMessage, ChatContent};
+/// use ragent_llm::llm::{ChatRequest, ChatMessage, ChatContent, LlmClient};
 /// use ragent_llm::providers::mock_llm_client::{MockLlmClient, MockScenario};
 ///
 /// # async fn run() {

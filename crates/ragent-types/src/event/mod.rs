@@ -467,6 +467,10 @@ pub enum Event {
         agent_id: String,
     },
     /// A teammate sent a message that was delivered to the lead session.
+    ///
+    /// M5-T6: `message_type` carries the snake_case `MessageType` so event
+    /// consumers can distinguish a plan approval from a broadcast without
+    /// parsing the preview.
     TeammateMessage {
         /// Lead session ID.
         session_id: String,
@@ -476,6 +480,9 @@ pub enum Event {
         from: String,
         /// Recipient's agent ID or `"lead"`.
         to: String,
+        /// Snake_case message type (e.g. `"message"`, `"plan_approved"`,
+        /// `"broadcast"`).
+        message_type: String,
         /// First 200 chars of message content (preview).
         preview: String,
     },
@@ -560,6 +567,8 @@ pub enum Event {
         from: String,
         /// Recipient's agent ID.
         to: String,
+        /// Snake_case message type (M5-T6).
+        message_type: String,
         /// First 200 chars of message content (preview).
         preview: String,
     },

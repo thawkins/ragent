@@ -1,0 +1,262 @@
+//! HTTP handlers for the research system (T-036, T-037, T-038, T-039).
+//!
+//! Exposes the `ragent-research` crate behind a thin REST surface:
+//!
+//! - `GET    /research`              — list every research item (FR-012)
+//! - `POST   /research`              — create + run a gathering session
+//! - `GET    /research/{name}`       — show one item
+//! - `DELETE /research/{name}`       — remove an item (with confirmation)
+//!
+//! All endpoints are mounted under the auth-protected router in
+//! `routes/mod.rs`.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::routes::AppState;
+
+use ragent_research::{
+    ResearchManager, ResearchSession, SearchHit, SessionConfig, SessionEvent, SessionObserver,
+};
+
+/// Build the `/research` sub-router.
+pub fn research_routes() -> Router<AppState> {
+    Router::new()
+        .route("/research", get(list_research).post(create_research))
+        .route(
+            "/research/{name}",
+            get(show_research).delete(delete_research),
+        )
+}
+
+/// Compute the research root from the process working directory. The HTTP
+/// server runs against the same project root as the CLI, so this is the
+/// straightforward `cwd/research`.
+fn research_root() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("research")
+}
+
+// ── GET /research ────────────────────────────────────────────────────────
+
+async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
+    let manager = ResearchManager::new(research_root());
+    match manager.list(false).await {
+        Ok(items) => {
+            let rows: Vec<ResearchItemRow> = items
+                .into_iter()
+                .map(|i| {
+                    let sources = i.source_count();
+                    ResearchItemRow {
+                        name: i.name.to_string(),
+                        title: i.title,
+                        status: i.status.as_str().to_string(),
+                        created_at: i.created_at.to_rfc3339(),
+                        modified_at: i.modified_at.to_rfc3339(),
+                        sources,
+                    }
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "items": rows,
+                    "count": rows.len(),
+                })),
+            )
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+#[derive(Serialize)]
+struct ResearchItemRow {
+    name: String,
+    title: String,
+    status: String,
+    created_at: String,
+    modified_at: String,
+    sources: usize,
+}
+
+// ── POST /research ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct CreateResearchRequest {
+    name: String,
+    topic: String,
+    title: Option<String>,
+    sources_dir: Option<String>,
+    template: Option<String>,
+}
+
+async fn create_research(
+    State(_state): State<AppState>,
+    Json(req): Json<CreateResearchRequest>,
+) -> impl IntoResponse {
+    let manager = ResearchManager::new(research_root());
+    let config = SessionConfig {
+        topic: req.topic.clone(),
+        sources_dir: req.sources_dir.map(PathBuf::from),
+        template: req.template,
+        ..SessionConfig::default()
+    };
+    let title = req.title.clone().unwrap_or_else(|| {
+        req.topic
+            .split_whitespace()
+            .next()
+            .unwrap_or("Research")
+            .to_string()
+    });
+
+    // Stream every gathering event as a server-sent response. The HTTP
+    // layer doesn't currently expose SSE for research, so we collect the
+    // events into a single JSON response instead. Future iterations can
+    // upgrade this to a true `text/event-stream` without changing the
+    // public surface.
+    struct Collector(Arc<tokio::sync::Mutex<Vec<SessionEvent>>>);
+    impl SessionObserver for Collector {
+        fn on_event(&self, event: SessionEvent) {
+            // Best-effort push; if the mutex is contended we drop the event
+            // rather than block the session.
+            if let Ok(mut g) = self.0.try_lock() {
+                g.push(event);
+            }
+        }
+    }
+    let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let observer = Collector(events.clone());
+
+    let session = ResearchSession::new(manager.clone(), None, None);
+    match session
+        .run(&req.name, &title, &config, Arc::new(observer))
+        .await
+    {
+        Ok(outcome) => {
+            let collected = events.lock().await.clone();
+            let events_json: Vec<serde_json::Value> = collected
+                .iter()
+                .map(ragent_research::render_session_event_json)
+                .map(|line| {
+                    // Strip the `ragent-research: ` prefix so the body is
+                    // plain JSON.
+                    line.trim_start_matches("ragent-research: ").to_string()
+                })
+                .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s)))
+                .collect();
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "name": outcome.research_name,
+                    "total_sources": outcome.sources.len(),
+                    "events": events_json,
+                })),
+            )
+        }
+        Err(e) => {
+            let status = match &e {
+                ragent_research::ResearchError::InvalidName(_) => StatusCode::BAD_REQUEST,
+                ragent_research::ResearchError::AlreadyExists(_) => StatusCode::CONFLICT,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            error_response(status, &e.to_string())
+        }
+    }
+}
+
+// ── GET /research/{name} ────────────────────────────────────────────────
+
+async fn show_research(
+    State(_state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let manager = ResearchManager::new(research_root());
+    match manager.show(&name).await {
+        Ok(item) => {
+            let row = ResearchItemRow {
+                name: item.name.to_string(),
+                title: item.title.clone(),
+                status: item.status.as_str().to_string(),
+                created_at: item.created_at.to_rfc3339(),
+                modified_at: item.modified_at.to_rfc3339(),
+                sources: item.source_count(),
+            };
+            let search_hits: Vec<SearchHit> =
+                manager.search(&item.title, 5).await.unwrap_or_default();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "item": row,
+                    "related": search_hits
+                        .into_iter()
+                        .map(|h| serde_json::json!({
+                            "name": h.name,
+                            "title": h.title,
+                            "snippet": h.snippet,
+                        }))
+                        .collect::<Vec<_>>(),
+                })),
+            )
+        }
+        Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
+            StatusCode::NOT_FOUND,
+            &format!("research item '{name}' not found. Closest matches: {suggestions}"),
+        ),
+        Err(ragent_research::ResearchError::InvalidName(_)) => {
+            error_response(StatusCode::BAD_REQUEST, "invalid research name")
+        }
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+// ── DELETE /research/{name} ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DeleteResearchQuery {
+    /// Required confirmation token. Matches the supplied value verbatim.
+    confirm: Option<String>,
+}
+
+async fn delete_research(
+    State(_state): State<AppState>,
+    Path(name): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<DeleteResearchQuery>,
+) -> impl IntoResponse {
+    let manager = ResearchManager::new(research_root());
+    let confirm = q.confirm.unwrap_or_default();
+    if confirm != format!("delete-{name}") {
+        return error_response(
+            StatusCode::PRECONDITION_FAILED,
+            &format!(
+                "refusing to delete research/{name}: pass `?confirm=delete-{name}` to confirm"
+            ),
+        );
+    }
+    match manager.delete(&name).await {
+        Ok(()) => (
+            StatusCode::NO_CONTENT,
+            Json(serde_json::json!({ "deleted": name })),
+        ),
+        Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
+            StatusCode::NOT_FOUND,
+            &format!("research item '{name}' not found. Closest matches: {suggestions}"),
+        ),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────
+
+fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({ "error": message })))
+}

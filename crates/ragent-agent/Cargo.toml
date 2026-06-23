@@ -59,6 +59,8 @@ dashmap = { workspace = true }
 lru = { workspace = true }
 rayon = { workspace = true }
 parking_lot = { workspace = true }
+# PERF-031: FxHash for non-cryptographic cache keys.
+rustc-hash = { workspace = true }
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-llm = { path = "../ragent-llm" }
@@ -71,6 +73,10 @@ ragent-specs = { path = "../ragent-specs" }
 
 [features]
 default = []
+# ── Local ONNX embeddings ────────────────────────────────────────────
+# Enables the local ONNX Runtime embedding provider for semantic memory
+# search. Requires building with: cargo build -p ragent-agent --features embeddings
+embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
 # ── Context compression (Headroom integration) ───────────────────────
 # Enables content-aware compression, CCR reversible storage, accurate
 # token counting, and relevance filtering via the headroom-core crate.

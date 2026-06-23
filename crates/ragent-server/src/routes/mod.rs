@@ -4,6 +4,7 @@
 //! handlers for session management, messaging, permissions, and configuration.
 
 pub mod memory;
+pub mod research;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -117,7 +118,8 @@ pub fn router(state: AppState) -> Router {
         .route("/opt", post(prompt_opt_handler))
         // Memory API (Milestone 8)
         .nest("/memory", memory::memory_routes())
-        // Orchestration endpoints (Milestone 3 — Task 3.1)        .route("/orchestrator/metrics", get(orch_metrics))
+        // Research API (research system)
+        .nest("/research", research::research_routes()) // Orchestration endpoints (Milestone 3 — Task 3.1)        .route("/orchestrator/metrics", get(orch_metrics))
         .route("/orchestrator/start", post(orch_start))
         .route("/orchestrator/jobs/{id}", get(orch_job))
         .route_layer(middleware::from_fn_with_state(
@@ -829,9 +831,8 @@ impl Completer for ServerCompleter {
             temperature: None,
             top_p: None,
             max_tokens: None,
-            system: Some(system.to_string()),
-            options: Default::default(),
-            session_id: None,
+                          system: Some(std::sync::Arc::from(system)),
+                          options: Default::default(),            session_id: None,
             request_id: None,
             stream_timeout_secs: None,
             thinking: None,

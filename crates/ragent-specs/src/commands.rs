@@ -237,22 +237,22 @@ impl SpecCommand {
     /// Build the static help message shown by `/spec help`.
     pub fn build_help_message() -> &'static str {
         "From: /spec help\n\
-               ## /spec command reference\n\n\
-               | Command | Arguments | Description |\n\
-               |---|---|---|\n\
-               | `/spec help` | none | Show this command reference table. |\n\
-               | `/spec create <specname> <feature description>` | required `specname` + `feature description` | Generate `specs/<specname>/SPEC.md` (EARS spec) and `specs/<specname>/PLAN.md` (implementation plan). |\n\
-               | `/spec add <spec-id> <feature description>` | required `spec-id` + `feature description` | Incrementally add requirements to an existing spec and update its plan. |\n\
-               | `/spec validate [specname]` | optional `specname` | Validate EARS compliance. Without argument, validates all specs. |\n\
-               | `/spec list [--status <status>] [--prefix <prefix>]` | optional filters | List all specs with optional filtering by status or ID prefix. |\n\
-               | `/spec search <query>` | required `query` | Full-text search across all specs. |\n\
-               | `/spec status <spec-id> [<new-status>]` | required `spec-id`, optional `new-status` | Show current status or transition to a new status. |\n\
-               | `/spec task <spec-id> [<task-id>] [<new-status>]` | required `spec-id`, optional `task-id` and `new-status` | List tasks, show a task, or update its status. |\n\
-               | `/spec activate <spec-id>` | required `spec-id` | Activate a spec for context injection into agent prompts. |\n\
-               | `/spec deactivate` | none | Deactivate the currently active spec. |\n\
-               | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\
-               | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\n\
-               Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets`"
+                    ## /spec command reference\n\n\
+                    | Command | Arguments | Description |\n\
+                    |---|---|---|\n\
+                    | `/spec help` | none | Show this command reference table. |\n\
+                    | `/spec create <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` (EARS spec) and `specs/<specname>/PLAN.md` (implementation plan). `--from-research` pre-populates a `## Related Research` section. |\n\
+                    | `/spec add <spec-id> <feature description>` | required `spec-id` + `feature description` | Incrementally add requirements to an existing spec and update its plan. |\n\
+                    | `/spec validate [specname]` | optional `specname` | Validate EARS compliance. Without argument, validates all specs. |\n\
+                    | `/spec list [--status <status>] [--prefix <prefix>]` | optional filters | List all specs with optional filtering by status or ID prefix. |\n\
+                    | `/spec search <query>` | required `query` | Full-text search across all specs. |\n\
+                    | `/spec status <spec-id> [<new-status>]` | required `spec-id`, optional `new-status` | Show current status or transition to a new status. |\n\
+                    | `/spec task <spec-id> [<task-id>] [<new-status>]` | required `spec-id`, optional `task-id` and `new-status` | List tasks, show a task, or update its status. |\n\
+                    | `/spec activate <spec-id>` | required `spec-id` | Activate a spec for context injection into agent prompts. |\n\
+                    | `/spec deactivate` | none | Deactivate the currently active spec. |\n\
+                    | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\
+                    | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\n\
+                    Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets --from-research realtime-collab`"
     }
     /// Build the user-facing status string for a create operation.
     pub fn build_create_status(specname: &str) -> String {

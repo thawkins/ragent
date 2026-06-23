@@ -437,6 +437,7 @@ fn test_teammate_message() {
         team_name: "code-review".into(),
         from: "tm-001".into(),
         to: "lead".into(),
+        message_type: "message".into(),
         preview: "Looks good to me".into(),
     });
     assert_eq!(name, "teammate_message");

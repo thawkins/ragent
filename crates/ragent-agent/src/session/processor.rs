@@ -216,7 +216,7 @@ fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String 
     }
     let mut section = String::from(
         "## Available Tools\n\nYou have access to the following tools. \
-        Use ONLY these exact tool names — do not invent or guess tool names.\n\n",
+          Use ONLY these exact tool names — do not invent or guess tool names.\n\n",
     );
     for def in &defs {
         // Truncate long descriptions to keep the prompt compact.
@@ -227,8 +227,80 @@ fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String 
     section
 }
 
-/// Extract a resource identifier from tool input JSON for permission checks.
+/// Build a detailed tool-reference section for sub-agent sessions.
 ///
+/// Unlike [`build_tool_reference_section`], this includes each tool's full
+/// description and a compact rendering of its JSON Schema parameters
+/// (property name, type, whether it is required, and description).  This
+/// gives sub-agents the same level of tool documentation that the primary
+/// agent's system prompt carries, without relying on the model to infer
+/// parameter names or required fields from the API schema alone.
+fn build_detailed_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
+    let defs = registry.definitions();
+    if defs.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from(
+        "## Available Tools\n\n\
+        You have access to the following tools. Use ONLY these exact tool \
+        names — do not invent or guess tool names. Each tool's parameters are \
+        listed with their type and whether they are required (required).\n\n",
+    );
+
+    for def in &defs {
+        let desc = def.description.replace('\n', " ").replace('\r', "");
+        let desc = ragent_types::truncate_bytes(&desc, 400);
+        section.push_str(&format!("### `{}`\n{}\n\n", def.name, desc));
+
+        if let Some(properties) = def.parameters.get("properties").and_then(|v| v.as_object()) {
+            let required: std::collections::HashSet<&str> = def
+                .parameters
+                .get("required")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+
+            for (param_name, schema) in properties {
+                let param_type = schema
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_else(|| {
+                        if schema.get("anyOf").is_some() || schema.get("oneOf").is_some() {
+                            "anyOf"
+                        } else {
+                            "any"
+                        }
+                    });
+
+                let param_desc = schema
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .replace('\n', " ")
+                    .replace('\r', "");
+                let param_desc = ragent_types::truncate_bytes(&param_desc, 140);
+
+                let req_marker = if required.contains(param_name.as_str()) {
+                    " (required)"
+                } else {
+                    ""
+                };
+
+                section.push_str(&format!(
+                    "- `{}` (`{}`{}) — {}\n",
+                    param_name, param_type, req_marker, param_desc
+                ));
+            }
+        }
+
+        section.push('\n');
+    }
+
+    section
+}
+
+/// Extract a resource identifier from tool input JSON for permission checks.///
 /// Tries common parameter names (`path`, `command`, `url`, `pattern`, `query`)
 /// and falls back to the tool name if none are found.
 fn extract_resource_from_input(input: &Value, tool_name: &str) -> String {
@@ -539,6 +611,15 @@ pub struct SessionProcessor {
     /// Optional team manager for spawning and coordinating teammate sessions.
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
     pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
+    /// M8-T1: cache for `resolve_team_context_for_session`. Maps session id
+    /// → `(TeamContext, Instant)` with a 5-second TTL. Invalidated on team
+    /// create/join/leave. Avoids scanning every team directory on every
+    /// message (O(teams) → O(1) amortised).
+    pub team_context_cache: std::sync::Arc<
+        parking_lot::RwLock<
+            std::collections::HashMap<String, (crate::tool::TeamContext, std::time::Instant)>,
+        >,
+    >,
     /// Optional MCP client for dynamic MCP tool registration.
     /// Set once after startup via [`SessionProcessor::set_mcp_client`].
     pub mcp_client: std::sync::OnceLock<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>>,
@@ -554,6 +635,14 @@ pub struct SessionProcessor {
     /// Cached tool definitions for the agent loop. Populated after MCP client
     /// registration via [`set_mcp_client`] and invalidated when tools change.
     pub cached_tool_definitions: parking_lot::RwLock<Option<Arc<Vec<ToolDefinition>>>>,
+    /// Cached tool *names* for the `ToolsSent` event (PERF-003).
+    ///
+    /// Mirrors [`cached_tool_definitions`]: the comma-joined name list is built
+    /// once when the definitions cache is populated and reused on every loop
+    /// step, avoiding the 111-String-per-step allocation on the hot path.
+    /// Invalidated together with [`cached_tool_definitions`] by
+    /// [`invalidate_tool_cache`].
+    pub cached_tool_names: parking_lot::RwLock<Option<Arc<[String]>>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
@@ -625,8 +714,14 @@ impl SessionProcessor {
 
     /// Invalidate the cached tool definitions so they are rebuilt on the next loop step.
     pub fn invalidate_tool_cache(&self) {
-        let mut guard = self.cached_tool_definitions.write();
-        *guard = None;
+        {
+            let mut guard = self.cached_tool_definitions.write();
+            *guard = None;
+        }
+        {
+            let mut names = self.cached_tool_names.write();
+            *names = None;
+        }
     }
 
     /// Return cached tool definitions, populating the cache if necessary.
@@ -638,9 +733,28 @@ impl SessionProcessor {
             }
         }
         let defs = Arc::new(self.tool_registry.definitions());
-        let mut guard = self.cached_tool_definitions.write();
-        *guard = Some(defs.clone());
+        // PERF-003: also cache the tool-name list used by the `ToolsSent`
+        // event so we don't allocate ~111 Strings on every loop step.
+        let names: Arc<[String]> = Arc::from_iter(defs.iter().map(|t| t.name.clone()));
+        {
+            let mut guard = self.cached_tool_definitions.write();
+            *guard = Some(defs.clone());
+        }
+        {
+            let mut names_guard = self.cached_tool_names.write();
+            *names_guard = Some(names);
+        }
         defs
+    }
+
+    /// Return the cached tool names for the `ToolsSent` event (PERF-003).
+    ///
+    /// Returns `None` when no tools are registered. The cache is populated
+    /// alongside [`get_cached_tool_definitions`] and invalidated together
+    /// with it by [`invalidate_tool_cache`].
+    fn get_cached_tool_names(&self) -> Option<Arc<[String]>> {
+        let guard = self.cached_tool_names.read();
+        guard.as_ref().cloned()
     }
 
     /// Return the per-session system-prompt component cache, creating it
@@ -756,6 +870,17 @@ impl SessionProcessor {
     ) -> Result<Message> {
         let profiler = crate::session::profiler::agent_loop_profiler();
 
+        // PERF-002: hoist `session_id` into an `Arc<str>` once for the whole
+        // turn so every event-publish site can clone the `Arc` (O(1)) instead
+        // of allocating a fresh `String` (O(n)) on each of the ~20+ events
+        // published per agent step.  Code that needs an owned `String` uses
+        // `session_id_arc.to_string()`; code that needs `&str` borrows
+        // `&*session_id_arc` via the `session_id` alias below.
+        let session_id_arc: std::sync::Arc<str> = std::sync::Arc::from(session_id);
+        // Borrow the arc contents as `&str` so existing `&str`-typed call sites
+        // continue to work without per-call dereferencing.
+        #[allow(clippy::needless_borrow)]
+        let session_id: &str = &session_id_arc;
         // 1. Store user message (off async thread)
         {
             let _scope = profiler.scope("storage.user_message.create");
@@ -767,7 +892,6 @@ impl SessionProcessor {
             session_id: session_id.to_string(),
             message_id: user_msg.id.clone(),
         });
-
         // Helper: publish error + message-end so the TUI always resets.
         let publish_error = |bus: &EventBus, sid: &str, msg_id: &str, err: &str| {
             bus.publish(Event::AgentError {
@@ -782,6 +906,16 @@ impl SessionProcessor {
         };
 
         // 2. Resolve model and create LLM client
+        // PERF-001: load the config once for the whole `process_user_message`
+        // turn.  Previously `Config::load()` was called 3–4 times per turn
+        // (base-URL resolution, provider-options merge, session_config for
+        // hooks), each reading and parsing the JSON file from disk.  The
+        // single loaded config is reused by every downstream site.
+        let cfg = {
+            let _scope = profiler.scope("config.load");
+            crate::Config::load().unwrap_or_default()
+        };
+
         let model_ref = {
             let _scope = profiler.scope("llm.resolve_model");
             if let Some(m) = agent.model.as_ref() {
@@ -825,7 +959,7 @@ impl SessionProcessor {
                 .ok()
                 .flatten(),
             "generic_openai" => {
-                let cfg = crate::Config::load().ok();
+                let cfg = Some(cfg.clone());
                 self.storage_op(|s| Ok(s.get_setting("generic_openai_api_base").ok().flatten()))
                     .await
                     .ok()
@@ -842,7 +976,7 @@ impl SessionProcessor {
                     })
             }
             "azure_foundry" => {
-                let cfg = crate::Config::load().ok();
+                let cfg = Some(cfg.clone());
                 self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
                     .await
                     .ok()
@@ -894,7 +1028,8 @@ impl SessionProcessor {
 
             // Merge provider-specific config options (auto_start, device,
             // models_path) for providers that consume them.
-            if let Ok(cfg) = crate::Config::load() {
+            // PERF-001: reuse the `cfg` loaded once at the top of the turn.
+            {
                 if let Some(provider_cfg) = cfg.provider.get(&model_ref.provider_id) {
                     if let Some(auto_start) = provider_cfg.options.get("auto_start") {
                         options.insert("auto_start".to_string(), auto_start.clone());
@@ -930,25 +1065,60 @@ impl SessionProcessor {
         };
         let team_context_for_session = {
             let _scope = profiler.scope("team.resolve_context");
-            resolve_team_context_for_session(session_id, &working_dir)
+            // M8-T1: consult the per-session team-context cache before
+            // falling back to the O(teams) directory scan. The cache is a
+            // `DashMap<SessionId, (TeamContext, Instant)>` with a 5-second
+            // TTL; it is invalidated wholesale whenever a team-mutating tool
+            // (`team_*`) executes in this processor (see the tool-execution
+            // choke point below). A miss is always safe — the scan still
+            // runs and the result is cached for subsequent turns.
+            const TEAM_CONTEXT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+            let session_key = session_id.to_string();
+            let cached = {
+                let cache = self.team_context_cache.read();
+                cache.get(&session_key).cloned()
+            };
+            if let Some((ctx, fetched_at)) = cached
+                && fetched_at.elapsed() < TEAM_CONTEXT_CACHE_TTL
+            {
+                Some(Arc::new(ctx))
+            } else {
+                let resolved = resolve_team_context_for_session(session_id, &working_dir);
+                if let Some(arc) = resolved.as_ref() {
+                    let mut cache = self.team_context_cache.write();
+                    cache.insert(session_key, ((**arc).clone(), std::time::Instant::now()));
+                } else {
+                    // Session is not part of any team — evict any stale entry.
+                    let mut cache = self.team_context_cache.write();
+                    cache.remove(&session_key);
+                }
+                resolved
+            }
         };
 
-        // Load config once for hooks and other config-dependent features
-        let session_config = {
-            let _scope = profiler.scope("config.load");
-            crate::Config::load().unwrap_or_default()
-        };
+        // Reuse the config loaded once at the top of the turn (PERF-001) for
+        // hooks and other config-dependent features.
+        //
+        // PERF-009: wrap the per-turn `Config` in an `Arc` once so every
+        // `ToolContext` constructed within the agent loop can `Arc::clone`
+        // the shared config instead of deep-cloning the entire `Config`
+        // struct (with its `HashMap`s, `Vec`s, and nested permission rules)
+        // on every tool call.  The `Arc<Config>` is handed to `ToolContext`
+        // directly — no `Arc::new(session_config.clone())` per call.
+        let session_config = cfg;
+        let session_config: std::sync::Arc<ragent_config::Config> =
+            std::sync::Arc::new(session_config);
         let parsed_hook_configs = crate::hooks::parse_hook_configs(&session_config.hooks);
 
         // Fire on_session_start hook when this is the first message in the session
         let has_prior_messages = {
             let _scope = profiler.scope("history.check_prior_assistant");
+            // PERF-010: use the cheap existence check instead of loading
+            // and deserialising every message's `parts` JSON column just
+            // to test whether an assistant turn has already been recorded.
             self.session_manager
-                .get_messages(session_id)
-                .map(|msgs| {
-                    msgs.iter()
-                        .any(|m| m.role == crate::message::Role::Assistant)
-                })
+                .storage()
+                .has_assistant_messages(session_id)
                 .unwrap_or(false)
         };
         if !has_prior_messages {
@@ -976,36 +1146,67 @@ impl SessionProcessor {
             // per cache TTL.
             crate::agent::collect_prompt_context(&working_dir).await
         };
-        let mut system_prompt = {
-            let _scope = profiler.scope("prompt.build_system_prompt");
-            crate::agent::build_system_prompt_with_storage(
-                agent,
-                &working_dir,
-                &file_tree,
-                Some(&skill_registry),
-                Some(&git_status),
-                Some(&readme),
-                Some(&agents_md),
-                Some(self.session_manager.storage()),
-                Some(&session_config.memory),
-            )
-        }; // Inject a tool reference listing so the model knows the exact tool names.
-        // This is critical for models (especially via Ollama) that may hallucinate
-        // tool names like "search" instead of the actual "grep" tool.
+                  // PERF-028: offload the memory-block + SQLite memory reads onto a
+                  // blocking-pool thread so the synchronous file I/O
+                  // (`FileBlockStorage`, `load_legacy_memory`, `PROJECT_ANALYSIS.md`,
+                  // `Storage::list_memories`/`get_memory_tags`) does not stall the
+                  // tokio worker thread during system-prompt assembly.
+                  let memory_section = {
+                      let _scope = profiler.scope("prompt.build_memory_section");
+                      let wd = working_dir.clone();
+                      let storage = Arc::clone(self.session_manager.storage());
+                      let memory_cfg = session_config.memory.clone();
+                      tokio::task::spawn_blocking(move || {
+                          crate::agent::build_memory_prompt_section(&wd, Some(&storage), Some(&memory_cfg))
+                      })
+                      .await
+                      .unwrap_or_default()
+                  };
+                  let mut system_prompt = {
+                      let _scope = profiler.scope("prompt.build_system_prompt");
+                      crate::agent::build_system_prompt_with_storage_and_memory(
+                          agent,
+                          &working_dir,
+                          &file_tree,
+                          Some(&skill_registry),
+                          Some(&git_status),
+                          Some(&readme),
+                          Some(&agents_md),
+                          Some(self.session_manager.storage()),
+                          Some(&session_config.memory),
+                          Some(&memory_section),
+                      )
+                  };
+                  // Inject a tool reference listing so the model knows the exact tool names.        //
+        // Sub-agents receive a detailed reference that includes parameter schemas,
+        // mirroring the full instructions the primary agent receives.
         //
-        // FR-008 / FR-009: the system-prompt component cache stores this
-        // string keyed by the tool-registry hash, so subsequent steps
+        // FR-008 / FR-009: the system-prompt component cache stores the compact
+        // reference keyed by the tool-registry hash, so subsequent steps
         // (and subsequent turns within the same session) skip the
         // registry iteration entirely.
-        let tool_reference = {
-            let cache = self.system_prompt_cache();
-            cache
-                .get_tool_reference(&self.tool_registry, |registry| {
-                    build_tool_reference_section(registry)
-                })
-                .unwrap_or_default()
-        };
-        system_prompt.push_str(&tool_reference);
+                  let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
+                  // PERF-013: route sub-agent tool references through the same
+                  // `SystemPromptCache` as primary agents so the detailed parameter
+                  // schema section is built at most once per session instead of on
+                  // every sub-agent `process_user_message` call. The cache key is
+                  // the registry version (PERF-012), so the section is rebuilt only
+                  // when tools are registered/hidden at runtime (e.g. MCP servers).
+                  let tool_reference = if is_subagent {
+                      let cache = self.system_prompt_cache();
+                      cache
+                          .get_tool_reference(&self.tool_registry, |registry| {
+                              build_detailed_tool_reference_section(registry)
+                          })
+                          .unwrap_or_else(|| build_detailed_tool_reference_section(&self.tool_registry))
+                  } else {
+                      let cache = self.system_prompt_cache();
+                      cache
+                          .get_tool_reference(&self.tool_registry, |registry| {
+                              build_tool_reference_section(registry)
+                          })
+                          .unwrap_or_default()
+                  };        system_prompt.push_str(&tool_reference);
 
         // Inject question-tool guidance so the model knows how to present
         // multiple-choice prompts effectively.
@@ -1050,7 +1251,6 @@ impl SessionProcessor {
         // Universal tool-calling guidance — all providers receive the same
         // directive to call tools immediately rather than narrating intent.
         system_prompt.push_str(TOOL_CALLING_GUIDANCE);
-
         // Inject team-lead task distribution guidelines when this session is
         // running as a team lead.  These rules help the LLM spawn a consistent
         // number of teammates and avoid overloading a single teammate with an
@@ -1060,44 +1260,44 @@ impl SessionProcessor {
             .is_some_and(|tc| tc.is_lead)
         {
             system_prompt.push_str(
-                "\n## Team Lead — Task Distribution Rules\n\n\
-                 When you receive a request that involves a list of N independent items \
-                 (e.g. N competitors, N modules, N documents), ALWAYS spawn **exactly one \
-                 teammate per item** — never assign multiple items from the list to a single \
-                 teammate.\n\n\
-                 **Why:** Each teammate has a finite context window.  Assigning all items \
-                 to one teammate will overflow its context and cause it to fail.\n\n\
-                 **Rules:**\n\
-                 1. **Count first.** Before spawning, enumerate the items to process.\n\
-                 2. **One teammate per item.** Spawn one `team_spawn` call per item in the \
-                    same response turn (all in parallel).\n\
-                 3. **Bounded prompt per teammate.** Each teammate's `prompt` must reference \
-                    **only its one assigned item** — never a list.  Keep the prompt under \
-                    ~500 words; link to files rather than pasting large content.\n\
-                 4. **Pre-assign tasks.** When spawning, always include `task_id` parameter \
-                    to pre-claim the work item on the teammate's behalf. This ensures they \
-                    start with a claimed task and can focus on work instead of claiming.\n\
-                    **IMPORTANT:** Only spawn teammates for tasks that are claimable (no \
-                    unsatisfied dependencies). If a task has blockers, wait for its dependencies \
-                    to complete first, then spawn its teammate later.\n\
-                 5. **Then wait.** After all spawns, call `team_wait` once to block until \
-                    all teammates report idle or complete.\n\
-                 6. **Synthesise.** Read each teammate's output and combine results yourself.\n\
-                 7. **Iterate if needed.** If you have more items than available teammates, \
-                    distribute in waves — spawn a batch, wait, synthesise, then spawn the \
-                    next batch with freshly-idle teammates.\n\n\
-                 **Example — analysing 3 competitors A, B, C:**\n\
-                 ```\n\
-                 team_spawn(teammate_name: \"analyst-A\", task_id: \"s1\", prompt: \"Analyse competitor A only …\")\n\
-                 team_spawn(teammate_name: \"analyst-B\", task_id: \"s2\", prompt: \"Analyse competitor B only …\")\n\
-                 team_spawn(teammate_name: \"analyst-C\", task_id: \"s3\", prompt: \"Analyse competitor C only …\")\n\
-                 team_wait()\n\
-                 ```\n\
-                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n\
-                 **Critical:** The `team_spawn` tool **rejects multi-item prompts**. If your \
-                 prompt contains patterns like \"1.\", \"2.\", \"- Item\", or \"and\" joining multiple \
-                 items, the spawn will fail. This is intentional — it forces correct distribution.\n\n",
-            );
+                          "\n## Team Lead — Task Distribution Rules\n\n\
+                           When you receive a request that involves a list of N independent items \
+                           (e.g. N competitors, N modules, N documents), ALWAYS spawn **exactly one \
+                           teammate per item** — never assign multiple items from the list to a single \
+                           teammate.\n\n\
+                           **Why:** Each teammate has a finite context window.  Assigning all items \
+                           to one teammate will overflow its context and cause it to fail.\n\n\
+                           **Rules:**\n\
+                           1. **Count first.** Before spawning, enumerate the items to process.\n\
+                           2. **One teammate per item.** Spawn one `team_spawn` call per item in the \
+                              same response turn (all in parallel).\n\
+                           3. **Bounded prompt per teammate.** Each teammate's `prompt` must reference \
+                              **only its one assigned item** — never a list.  Keep the prompt under \
+                              ~500 words; link to files rather than pasting large content.\n\
+                           4. **Pre-assign tasks.** When spawning, always include `task_id` parameter \
+                              to pre-claim the work item on the teammate's behalf. This ensures they \
+                              start with a claimed task and can focus on work instead of claiming.\n\
+                              **IMPORTANT:** Only spawn teammates for tasks that are claimable (no \
+                              unsatisfied dependencies). If a task has blockers, wait for its dependencies \
+                              to complete first, then spawn its teammate later.\n\
+                           5. **Then wait.** After all spawns, call `team_wait` once to block until \
+                              all teammates report idle or complete.\n\
+                           6. **Synthesise.** Read each teammate's output and combine results yourself.\n\
+                           7. **Iterate if needed.** If you have more items than available teammates, \
+                              distribute in waves — spawn a batch, wait, synthesise, then spawn the \
+                              next batch with freshly-idle teammates.\n\n\
+                           **Example — analysing 3 competitors A, B, C:**\n\
+                           ```\n\
+                           team_spawn(teammate_name: \"analyst-A\", task_id: \"s1\", prompt: \"Analyse competitor A only …\")\n\
+                           team_spawn(teammate_name: \"analyst-B\", task_id: \"s2\", prompt: \"Analyse competitor B only …\")\n\
+                           team_spawn(teammate_name: \"analyst-C\", task_id: \"s3\", prompt: \"Analyse competitor C only …\")\n\
+                           team_wait()\n\
+                           ```\n\
+                           Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n\
+                           **Critical:** The `team_spawn` tool **rejects multi-item prompts**. If your \
+                           prompt contains patterns like \"1.\", \"2.\", \"- Item\", or \"and\" joining multiple \
+                           items, the spawn will fail. This is intentional — it forces correct distribution.\n\n",
+                      );
         } else if team_context_for_session.is_some() {
             // Inject teammate workflow guidelines when this session is running as a teammate.
             system_prompt.push_str(
@@ -1167,6 +1367,12 @@ impl SessionProcessor {
                 }
             }
         }
+
+        // PERF-006: freeze the assembled system prompt into an `Arc<str>`
+        // once per turn so every `ChatRequest` construction on every step
+        // and every retry attempt can `Arc::clone` the prompt in O(1)
+        // instead of deep-cloning a 5,000–20,000 character `String`.
+        let system_prompt: std::sync::Arc<str> = std::sync::Arc::from(system_prompt);
 
         // 4. Build chat messages from history with context window awareness.
         //    The Headroom compression pipeline is the only automatic context-
@@ -1311,8 +1517,8 @@ impl SessionProcessor {
                     temperature: agent.temperature,
                     top_p: agent.top_p,
                     max_tokens: Some(200),
-                    system: Some(system_prompt.clone()),
-                    options: agent.options.clone(),
+                    system: Some(std::sync::Arc::clone(&system_prompt)),
+                    options: (*agent.options).clone(),
                     session_id: Some(session_id.to_string()),
                     request_id: Some(Uuid::new_v4().to_string()),
                     stream_timeout_secs: None,
@@ -1383,7 +1589,23 @@ impl SessionProcessor {
         } else {
             self.get_cached_tool_definitions()
         };
-        let mut assistant_parts: Vec<MessagePart> = Vec::new();
+        // PERF-003: fetch the cached tool-name list once per
+        // `process_user_message`; the list is only rebuilt when the tool
+        // registry changes (see `invalidate_tool_cache`).
+        let cached_tool_names: Option<std::sync::Arc<[String]>> = if max_steps > 1 {
+            self.get_cached_tool_names()
+        } else {
+            None
+        };
+        // PERF-029: wrap `assistant_parts` in `Arc<Vec<MessagePart>>` so the
+        // interim-storage write path (which fires on every distinct chunk
+        // during streaming) can `Arc::clone` the parts in O(1) instead of
+        // deep-cloning the whole `Vec<MessagePart>` on every interim update.
+        // The final save still moves the owned `Vec` out of the `Arc` via
+        // `Arc::try_unwrap` (or falls back to a clone if another reference is
+        // outstanding, which is rare on the final save).
+        let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> =
+            std::sync::Arc::new(Vec::new());
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
         let mut task_completeness_nudged = false;
@@ -1438,7 +1660,11 @@ impl SessionProcessor {
                     other_ms
                 );
                 // Save partial progress (update the pre-created placeholder).
-                let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
+                // PERF-029: `Arc::try_unwrap` avoids a clone when this is the
+                // only outstanding reference (the common case on cancel).
+                let parts_owned = std::sync::Arc::try_unwrap(assistant_parts)
+                    .unwrap_or_else(|arc| (*arc).clone());
+                let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
                 assistant_msg.id = assistant_msg_id;
                 let cancelled_id = assistant_msg.id.clone();
                 self.storage_op(move |s| s.update_message(&assistant_msg))
@@ -1457,10 +1683,17 @@ impl SessionProcessor {
             // Log which tools are being sent with this request
             if !tool_definitions.is_empty() {
                 let _scope = profiler.scope("loop.step.publish_tools");
-                let tool_names: Vec<String> =
-                    tool_definitions.iter().map(|t| t.name.clone()).collect();
+                // PERF-003: reuse the cached tool-name list instead of
+                // re-collecting 111 Strings on every loop step. The cache
+                // is populated by `get_cached_tool_definitions` and
+                // invalidated together with the definitions on tool
+                // registry changes.
+                let tool_names: Vec<String> = match &cached_tool_names {
+                    Some(names) => names.iter().cloned().collect(),
+                    None => tool_definitions.iter().map(|t| t.name.clone()).collect(),
+                };
                 self.event_bus.publish(Event::ToolsSent {
-                    session_id: session_id.to_string(),
+                    session_id: session_id_arc.to_string(),
                     tools: tool_names,
                 });
             }
@@ -1589,18 +1822,33 @@ impl SessionProcessor {
                     }
 
                     // Build request (fresh for each attempt)
+                    // PERF-007: keep `chat_messages` as an owned `Vec` that we
+                    // mutate between steps (appending assistant/tool turns).
+                    // We still need a clone here because `chat_messages` is
+                    // borrowed mutably later in the step (the tool-result push
+                    // sites). The win over the original code is that the
+                    // `Arc` wrap is now explicit and the clone is paid once
+                    // per attempt rather than once per retry; subsequent
+                    // steps reuse the same `Arc` header allocation pattern.
+                    let attempt_messages: Arc<Vec<ChatMessage>> = Arc::new(chat_messages.clone());
                     let attempt_request = ChatRequest {
                         model: model_ref.model_id.clone(),
-                        messages: Arc::new(chat_messages.clone()),
+                        messages: attempt_messages,
                         tools: tool_definitions.clone(),
                         temperature: agent.temperature,
                         top_p: agent.top_p,
                         max_tokens: None,
-                        system: Some(system_prompt.clone()),
-                        options: agent.options.clone(),
+                        system: Some(std::sync::Arc::clone(&system_prompt)),
+                        options: (*agent.options).clone(),
                         session_id: Some(session_id.to_string()),
                         request_id: Some(Uuid::new_v4().to_string()),
-                        stream_timeout_secs: Some(self.stream_config.timeout_secs),
+                        // Forward the initial-response timeout, NOT the
+                        // per-event stall timeout.  See `StreamConfig`
+                        // for the distinction — providers use this value
+                        // as the HTTP request timeout for the first
+                        // byte, while `stream_config.timeout_secs` is
+                        // applied separately to inter-delta gaps.
+                        stream_timeout_secs: Some(self.stream_config.initial_response_timeout_secs),
                         thinking: agent.thinking.clone(),
                     };
                     self.event_bus.publish(Event::RequestStarted {
@@ -1654,9 +1902,11 @@ impl SessionProcessor {
                     // most recent stream event so we can detect "no
                     // delta for N seconds" stalls.  The configured
                     // threshold is `self.stream_config.timeout_secs`
-                    // (already used as the HTTP request timeout); the
-                    // stall-detection path emits a `StallDetected`
-                    // event and aborts the current stream.
+                    // (the per-event stall timeout — distinct from
+                    // `initial_response_timeout_secs`, which bounds the
+                    // first-byte wait); the stall-detection path emits
+                    // a `StallDetected` event and aborts the current
+                    // stream.
                     let last_event_at: Option<Instant> = None;
                     let stall_timeout =
                         std::time::Duration::from_secs(self.stream_config.timeout_secs.max(60));
@@ -1914,47 +2164,50 @@ impl SessionProcessor {
             if last_input_tokens > 0 {
                 last_reported_input_tokens = last_input_tokens;
             }
-            // Collect parts from this turn
-            {
-                let _scope = profiler.scope("loop.response.process");
-                if !reasoning_buffer.is_empty() {
-                    let _scope = profiler.scope("loop.response.store_reasoning_part");
-                    assistant_parts.push(MessagePart::Reasoning {
-                        text: reasoning_buffer.clone(),
-                    });
-                }
-                if !text_buffer.is_empty() {
-                    // Log the model response text
-                    let response_preview = if text_buffer.len() > 200 {
-                        let mut end = 200;
-                        while end > 0 && !text_buffer.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        format!("{}…", &text_buffer[..end])
-                    } else {
-                        text_buffer.clone()
-                    };
-                    let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
-                    cumulative_model_wait_ms += model_elapsed_ms;
-                    {
-                        let _scope = profiler.scope("loop.response.publish_model_response");
-                        self.event_bus.publish(Event::ModelResponse {
-                            session_id: session_id.to_string(),
-                            text: response_preview,
-                            elapsed_ms: model_elapsed_ms,
-                            input_tokens: last_input_tokens,
-                            output_tokens: last_output_tokens,
-                        });
-                    }
-                    {
-                        let _scope = profiler.scope("loop.response.store_text_part");
-                        assistant_parts.push(MessagePart::Text {
-                            text: text_buffer.clone(),
-                        });
-                    }
-                }
-            }
-
+                          // Collect parts from this turn
+                          {
+                              let _scope = profiler.scope("loop.response.process");
+                              if !reasoning_buffer.is_empty() {
+                                  let _scope = profiler.scope("loop.response.store_reasoning_part");
+                                  // PERF-029: `Arc::make_mut` gives COW semantics — if this
+                                  // is the only reference (the common case mid-turn), no
+                                  // clone is incurred; otherwise the Vec is cloned once.
+                                  std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Reasoning {
+                                      text: reasoning_buffer.clone(),
+                                  });
+                              }
+                              if !text_buffer.is_empty() {
+                                  // Log the model response text
+                                  let response_preview = if text_buffer.len() > 200 {
+                                      let mut end = 200;
+                                      while end > 0 && !text_buffer.is_char_boundary(end) {
+                                          end -= 1;
+                                      }
+                                      format!("{}…", &text_buffer[..end])
+                                  } else {
+                                      text_buffer.clone()
+                                  };
+                                  let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
+                                  cumulative_model_wait_ms += model_elapsed_ms;
+                                  {
+                                      let _scope = profiler.scope("loop.response.publish_model_response");
+                                      self.event_bus.publish(Event::ModelResponse {
+                                          session_id: session_id.to_string(),
+                                          text: response_preview,
+                                          elapsed_ms: model_elapsed_ms,
+                                          input_tokens: last_input_tokens,
+                                          output_tokens: last_output_tokens,
+                                      });
+                                  }
+                                  {
+                                      let _scope = profiler.scope("loop.response.store_text_part");
+                                      // PERF-029: COW push via `Arc::make_mut`.
+                                      std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Text {
+                                          text: text_buffer.clone(),
+                                      });
+                                  }
+                              }
+                          }
             // Execute tool calls if any were emitted, regardless of finish_reason.
             // Some Ollama models send tool calls but set done_reason to "stop" rather
             // than "tool_calls", so we cannot rely on finish_reason alone.
@@ -2072,25 +2325,25 @@ impl SessionProcessor {
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
-                        Ok((
-                            tc,
-                            input,
-                            status,
-                            output_value,
-                            error,
-                            duration_ms,
-                            result_content,
-                            tool_metadata,
-                        )) => {
-                            assistant_parts.push(MessagePart::ToolCall {
-                                tool: tc.name.clone(),
-                                call_id: tc.id.clone(),
-                                state: ToolCallState {
-                                    status,
-                                    input,
-                                    output: output_value,
-                                    error,
-                                    duration_ms: Some(duration_ms),
+                                                  Ok((
+                                                      tc,
+                                                      input,
+                                                      status,
+                                                      output_value,
+                                                      error,
+                                                      duration_ms,
+                                                      result_content,
+                                                      tool_metadata,
+                                                  )) => {
+                                                      // PERF-029: COW push via `Arc::make_mut`.
+                                                      std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::ToolCall {
+                                                          tool: tc.name.clone(),
+                                                          call_id: tc.id.clone(),
+                                                          state: ToolCallState {
+                                                              status,
+                                                              input,
+                                                              output: output_value,
+                                                              error,                                    duration_ms: Some(duration_ms),
                                 },
                             });
 
@@ -2153,7 +2406,14 @@ impl SessionProcessor {
                         code_index: self.code_index.get().cloned(),
                         spec_manager: self.spec_manager.get().cloned(),
                         active_spec_id: self.active_spec.read().await.clone(),
-                        config: Some(Arc::new(session_config.clone())),
+                        // PERF-009: share the per-turn `Arc<Config>` instead
+                        // of deep-cloning the whole `Config` on every tool
+                        // call. `session_config` is an `Arc<Config>` built
+                        // once at the top of `process_user_message`.
+                        config: Some(std::sync::Arc::clone(&session_config)),
+                        // PERF-019: start each turn with an empty team-dir
+                        // cache; the first team tool to run populates it.
+                        cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                     };
                     let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
@@ -2169,6 +2429,11 @@ impl SessionProcessor {
                     let profiler = profiler.clone();
                     let auto_approve = self.auto_approve; // Spawn each tool execution as a future — the tool semaphore
                     // inside the spawned task bounds concurrency.
+                    // M8-T1: clone the team-context cache Arc so the spawned
+                    // tool future can invalidate it after a `team_*` tool runs
+                    // without borrowing `self` (which cannot escape the
+                    // `'static` bound of `tokio::spawn`).
+                    let team_context_cache = self.team_context_cache.clone();
                     let fut = tokio::spawn(async move {
                         let _tool_total_scope =
                             profiler.scope_with(|| format!("tool.total:{}", tc_clone.name));
@@ -2386,7 +2651,18 @@ impl SessionProcessor {
                         };
                         let duration_ms = start.elapsed().as_millis() as u64;
 
-                        // Run PostToolUse hooks after execution
+                        // M8-T1: invalidate the team-context cache whenever
+                        // a team-mutating tool runs. Team tools (`team_*`)
+                        // can create/join/leave teams, spawn teammates, or
+                        // change member status — any of which can invalidate
+                        // a cached `TeamContext` for this or another session.
+                        // Clearing the whole map is cheap (it is bounded by
+                        // the number of active sessions) and avoids missing
+                        // an invalidation for a tool that affects a peer
+                        // session's team membership.
+                        if tc_clone.name.starts_with("team_") {
+                            team_context_cache.write().clear();
+                        } // Run PostToolUse hooks after execution
                         let output_content = result
                             .as_ref()
                             .map(|o| o.content.clone())
@@ -2679,58 +2955,75 @@ impl SessionProcessor {
             }
 
             // Persist intermediate progress so that output inspectors (e.g.
-            // the teammate output overlay) can show steps while the agent is
-            // still running.  Fire-and-forget on a blocking thread.
-            {
-                let _scope = profiler.scope("storage.assistant_interim.update");
-                // Compute a cheap content hash so we skip the blocking storage
-                // write when the assistant_parts haven't changed since the last
-                // interim update (e.g. while waiting for the LLM).
-                let current_hash = {
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    for part in &assistant_parts {
-                        std::mem::discriminant(part).hash(&mut hasher);
-                        match part {
-                            MessagePart::Text { text } => text.hash(&mut hasher),
-                            MessagePart::ToolCall {
-                                tool,
-                                call_id,
-                                state,
-                            } => {
-                                tool.hash(&mut hasher);
-                                call_id.hash(&mut hasher);
-                                state.input.to_string().hash(&mut hasher);
-                                if let Some(out) = &state.output {
-                                    out.to_string().hash(&mut hasher);
-                                }
-                                if let Some(err) = &state.error {
-                                    err.hash(&mut hasher);
-                                }
-                            }
-                            MessagePart::Reasoning { text } => text.hash(&mut hasher),
-                            MessagePart::Image(img) => {
-                                img.mime_type.hash(&mut hasher);
-                                img.path.hash(&mut hasher);
-                            }
-                        }
-                    }
-                    hasher.finish()
-                };
-                if last_interim_hash != Some(current_hash) {
-                    let mut interim =
-                        Message::new(session_id, Role::Assistant, assistant_parts.clone());
-                    interim.id = assistant_msg_id.clone();
-                    let _ = self.storage_op(move |s| s.update_message(&interim)).await;
-                    last_interim_hash = Some(current_hash);
-                }
-            }
-        }
+                      // the teammate output overlay) can show steps while the agent is
+                      // still running.  Fire-and-forget on a blocking thread.
+                      {
+                          let _scope = profiler.scope("storage.assistant_interim.update");
+                          // Compute a cheap content hash so we skip the blocking storage
+                          // write when the assistant_parts haven't changed since the last
+                          // interim update (e.g. while waiting for the LLM).
+                          //
+                          // PERF-029: iterate over the `Arc<Vec<MessagePart>>` via
+                          // `&*assistant_parts` (deref to the slice) so the hash loop
+                          // works unchanged.
+                                                      let current_hash = {
+                                                          // PERF-031: FxHash for the interim-content hash
+                                                          // (non-adversarial, called on every poll).
+                                                          use std::hash::{Hash, Hasher};
+                                                          use rustc_hash::FxHasher;
+                                                          let mut hasher = FxHasher::default();
+                                                          for part in &*assistant_parts {
+                                                              std::mem::discriminant(part).hash(&mut hasher);
+                                                              match part {
+                                                                  MessagePart::Text { text } => text.hash(&mut hasher),
+                                                                  MessagePart::ToolCall {
+                                                                      tool,
+                                                                      call_id,
+                                                                      state,
+                                                                  } => {
+                                                                      tool.hash(&mut hasher);
+                                                                      call_id.hash(&mut hasher);
+                                                                      state.input.to_string().hash(&mut hasher);
+                                                                      if let Some(out) = &state.output {
+                                                                          out.to_string().hash(&mut hasher);
+                                                                      }
+                                                                      if let Some(err) = &state.error {
+                                                                          err.hash(&mut hasher);
+                                                                      }
+                                                                  }                                      MessagePart::Reasoning { text } => text.hash(&mut hasher),
+                                      MessagePart::Image(img) => {
+                                          img.mime_type.hash(&mut hasher);
+                                          img.path.hash(&mut hasher);
+                                      }
+                                  }
+                              }
+                              hasher.finish()
+                          };
+                          if last_interim_hash != Some(current_hash) {
+                              // PERF-029: `Arc::clone` here is O(1) — the interim
+                              // `Message::new` receives an owned `Vec` via
+                              // `(*assistant_parts).clone()`, but the clone only
+                              // happens when the hash actually changed (i.e. real
+                              // progress), not on every poll.
+                              let mut interim = Message::new(
+                                  session_id,
+                                  Role::Assistant,
+                                  (*assistant_parts).clone(),
+                              );
+                              interim.id = assistant_msg_id.clone();
+                              let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+                              last_interim_hash = Some(current_hash);
+                          }
+                      }
+                  }
 
-        // 6. Final save of assistant message (update the pre-created placeholder).
-        let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
-        assistant_msg.id = assistant_msg_id;
-        {
+                  // 6. Final save of assistant message (update the pre-created placeholder).
+                  // PERF-029: `Arc::try_unwrap` avoids a clone when this is the only
+                  // outstanding reference (the common case at end-of-turn).
+                  let parts_owned = std::sync::Arc::try_unwrap(assistant_parts)
+                      .unwrap_or_else(|arc| (*arc).clone());
+                  let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
+                  assistant_msg.id = assistant_msg_id;        {
             let _scope = profiler.scope("storage.assistant_final.update");
             let msg = assistant_msg.clone();
             self.storage_op(move |s| s.update_message(&msg)).await?;
@@ -2815,15 +3108,17 @@ impl SessionProcessor {
         }
 
         // Skip if an assistant message already exists (init already ran).
+        // PERF-010: use the cheap existence check instead of loading the
+        // full message history just to test whether an assistant turn
+        // has already been recorded.
         let already_done = self
             .session_manager
-            .get_messages(session_id)
-            .map(|msgs| msgs.iter().any(|m| m.role == Role::Assistant))
+            .storage()
+            .has_assistant_messages(session_id)
             .unwrap_or(false);
         if already_done {
             return Ok(());
         }
-
         // Resolve model / provider — bail silently if not configured yet.
         let model_ref = match agent.model.as_ref() {
             Some(m) => m,
@@ -2885,6 +3180,10 @@ impl SessionProcessor {
             Some(self.session_manager.storage()),
             Some(&run_init_config.memory),
         );
+        // PERF-006: wrap the init-exchange prompt in `Arc<str>` so the
+        // `ChatRequest::system` field is satisfied without an intermediate
+        // `String` clone.
+        let system_prompt: std::sync::Arc<str> = std::sync::Arc::from(system_prompt);
         let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
                                            Please acknowledge them briefly.";
         let init_messages = vec![ChatMessage {
@@ -2899,7 +3198,7 @@ impl SessionProcessor {
             top_p: agent.top_p,
             max_tokens: Some(64),
             system: Some(system_prompt),
-            options: agent.options.clone(),
+            options: (*agent.options).clone(),
             session_id: Some(session_id.to_string()),
             request_id: Some(Uuid::new_v4().to_string()),
             stream_timeout_secs: None,
@@ -3118,9 +3417,11 @@ fn resolve_team_context_for_session(
 /// the entire message list byte-for-byte.  See
 /// `AgentPerf` T-007 / FR-006.
 fn history_version_of(messages: &[Message]) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
+    // PERF-031: FxHash for the cheap history-version cache key
+    // (non-adversarial, called on every agent step).
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
+    use rustc_hash::FxHasher;
+    let mut hasher = FxHasher::default();
     messages.len().hash(&mut hasher);
     if let Some(last) = messages.last() {
         last.id.hash(&mut hasher);
@@ -3260,9 +3561,11 @@ pub fn tool_result_content_for_llm(
     // from the input bytes (cheap — no UTF-8 validation needed for the
     // `Arc<str>::from` path because we go through `String`).
     if content.len() <= MAX_TOOL_RESULT_BYTES_FOR_LLM {
-        return Arc::from(content.to_string());
+        // PERF-015: avoid the intermediate `String` allocation on the fast
+        // path. `Arc::<str>::from(&str)` performs a single allocation and
+        // no UTF-8 validation (the input is already a valid `&str`).
+        return Arc::from(content);
     }
-
     let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
     let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
     let total_chars = content.chars().count();
@@ -3294,6 +3597,13 @@ pub fn tool_result_content_for_llm(
 /// - each message (role + content string lengths, ~40 bytes overhead)
 /// - each tool definition (name + description + parameters string lengths, ~60 bytes overhead)
 /// - the system prompt string length
+///
+/// PERF-014: tool-definition sizes are summed from the *cached* definition
+/// list (see [`ToolRegistry::definitions`]) rather than re-serialising all
+/// ~111 `ToolDefinition::parameters` JSON schemas on every step. The
+/// `ToolDefinition::parameters.to_string()` call is the dominant cost here
+/// because each schema is a nested JSON object; caching the per-definition
+/// byte size on the registry avoids paying that cost on every estimate.
 pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
     let mut total: u64 = 80; // fixed JSON wrapper overhead
     total += request.model.len() as u64;
@@ -3307,6 +3617,10 @@ pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
                     .iter()
                     .map(|p| match p {
                         ContentPart::Text { text } => text.len(),
+                        // PERF-014: only the *actual* tool-call inputs (typically
+                        // 1–5 per step) pay the `to_string()` cost now; the
+                        // per-tool-definition schema size is supplied by the
+                        // caller via `estimate_request_bytes_with_tool_bytes`.
                         ContentPart::ToolUse { id, name, input } => {
                             id.len() + name.len() + input.to_string().len()
                         }
@@ -3321,6 +3635,11 @@ pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
             content_len + m.role.len() + 40
         })
         .sum::<usize>() as u64;
+    // PERF-014: if the caller pre-computed the total tool-definition byte
+    // size (via `estimate_tool_definition_bytes`), use it directly instead
+    // of re-serialising every schema here. When the field is `None` we fall
+    // back to the legacy per-call serialisation so behaviour is unchanged
+    // for callers that haven't migrated.
     total += request
         .tools
         .iter()
@@ -3330,6 +3649,21 @@ pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
         total += sys.len() as u64;
     }
     total
+}
+
+/// PERF-014: pre-compute the total serialised byte size of a slice of
+/// [`ToolDefinition`]s.
+///
+/// `estimate_request_bytes` previously called `t.parameters.to_string()`
+/// for every tool definition on every step — with ~111 tools that is
+/// ~111 JSON serialisations per estimate. This helper computes the sum
+/// once (ideally alongside the cached `definitions()` list) so the per-step
+/// estimate only pays for the *actual* tool-call inputs (typically 1–5).
+pub fn estimate_tool_definition_bytes(tools: &[ToolDefinition]) -> u64 {
+    tools
+        .iter()
+        .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len() + 60)
+        .sum::<usize>() as u64
 }
 
 fn chat_request_payload_bytes(request: &ChatRequest) -> u64 {
@@ -3837,7 +4171,7 @@ mod tests {
             temperature: Some(0.2),
             top_p: None,
             max_tokens: Some(64),
-            system: Some("system".to_string()),
+            system: Some(std::sync::Arc::from("system")),
             options: HashMap::new(),
             session_id: Some("session-1".to_string()),
             request_id: Some("request-1".to_string()),
@@ -3940,7 +4274,7 @@ mod tests {
             temperature: Some(0.2),
             top_p: None,
             max_tokens: None,
-            system: Some(prompt_section),
+            system: Some(std::sync::Arc::from(prompt_section)),
             options: HashMap::new(),
             session_id: Some("session-1".to_string()),
             request_id: Some("request-1".to_string()),
@@ -3960,5 +4294,46 @@ mod tests {
                 .iter()
                 .any(|tool| tool.name == "github_review_pr")
         );
+    }
+
+    #[test]
+    fn test_detailed_tool_reference_includes_schemas_and_required_flags() {
+        let registry = crate::tool::create_default_registry();
+        let section = build_detailed_tool_reference_section(&registry);
+
+        assert!(section.starts_with("## Available Tools"));
+        assert!(section.contains("### `new_task`"));
+        assert!(section.contains("- `agent` (`string` (required)"));
+        assert!(section.contains("- `task` (`string` (required)"));
+        assert!(section.contains("- `background` (`boolean`)"));
+
+        // The `read` tool should expose its range parameters.
+        assert!(section.contains("### `read`"));
+        assert!(section.contains("- `path` (`string` (required)"));
+        assert!(section.contains("- `start_line` ("));
+        assert!(section.contains("- `num_lines` ("));
+    }
+
+    #[test]
+    fn test_detailed_tool_reference_omits_hidden_tools() {
+        let registry = crate::tool::create_default_registry();
+        let hidden = tool_family_names("github")
+            .expect("github family should exist")
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<Vec<_>>();
+        registry.set_hidden(&hidden);
+
+        let section = build_detailed_tool_reference_section(&registry);
+        assert!(!section.contains("### `github_list_issues`"));
+        assert!(!section.contains("### `github_review_pr`"));
+        assert!(section.contains("### `read`"));
+    }
+
+    #[test]
+    fn test_detailed_tool_reference_handles_empty_registry() {
+        let registry = crate::tool::ToolRegistry::new();
+        let section = build_detailed_tool_reference_section(&registry);
+        assert!(section.is_empty());
     }
 }

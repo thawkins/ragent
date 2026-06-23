@@ -97,19 +97,35 @@ impl Tool for TeamApprovePlanTool {
             store.save()?;
         }
 
-        // Send approval/rejection to the teammate's mailbox.
         let teammate_mailbox = Mailbox::open(&team_dir, &agent_id)?;
-        let msg_type = if approved {
-            MessageType::PlanApproved
-        } else {
-            MessageType::PlanRejected
-        };
-        teammate_mailbox.push(MailboxMessage::new(
+        let mut msg = MailboxMessage::new(
             "lead".to_string(),
             agent_id.clone(),
-            msg_type,
+            if approved {
+                MessageType::PlanApproved
+            } else {
+                MessageType::PlanRejected
+            },
             feedback,
-        ))?;
+        );
+        // M5-T4: copy the correlation id from the member's plan_request_id so
+        // the teammate can tell which plan was approved/rejected.
+        {
+            let store = TeamStore::load(&team_dir)?;
+            if let Some(m) = store.config.member_by_id(&agent_id) {
+                msg.correlation_id = m.plan_request_id.clone();
+            }
+        }
+        teammate_mailbox.push(msg)?;
+
+        // M5-T4: clear the member's plan_request_id now that the reply is sent.
+        {
+            let mut store = TeamStore::load(&team_dir)?;
+            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                m.plan_request_id = None;
+            }
+            store.save()?;
+        }
 
         let verdict = if approved { "approved" } else { "rejected" };
         Ok(ToolOutput {

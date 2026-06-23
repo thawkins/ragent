@@ -336,13 +336,12 @@ impl OllamaCloudClient {
         if let Some(system) = &request.system {
             messages.push(json!({
                 "role": "system",
-                "content": system
+                "content": &**system
             }));
         }
 
         for msg in request.messages.iter() {
-            // Ollama Cloud requires content to always be a plain string.
-            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
+            // Ollama Cloud requires content to always be a plain string.            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
             let (content_str, images): (String, Vec<String>) = match &msg.content {
                 ChatContent::Text(text) => (text.clone(), vec![]),
                 ChatContent::Parts(parts) => {

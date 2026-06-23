@@ -54,6 +54,8 @@ fn make_app() -> App {
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
+        cached_tool_names: parking_lot::RwLock::new(None),
+            team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
     });
@@ -1332,6 +1334,7 @@ fn test_event_teammate_message_logs_preview() {
         team_name: "alpha".to_string(),
         from: "tm-001".to_string(),
         to: "lead".to_string(),
+        message_type: "message".to_string(),
         preview: "here is my result".to_string(),
     });
 
@@ -1359,6 +1362,7 @@ fn test_event_teammate_message_increments_receiver_counter() {
         team_name: "alpha".to_string(),
         from: "lead".to_string(),
         to: "tm-002".to_string(),
+        message_type: "message".to_string(),
         preview: "please check logs".to_string(),
     });
 

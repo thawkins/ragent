@@ -216,6 +216,15 @@ impl Message {
         )
     }
 
+    /// Convenience constructor for a single-text assistant message.
+    pub fn assistant_text(session_id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self::new(
+            session_id,
+            Role::Assistant,
+            vec![MessagePart::Text { text: text.into() }],
+        )
+    }
+
     /// Concatenates all [`MessagePart::Text`] parts into a single string.
     ///
     /// # Examples

@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::event::Event;
 use crate::team::{MemberStatus, TeamStatus, TeamStore, find_team_dir};
 
 /// Tears down a team's on-disk resources.
@@ -77,15 +78,23 @@ impl Tool for TeamCleanupTool {
         }
 
         // Mark team as disbanded in config before deleting (best-effort).
-        {
+        let lead_sid = {
             let mut store = TeamStore::load(&team_dir)?;
+            let sid = store.config.lead_session_id.clone();
             store.config.status = TeamStatus::Disbanded;
             store.save().ok(); // Ignore errors — we're about to delete.
-        }
+            sid
+        };
 
         std::fs::remove_dir_all(&team_dir)
             .map_err(|e| anyhow::anyhow!("Failed to remove team directory: {e}"))?;
 
+        // M5-T7: publish TeamCleanedUp so the TUI/SSE observe the teardown
+        // (the event variant already existed but was never published).
+        ctx.event_bus.publish(Event::TeamCleanedUp {
+            session_id: lead_sid,
+            team_name: team_name.to_string(),
+        });
         Ok(ToolOutput {
             content: format!("Team '{team_name}' cleaned up successfully. All resources removed."),
             metadata: Some(json!({

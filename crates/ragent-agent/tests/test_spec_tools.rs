@@ -24,6 +24,7 @@ fn base_ctx() -> ToolContext {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
     }
 }
 

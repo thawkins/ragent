@@ -63,13 +63,33 @@ impl Tool for TeamShutdownAckTool {
         }
 
         // Send ack to lead mailbox.
+        // M5-T4: copy the correlation id from the member's shutdown_request_id
+        // so the lead can pair request/ack.
+        let correlation_id = {
+            let store = TeamStore::load(&team_dir)?;
+            store
+                .config
+                .member_by_id(&agent_id)
+                .and_then(|m| m.shutdown_request_id.clone())
+        };
         let lead_mailbox = Mailbox::open(&team_dir, "lead")?;
-        lead_mailbox.push(MailboxMessage::new(
+        let mut msg = MailboxMessage::new(
             agent_id.clone(),
             "lead".to_string(),
             MessageType::ShutdownAck,
             format!("Teammate '{agent_id}' acknowledges shutdown and is terminating."),
-        ))?;
+        );
+        msg.correlation_id = correlation_id;
+        lead_mailbox.push(msg)?;
+
+        // M5-T4: clear the member's shutdown_request_id now that the ack is sent.
+        {
+            let mut store = TeamStore::load(&team_dir)?;
+            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                m.shutdown_request_id = None;
+            }
+            store.save()?;
+        }
 
         Ok(ToolOutput {
             content: format!(

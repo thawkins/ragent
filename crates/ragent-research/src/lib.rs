@@ -30,30 +30,57 @@
 //!
 //! - `manager` — `ResearchManager` with create/list/show/delete/archive
 //! - `session` — gathering orchestration engine
-//! - `io` — atomic file read/write for `RESEARCH.md`
 //! - `index` — `research/INDEX.md` derived cache
+//!
+//! ## Implemented modules (Milestone 1+)
+//!
+//! - [`io`] — atomic file I/O, supporting-file paths, References Index and
+//!   `research/INDEX.md` rendering (T-006, T-012, T-013).
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod cli;
+pub mod document;
+pub mod io;
 pub mod item;
 pub mod local_gatherer;
+pub mod manager;
 pub mod plan_dep;
 pub mod research_name;
+pub mod session;
 pub mod source;
 pub mod status;
 pub mod web_gatherer;
 
+pub use cli::{
+    ResearchCliCommand, render_list_output, render_search_output, render_session_event_json,
+    render_show_output,
+};
+pub use document::{
+    AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
+    assemble_document, fence_source_body, mark_complete, mark_in_progress, render_skeleton,
+    render_supporting_file,
+};
+pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{ResearchItem, ResearchItemError};
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch, LocalGatherConfig, LocalGatherError,
     LocalGatherer, LocalTool, derive_terms, local_body_path,
 };
+pub use manager::{
+    IndexTimestamp, ResearchError, ResearchManager, SearchHit, render_document_for,
+    suggest_closest_from, union_with_existing,
+};
 pub use plan_dep::{
     ResearchDependency, ResearchDependencyError, parse_research_dependencies,
-    research_dependency_names,
+    parse_spec_frontmatter_research, research_dependency_names,
 };
-pub use research_name::{ResearchName, ResearchNameError, MAX_LEN, MIN_LEN, is_path_traversal};
+pub use research_name::{MAX_LEN, MIN_LEN, ResearchName, ResearchNameError, is_path_traversal};
+pub use session::{
+    NoopObserver, ResearchSession, RunOutcome, SessionConfig, SessionEvent, SessionObserver,
+    SessionPhase,
+};
 pub use source::{LocalSourceKind, Source};
 pub use status::ResearchStatus;
 pub use web_gatherer::{

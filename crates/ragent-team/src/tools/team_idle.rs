@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::event::Event;
 use crate::team::manager::HookOutcome;
 use crate::team::{HookEvent, MemberStatus, TaskStore, TeamStore, find_team_dir, run_team_hook};
 
@@ -129,11 +130,25 @@ impl Tool for TeamIdleTool {
             store.save()?;
         }
 
+        // M3-T4: publish TeammateIdle so `team_wait` and the TUI/SSE observe
+        // the idle transition even when the mailbox poll loop does not deliver
+        // an `IdleNotify` message. We lack the lead's session id in the tool
+        // context, so derive it from the on-disk team config.
+        let lead_session_id = TeamStore::load(&team_dir)
+            .ok()
+            .map(|s| s.config.lead_session_id.clone())
+            .unwrap_or_else(|| ctx.session_id.clone());
+        ctx.event_bus.publish(Event::TeammateIdle {
+            session_id: lead_session_id,
+            team_name: team_name.to_string(),
+            agent_id: agent_id.clone(),
+        });
+
         Ok(ToolOutput {
             content: format!(
                 "Teammate '{agent_id}' is now idle in team '{team_name}'.\n\
-                           Summary: {summary}\n\
-                           Waiting for new tasks or shutdown instructions."
+                            Summary: {summary}\n\
+                            Waiting for new tasks or shutdown instructions."
             ),
             metadata: Some(json!({
                 "team_name": team_name,

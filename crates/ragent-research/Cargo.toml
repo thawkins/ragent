@@ -18,6 +18,14 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros"] }
+similar = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { version = "1", features = ["full"] }
+async-trait = { workspace = true }
+
+[[bench]]
+name = "gathering_bench"
+harness = false

@@ -73,11 +73,7 @@ pub trait LocalTool: Send + Sync {
     /// Run a case-insensitive search for any of `terms` in `path` and
     /// return the matching line numbers (1-based) plus the matched lines
     /// themselves.
-    async fn grep(
-        &self,
-        path: &Path,
-        terms: &[String],
-    ) -> anyhow::Result<Vec<GrepMatch>>;
+    async fn grep(&self, path: &Path, terms: &[String]) -> anyhow::Result<Vec<GrepMatch>>;
 
     /// Read the full contents of `path` as a UTF-8 string.
     async fn read(&self, path: &Path) -> anyhow::Result<String>;
@@ -213,10 +209,7 @@ impl LocalGatherer {
             .enumerate()
         {
             let body_path = local_body_path(index);
-            let relevance = format!(
-                "{} keyword match(es) for research topic",
-                score
-            );
+            let relevance = format!("{} keyword match(es) for research topic", score);
             tracing::info!(
                 path = %candidate.path.display(),
                 kind = ?candidate.kind,
@@ -234,10 +227,15 @@ impl LocalGatherer {
         }
 
         // 3. Cross-reference prior specs (FR-009).
-        let spec_sources = self.gather_specs(project_root, &terms, config.max_local_sources).await;
+        let spec_sources = self
+            .gather_specs(project_root, &terms, config.max_local_sources)
+            .await;
         sources.extend(spec_sources);
 
-        tracing::info!(count = sources.len(), "research: local-gathering phase complete");
+        tracing::info!(
+            count = sources.len(),
+            "research: local-gathering phase complete"
+        );
         Ok(sources)
     }
 
@@ -312,27 +310,48 @@ impl LocalGatherer {
                 return Vec::new();
             }
         };
-        let mut sources = Vec::new();
+
+        // Split specs into those matching a keyword and the rest.
+        let mut matched = Vec::new();
+        let mut rest = Vec::new();
         for spec_id in spec_ids {
-            let title = self.tool.spec_title(project_root, &spec_id).await.unwrap_or_default();
+            let title = self
+                .tool
+                .spec_title(project_root, &spec_id)
+                .await
+                .unwrap_or_default();
+            let haystack = format!("{} {}", spec_id.to_lowercase(), title.to_lowercase());
+            let is_relevant = terms.iter().any(|term| haystack.contains(term));
+            if is_relevant {
+                matched.push((spec_id, title));
+            } else {
+                rest.push((spec_id, title));
+            }
+        }
+
+        // FR-009: prefer relevant specs, but fall back to all specs when the
+        // filter is too restrictive (fewer than 3 matches) so research still
+        // has useful cross-references.
+        let selected: Vec<_> = if matched.len() >= 3 {
+            matched
+        } else {
+            let mut combined = matched;
+            combined.extend(rest);
+            combined
+        };
+
+        let mut sources = Vec::new();
+        for (spec_id, title) in selected.into_iter().take(max_total) {
             let relevance = if title.is_empty() {
                 format!("Spec {} under specs/", spec_id)
             } else {
                 format!("Spec {}: {}", spec_id, title)
             };
-            // Spec sources are appended last and capped so the total stays
-            // under `max_total`. FR-009 wants at least three where
-            // available; we surface all and let the caller cap.
             sources.push(Source::Spec {
                 spec_id,
                 captured_at: Utc::now(),
                 relevance,
             });
-            if sources.len() >= max_total {
-                break;
-            }
-            // Quietly note any spec whose title matches a keyword.
-            let _ = terms;
         }
         sources
     }
@@ -350,14 +369,41 @@ pub fn local_body_path(index: usize) -> PathBuf {
 /// of length ≥ 2 (so we don't try to grep for single letters) drawn
 /// from either source.
 pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
-    let mut terms: Vec<String> = topic
+    // Replace ASCII punctuation (except apostrophes in contractions) with spaces
+    // so tokens like "async/await," become "async" and "await".
+    let cleaned: String = topic
+        .chars()
+        .map(|c| {
+            if c.is_ascii_punctuation() && c != '\'' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let mut terms: Vec<String> = cleaned
         .split_whitespace()
         .map(|s| s.to_lowercase())
         .filter(|s| s.len() >= 2)
         .collect();
     if terms.is_empty() {
-        terms = fallback
+        let cleaned_fallback: String = fallback
             .iter()
+            .map(|s| {
+                s.chars()
+                    .map(|c| {
+                        if c.is_ascii_punctuation() && c != '\'' {
+                            ' '
+                        } else {
+                            c
+                        }
+                    })
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        terms = cleaned_fallback
+            .split_whitespace()
             .map(|s| s.to_lowercase())
             .filter(|s| s.len() >= 2)
             .collect();
@@ -394,10 +440,7 @@ mod tests {
             let mut out: Vec<PathBuf> = self
                 .files
                 .keys()
-                .filter(|p| {
-                    p.extension().map(|e| e == ext).unwrap_or(false)
-                        && p.starts_with(root)
-                })
+                .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false) && p.starts_with(root))
                 .cloned()
                 .collect();
             out.sort();
@@ -405,7 +448,10 @@ mod tests {
         }
 
         async fn grep(&self, path: &Path, terms: &[String]) -> anyhow::Result<Vec<GrepMatch>> {
-            self.grep_calls.lock().unwrap().push((path.to_path_buf(), terms.to_vec()));
+            self.grep_calls
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), terms.to_vec()));
             if let Some(matches) = self.grep_results.get(path) {
                 return Ok(matches.clone());
             }
@@ -417,7 +463,10 @@ mod tests {
             for (i, line) in body.lines().enumerate() {
                 let lower = line.to_lowercase();
                 if terms.iter().any(|t| lower.contains(t)) {
-                    hits.push(GrepMatch { line: i + 1, text: line.to_string() });
+                    hits.push(GrepMatch {
+                        line: i + 1,
+                        text: line.to_string(),
+                    });
                 }
             }
             Ok(hits)
@@ -454,7 +503,10 @@ mod tests {
     #[tokio::test]
     async fn gather_rejects_zero_max_sources() {
         let (g, _) = gatherer_with_fs(FakeFs::default());
-        let cfg = LocalGatherConfig { max_local_sources: 0, ..LocalGatherConfig::default() };
+        let cfg = LocalGatherConfig {
+            max_local_sources: 0,
+            ..LocalGatherConfig::default()
+        };
         let err = g.gather(&root(), "topic", None, &cfg).await.unwrap_err();
         assert!(matches!(err, LocalGatherError::ZeroLimit));
     }
@@ -462,7 +514,10 @@ mod tests {
     #[tokio::test]
     async fn gather_rejects_no_terms() {
         let (g, _) = gatherer_with_fs(FakeFs::default());
-        let cfg = LocalGatherConfig { terms: Vec::new(), ..LocalGatherConfig::default() };
+        let cfg = LocalGatherConfig {
+            terms: Vec::new(),
+            ..LocalGatherConfig::default()
+        };
         let err = g.gather(&root(), "", None, &cfg).await.unwrap_err();
         assert!(matches!(err, LocalGatherError::NoTerms));
     }
@@ -482,7 +537,9 @@ mod tests {
         assert!(!sources.is_empty(), "fallback terms should produce hits");
         let grep_calls = arc.grep_calls.lock().unwrap();
         assert!(
-            grep_calls.iter().any(|(_, terms)| terms.contains(&"alpha".to_string())),
+            grep_calls
+                .iter()
+                .any(|(_, terms)| terms.contains(&"alpha".to_string())),
             "grep should be called with the fallback term"
         );
     }
@@ -492,7 +549,8 @@ mod tests {
         let mut fs = FakeFs::default();
         for name in ["alpha.rs", "beta.rs", "gamma.rs"].iter() {
             let p = root().join("src").join(name);
-            fs.files.insert(p, format!("this is the {name} file, alpha content\n"));
+            fs.files
+                .insert(p, format!("this is the {name} file, alpha content\n"));
         }
         let (g, _) = gatherer_with_fs(fs);
         let cfg = LocalGatherConfig {
@@ -500,10 +558,19 @@ mod tests {
             max_local_sources: 5,
             ..LocalGatherConfig::default()
         };
-        let sources = g.gather(&root(), "alpha content", None, &cfg).await.unwrap();
+        let sources = g
+            .gather(&root(), "alpha content", None, &cfg)
+            .await
+            .unwrap();
         assert!(!sources.is_empty());
         for (i, src) in sources.iter().enumerate() {
-            let Source::Local { body_path, kind, path, .. } = src else {
+            let Source::Local {
+                body_path,
+                kind,
+                path,
+                ..
+            } = src
+            else {
                 panic!("expected Source::Local, got {src:?}");
             };
             assert_eq!(*kind, LocalSourceKind::InProject);
@@ -529,7 +596,10 @@ mod tests {
             ..LocalGatherConfig::default()
         };
         let sources = g.gather(&root(), "alpha", None, &cfg).await.unwrap();
-        let local_count = sources.iter().filter(|s| matches!(s, Source::Local { .. })).count();
+        let local_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Local { .. }))
+            .count();
         assert_eq!(local_count, 3);
     }
 
@@ -537,8 +607,12 @@ mod tests {
     async fn gather_orders_higher_scores_first() {
         let mut fs = FakeFs::default();
         // file_high has 5 alpha hits, file_low has 1.
-        fs.files.insert(root().join("high.rs"), "alpha\nalpha\nalpha\nalpha\nalpha\n".into());
-        fs.files.insert(root().join("low.rs"), "alpha\nbeta\ngamma\n".into());
+        fs.files.insert(
+            root().join("high.rs"),
+            "alpha\nalpha\nalpha\nalpha\nalpha\n".into(),
+        );
+        fs.files
+            .insert(root().join("low.rs"), "alpha\nbeta\ngamma\n".into());
         let (g, _) = gatherer_with_fs(fs);
         let cfg = LocalGatherConfig {
             terms: vec!["alpha".into()],
@@ -550,16 +624,22 @@ mod tests {
             .iter()
             .find(|s| matches!(s, Source::Local { path, .. } if path.contains("high.rs")));
         assert!(first.is_some(), "highest-scoring file must come first");
-        assert!(matches!(first.unwrap(), Source::Local { body_path, .. } if body_path == &PathBuf::from("sources/local-01.md")));
+        assert!(
+            matches!(first.unwrap(), Source::Local { body_path, .. } if body_path == &PathBuf::from("sources/local-01.md"))
+        );
     }
 
     #[tokio::test]
     async fn gather_marks_extra_dir_files_with_extra_kind() {
         let mut fs = FakeFs::default();
         // In-project file.
-        fs.files.insert(root().join("src/lib.rs"), "alpha content here\n".into());
+        fs.files
+            .insert(root().join("src/lib.rs"), "alpha content here\n".into());
         // Extra-dir file (will be globs'd from /extra).
-        fs.files.insert(PathBuf::from("/extra/notes.md"), "alpha notes here\n".into());
+        fs.files.insert(
+            PathBuf::from("/extra/notes.md"),
+            "alpha notes here\n".into(),
+        );
         let (g, _) = gatherer_with_fs(fs);
         let cfg = LocalGatherConfig {
             terms: vec!["alpha".into()],
@@ -587,8 +667,10 @@ mod tests {
     #[tokio::test]
     async fn gather_includes_spec_sources_with_relevance_notes() {
         let mut fs = FakeFs::default();
-        fs.specs.insert("auth-refactor".into(), "Auth refactor plan".into());
-        fs.specs.insert("model-router".into(), "Model router provider".into());
+        fs.specs
+            .insert("auth-refactor".into(), "Auth refactor plan".into());
+        fs.specs
+            .insert("model-router".into(), "Model router provider".into());
         let (g, _) = gatherer_with_fs(fs);
         let cfg = LocalGatherConfig {
             terms: vec!["auth".into()],
@@ -612,15 +694,24 @@ mod tests {
     #[tokio::test]
     async fn gather_returns_empty_when_no_files_match() {
         let mut fs = FakeFs::default();
-        fs.files.insert(root().join("README.md"), "no matching keywords here\n".into());
+        fs.files.insert(
+            root().join("README.md"),
+            "no matching keywords here\n".into(),
+        );
         let (g, _) = gatherer_with_fs(fs);
         let cfg = LocalGatherConfig {
             terms: vec!["zzznotpresent".into()],
             max_local_sources: 5,
             ..LocalGatherConfig::default()
         };
-        let sources = g.gather(&root(), "zzznotpresent", None, &cfg).await.unwrap();
-        let local_count = sources.iter().filter(|s| matches!(s, Source::Local { .. })).count();
+        let sources = g
+            .gather(&root(), "zzznotpresent", None, &cfg)
+            .await
+            .unwrap();
+        let local_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Local { .. }))
+            .count();
         assert_eq!(local_count, 0);
     }
 
@@ -648,6 +739,62 @@ mod tests {
         let terms = derive_terms("", &fallback);
         // Single-char tokens filtered even from fallback.
         assert_eq!(terms, vec!["yy".to_string()]);
+    }
+
+    #[test]
+    fn derive_terms_strips_punctuation_and_splits_internal_punctuation() {
+        let terms = derive_terms("async/await, tokio!", &[]);
+        assert_eq!(
+            terms,
+            vec![
+                "async".to_string(),
+                "await".to_string(),
+                "tokio".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn derive_terms_keeps_apostrophes_in_contractions() {
+        let terms = derive_terms("don't split this", &[]);
+        assert!(terms.contains(&"don't".to_string()));
+    }
+
+    #[tokio::test]
+    async fn gather_specs_filters_by_terms_and_falls_back_when_narrow() {
+        let mut fs = FakeFs::default();
+        fs.specs
+            .insert("auth-refactor".into(), "Sign-in Refactor".into());
+        fs.specs
+            .insert("auth-service".into(), "Auth Service".into());
+        fs.specs.insert("auth-db".into(), "Auth Database".into());
+        fs.specs
+            .insert("model-router".into(), "Model Router".into());
+        let g = LocalGatherer::new(Arc::new(fs));
+        let root = root();
+
+        // Three or more relevant specs keep the filter and exclude unrelated specs.
+        let relevant = g.gather_specs(&root, &["auth".into()], 10).await;
+        assert_eq!(relevant.len(), 3);
+        let ids: Vec<String> = relevant
+            .iter()
+            .map(|s| {
+                if let Source::Spec { spec_id, .. } = s {
+                    spec_id.clone()
+                } else {
+                    panic!("expected spec source")
+                }
+            })
+            .collect();
+        assert!(ids.contains(&"auth-refactor".to_string()));
+        assert!(ids.contains(&"auth-service".to_string()));
+        assert!(ids.contains(&"auth-db".to_string()));
+        assert!(!ids.contains(&"model-router".to_string()));
+
+        // A very narrow filter falls back to all specs so research still has
+        // useful cross-references.
+        let fallback = g.gather_specs(&root, &["zzzz".into()], 10).await;
+        assert_eq!(fallback.len(), 4);
     }
 
     #[test]

@@ -67,7 +67,11 @@ pub enum ResearchDependencyError {
 impl std::fmt::Display for ResearchDependencyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidName { line, raw_name, source } => write!(
+            Self::InvalidName {
+                line,
+                raw_name,
+                source,
+            } => write!(
                 f,
                 "PLAN.md line {line}: invalid research dependency '{raw_name}': {source}"
             ),
@@ -146,7 +150,10 @@ pub fn parse_research_dependencies(
         match ResearchName::try_new(stripped) {
             Ok(name) => {
                 if seen.insert(name.as_str().to_string()) {
-                    out.push(ResearchDependency { name, line: line_number });
+                    out.push(ResearchDependency {
+                        name,
+                        line: line_number,
+                    });
                 }
             }
             Err(source) => {
@@ -162,12 +169,42 @@ pub fn parse_research_dependencies(
     Ok(out)
 }
 
+/// Parse the `research:` list from a SPEC.md frontmatter block. This
+/// complements [`parse_research_dependencies`] which reads PLAN.md.
+///
+/// Returns the names in document order, deduplicated. Invalid entries
+/// are ignored so the surface stays best-effort.
+pub fn parse_spec_frontmatter_research(frontmatter: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in frontmatter.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("research:") else {
+            continue;
+        };
+        let rest = rest.trim();
+        // Accept both inline `[a, b, c]` and a single bare name.
+        let inner = rest
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .unwrap_or(rest);
+        for raw in inner.split(',') {
+            let name = raw.trim().trim_matches('"').trim_matches('\'');
+            if name.is_empty() {
+                continue;
+            }
+            if seen.insert(name.to_string()) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Convenience wrapper: parse and return only the names in document order.
 ///
 /// Returns `Err` for the same reasons as [`parse_research_dependencies`].
-pub fn research_dependency_names(
-    plan_md: &str,
-) -> Result<Vec<String>, ResearchDependencyError> {
+pub fn research_dependency_names(plan_md: &str) -> Result<Vec<String>, ResearchDependencyError> {
     Ok(parse_research_dependencies(plan_md)?
         .into_iter()
         .map(|d| d.name.into())
@@ -261,7 +298,11 @@ research: not-a-real-dep
         let plan = "# Plan\n\nresearch: 1bad\n";
         let err = parse_research_dependencies(plan).unwrap_err();
         match err {
-            ResearchDependencyError::InvalidName { line, raw_name, source } => {
+            ResearchDependencyError::InvalidName {
+                line,
+                raw_name,
+                source,
+            } => {
                 assert_eq!(line, 3);
                 assert_eq!(raw_name, "1bad");
                 assert!(matches!(
@@ -277,15 +318,9 @@ research: not-a-real-dep
     fn rejects_path_traversal_in_name() {
         let plan = "research: ../etc\n";
         let err = parse_research_dependencies(plan).unwrap_err();
-        assert!(matches!(
-            err,
-            ResearchDependencyError::InvalidName { .. }
-        ));
+        assert!(matches!(err, ResearchDependencyError::InvalidName { .. }));
         if let ResearchDependencyError::InvalidName { source, .. } = err {
-            assert!(matches!(
-                source,
-                ResearchNameError::PathTraversal { .. }
-            ));
+            assert!(matches!(source, ResearchNameError::PathTraversal { .. }));
         }
     }
 
@@ -303,7 +338,10 @@ research: not-a-real-dep
     fn rejects_empty_name_when_only_whitespace_after_colon() {
         let plan = "research:    \n";
         let err = parse_research_dependencies(plan).unwrap_err();
-        assert!(matches!(err, ResearchDependencyError::EmptyName { line: 1 }));
+        assert!(matches!(
+            err,
+            ResearchDependencyError::EmptyName { line: 1 }
+        ));
     }
 
     #[test]

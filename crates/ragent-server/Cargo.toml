@@ -13,6 +13,7 @@ ragent-team = { path = "../ragent-team" }
 ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }
 ragent-prompt_opt = { path = "../ragent-prompt_opt" }
+ragent-research = { path = "../ragent-research" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -469,7 +469,7 @@ impl BedrockAnthropicClient {
         });
 
         if let Some(system) = &request.system {
-            body["system"] = json!(system);
+            body["system"] = json!(&**system);
         }
         if let Some(temp) = request.temperature {
             body["temperature"] = json!(temp);
@@ -808,7 +808,7 @@ impl BedrockConverseClient {
         // System prompt
         if let Some(system) = &request.system {
             body["system"] = json!([{
-                "text": system
+                "text": &**system
             }]);
         }
 
@@ -1422,7 +1422,7 @@ mod tests {
             temperature: None,
             top_p: None,
             max_tokens: Some(1024),
-            system: Some("You are helpful".to_string()),
+            system: Some(std::sync::Arc::from("You are helpful")),
             options: HashMap::new(),
             session_id: None,
             request_id: None,
@@ -1471,7 +1471,7 @@ mod tests {
             temperature: Some(0.7),
             top_p: None,
             max_tokens: Some(2048),
-            system: Some("Be concise".to_string()),
+            system: Some(std::sync::Arc::from("Be concise")),
             options: HashMap::new(),
             session_id: None,
             request_id: None,

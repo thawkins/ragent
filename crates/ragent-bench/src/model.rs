@@ -475,11 +475,9 @@ fn benchmark_chat_request(
             options.top_p
         },
         max_tokens: options.max_tokens,
-        system: Some(
-            "You are running inside a benchmark harness. Respond with the requested completion only."
-                .to_string(),
-        ),
-        options: HashMap::new(),
+                  system: Some(std::sync::Arc::from(
+                      "You are running inside a benchmark harness. Respond with the requested completion only.",
+                  )),        options: HashMap::new(),
         session_id: None,
         request_id: None,
         stream_timeout_secs: None,

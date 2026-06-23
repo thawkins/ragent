@@ -1,10 +1,14 @@
 //! `team_message` — Send a direct message to one team member.
+//!
+//! M4-T4: validates the recipient exists and is not `Stopped` / `Failed`
+//! before pushing, so messages to dead teammates are rejected up front
+//! rather than sitting unread forever while the sender gets a false success.
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{Mailbox, MailboxMessage, MessageType, TeamStore, find_team_dir};
+use crate::team::{Mailbox, MailboxMessage, MemberStatus, MessageType, TeamStore, find_team_dir};
 
 /// Sends a direct message to one team member by name.
 pub struct TeamMessageTool;
@@ -16,7 +20,9 @@ impl Tool for TeamMessageTool {
     }
 
     fn description(&self) -> &'static str {
-        "Send a direct message to one team member (teammate or lead) by agent ID or name."
+        "Send a direct message to one team member (teammate or lead) by agent ID or name. \
+         The recipient must be an active member of the team; messages to Stopped or Failed \
+         teammates are rejected."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -71,6 +77,28 @@ impl Tool for TeamMessageTool {
         // Resolve recipient agent ID if a name was given.
         let recipient_id = resolve_agent_id(&team_dir, to)?;
 
+        // M4-T4: validate the recipient is an active member before pushing.
+        // Messages to `lead` are always allowed (the lead mailbox is always
+        // valid). For teammates, reject `Stopped` / `Failed` so the sender
+        // gets an error instead of a false success.
+        if recipient_id != "lead" {
+            let store = TeamStore::load(&team_dir)?;
+            match store.config.member_by_id(&recipient_id) {
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Recipient '{to}' (id: {recipient_id}) is not a member of team '{team_name}'"
+                    ));
+                }
+                Some(m) if matches!(m.status, MemberStatus::Stopped | MemberStatus::Failed) => {
+                    return Err(anyhow::anyhow!(
+                        "Recipient '{to}' (id: {recipient_id}) is {} in team '{team_name}' and cannot receive messages",
+                        m.status.as_str()
+                    ));
+                }
+                _ => {}
+            }
+        }
+
         let mailbox = Mailbox::open(&team_dir, &recipient_id)?;
         mailbox.push(MailboxMessage::new(
             from.clone(),
@@ -92,10 +120,30 @@ impl Tool for TeamMessageTool {
 }
 
 /// Resolve a teammate name to an agent ID by looking it up in config.json.
-/// If `name_or_id` is already an agent ID (starts with "tm-" or is "lead"), return it as-is.
+///
+/// M8-T5: if `name_or_id` starts with `"tm-"`, it is validated against the
+/// actual member list before being accepted. A typo like `"tm-999"` that
+/// does not correspond to a real member now returns an error instead of
+/// silently writing to a mailbox nobody owns.
+///
+/// If `name_or_id` is `"lead"`, it is returned as-is (the lead mailbox is
+/// always valid).
+///
+/// If `name_or_id` is neither `"lead"` nor a `"tm-"` prefix, it is treated
+/// as a teammate **name** and looked up in `config.json`'s member list.
 pub(crate) fn resolve_agent_id(team_dir: &std::path::Path, name_or_id: &str) -> Result<String> {
-    if name_or_id == "lead" || name_or_id.starts_with("tm-") {
+    if name_or_id == "lead" {
         return Ok(name_or_id.to_string());
+    }
+    // M8-T5: validate `tm-…` IDs against the actual member list.
+    if name_or_id.starts_with("tm-") {
+        let store = TeamStore::load(team_dir)?;
+        if let Some(m) = store.config.member_by_id(name_or_id) {
+            return Ok(m.agent_id.clone());
+        }
+        return Err(anyhow::anyhow!(
+            "Agent ID '{name_or_id}' is not a member of this team (no matching member in config.json)"
+        ));
     }
     // Try to find a member with this name.
     let store = TeamStore::load(team_dir)?;

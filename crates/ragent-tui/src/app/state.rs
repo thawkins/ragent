@@ -662,6 +662,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Specification management: /spec create|add|list|search|validate|status|task|help",
     },
     SlashCommandDef {
+        trigger: "research",
+        description: "Research system: /research create|list|open|search|show|delete|archive",
+    },
+    SlashCommandDef {
         trigger: "autopilot",
         description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
     },

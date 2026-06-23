@@ -374,11 +374,10 @@ impl GeminiClient {
         let mut system_instruction: Option<Value> = None;
         if let Some(system) = &request.system {
             system_instruction = Some(json!({
-                "parts": [{ "text": system }],
+                "parts": [{ "text": &**system }],
                 "role": "user"
             }));
         }
-
         for msg in request.messages.iter() {
             let role = match msg.role.as_str() {
                 "assistant" => "model",

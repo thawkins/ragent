@@ -6,7 +6,9 @@
 //! settings are all configured here.
 
 use crate::compression::CompressionConfig;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -115,49 +117,114 @@ pub struct Config {
 /// corresponds to a group of related tools. When a switch is `false`,
 /// all tools in that family are suppressed from `ToolRegistry::definitions()`.
 /// Tools remain registered and executable regardless of visibility.
+///
+/// All fields are public so that callers which have a [`ToolVisibilityConfig`]
+/// in hand (e.g. the TUI `/tools` handler) can mark a switch as explicitly
+/// user-set before persisting the config.
 #[derive(Debug, Clone, Default)]
-struct ToolVisibilitySpecified {
-    office: bool,
-    github: bool,
-    gitlab: bool,
-    teams: bool,
-    agents: bool,
-    plan: bool,
-    codeindex: bool,
+pub struct ToolVisibilitySpecified {
+    /// `true` when `office` was explicitly set in the source JSON or via a setter.
+    pub office: bool,
+    /// `true` when `github` was explicitly set in the source JSON or via a setter.
+    pub github: bool,
+    /// `true` when `gitlab` was explicitly set in the source JSON or via a setter.
+    pub gitlab: bool,
+    /// `true` when `teams` was explicitly set in the source JSON or via a setter.
+    pub teams: bool,
+    /// `true` when `agents` was explicitly set in the source JSON or via a setter.
+    pub agents: bool,
+    /// `true` when `plan` was explicitly set in the source JSON or via a setter.
+    pub plan: bool,
+    /// `true` when `codeindex` was explicitly set in the source JSON or via a setter.
+    pub codeindex: bool,
 }
 
 /// Tool-family visibility configuration.
 ///
 /// The config loader tracks which switches were explicitly present in the
 /// source JSON so merge operations can preserve base values for omitted fields.
-#[derive(Debug, Clone, Serialize)]
+///
+/// The `codeindex` switch is serialised only when the user has *explicitly* set
+/// it (tracked by [`ToolVisibilitySpecified::codeindex`]). This lets the default
+/// config omit the key so code-level default changes propagate, while ensuring
+/// that an explicit user toggle (e.g. `/tools codeindex on|off`) is written to
+/// disk and survives a restart — even when a global config disagrees.
+#[derive(Debug, Clone)]
 pub struct ToolVisibilityConfig {
     /// Office document tools (office_read, office_write, office_info, libre_read, etc.).
-    #[serde(default = "default_false")]
     pub office: bool,
     /// GitHub tools (github_list_issues, github_get_issue, github_create_issue, etc.).
-    #[serde(default = "default_false")]
     pub github: bool,
     /// GitLab tools (gitlab_list_issues, gitlab_get_issue, gitlab_create_mr, etc.).
-    #[serde(default = "default_false")]
     pub gitlab: bool,
     /// Team coordination tools (team_create, team_spawn, team_message, etc.).
-    #[serde(default = "default_false")]
     pub teams: bool,
     /// Autonomous agent task tools (new_task, list_tasks, cancel_task, etc.).
-    #[serde(default = "default_false")]
     pub agents: bool,
     /// Plan-mode tools (plan_enter, plan_exit).
-    #[serde(default = "default_false")]
     pub plan: bool,
     /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
     /// Default `true` — codeindex tools are visible when the subsystem is enabled.
-    /// When serialised, the default value (`true`) is omitted so that code-level
-    /// default changes take effect without manual config edits.
-    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    /// When serialised, this field is only written if the user explicitly set it
+    /// (via [`ToolVisibilityConfig::set_codeindex`] or by having it present in the
+    /// loaded JSON).
     pub codeindex: bool,
-    #[serde(skip)]
-    specified: ToolVisibilitySpecified,
+    /// Tracks which switches were explicitly set, so merge/serialise can
+    /// distinguish "user set this" from "this is just the default".
+    pub specified: ToolVisibilitySpecified,
+}
+
+impl ToolVisibilityConfig {
+    /// Iterate over every tool-visibility switch and its enabled state.
+    pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
+        [
+            ("office", self.office),
+            ("github", self.github),
+            ("gitlab", self.gitlab),
+            ("teams", self.teams),
+            ("agents", self.agents),
+            ("plan", self.plan),
+            ("codeindex", self.codeindex),
+        ]
+        .into_iter()
+    }
+
+    /// Explicitly set the `codeindex` switch and mark it as user-specified.
+    ///
+    /// Use this (rather than direct field assignment) when persisting a user
+    /// toggle such as `/tools codeindex on` / `/tools codeindex off`, so the
+    /// value is written to the config file and overrides any global-config
+    /// default on reload.
+    pub fn set_codeindex(&mut self, enabled: bool) {
+        self.codeindex = enabled;
+        self.specified.codeindex = true;
+    }
+}
+
+impl Serialize for ToolVisibilityConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        // Non-codeindex switches are always serialised (they default to false
+        // and have no skip). `codeindex` is serialised only when explicitly set.
+        let mut count = 6; // office, github, gitlab, teams, agents, plan
+        if self.specified.codeindex {
+            count += 1;
+        }
+        let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
+        s.serialize_field("office", &self.office)?;
+        s.serialize_field("github", &self.github)?;
+        s.serialize_field("gitlab", &self.gitlab)?;
+        s.serialize_field("teams", &self.teams)?;
+        s.serialize_field("agents", &self.agents)?;
+        s.serialize_field("plan", &self.plan)?;
+        if self.specified.codeindex {
+            s.serialize_field("codeindex", &self.codeindex)?;
+        }
+        s.end()
+    }
 }
 
 /// Agent-loop performance configuration (AgentPerf FR-027).
@@ -280,22 +347,6 @@ impl Default for ToolVisibilityConfig {
     }
 }
 
-impl ToolVisibilityConfig {
-    /// Iterate over every tool-visibility switch and its enabled state.
-    pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
-        [
-            ("office", self.office),
-            ("github", self.github),
-            ("gitlab", self.gitlab),
-            ("teams", self.teams),
-            ("agents", self.agents),
-            ("plan", self.plan),
-            ("codeindex", self.codeindex),
-        ]
-        .into_iter()
-    }
-}
-
 impl<'de> Deserialize<'de> for ToolVisibilityConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -336,12 +387,6 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
 
 const fn default_false() -> bool {
     false
-}
-
-/// Helper for `#[serde(skip_serializing_if = "is_true")]` — omits `true` booleans
-/// from serialised output so that code-level defaults take precedence.
-const fn is_true(v: &bool) -> bool {
-    *v
 }
 
 /// Map a visibility switch to the list of tool names it governs.
@@ -432,18 +477,51 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
     }
 }
 
-/// Configuration for LLM streaming behaviour (timeouts, retries)./// ```json
+/// Configuration for LLM streaming behaviour (timeouts, retries).
+///
+/// The two timeouts serve distinct purposes:
+///
+/// - `initial_response_timeout_secs` (default 300) bounds how long the
+///   HTTP client will wait for the **first byte** from the provider after
+///   sending the request.  This covers network RTT plus provider-side
+///   cold-start / queue wait and must be generous for cloud-hosted
+///   models that may spend tens of seconds preparing the model before
+///   the first token streams.
+/// - `timeout_secs` (default 120) bounds the gap between **subsequent
+///   stream deltas** during an in-flight response.  Once tokens are
+///   flowing, an inter-delta gap larger than this is treated as a
+///   stream stall and triggers the retry/recovery path.
+///
+/// `initial_response_timeout_secs` must be greater than or equal to
+/// `timeout_secs` to avoid aborting an in-flight stream before it
+/// produces any data.
+///
+/// ```json
 /// {
 ///   "stream": {
+///     "initial_response_timeout_secs": 300,
 ///     "timeout_secs": 120,
 ///     "max_retries": 4,
 ///     "retry_backoff_secs": 2
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StreamConfig {
-    /// Seconds of silence before a stream is considered stalled (default: 120).
+    /// Seconds the HTTP client will wait for the provider to return the
+    /// **first byte** of a streaming response (default: 300).
+    ///
+    /// This is forwarded to each provider as `ChatRequest::stream_timeout_secs`
+    /// and governs the initial-response / connection-establishment timeout,
+    /// not the per-event stall timeout (see [`Self::timeout_secs`]).
+    #[serde(default = "default_initial_response_timeout_secs")]
+    pub initial_response_timeout_secs: u64,
+    /// Seconds of silence between stream deltas before a stream is
+    /// considered stalled (default: 120).
+    ///
+    /// Used by the session processor's per-event stall detection.  The
+    /// `agent_perf.stall_timeout_secs` knob is a separate budget used by
+    /// the agent-perf profiler and should be ≤ this value.
     #[serde(default = "default_stream_timeout_secs")]
     pub timeout_secs: u64,
     /// Maximum number of retry attempts after a stall or connection failure (default: 4).
@@ -453,6 +531,10 @@ pub struct StreamConfig {
     /// Attempt N waits `N * retry_backoff_secs` seconds before retrying.
     #[serde(default = "default_stream_retry_backoff_secs")]
     pub retry_backoff_secs: u64,
+}
+
+const fn default_initial_response_timeout_secs() -> u64 {
+    300
 }
 
 const fn default_stream_timeout_secs() -> u64 {
@@ -470,6 +552,7 @@ const fn default_stream_retry_backoff_secs() -> u64 {
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
+            initial_response_timeout_secs: default_initial_response_timeout_secs(),
             timeout_secs: default_stream_timeout_secs(),
             max_retries: default_stream_max_retries(),
             retry_backoff_secs: default_stream_retry_backoff_secs(),
@@ -477,40 +560,99 @@ impl Default for StreamConfig {
     }
 }
 
+impl StreamConfig {
+    /// Validate the configuration and return a list of any problems.
+    ///
+    /// Returns an empty `Vec` when all values are within their supported
+    /// ranges.  Callers (e.g. the session processor startup path) can
+    /// surface the messages and refuse to start the runtime.
+    #[must_use]
+    pub fn validate(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if self.initial_response_timeout_secs < 5 {
+            problems.push(format!(
+                "stream.initial_response_timeout_secs must be >= 5 (got {})",
+                self.initial_response_timeout_secs
+            ));
+        }
+        if self.timeout_secs < 5 {
+            problems.push(format!(
+                "stream.timeout_secs must be >= 5 (got {})",
+                self.timeout_secs
+            ));
+        }
+        if self.initial_response_timeout_secs < self.timeout_secs {
+            problems.push(format!(
+                "stream.initial_response_timeout_secs ({}) must be >= stream.timeout_secs ({})",
+                self.initial_response_timeout_secs, self.timeout_secs
+            ));
+        }
+        if self.max_retries > 32 {
+            problems.push(format!(
+                "stream.max_retries must be <= 32 (got {})",
+                self.max_retries
+            ));
+        }
+        problems
+    }
+}
+
 /// Persistent configuration for the code-index subsystem.
 ///
 /// Runtime-derived fields like `project_root` and `index_dir` are
 /// resolved at startup, not stored in the config file.
+///
+/// All fields are public so callers which have a [`CodeIndexConfig`] in hand
+/// can mark a field as explicitly user-set before persisting the config.
 #[derive(Debug, Clone, Default)]
-struct CodeIndexSpecified {
-    enabled: bool,
-    max_file_size: bool,
-    extra_exclude_dirs: bool,
-    extra_exclude_patterns: bool,
+pub struct CodeIndexSpecified {
+    /// `true` when `enabled` was explicitly set in the source JSON or via a setter.
+    pub enabled: bool,
+    /// `true` when `max_file_size` was explicitly set in the source JSON or via a setter.
+    pub max_file_size: bool,
+    /// `true` when `extra_exclude_dirs` was explicitly set in the source JSON or via a setter.
+    pub extra_exclude_dirs: bool,
+    /// `true` when `extra_exclude_patterns` was explicitly set in the source JSON or via a setter.
+    pub extra_exclude_patterns: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// Persistent configuration for the code-index subsystem.
+///
+/// The `enabled` field is serialised only when the user has *explicitly* set it
+/// (tracked by [`CodeIndexSpecified::enabled`]). This lets the default config
+/// omit the key so code-level default changes propagate, while ensuring that an
+/// explicit user toggle (e.g. `/codeindex on`/`/codeindex off`) is written to disk
+/// and survives a restart — even when a global config disagrees.
+#[derive(Debug, Clone)]
 pub struct CodeIndexConfig {
     /// Whether code indexing is enabled.
     ///
-    /// Defaults to `true`. When serialised, the default value (`true`) is omitted
-    /// so that code-level default changes take effect without manual config edits.
-    #[serde(
-        default = "default_code_index_enabled",
-        skip_serializing_if = "is_true"
-    )]
+    /// Defaults to `true`. When serialised, this field is only written if the
+    /// user explicitly set it (via [`CodeIndexConfig::set_enabled`] or by
+    /// having it present in the loaded JSON).
     pub enabled: bool,
     /// Maximum file size in bytes to index (default: 1 MB).
-    #[serde(default = "default_max_file_size")]
     pub max_file_size: u64,
     /// Additional directory names to exclude from scanning.
-    #[serde(default)]
     pub extra_exclude_dirs: Vec<String>,
     /// Additional glob patterns to exclude from scanning.
-    #[serde(default)]
     pub extra_exclude_patterns: Vec<String>,
-    #[serde(skip_serializing, default)]
-    specified: CodeIndexSpecified,
+    /// Tracks which fields were explicitly present in the source JSON or set
+    /// via a setter, so merge/serialise operations can distinguish "user set
+    /// this" from "this is just the default".
+    pub specified: CodeIndexSpecified,
+}
+
+impl CodeIndexConfig {
+    /// Explicitly set `enabled` and mark it as user-specified.
+    ///
+    /// Use this (rather than direct field assignment) when persisting a user
+    /// toggle such as `/codeindex on` / `/codeindex off`, so the value is written
+    /// to the config file and overrides any global-config default on reload.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+        self.specified.enabled = true;
+    }
 }
 
 const fn default_code_index_enabled() -> bool {
@@ -571,6 +713,28 @@ impl<'de> Deserialize<'de> for CodeIndexConfig {
         }
 
         Ok(config)
+    }
+}
+
+impl Serialize for CodeIndexConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        // Count fields actually written: `enabled` only when explicitly set.
+        let mut count = 3; // max_file_size, extra_exclude_dirs, extra_exclude_patterns
+        if self.specified.enabled {
+            count += 1;
+        }
+        let mut s = serializer.serialize_struct("CodeIndexConfig", count)?;
+        if self.specified.enabled {
+            s.serialize_field("enabled", &self.enabled)?;
+        }
+        s.serialize_field("max_file_size", &self.max_file_size)?;
+        s.serialize_field("extra_exclude_dirs", &self.extra_exclude_dirs)?;
+        s.serialize_field("extra_exclude_patterns", &self.extra_exclude_patterns)?;
+        s.end()
     }
 }
 
@@ -1202,41 +1366,57 @@ impl Config {
             }
         }
 
-        // code_index: overlay takes precedence only for explicitly set fields
+        // code_index: overlay takes precedence only for explicitly set fields.
+        // The `specified` flags from the overlay are propagated onto the base so
+        // that a subsequent serialise (e.g. save_to_source) writes the field
+        // explicitly and the value survives a reload even when a global config
+        // disagrees.
         if overlay.code_index.specified.enabled {
             base.code_index.enabled = overlay.code_index.enabled;
+            base.code_index.specified.enabled = true;
         }
         if overlay.code_index.specified.max_file_size {
             base.code_index.max_file_size = overlay.code_index.max_file_size;
+            base.code_index.specified.max_file_size = true;
         }
         if overlay.code_index.specified.extra_exclude_dirs {
             base.code_index.extra_exclude_dirs = overlay.code_index.extra_exclude_dirs;
+            base.code_index.specified.extra_exclude_dirs = true;
         }
         if overlay.code_index.specified.extra_exclude_patterns {
             base.code_index.extra_exclude_patterns = overlay.code_index.extra_exclude_patterns;
+            base.code_index.specified.extra_exclude_patterns = true;
         }
 
-        // tool_visibility: overlay takes precedence only for explicitly set fields
+        // tool_visibility: overlay takes precedence only for explicitly set fields.
+        // Propagate `specified` flags so an explicit toggle persists on save.
         if overlay.tool_visibility.specified.office {
             base.tool_visibility.office = overlay.tool_visibility.office;
+            base.tool_visibility.specified.office = true;
         }
         if overlay.tool_visibility.specified.github {
             base.tool_visibility.github = overlay.tool_visibility.github;
+            base.tool_visibility.specified.github = true;
         }
         if overlay.tool_visibility.specified.gitlab {
             base.tool_visibility.gitlab = overlay.tool_visibility.gitlab;
+            base.tool_visibility.specified.gitlab = true;
         }
         if overlay.tool_visibility.specified.teams {
             base.tool_visibility.teams = overlay.tool_visibility.teams;
+            base.tool_visibility.specified.teams = true;
         }
         if overlay.tool_visibility.specified.agents {
             base.tool_visibility.agents = overlay.tool_visibility.agents;
+            base.tool_visibility.specified.agents = true;
         }
         if overlay.tool_visibility.specified.plan {
             base.tool_visibility.plan = overlay.tool_visibility.plan;
+            base.tool_visibility.specified.plan = true;
         }
         if overlay.tool_visibility.specified.codeindex {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
+            base.tool_visibility.specified.codeindex = true;
         }
 
         if overlay.yolo {

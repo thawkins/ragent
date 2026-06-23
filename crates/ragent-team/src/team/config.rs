@@ -24,6 +24,18 @@ pub enum MemoryScope {
     Project,
 }
 
+impl MemoryScope {
+    /// Return the snake_case string used for serialization.
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::User => "user",
+            Self::Project => "project",
+        }
+    }
+}
+
 /// Resolve the memory directory for a given agent name and scope.
 ///
 /// Returns `None` when `scope` is [`MemoryScope::None`].
@@ -62,7 +74,23 @@ pub enum TeamStatus {
     Disbanded,
 }
 
+impl TeamStatus {
+    /// Return the canonical snake_case string (M5-T1).
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Completed => "completed",
+            Self::Disbanded => "disbanded",
+        }
+    }
+}
+
 /// Lifecycle state of an individual teammate session.
+///
+/// Serialises to snake_case via `#[serde(rename_all = "lowercase")]` and via
+/// [`MemberStatus::as_str`] (M5-T1). All output paths produce the same
+/// snake_case string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemberStatus {
@@ -87,6 +115,25 @@ pub enum MemberStatus {
     Failed,
 }
 
+impl MemberStatus {
+    /// Return the canonical snake_case string used for serialization, tool
+    /// output, and SSE (M5-T1).
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Spawning => "spawning",
+            Self::Working => "working",
+            Self::Idle => "idle",
+            Self::PlanPending => "plan_pending",
+            Self::Blocked => "blocked",
+            Self::Suspended => "suspended",
+            Self::ShuttingDown => "shutting_down",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
 /// Plan approval state for a teammate that has submitted a plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -100,6 +147,19 @@ pub enum PlanStatus {
     Approved,
     /// Lead rejected the plan.
     Rejected,
+}
+
+impl PlanStatus {
+    /// Return the canonical snake_case string (M5-T1).
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+        }
+    }
 }
 
 /// Lifecycle event that can trigger a quality-gate hook.
@@ -130,6 +190,10 @@ pub struct HookEntry {
 }
 
 /// Describes one teammate within a team.
+///
+/// `plan_request_id` and `shutdown_request_id` carry the correlation id of the
+/// most recent `PlanRequest` / `ShutdownRequest` so the corresponding reply
+/// (`PlanApproved`/`PlanRejected`/`ShutdownAck`) can copy it (M5-T4).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamMember {
     /// Human-friendly name for this teammate (e.g. `"security-reviewer"`).
@@ -137,12 +201,17 @@ pub struct TeamMember {
     /// Unique agent ID assigned at spawn time (e.g. `"tm-001"`).
     pub agent_id: String,
     /// Session ID of the underlying ragent session, if spawned.
+    #[serde(default)]
     pub session_id: Option<String>,
     /// Agent type / definition name used when spawning this session.
+    ///
+    /// For swarm-created teammates this value is derived from the subtask's
+    /// `agent_type` field and resolved through the classification fallback chain.
     pub agent_type: String,
     /// Current lifecycle state.
     pub status: MemberStatus,
     /// ID of the task currently being worked on, if any.
+    #[serde(default)]
     pub current_task_id: Option<String>,
     /// Plan approval state.
     pub plan_status: PlanStatus,
@@ -164,6 +233,14 @@ pub struct TeamMember {
     /// directory is created and `MEMORY.md` is injected into the system prompt.
     #[serde(default)]
     pub memory_scope: MemoryScope,
+    /// Correlation id of the most recent `PlanRequest` sent by this teammate
+    /// (M5-T4). Copied into the `PlanApproved`/`PlanRejected` reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_request_id: Option<String>,
+    /// Correlation id of the most recent `ShutdownRequest` sent to this
+    /// teammate (M5-T4). Copied into the `ShutdownAck` reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shutdown_request_id: Option<String>,
 }
 
 impl TeamMember {
@@ -186,6 +263,8 @@ impl TeamMember {
             spawn_prompt: None,
             model_override: None,
             memory_scope: MemoryScope::None,
+            plan_request_id: None,
+            shutdown_request_id: None,
         }
     }
 }
@@ -216,14 +295,26 @@ impl Default for TeamSettings {
 }
 
 /// Root configuration object for a team, stored as `config.json`.
+///
+/// Carries a `schema_version` (M5-T2) and `updated_at` (M5-T5) so future
+/// schema changes can be migrated and concurrent races can be debugged.
+/// `#[serde(deny_unknown_fields)]` rejects unknown fields on manual edits
+/// (M5-T3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TeamConfig {
+    /// Schema version of the on-disk format (M5-T2).
+    #[serde(default)]
+    pub schema_version: u32,
     /// Unique name for this team (also the directory name).
     pub name: String,
     /// Session ID of the lead session that created this team.
     pub lead_session_id: String,
     /// When the team was created.
     pub created_at: DateTime<Utc>,
+    /// When this config was last written (M5-T5).
+    #[serde(default)]
+    pub updated_at: Option<DateTime<Utc>>,
     /// Current overall status.
     pub status: TeamStatus,
     /// All registered teammates (active and stopped).
@@ -232,21 +323,67 @@ pub struct TeamConfig {
     pub settings: TeamSettings,
 }
 
+/// Current on-disk schema version for [`TeamConfig`] (M5-T2).
+pub const TEAM_CONFIG_SCHEMA_VERSION: u32 = 1;
+
 impl TeamConfig {
     /// Create a new team config with no members.
     pub fn new(name: impl Into<String>, lead_session_id: impl Into<String>) -> Self {
         Self {
+            schema_version: TEAM_CONFIG_SCHEMA_VERSION,
             name: name.into(),
             lead_session_id: lead_session_id.into(),
             created_at: Utc::now(),
+            updated_at: Some(Utc::now()),
             status: TeamStatus::Active,
             members: Vec::new(),
             settings: TeamSettings::default(),
         }
     }
 
-    /// Return the member with the given `agent_id`, if found.
-    #[must_use]
+    /// Validate the config's invariants (M5-T3).
+    ///
+    /// Returns `Ok(())` if the config is well-formed, or an error describing
+    /// the first violation. Checks:
+    /// - `name` and `lead_session_id` are non-empty.
+    /// - member `agent_id`s are unique and non-empty.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        use anyhow::anyhow;
+        if self.name.is_empty() {
+            return Err(anyhow!("team config name is empty"));
+        }
+        if self.lead_session_id.is_empty() {
+            return Err(anyhow!("team config lead_session_id is empty"));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for m in &self.members {
+            if m.agent_id.is_empty() {
+                return Err(anyhow!("member '{}' has an empty agent_id", m.name));
+            }
+            if !seen.insert(&m.agent_id) {
+                return Err(anyhow!("duplicate agent_id '{}'", m.agent_id));
+            }
+        }
+        Ok(())
+    }
+
+    /// Migrate this config to the current schema version (M5-T2).
+    ///
+    /// Currently a no-op: the only schema change so far is the addition of
+    /// `schema_version` and `updated_at`, both of which are
+    /// `#[serde(default)]`. Future breaking changes should bump
+    /// [`TEAM_CONFIG_SCHEMA_VERSION`] and perform the field transforms here
+    /// before the config is used.
+    pub fn migrate(&mut self) {
+        if self.schema_version == 0 {
+            self.schema_version = TEAM_CONFIG_SCHEMA_VERSION;
+        }
+        if self.updated_at.is_none() {
+            self.updated_at = Some(chrono::Utc::now());
+        }
+    }
+
+    /// Return the member with the given `agent_id`, if found.    #[must_use]
     pub fn member_by_id(&self, agent_id: &str) -> Option<&TeamMember> {
         self.members.iter().find(|m| m.agent_id == agent_id)
     }

@@ -3,12 +3,17 @@
 //! Teams are stored in:
 //! - `~/.ragent/teams/{name}/` — user-global (lower priority)
 //! - `[PROJECT]/.ragent/teams/{name}/` — project-local (higher priority)
+//!
+//! `config.json` writes are serialised using a companion `config.json.lock`
+//! file and an atomic rename so concurrent saves cannot clobber each other
+//! (Milestone 1).
 
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
+use fs2::FileExt as _;
 
 use crate::team::config::{TeamConfig, TeamMember};
 use crate::team::mailbox::Mailbox;
@@ -39,10 +44,41 @@ pub fn find_project_teams_dir(working_dir: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Locate the on-disk directory for a named team, caching the result on the
+/// supplied [`ToolContext`] (PERF-019) so repeated tool calls within the
+/// same agent step skip the directory walk.
+///
+/// `find_team_dir` walks up the directory tree calling `candidate.is_dir()`
+/// (a `stat()` syscall per level) on every parent. This is called from
+/// nearly every team tool's `execute()` method, often multiple times per
+/// call. PERF-019 caches the resolved `PathBuf` on the
+/// [`ToolContext::cached_team_dir`] field so the walk runs at most once per
+/// `process_user_message` turn.
+#[must_use]
+pub fn find_team_dir_cached(ctx: &crate::tool::ToolContext, name: &str) -> Option<PathBuf> {
+    {
+        let guard = ctx.cached_team_dir.lock().ok()?;
+        if let Some((ref cached_name, ref dir)) = *guard {
+            if cached_name.as_str() == name {
+                return Some(dir.clone());
+            }
+        }
+    }
+    let dir = find_team_dir(&ctx.working_dir, name)?;
+    if let Ok(mut guard) = ctx.cached_team_dir.lock() {
+        *guard = Some((name.to_string(), dir.clone()));
+    }
+    Some(dir)
+}
+
 /// Locate the on-disk directory for a named team.
 ///
 /// Searches project-local first (higher priority), then user-global.
 /// Returns `None` if the team does not exist in either location.
+///
+/// For the hot path inside tool `execute()` methods prefer
+/// [`find_team_dir_cached`] which caches the resolved path on the
+/// [`ToolContext`](crate::tool::ToolContext) (PERF-019).
 #[must_use]
 pub fn find_team_dir(working_dir: &Path, name: &str) -> Option<PathBuf> {
     // Project-local wins.
@@ -150,13 +186,47 @@ impl TeamStore {
         Ok(store)
     }
 
-    /// Load an existing team from `team_dir`.
+    /// Return the companion lock-file path for `config.json`.
+    fn lock_path(config_path: &Path) -> PathBuf {
+        let mut name = config_path.as_os_str().to_os_string();
+        name.push(".lock");
+        PathBuf::from(name)
+    }
+
+    /// Acquire an advisory `flock` on the companion lock file for `config.json`.
+    fn acquire_lock(config_path: &Path, exclusive: bool) -> Result<std::fs::File> {
+        let lock = Self::lock_path(config_path);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock)
+            .with_context(|| format!("open lock file {}", lock.display()))?;
+        if exclusive {
+            file.lock_exclusive()
+                .with_context(|| format!("acquire exclusive lock on {}", lock.display()))?;
+        } else {
+            file.lock_shared()
+                .with_context(|| format!("acquire shared lock on {}", lock.display()))?;
+        }
+        Ok(file)
+    }
+
+    /// Load an existing team from `team_dir` (acquires a shared lock on the
+    /// companion lock file).
+    ///
+    /// M5-T2: migrates the loaded config to the current schema version before
+    /// returning it.
     pub fn load(team_dir: &Path) -> Result<Self> {
         let config_path = team_dir.join("config.json");
+        let lock = Self::acquire_lock(&config_path, false)?;
         let raw = fs::read_to_string(&config_path)
             .with_context(|| format!("read {}", config_path.display()))?;
-        let config: TeamConfig = serde_json::from_str(&raw)
+        drop(lock);
+        let mut config: TeamConfig = serde_json::from_str(&raw)
             .with_context(|| format!("parse {}", config_path.display()))?;
+        config.migrate();
         Ok(Self {
             dir: team_dir.to_path_buf(),
             config,
@@ -170,16 +240,50 @@ impl TeamStore {
         Self::load(&team_dir)
     }
 
-    /// Persist the current config to `config.json`.
+    /// Persist the current config to `config.json` (acquires an exclusive lock
+    /// on the companion lock file and uses an atomic rename).
+    ///
+    /// Stamps `schema_version` and `updated_at` on every write (M5-T2/T5).
     pub fn save(&self) -> Result<()> {
         let config_path = self.dir.join("config.json");
-        let tmp_path = self.dir.join("config.json.tmp");
-        let json = serde_json::to_string_pretty(&self.config)?;
+        let lock = Self::acquire_lock(&config_path, true)?;
+
+        // M5-T2/T5: stamp schema_version and updated_at on every write.
+        let mut config = self.config.clone();
+        if config.schema_version == 0 {
+            config.schema_version = crate::team::config::TEAM_CONFIG_SCHEMA_VERSION;
+        }
+        config.updated_at = Some(chrono::Utc::now());
+
+        let json = serde_json::to_string_pretty(&config)?;
+        let file_name = config_path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "config.json".to_string());
+        let tmp_path = self
+            .dir
+            .join(format!(".{file_name}.{}", uuid::Uuid::new_v4()));
         fs::write(&tmp_path, json).with_context(|| format!("write {}", tmp_path.display()))?;
-        fs::rename(&tmp_path, &config_path).with_context(|| {
-            format!("rename {} -> {}", tmp_path.display(), config_path.display())
-        })?;
-        Ok(())
+        let result: Result<()> = (|| {
+            let temp = OpenOptions::new().read(true).open(&tmp_path)?;
+            temp.sync_all()
+                .with_context(|| format!("sync temp file {}", tmp_path.display()))?;
+            fs::rename(&tmp_path, &config_path).with_context(|| {
+                format!("rename {} -> {}", tmp_path.display(), config_path.display())
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp_path);
+        }
+        drop(lock);
+        result.with_context(|| {
+            format!(
+                "atomic write {} -> {}",
+                tmp_path.display(),
+                config_path.display()
+            )
+        })
     }
 
     // ── Discovery ─────────────────────────────────────────────────────────
@@ -291,5 +395,40 @@ impl TeamStore {
     /// Stamp the config with a UTC creation time (used internally by `create`).
     pub fn timestamp(&mut self) {
         self.config.created_at = Utc::now();
+    }
+
+    // ── PERF-016: async `spawn_blocking` wrappers ──────────────────────────────
+    //
+    // `TeamStore::load` / `save` perform synchronous `fs::read_to_string` /
+    // `fs::write` + `serde_json` (de)serialisation under a `flock`. On the
+    // async path these stall the tokio worker thread. The helpers below move
+    // the I/O onto a blocking-pool thread so the async executor stays free
+    // during concurrent teammate activity. `TeamStore` is cheap to
+    // reconstruct (`load` is a single file read), so we pass the `team_dir`
+    // into the closure and reopen there.
+
+    /// PERF-016: `spawn_blocking` wrapper around [`TeamStore::load`].
+    pub async fn load_blocking(team_dir: PathBuf) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Self::load(&team_dir)).await?
+    }
+
+    /// PERF-016: `spawn_blocking` wrapper around [`TeamStore::load_by_name`].
+    pub async fn load_by_name_blocking(name: String, working_dir: PathBuf) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Self::load_by_name(&name, &working_dir)).await?
+    }
+
+    /// PERF-016: `spawn_blocking` wrapper around [`TeamStore::save`].
+    ///
+    /// Consumes `self` (matching `save`'s `&self` receiver via a clone) so
+    /// the blocking closure can take ownership without borrowing across an
+    /// await boundary.
+    pub async fn save_blocking(self) -> Result<()> {
+        let dir = self.dir.clone();
+        let config = self.config.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = Self { dir, config };
+            store.save()
+        })
+        .await?
     }
 }

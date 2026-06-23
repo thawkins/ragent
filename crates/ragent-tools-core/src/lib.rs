@@ -3,6 +3,10 @@
 //! This crate provides the extracted Milestone 4 tool set together with the
 //! minimal shared tool abstractions those moved implementations require.
 
+// Shared whitespace-tolerant replacement matcher (used by edit, multiedit,
+// and memory_replace). Extracted in WSPLAN Milestone 2.
+pub mod replace;
+
 // File operation tools
 pub mod append_file;
 pub mod copy_file;

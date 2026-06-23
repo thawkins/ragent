@@ -848,6 +848,33 @@ EOF
 ragent run "Add input validation to the create_user endpoint"
 ```
 
+### Research → Spec → Implement
+
+The `ragent research` workflow lets you gather information on a topic
+before turning it into a spec. Run any of these from the TUI prompt:
+
+```text
+/research rust-async async/await idioms in stable Rust
+/spec create async-await Add async/await ergonomics --from-research rust-async
+```
+
+Or from the CLI:
+
+```bash
+ragent research create rust-async "async/await idioms in stable Rust"
+ragent research list
+ragent research open rust-async
+ragent research search "async"
+ragent research show rust-async
+ragent research archive rust-async
+ragent research delete rust-async --yes
+```
+
+The HTTP API exposes the same surface at `GET /research`, `POST /research`,
+`GET /research/<name>`, and `DELETE /research/<name>` (auth-protected).
+
+See [`docs/research.md`](docs/research.md) for the full workflow guide.
+
 ---
 
 ## 14. TUI Interaction

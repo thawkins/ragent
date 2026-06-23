@@ -71,7 +71,11 @@ impl Tool for TeamStatusTool {
             .count();
 
         let mut lines = vec![
-            format!("Team: {} [{:?}]", store.config.name, store.config.status),
+            format!(
+                "Team: {} [{}]",
+                store.config.name,
+                store.config.status.as_str()
+            ),
             format!("Lead session: {}", store.config.lead_session_id),
             format!(
                 "Tasks: {done_tasks}/{total_tasks} done | {in_progress_tasks} in progress | {pending_tasks} pending"
@@ -98,8 +102,10 @@ impl Tool for TeamStatusTool {
                 .map(|id| format!(" (task: {id})"))
                 .unwrap_or_default();
             lines.push(format!(
-                "  {status_icon} {} [{}] {:?}{task_info}",
-                m.name, m.agent_id, m.status
+                "  {status_icon} {} [{}] {}{task_info}",
+                m.name,
+                m.agent_id,
+                m.status.as_str()
             ));
         }
 
@@ -111,7 +117,7 @@ impl Tool for TeamStatusTool {
                 json!({
                     "name": m.name,
                     "agent_id": m.agent_id,
-                    "status": format!("{:?}", m.status).to_lowercase(),
+                    "status": m.status.as_str(),
                     "current_task_id": m.current_task_id
                 })
             })
@@ -121,8 +127,7 @@ impl Tool for TeamStatusTool {
             content: lines.join("\n"),
             metadata: Some(json!({
                 "team_name": team_name,
-                "team_status": format!("{:?}", store.config.status).to_lowercase(),
-                "member_count": store.config.members.len(),
+                                  "team_status": store.config.status.as_str(),                "member_count": store.config.members.len(),
                 "members": members_json,
                 "tasks": {
                     "total": total_tasks,

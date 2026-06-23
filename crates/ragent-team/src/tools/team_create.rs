@@ -114,6 +114,13 @@ impl Tool for TeamCreateTool {
                 Err(e) => return Err(e),
             };
 
+        // M8-T2: collect per-prompt blueprint spawn failures so the lead is
+        // told which teammates failed to spawn instead of only seeing them
+        // silently logged. Declared at function-body scope so it survives
+        // past the blueprint `if` block and is available when building the
+        // tool output below.
+        let mut failed_spawns: Vec<serde_json::Value> = Vec::new();
+
         // If the caller provided a blueprint, apply it now.
         if let Some(bp) = input
             .get("blueprint")
@@ -438,6 +445,19 @@ impl Tool for TeamCreateTool {
                                         }
                                         Err(e) => {
                                             tracing::error!(tool = %tool_name, error = %e, "Spawn tool execution failed");
+                                            // M8-T2: record the failure so it can be
+                                            // surfaced to the lead in the tool output.
+                                            let teammate_name = args
+                                                .get("teammate_name")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("auto")
+                                                .to_string();
+                                            failed_spawns.push(serde_json::json!({
+                                                "index": i,
+                                                "teammate_name": teammate_name,
+                                                "tool": tool_name,
+                                                "error": e.to_string(),
+                                            }));
                                         }
                                     }
                                 }
@@ -454,14 +474,7 @@ impl Tool for TeamCreateTool {
             .config
             .members
             .iter()
-            .map(|m| {
-                format!(
-                    "  - {} ({}, {})",
-                    m.name,
-                    m.agent_id,
-                    format!("{:?}", m.status).to_lowercase()
-                )
-            })
+            .map(|m| format!("  - {} ({}, {})", m.name, m.agent_id, m.status.as_str()))
             .collect();
         let member_summary = if member_list.is_empty() {
             "No teammates spawned yet. Use team_spawn to add teammates.".to_string()
@@ -473,14 +486,43 @@ impl Tool for TeamCreateTool {
             )
         };
 
+        // M8-T2: surface any per-prompt blueprint spawn failures to the lead.
+        // Failed spawns are still logged via `tracing::error!`, but without
+        // this summary the lead only sees a success response and silently
+        // missing teammates.
+        let failed_spawn_count = failed_spawns.len();
+        let failed_summary = if failed_spawns.is_empty() {
+            String::new()
+        } else {
+            let lines: Vec<String> = failed_spawns
+                .iter()
+                .map(|f| {
+                    let name = f
+                        .get("teammate_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("?");
+                    let tool = f.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+                    let err = f.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                    format!("  - {name} ({tool}): {err}")
+                })
+                .collect();
+            format!(
+                "\n\n⚠ {} blueprint spawn(s) failed:\n{}\n\
+                         These teammates were not created. Re-spawn them manually with `team_spawn` if needed.",
+                failed_spawn_count,
+                lines.join("\n")
+            )
+        };
+
         Ok(ToolOutput {
             content: format!(
-                "Team '{}' created successfully.\nDirectory: {}\nLead session: {}\n\n{}\n\n\
-                           Next: call `team_wait` to block until all teammates finish their initial work.",
+                "Team '{}' created successfully.\nDirectory: {}\nLead session: {}\n\n{}{}\n\n\
+                                    Next: call `team_wait` to block until all teammates finish their initial work.",
                 name,
                 final_store.dir.display(),
                 ctx.session_id,
-                member_summary
+                member_summary,
+                failed_summary
             ),
             metadata: MetadataBuilder::new()
                 .custom("team_name", &name)
@@ -496,6 +538,11 @@ impl Tool for TeamCreateTool {
                         .map(str::trim)
                         .is_none_or(str::is_empty),
                 )
+                // M8-T2: include the per-prompt spawn failure list in metadata
+                // so programmatic consumers (HTTP API, tests) can detect
+                // partial blueprint seeding without parsing the text output.
+                .custom("failed_spawn_count", failed_spawn_count)
+                .custom("failed_spawns", serde_json::Value::Array(failed_spawns))
                 .build(),
         })
     }

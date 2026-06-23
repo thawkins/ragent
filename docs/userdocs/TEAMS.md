@@ -190,7 +190,45 @@ The lead session receives these tools; teammates receive a smaller subset.
 
 ## 4. TUI Integration
 
-### 4.1 Teams Panel
+### 4.1 `/swarm` Fleet-Style Decomposition
+
+The `/swarm` slash command is a convenience layer on top of Teams. It asks the LLM to decompose a goal into independent subtasks, creates an ephemeral team, and spawns one teammate per subtask. Each teammate is assigned an agent type based on its subtask.
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `/swarm <prompt>` | Decompose a goal and spawn a team of specialist teammates |
+| `/swarm --agent <type> <prompt>` | Same as above, but use `<type>` as the default agent for subtasks that do not infer a more specific type |
+| `/swarm status` | Show live progress of the active swarm |
+| `/swarm cancel` | Cancel the active swarm and clean up |
+| `/swarm help` | Show help |
+
+#### How agent types are chosen
+
+1. **Explicit** — if the LLM returns an `agent_type` field for a subtask, that type is used after a runtime availability check.
+2. **Embedded hint** — the subtask description may contain a marker such as `[agent: code-review]` or `(agent_type: doc-writer)`. The marker is stripped from the displayed description and the hinted type is used.
+3. **Keyword inference** — the title and description are matched against a keyword map (e.g., "test" → `coder`, "document" → `doc-writer`, "debug" → `debug`).
+4. **Swarm default** — if the user supplied `--agent <type>`, that type is used when no specific type was inferred.
+5. **Final fallback** — `general`.
+
+If an assigned type is not available in the runtime (not a built-in and not a custom agent), the system logs a warning and falls back to `general`.
+
+#### Example
+
+```text
+/swarm --agent coder "Add OAuth2 login support"
+```
+
+This might decompose into:
+
+- `s1` — Implement OAuth2 token exchange → `coder`
+- `s2` — Write integration tests for the login flow → `coder`
+- `s3` — Document the new auth API endpoints → `doc-writer`
+
+The swarm creation summary shows the assigned agent type for each subtask, and `/swarm status` shows each teammate's current state alongside its agent type.
+
+### 4.2 Teams Panel
 
 A new panel in the TUI (when a team is active) shows the full team tree:
 

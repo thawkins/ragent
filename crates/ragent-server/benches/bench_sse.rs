@@ -75,6 +75,7 @@ fn make_events() -> Vec<(&'static str, Event)> {
                 team_name: "code-review".into(),
                 from: "tm-001".into(),
                 to: "lead".into(),
+                message_type: "message".into(),
                 preview: "I've finished reviewing the auth module.".into(),
             },
         ),

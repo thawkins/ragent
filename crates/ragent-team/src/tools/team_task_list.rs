@@ -86,7 +86,7 @@ impl Tool for TeamTaskListTool {
                 json!({
                     "id": t.id,
                     "title": t.title,
-                    "status": format!("{:?}", t.status).to_lowercase(),
+                    "status": t.status.as_str(),
                     "assigned_to": t.assigned_to,
                     "depends_on": t.depends_on
                 })

@@ -381,7 +381,7 @@ impl AnthropicClient {
         });
 
         if let Some(system) = &request.system {
-            body["system"] = json!(system);
+            body["system"] = json!(&**system);
         }
         if let Some(temp) = request.temperature {
             body["temperature"] = json!(temp);

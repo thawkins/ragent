@@ -33,7 +33,7 @@ fn make_request(model: &str) -> ChatRequest {
         temperature: None,
         top_p: None,
         max_tokens: Some(128),
-        system: Some("system".to_string()),
+        system: Some(std::sync::Arc::from("system")),
         options: HashMap::new(),
         session_id: None,
         request_id: None,

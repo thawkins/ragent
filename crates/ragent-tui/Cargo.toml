@@ -39,6 +39,7 @@ html2text = { workspace = true }
 pulldown-cmark = "0.12"
 ragent-prompt_opt = { path = "../ragent-prompt_opt" }
 ragent-specs = { path = "../ragent-specs" }
+ragent-research = { path = "../ragent-research" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }

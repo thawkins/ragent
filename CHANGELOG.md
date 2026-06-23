@@ -1,5 +1,222 @@
 # Changelog
 
+## Version: 0.1.0-alpha.116 (unreleased)
+
+### Fixed — persistence and performance of agent loop
+- **Fix persistence and improve performance of agent loop** — Addressed
+  persistence-related issues in the session/cache and storage layers and
+  reduced overhead in the session processor hot path. Bumps workspace version
+  to `0.1.0-alpha.116`.
+
+## Version: 0.1.0-alpha.114 (unreleased)
+
+### Changed — eliminate duplicated team tool source
+- **Single source of truth for team coordination tools** — The 20 team tool
+  files (`team_approve_plan`, `team_assign_task`, `team_broadcast`,
+  `team_cleanup`, `team_create`, `team_idle`, `team_memory_read`,
+  `team_memory_write`, `team_message`, `team_read_messages`,
+  `team_shutdown_ack`, `team_shutdown_teammate`, `team_spawn`, `team_status`,
+  `team_submit_plan`, `team_task_claim`, `team_task_complete`,
+  `team_task_create`, `team_task_list`, `team_wait`) previously existed as
+  byte-for-byte identical copies in both `crates/ragent-agent/src/tool/` and
+  `crates/ragent-team/src/tools/`. Every COMMSPLAN fix had to be applied twice
+  and re-synced with `cp`. The `ragent-agent` copies have been deleted and
+  `crates/ragent-agent/src/tool/mod.rs` now compiles each tool from the
+  canonical `crates/ragent-team/src/tools/team_*.rs` file via `#[path]`
+  includes — the same mechanism already used for the team runtime modules in
+  `crates/ragent-agent/src/team/mod.rs`. Edits to the team tools now only need
+  to be made in one place. The CI guard `scripts/check-team-duplication.sh`
+  was extended to reject any re-introduced physical `team_*.rs` copy under
+  `crates/ragent-agent/src/tool/` and to verify every tool has a `#[path]`
+  include.
+
+### Added — COMMSPLAN Milestone 4 (message delivery semantics)
+- **Read-vs-processed split in mailbox consumption (M4-T1)** — `Mailbox` gained
+  `peek_unread()` (returns unread messages **without** marking them read) and
+  `acknowledge(message_id)` (the explicit "I processed this" ack, semantically
+  `mark_read`). `team_read_messages` now peeks, builds its output, and only
+  acknowledges each message once the `ToolOutput` is ready — so a failure
+  mid-build leaves the messages unread and they are redelivered on the next
+  call (at-least-once semantics). `drain_unread` is kept for the mailbox poll
+  loop, which treats event publishing as the processing step. As part of this,
+  `mark_read` / `acknowledge` now return `changed` instead of `pos.is_some()`,
+  making acknowledge idempotent (a second ack of an already-read message
+  reports `false`), matching the documented contract.
+- **`team_assign_task` notifies the assigned teammate (M4-T2)** — After
+  updating `tasks.json`, the tool pushes a `MailboxMessage` to the assignee's
+  mailbox so they are notified immediately instead of having to poll
+  `team_task_list` / `team_task_claim`. The notification outcome is reported
+  in the tool output (`Notification: delivered` / `failed: …`). The tool also
+  rejects assignment to `Stopped` / `Failed` teammates up front.
+- **`team_broadcast` reports per-recipient results (M4-T3)** — The
+  early-return `?` on the first failure is replaced with a loop that collects
+  `Result` per recipient, so a failure on one teammate no longer aborts
+  delivery to the rest. The tool output includes `succeeded` and `failed`
+  arrays (with per-failure error text) in the JSON metadata.
+- **`team_message` validates recipient state (M4-T4)** — Before pushing, the
+  tool loads `TeamStore` and rejects messages to `Stopped` / `Failed`
+  teammates and to unknown agent IDs, so the sender gets an error instead of a
+  false success. Messages to `lead` and active teammates are delivered as
+  before.
+- **`team_read_messages` output schema fixed (M4-T5)** — The JSON metadata
+  now serialises `message_type` via `serde_json::to_value` (snake_case,
+  matching the on-disk `#[serde(rename_all = "snake_case")]` format) instead
+  of `format!("{:?}", …)` (PascalCase), and includes the `to` and `read`
+  fields. The human-readable text now shows `To:` and the snake_case type.
+- **Delivery regression tests (M4-T1..T5)** — New `ragent-team` integration
+  test suite `tests/test_m4_delivery.rs` (12 tests) covering peek/ack
+  idempotence, redelivery-on-no-ack, assign-task notification, dead-assignee
+  rejection, per-recipient broadcast results, stopped/unknown recipient
+  rejection, and the snake_case `team_read_messages` schema.
+
+### Added — COMMSPLAN Milestone 3 (team liveness, shutdown, idle signalling)
+- **`team_wait` subscribes before reading team state (M3-T1)** — The event-bus
+  receiver is now created *before* the initial `TeamStore::load` so a teammate
+  that goes idle or fails between the store read and the wait loop is captured
+  rather than missed. A pre-loop `try_recv` drain reconciles any events that
+  arrived during the store scan into the `waiting_for` set.
+- **`team_wait` handles `TeammateFailed` (M3-T2)** — A failed teammate is now
+  removed from the waiting set on receipt of `Event::TeammateFailed`, so the
+  lead no longer waits the full 300 s timeout for an agent that will never
+  become idle.
+- **`team_wait` re-checks disk state on timeout (M3-T3)** — Before returning a
+  timeout, `team_wait` reloads the team store and treats any member whose
+  on-disk status is `Idle`, `Failed`, or `Stopped` as finished. This recovers
+  terminal state when an `EventBus` event was dropped (buffer full / no
+  subscribers) but the teammate legitimately reached a terminal state on disk.
+- **`team_idle` publishes `Event::TeammateIdle` (M3-T4)** — After marking the
+  member `Idle` on disk, the tool now publishes `TeammateIdle` on the event
+  bus so `team_wait` and the TUI/SSE observe the transition even when the
+  mailbox poll loop does not deliver an `IdleNotify` message. The lead session
+  id is derived from the on-disk team config.
+- **Unified shutdown path (M3-T5/T6)** — `TeamManagerInterface` gained a
+  `shutdown_teammate(agent_id, graceful)` method, implemented once on
+  `TeamManager` and used by both the `team_shutdown_teammate` tool and
+  internal callers (`shutdown_all`, the TUI teardown paths). Graceful shutdown
+  marks the member `ShuttingDown` and pushes a `ShutdownRequest` without
+  forcing cancel; immediate shutdown sets the agent-loop and poll-loop cancel
+  flags, deregisters the mailbox notifier, pushes a `ShutdownRequest` as a
+  fallback, and marks the member `Stopped`. The tool gained an `immediate`
+  parameter (default `false`) and falls back to a disk-only path when no
+  `TeamManager` is wired into the context.
+- **Lifecycle regression tests (M3-T7)** — New `ragent-team` integration test
+  suite `tests/test_m3_lifecycle.rs` covering all four required scenarios:
+  (a) teammate fails while lead is in `team_wait`, (b) teammate goes idle
+  before `team_wait` starts, (c) `EventBus` event dropped but disk state
+  correct, (d) `team_idle` publishes `TeammateIdle` and `team_shutdown_teammate`
+  marks `ShuttingDown` (graceful) / `Stopped` (immediate).
+
+### Added
+- **Unified whitespace-tolerant replacement matcher** — `edit`, `multiedit`,
+  and `memory_replace` now share a single seven-pass matcher in the new
+  `ragent_tools_core::replace` module (`find_replacement_range` /
+  `find_replacement_range_diag`). The matcher tolerates CRLF line endings,
+  trailing/leading whitespace differences, collapsed-whitespace (tabs vs
+  spaces, double spaces, mixed indentation), blank-line edge differences, and
+  final-newline mismatches — eliminating `old_str not found` failures caused
+  by common LLM output quirks. `memory_replace` previously used exact-only
+  `String::matches`/`replacen` and would fail on the same whitespace quirks
+  that `edit` already handled; it now behaves identically to `edit`.
+- **`stream.initial_response_timeout_secs` config knob** — New optional
+  field on `StreamConfig` (default `300`) that bounds how long the HTTP
+  client waits for the **first byte** of a streaming response.  This is
+  distinct from `stream.timeout_secs` (default `120`), which now exclusively
+  governs the gap between subsequent stream deltas.  Cloud-hosted models
+  (Ollama Cloud, Bedrock, Copilot, Azure AI Foundry) routinely need
+  30-90 s for cold-start, which the previous shared 120 s timeout was
+  insufficient to absorb once 4-5 swarm teammates started hammering the
+  same provider concurrently.
+
+### Changed
+- **`multiedit` overlap detection & ordering** — `MultiEditTool::execute` now
+  resolves every edit against the **original** file content (so byte ranges
+  are stable), pairwise-checks edits on the same file for intersecting byte
+  ranges (rejecting with a clear error naming the edit indices and file path),
+  and applies non-overlapping edits highest-end-offset-first so the JSON input
+  order no longer matters. Touching ranges (`a.end == b.start`) are allowed.
+- **`multiedit` / `edit` diagnostics** — `NotFound` errors from `multiedit`
+  now name the edit index, the file path, the last matching pass attempted
+  (e.g. `collapsed`, `final-newline`), and a best-effort closest-line hint,
+  via the new `FindDiag` / `find_replacement_range_diag` API. The original
+  `find_replacement_range` remains as a thin wrapper so `edit` and
+  `memory_replace` are unaffected.
+- **Relative indentation preservation** — `reindent_with` now uses the
+  **common** leading whitespace of all matched file lines (via
+  `common_leading_ws`) rather than just the first line's full indentation,
+  and leaves blank lines untouched so no trailing whitespace is introduced.
+- **Swarm teammate retry backoff is now exponential with jitter** —
+  `teammate_retry_backoff(attempt)` (in `ragent-team`, used by
+  `TeamManager::spawn_teammate_internal`) replaced the previous linear
+  `500 ms × attempt` schedule with an exponential curve
+  (`1 s, 2 s, 4 s, 8 s` for attempts 1-4) plus up to 500 ms of clock-
+  derived jitter, capped at 30 s.  The previous linear schedule caused
+  every teammate that failed at the same moment to retry in lockstep,
+  re-triggering the same upstream rate-limit / cold-start pressure on
+  cloud LLMs (Ollama Cloud, Bedrock, Copilot).  The new helper is exposed
+  publicly for downstream tooling and is covered by 4 integration tests
+  in `crates/ragent-team/tests/test_teammate_retry_backoff.rs`.
+
+### Fixed
+- **Team subsystem data-loss races (COMMSPLAN Milestone 1)** —
+  `Mailbox`, `TaskStore`, and `TeamStore` now serialise all mutating disk
+  operations on a stable companion lock file (`*.json.lock`) using `fs2`
+  advisory locks.  The lock is held across the full read-modify-write cycle
+  and the atomic rename of a uniquely-named temp file, eliminating the
+  previous TOCTOU window where concurrent writers released `flock` before
+  the data reached disk.  Temp file names now include a UUID so concurrent
+  writers cannot collide on a shared `.tmp` path.  Added regression tests
+  `parent_mailbox_concurrent_push`, `parent_task_store_concurrent_claims`,
+  and in-process threaded variants in
+  `crates/ragent-team/tests/test_concurrent_store_writes.rs`.
+
+  - **Team implementation unified (COMMSPLAN Milestone 2)** —
+    `crates/ragent-agent/src/team/` now contains only `mod.rs`, which
+    source-includes the implementation from `crates/ragent-team/src/team/`
+    via `#[path]` attributes.  The duplicated local copies of
+    `config.rs`, `mailbox.rs`, `manager.rs`, `store.rs`, `swarm.rs`,
+    `task.rs`, and the previous `store.rs` `#[path]` wrapper have been
+    removed, so fixes such as the Milestone 1 lock-file changes apply to
+    both crates from a single source.  A `MemoryScope::as_str()` helper was
+    added so that `TeamManager` can compare memory scopes across the
+    source-inclusion boundary.  Added `docs/team-unification-decision.md`
+    documenting why `#[path]` is used (the existing Cargo dependency cycle
+    between `ragent-agent` and `ragent-team`) and the future path to a real
+    crate dependency.  Added `scripts/check-team-duplication.sh` CI guard
+    that fails if local team source files reappear in `ragent-agent`.
+
+### Fixed
+- **`old_str not found` on blank-line / final-newline edge differences** —
+  Added blank-line normalisation (pass 6) and final-newline normalisation
+  (pass 7) passes to the matcher, handling `str::lines()` inconsistencies
+  around leading/trailing blank lines and trailing `\n` disagreements in
+  either direction.
+- **Collapsed-whitespace false `MultipleMatches`** — When collapsed matching
+  yields multiple candidates, the matcher now prefers the candidate whose
+  per-line leading whitespace is closest (smallest total char-length
+  distance) to the needle's, rather than hard-erroring. Ties still error
+  with `MultipleMatches`.
+- **Swarm synthesis task timing out on cloud LLM providers** — When the
+  final `/swarm` subtask (typically the architect agent) started after the
+  other 3-4 parallel teammates had already consumed provider rate-limit
+  budget, Ollama Cloud and similar hosted services would frequently fail
+  to deliver the first byte within the configured 120 s
+  `stream.timeout_secs`, surfacing as repeated `Ollama Cloud chat request
+  timed out` warnings and, on the final synthesis task, an unrecoverable
+  stall.  The fix splits the conflated timeout field into
+  `initial_response_timeout_secs` (300 s, forwarded to providers as
+  `ChatRequest.stream_timeout_secs`) and `timeout_secs` (120 s, used only
+  for per-event stall detection).  Paired with the new exponential
+  teammate retry backoff, the final synthesis task now completes on the
+  first attempt instead of exhausting retries on cold-start latency.
+
+## Version: 0.1.0-alpha.113 (unreleased)
+
+### Fixed
+- **`/research create` now wires real gatherers in the TUI** — Previously `handle_research_command` built every session with `ResearchSession::new(manager, None, None)`, so web search and local cross-referencing were skipped and every research item had zero sources.  The TUI now builds a `ResearchSession` backed by the existing agent tool registry (`websearch`/`webfetch` for the web phase, `glob`/`grep`/`read`/`list` for the local/spec phase) via new adapters in `crates/ragent-tui/src/research_adapter.rs`.
+- **`/research create` now reports completion in the TUI** — The TUI makes sure a session exists before spawning the research task, so the `TuiResearchObserver` `AgentNotice` events are routed to the active session.  The status bar now updates to the `Done` message instead of staying stuck on "research: writing …".
+- **`/research list|show|search` output no longer distorts columns** — `render_markdown_to_ascii` now bypasses the markdown→HTML→text and ASCII-table-normalisation pipeline for `/research` responses that contain a fenced code block, returning the already-formatted plain text directly.  This keeps the fixed-width tables aligned and readable.
+- **Research keyword matching improved** — `derive_terms()` in `ragent-research` now strips ASCII punctuation (except apostrophes in contractions) and splits on internal punctuation such as `/` and `,`, so topics like `"async/await, tokio!"` produce usable terms.  `LocalGatherer::gather_specs()` now actually filters specs by the research topic and falls back to all specs only when fewer than three relevant specs are found.
+
 ## Version: 0.1.0-alpha.113
 
 ### Fixed

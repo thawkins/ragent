@@ -15,10 +15,30 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::permission::{Permission, PermissionAction, PermissionRule, PermissionRuleset};
 use ragent_types::{ThinkingConfig, ThinkingLevel};
+
+/// PERF-008: serde adapter for `Arc<HashMap<String, Value>>`.
+///
+/// On the wire this is a plain JSON object — identical to the legacy
+/// `HashMap<String, Value>` representation. In memory the field is an
+/// `Arc<HashMap>` so `AgentInfo::options` can be cheaply `Arc::clone`d
+/// on every `ChatRequest` construction without deep-cloning each entry.
+fn serialize_options_arc<S: serde::Serializer>(
+    value: &Arc<HashMap<String, Value>>,
+    ser: S,
+) -> Result<S::Ok, S::Error> {
+    serde::Serialize::serialize(value.as_ref(), ser)
+}
+
+fn deserialize_options_arc<'de, D: serde::Deserializer<'de>>(
+    de: D,
+) -> Result<Arc<HashMap<String, Value>>, D::Error> {
+    let map: HashMap<String, Value> = serde::Deserialize::deserialize(de)?;
+    Ok(Arc::new(map))
+}
 
 pub mod custom;
 pub mod oasf;
@@ -435,7 +455,20 @@ pub struct AgentInfo {
     pub thinking: Option<ThinkingConfig>,
     /// Arbitrary key-value options forwarded to the provider.
     // TODO: Replace `Value` with typed agent option structs.
-    pub options: HashMap<String, Value>,
+    //
+    // PERF-008: held as `Arc<HashMap>` so the per-step `ChatRequest`
+    // construction can `Arc::clone` the options in O(1) instead of
+    // deep-cloning every entry (a `HashMap<String, Value>` allocates per
+    // entry on `clone()`).  Agent options are effectively read-only after
+    // construction — the only in-place mutation site
+    // (`agent.options.insert(...)` in `resolve_agent`) runs once during
+    // agent resolution and uses `Arc::make_mut` to preserve COW semantics.
+    #[serde(
+        default,
+        serialize_with = "serialize_options_arc",
+        deserialize_with = "deserialize_options_arc"
+    )]
+    pub options: std::sync::Arc<HashMap<String, Value>>,
     /// When `true` the `model` field was explicitly set by a custom agent
     /// profile and should not be overridden by the user's global provider
     /// selection.  Built-in agents set this to `false` so `/provider` works.
@@ -471,7 +504,7 @@ impl AgentInfo {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         }
     }
@@ -482,6 +515,17 @@ impl Default for AgentInfo {
         Self::new("", "")
     }
 }
+
+/// PERF-011: process-wide cache of the built-in agent roster.
+///
+/// [`create_builtin_agents`] constructs ~15 [`AgentInfo`] structs, each with
+/// long `String` prompts, on every call. `resolve_agent` (and friends) call
+/// it on every agent resolution — every `process_user_message` and every
+/// sub-agent spawn — even though the built-in definitions are static for the
+/// lifetime of the process. This `OnceLock` caches the result of the first
+/// call so subsequent resolutions search the cached `Vec` instead of
+/// rebuilding it.
+static BUILTIN_AGENTS: OnceLock<Vec<AgentInfo>> = OnceLock::new();
 
 /// Returns the full set of built-in agents shipped with ragent.
 ///
@@ -525,7 +569,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: Some(ThinkingConfig::off()),
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
         AgentInfo {
@@ -551,7 +595,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
         AgentInfo {
@@ -574,7 +618,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
         AgentInfo {
@@ -597,7 +641,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
         AgentInfo {
@@ -620,7 +664,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
         AgentInfo {
@@ -641,7 +685,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
             thinking: None,
-            options: HashMap::new(),
+            options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
         },
                                       AgentInfo {
@@ -662,7 +706,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                                           skills: Vec::new(),
                                           memory: crate::team::config::MemoryScope::None,
                                           thinking: None,
-                                          options: HashMap::new(),
+                                          options: std::sync::Arc::new(HashMap::new()),
                                           model_pinned: false,
                                       },
                                       // ── Domain-specific agents ───────────────────────────────────────
@@ -699,7 +743,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -736,7 +780,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -773,7 +817,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -809,7 +853,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -841,7 +885,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -876,7 +920,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -910,7 +954,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -946,7 +990,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -982,7 +1026,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
+                      options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
                   },
                   AgentInfo {
@@ -1019,11 +1063,22 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
                       thinking: None,
-                      options: HashMap::new(),
-                      model_pinned: false,
-                  },
-              ]
+                    options: std::sync::Arc::new(HashMap::new()),
+                    model_pinned: false,
+                },
+            ]
 }
+
+/// PERF-011: return a reference to the process-wide cached built-in
+/// agent roster. The first call builds the `Vec<AgentInfo>` (with its
+/// ~15 long-prompt entries) and stores it in a `OnceLock`; every
+/// subsequent `resolve_agent` / sub-agent spawn searches the cached
+/// slice instead of rebuilding it.
+#[must_use]
+pub fn builtin_agents() -> &'static [AgentInfo] {
+    BUILTIN_AGENTS.get_or_init(create_builtin_agents)
+}
+
 /// Helper to create a permission rule with the given parameters.
 fn rule(
     permission: Permission,
@@ -1241,10 +1296,15 @@ pub fn resolve_agent_with_customs_and_model(
 /// assert_eq!(agent.name, "general");
 /// ```
 pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<AgentInfo> {
-    let builtins = create_builtin_agents();
+    // PERF-011: search the cached built-in roster instead of rebuilding ~15
+    // AgentInfo entries (each with a multi-kilobyte prompt) on every
+    // resolution.  We clone the matching entry so downstream config
+    // overlays can mutate it in place without touching the shared cache.
+    let builtins = builtin_agents();
     let mut agent = builtins
-        .into_iter()
+        .iter()
         .find(|a| a.name == name)
+        .cloned()
         .unwrap_or_else(|| AgentInfo::new(name, format!("Custom agent: {name}")));
 
     // Apply config overrides
@@ -1282,10 +1342,9 @@ pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<Agent
             agent.skills = agent_config.skills.clone();
         }
         for (k, v) in &agent_config.options {
-            agent.options.insert(k.clone(), v.clone());
+            Arc::make_mut(&mut agent.options).insert(k.clone(), v.clone());
         }
     }
-
     Ok(agent)
 }
 
@@ -1342,7 +1401,11 @@ pub fn resolve_agent_with_customs(
 /// ```
 #[must_use]
 pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
-    let builtins = create_builtin_agents();
+    // PERF-011: clone the cached roster once instead of rebuilding ~15
+    // AgentInfo entries. `load_all_agents` is called by `/agents` and the
+    // agent picker, both of which run on user demand (not the hot path),
+    // but the cache still avoids the repeated ~15-construction cost.
+    let builtins: Vec<AgentInfo> = builtin_agents().to_vec();
     let builtin_names: std::collections::HashSet<String> =
         builtins.iter().map(|a| a.name.clone()).collect();
 
@@ -1729,6 +1792,123 @@ pub fn collect_agents_md_content_with_discovery(
 fn collect_agents_md_content(working_dir: &Path) -> String {
     collect_agents_md_content_with_discovery(working_dir).0
 }
+/// PERF-028: compute the memory-section of the system prompt (structured
+/// memory blocks, legacy MEMORY.md, PROJECT_ANALYSIS.md, and SQLite
+/// structured memories).
+///
+/// Extracted from [`build_system_prompt_with_storage`] so the async
+/// `process_user_message` path can pre-compute it via
+/// `tokio::task::spawn_blocking` and hand the result in as
+/// `memory_section`, keeping the synchronous I/O off the async executor.
+/// The sync [`build_system_prompt_with_storage`] still calls this helper
+/// directly when `memory_section` is `None` (used by tests / sub-agent
+/// paths that run without a tokio runtime).
+pub fn build_memory_prompt_section(
+    working_dir: &Path,
+    storage: Option<&crate::storage::Storage>,
+    memory_config: Option<&crate::MemoryConfig>,
+) -> String {
+    use crate::memory::block::BlockScope;
+    use crate::memory::storage::{FileBlockStorage, load_all_blocks, load_legacy_memory};
+
+    let mut out = String::new();
+    let block_storage = FileBlockStorage::new();
+    let wd = working_dir.to_path_buf();
+
+    // Load all structured memory blocks from both scopes.
+    let blocks = load_all_blocks(&block_storage, &wd);
+    if !blocks.is_empty() {
+        out.push_str("## Memory Blocks\n");
+        for (scope, block) in &blocks {
+            let scope_label = match scope {
+                BlockScope::Global => "global",
+                BlockScope::Project => "project",
+            };
+            out.push_str(&format!("### {} ({})\n", block.label, scope_label));
+            if !block.description.is_empty() {
+                out.push_str(&format!("*{}*\n\n", block.description));
+            }
+            if block.read_only {
+                out.push_str("*[read-only]*\n");
+            }
+            out.push_str(&block.content);
+            out.push_str("\n\n");
+            if block.limit > 0 {
+                let pct = (block.content.len() as f64 / block.limit as f64 * 100.0) as u32;
+                out.push_str(&format!(
+                    "*[size: {}/{} bytes, {}%]*\n\n",
+                    block.content.len(),
+                    block.limit,
+                    pct
+                ));
+            }
+        }
+    }
+
+    // Also load legacy MEMORY.md files that aren't already loaded as blocks.
+    let has_project_memory_block = blocks
+        .iter()
+        .any(|(s, b)| *s == BlockScope::Project && b.label == "MEMORY");
+    let has_global_memory_block = blocks
+        .iter()
+        .any(|(s, b)| *s == BlockScope::Global && b.label == "MEMORY");
+
+    if !has_project_memory_block {
+        if let Some(block) = load_legacy_memory(&BlockScope::Project, &wd) {
+            out.push_str("## Project Memory\n");
+            out.push_str(&block.content);
+            out.push_str("\n\n");
+        }
+    }
+
+    // Load PROJECT_ANALYSIS.md if present (legacy).
+    let project_analysis = working_dir.join(".ragent").join("memory").join("PROJECT_ANALYSIS.md");
+    if let Ok(content) = std::fs::read_to_string(&project_analysis)
+        && !content.trim().is_empty()
+    {
+        out.push_str("## Project Analysis\n");
+        out.push_str(&content);
+        out.push_str("\n\n");
+    }
+
+    if !has_global_memory_block {
+        if let Some(block) = load_legacy_memory(&BlockScope::Global, &wd) {
+            out.push_str("## User Memory\n");
+            out.push_str(&block.content);
+            out.push_str("\n\n");
+        }
+    }
+
+    // Load relevant structured memories from SQLite.
+    if let Some(sqlite_storage) = storage {
+        let project = working_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let max = memory_config
+            .map(|c| c.retrieval.max_memories_per_prompt)
+            .unwrap_or(5);
+        if let Ok(memories) = sqlite_storage.list_memories(project, max)
+            && !memories.is_empty()
+        {
+            out.push_str("## Relevant Memories\n");
+            for mem in &memories {
+                let mem_tags = sqlite_storage.get_memory_tags(mem.id).unwrap_or_default();
+                out.push_str(&format!(
+                    "- [{}] {} (confidence: {:.2})\n",
+                    mem.category, mem.content, mem.confidence,
+                ));
+                if !mem_tags.is_empty() {
+                    out.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
+                }
+            }
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
 /// Build a system prompt for the given agent using cached context.#[must_use]
 pub fn build_system_prompt(
     agent: &AgentInfo,
@@ -1833,6 +2013,11 @@ team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team
 /// This is the full-featured variant that can load relevant structured memories
 /// from SQLite when storage is provided.
 ///
+/// PERF-028: pre-compute the memory-section of the system prompt on a
+/// `spawn_blocking` thread and pass the resulting string in here. When
+/// `None`, the section is computed synchronously inside this function (the
+/// path taken by tests and the sub-agent fallback).
+///
 /// The system prompt always ends with [`TASK_TOOL_FAMILY_GUIDANCE`] so the
 /// model understands the difference between `task_complete` (autonomous loop
 /// signal) and `team_task_complete` (team workflow).
@@ -1846,6 +2031,47 @@ pub fn build_system_prompt_with_storage(
     agents_md: Option<&str>,
     storage: Option<&crate::storage::Storage>,
     memory_config: Option<&crate::MemoryConfig>,
+) -> String {
+    build_system_prompt_with_storage_inner(
+        agent, working_dir, file_tree, skills, git_status, readme, agents_md,
+        storage, memory_config, None,
+    )
+}
+
+/// PERF-028: variant that accepts a pre-computed memory-section string so
+/// the async `process_user_message` path can offload the memory-block +
+/// SQLite reads onto `tokio::task::spawn_blocking` and hand the result
+/// in here, keeping the synchronous I/O off the async executor.
+#[must_use]
+pub fn build_system_prompt_with_storage_and_memory(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+    git_status: Option<&str>,
+    readme: Option<&str>,
+    agents_md: Option<&str>,
+    storage: Option<&crate::storage::Storage>,
+    memory_config: Option<&crate::MemoryConfig>,
+    memory_section: Option<&str>,
+) -> String {
+    build_system_prompt_with_storage_inner(
+        agent, working_dir, file_tree, skills, git_status, readme, agents_md,
+        storage, memory_config, memory_section,
+    )
+}
+
+fn build_system_prompt_with_storage_inner(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+    git_status: Option<&str>,
+    readme: Option<&str>,
+    agents_md: Option<&str>,
+    storage: Option<&crate::storage::Storage>,
+    memory_config: Option<&crate::MemoryConfig>,
+    memory_section: Option<&str>,
 ) -> String {
     let mut prompt = String::new();
 
@@ -1955,108 +2181,20 @@ pub fn build_system_prompt_with_storage(
         prompt.push_str("\n\n");
     }
 
-    // Auto-load project and user memory files into context
-    {
-        use crate::memory::block::BlockScope;
-        use crate::memory::storage::{FileBlockStorage, load_all_blocks, load_legacy_memory};
-
-        let block_storage = FileBlockStorage::new();
-        let wd = working_dir.to_path_buf();
-
-        // Load all structured memory blocks from both scopes.
-        let blocks = load_all_blocks(&block_storage, &wd);
-        if !blocks.is_empty() {
-            prompt.push_str("## Memory Blocks\n");
-            for (scope, block) in &blocks {
-                let scope_label = match scope {
-                    BlockScope::Global => "global",
-                    BlockScope::Project => "project",
-                };
-                prompt.push_str(&format!("### {} ({})\n", block.label, scope_label));
-                if !block.description.is_empty() {
-                    prompt.push_str(&format!("*{}*\n\n", block.description));
-                }
-                if block.read_only {
-                    prompt.push_str("*[read-only]*\n");
-                }
-                prompt.push_str(&block.content);
-                prompt.push_str("\n\n");
-                if block.limit > 0 {
-                    let pct = (block.content.len() as f64 / block.limit as f64 * 100.0) as u32;
-                    prompt.push_str(&format!(
-                        "*[size: {}/{} bytes, {}%]*\n\n",
-                        block.content.len(),
-                        block.limit,
-                        pct
-                    ));
-                }
-            }
-        }
-
-        // Also load legacy MEMORY.md files that aren't already loaded as blocks.
-        // This maintains backward compatibility with existing flat memory files.
-        let has_project_memory_block = blocks
-            .iter()
-            .any(|(s, b)| *s == BlockScope::Project && b.label == "MEMORY");
-        let has_global_memory_block = blocks
-            .iter()
-            .any(|(s, b)| *s == BlockScope::Global && b.label == "MEMORY");
-
-        if !has_project_memory_block {
-            if let Some(block) = load_legacy_memory(&BlockScope::Project, &wd) {
-                prompt.push_str("## Project Memory\n");
-                prompt.push_str(&block.content);
-                prompt.push_str("\n\n");
-            }
-        }
-
-        // Load PROJECT_ANALYSIS.md if present (legacy).
-        let project_analysis = working_dir
-            .join(".ragent")
-            .join("memory")
-            .join("PROJECT_ANALYSIS.md");
-        if let Ok(content) = std::fs::read_to_string(&project_analysis) {
-            if !content.trim().is_empty() {
-                prompt.push_str("## Project Analysis\n");
-                prompt.push_str(&content);
-                prompt.push_str("\n\n");
-            }
-        }
-
-        if !has_global_memory_block {
-            if let Some(block) = load_legacy_memory(&BlockScope::Global, &wd) {
-                prompt.push_str("## User Memory\n");
-                prompt.push_str(&block.content);
-                prompt.push_str("\n\n");
-            }
-        }
-    }
-
-    // Load relevant structured memories from SQLite.
-    if let Some(sqlite_storage) = storage {
-        let project = working_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-        let max = memory_config
-            .map(|c| c.retrieval.max_memories_per_prompt)
-            .unwrap_or(5);
-        if let Ok(memories) = sqlite_storage.list_memories(project, max) {
-            if !memories.is_empty() {
-                prompt.push_str("## Relevant Memories\n");
-                for mem in &memories {
-                    let mem_tags = sqlite_storage.get_memory_tags(mem.id).unwrap_or_default();
-                    prompt.push_str(&format!(
-                        "- [{}] {} (confidence: {:.2})\n",
-                        mem.category, mem.content, mem.confidence,
-                    ));
-                    if !mem_tags.is_empty() {
-                        prompt.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
-                    }
-                }
-                prompt.push('\n');
-            }
-        }
+    // PERF-028: the memory-block + SQLite memory section is computed off
+    // the async path (via `tokio::task::spawn_blocking`) by
+    // `process_user_message` and passed in via `memory_section`. When
+    // `None` (tests / sub-agent fallback), it is computed synchronously
+    // here via [`build_memory_prompt_section`].
+    let memory_section_owned;
+    let memory_section_str: &str = if let Some(s) = memory_section {
+        s
+    } else {
+        memory_section_owned = build_memory_prompt_section(working_dir, storage, memory_config);
+        &memory_section_owned
+    };
+    if !memory_section_str.is_empty() {
+        prompt.push_str(memory_section_str);
     }
 
     // Available skills (per SPEC §3.19 prompt assembly order)
@@ -2103,12 +2241,11 @@ pub fn build_system_prompt_with_storage(
     // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {
-        let builtins = create_builtin_agents();
-        let spawnable: Vec<&AgentInfo> = builtins
-            .iter()
-            .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
-            .collect();
-        let max_background_agents = crate::Config::load()
+                  let builtins = builtin_agents();
+                  let spawnable: Vec<&AgentInfo> = builtins
+                      .iter()
+                      .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
+                      .collect();        let max_background_agents = crate::Config::load()
             .map(|c| c.experimental.max_background_agents)
             .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS);
 

@@ -669,9 +669,11 @@ impl ExtractionEngine {
     }
 
     /// Compute a simple hash of the content for dedup.
+    /// PERF-031: FxHash for the dedup cache key (non-adversarial).
     fn content_hash(content: &str) -> u64 {
         use std::hash::Hasher;
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use rustc_hash::FxHasher;
+        let mut hasher = FxHasher::default();
         // Normalise: lowercase, trim whitespace.
         let normalised = content.to_lowercase().trim().to_string();
         std::hash::Hash::hash_slice(normalised.as_bytes(), &mut hasher);

@@ -221,6 +221,7 @@ async fn test_task_complete_rejects_task_id_and_result_inputs() {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(
@@ -263,6 +264,7 @@ async fn test_task_complete_accepts_summary_input() {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(

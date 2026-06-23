@@ -120,6 +120,10 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
+        cached_tool_names: parking_lot::RwLock::new(None),
+        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::config::StreamConfig::default(),
         auto_approve: false,

@@ -100,7 +100,15 @@ pub struct ChatRequest {
     /// Maximum number of tokens to generate.
     pub max_tokens: Option<u32>,
     /// Optional system prompt prepended to the conversation.
-    pub system: Option<String>,
+    ///
+    /// Held as `Arc<str>` (PERF-006) so the system prompt — which can run
+    /// 5,000–20,000 characters — is built once per `process_user_message`
+    /// and cheaply `Arc::clone`d on every step and every retry attempt
+    /// instead of being deep-cloned as a `String`.  The on-wire JSON
+    /// format is unchanged (still a plain string) thanks to
+    /// [`arc_str_serde`].
+    #[serde(default, with = "optional_arc_str_serde")]
+    pub system: Option<std::sync::Arc<str>>,
     /// Arbitrary key-value options forwarded to the provider (e.g. thinking control).
     #[serde(default)]
     pub options: HashMap<String, Value>,
@@ -199,6 +207,27 @@ mod arc_str_serde {
     }
 }
 
+/// Serde adapter for `Option<Arc<str>>` (PERF-006). On the wire this is a
+/// plain nullable string — `null` or a JSON string — identical to the
+/// legacy `Option<String>` representation. In memory the `Some` variant
+/// carries an `Arc<str>` so the system prompt can be shared across
+/// retry attempts without deep cloning.
+mod optional_arc_str_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<S: Serializer>(value: &Option<Arc<str>>, ser: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(arc) => ser.serialize_some(&**arc),
+            None => ser.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Arc<str>>, D::Error> {
+        let opt = Option::<String>::deserialize(de)?;
+        Ok(opt.map(Arc::from))
+    }
+}
 /// Schema describing a tool that the LLM may invoke.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {

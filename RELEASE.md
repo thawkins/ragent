@@ -1,6 +1,33 @@
 # Release
 
-## Current Version: 0.1.0-alpha.112
+## Current Version: 0.1.0-alpha.116
+
+### Fixed — persistence and performance of agent loop
+- **Fix persistence and improve performance of agent loop** — Addressed
+  persistence-related issues in the session/cache and storage layers and
+  reduced overhead in the session processor hot path.
+
+## Previous Version: 0.1.0-alpha.114
+
+### Added
+- **Unified whitespace-tolerant replacement matcher** — `edit`, `multiedit`, and `memory_replace` now share a single seven-pass matcher in `ragent_tools_core::replace` (`find_replacement_range` / `find_replacement_range_diag`). Tolerates CRLF, trailing/leading whitespace, collapsed whitespace (tabs vs spaces, double spaces, mixed indentation), blank-line edge differences, and final-newline mismatches — eliminating `old_str not found` failures caused by common LLM output quirks. `memory_replace` previously used exact-only `String::matches`/`replacen` and now behaves identically to `edit`.
+
+### Changed
+- **`multiedit` overlap detection & ordering** — resolves every edit against the original file content, pairwise-checks same-file edits for intersecting byte ranges (clear error naming edit indices + file path), and applies non-overlapping edits highest-end-offset-first so JSON input order no longer matters.
+- **`multiedit` / `edit` diagnostics** — `NotFound` errors name the edit index, file, last matching pass attempted, and a best-effort closest-line hint via the new `FindDiag` API.
+- **Relative indentation preservation** — `reindent_with` uses the common leading whitespace of all matched file lines and leaves blank lines untouched.
+
+### Fixed
+- **`old_str not found` on blank-line / final-newline edge differences** — added blank-line (pass 6) and final-newline (pass 7) normalisation passes.
+- **Collapsed-whitespace false `MultipleMatches`** — prefers the candidate whose per-line leading whitespace is closest to the needle's; ties still error.
+
+## Previous Version: 0.1.0-alpha.113
+
+### Fixed
+- **Research-system spec status overstated (second occurrence)** — The previous correction in alpha.112 set the spec to `status: draft` with a single `none → draft` audit entry, but the autonomous task batch in the commit after alpha.112 then re-tagged the spec frontmatter as `status: implemented` with a full three-step audit trail (`none → draft → in_progress → implemented`) even though only six of the 56 plan tasks were actually completed (the three foundational types, the crate scaffold, the `ResearchItem` struct, the two gatherers, and the plan-dep parser). The spec frontmatter has been corrected again to `status: in_progress` with a two-step audit (`none → draft → in_progress`) that matches reality: foundational types + scaffold + gatherers + plan-dep parser have shipped, but the `ResearchManager` CRUD methods, the `ResearchSession` orchestrator, the `sources/<NN>.md` writers, the `RESEARCH.md` assembler, the References Index generator, the `research/INDEX.md` cache, the TUI slash-command wiring, the CLI/HTTP endpoints, the spec-integration glue, the benchmarks, and the user docs are still `pending`. The spec status will not be advanced to `implemented` from an autonomous task batch — that transition is reserved for a release where every plan row is `completed`.
+- **Workspace version** — Bumped to `0.1.0-alpha.113`.
+
+## Previous Version: 0.1.0-alpha.112
 
 ### Fixed
 - **Research-system spec status overstated** — The `specs/researchsystem/SPEC.md` frontmatter was tagged `status: implemented` with a three-step audit trail (`none → draft → in_progress → implemented`) even though only four of the 22 plan tasks were completed (the three foundational type definitions and the crate scaffold). The spec frontmatter has been corrected to `status: draft` with a single `none → draft` audit transition that matches reality. The plan task statuses remain as-is: T-001, T-002, T-003, T-005 are `completed`; the remaining 18 tasks are still `pending` and will be re-promoted through the proper lifecycle as the rest of the research system lands.

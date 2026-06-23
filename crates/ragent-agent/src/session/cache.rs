@@ -6,9 +6,11 @@
 //! - Context window pre-compression
 
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use rustc_hash::FxHasher;
 
 use crate::agent::AgentInfo;
 use crate::llm::ChatMessage;
@@ -110,8 +112,13 @@ pub struct SystemPromptCache {
     team_guidance: Mutex<Cached<String>>,
     /// Current cache version (monotonically increasing)
     cache_version: AtomicU64,
-    /// Tool registry hash for detecting tool changes
-    last_tool_registry_hash: Mutex<u64>,
+    /// Tool registry version for detecting tool changes (PERF-012).
+    ///
+    /// Stores the [`ToolRegistry::version`] observed at the time the
+    /// tool-reference cache was last populated. The next `get_tool_reference`
+    /// call compares the registry's current version against this value in
+    /// O(1) instead of re-hashing all ~111 tool definitions.
+    last_tool_registry_version: Mutex<u64>,
     /// Last known code index state
     last_codeindex_active: Mutex<bool>,
     /// Last known team context hash
@@ -134,7 +141,7 @@ impl SystemPromptCache {
             codeindex_guidance: Mutex::new(Cached::new()),
             team_guidance: Mutex::new(Cached::new()),
             cache_version: AtomicU64::new(current_cache_version()),
-            last_tool_registry_hash: Mutex::new(0),
+            last_tool_registry_version: Mutex::new(0),
             last_codeindex_active: Mutex::new(false),
             last_team_hash: Mutex::new(0),
         }
@@ -164,11 +171,14 @@ impl SystemPromptCache {
         let version = self.version();
 
         // Compute hash of agent's prompt
+        // PERF-031: FxHash (~2–5× faster than `DefaultHasher` for short
+        // non-adversarial cache keys).
         let prompt_hash = agent
             .prompt
             .as_ref()
             .map(|p| {
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                use std::hash::Hasher;
+                let mut hasher = FxHasher::default();
                 p.hash(&mut hasher);
                 hasher.finish()
             })
@@ -205,14 +215,15 @@ impl SystemPromptCache {
         self.refresh_version();
         let version = self.version();
 
-        // Compute hash of tool registry
-        let current_hash = Self::hash_tool_registry(tool_registry);
+        // PERF-012: compare the registry's monotonic version counter
+        // (O(1)) instead of hashing all ~111 tool definitions (O(n)).
+        let current_version = tool_registry.version();
 
-        let mut last_hash = self.last_tool_registry_hash.lock().ok()?;
+        let mut last_version = self.last_tool_registry_version.lock().ok()?;
         let mut cache = self.tool_reference.lock().ok()?;
 
         // Check if tools changed or cache is invalid
-        if *last_hash == current_hash {
+        if *last_version == current_version {
             if let Some(value) = cache.get(version) {
                 return Some(value);
             }
@@ -221,7 +232,7 @@ impl SystemPromptCache {
         // Compute and cache
         let value = compute(tool_registry);
         cache.set(value.clone());
-        *last_hash = current_hash;
+        *last_version = current_version;
 
         Some(value)
     }
@@ -332,8 +343,13 @@ impl SystemPromptCache {
         if let Ok(mut cache) = self.tool_reference.lock() {
             cache.invalidate();
         }
-        if let Ok(mut hash) = self.last_tool_registry_hash.lock() {
-            *hash = 0; // Force recompute
+        // PERF-012: reset the stored version so the next lookup sees a
+        // mismatch and rebuilds. Using `0` as the sentinel works because the
+        // registry version starts at `0` and is bumped on every `register()`,
+        // so any live registry will have `version > 0` after the first tool
+        // is registered.
+        if let Ok(mut version) = self.last_tool_registry_version.lock() {
+            *version = 0; // Force recompute
         }
     }
 
@@ -354,20 +370,11 @@ impl SystemPromptCache {
         }
     }
 
-    /// Compute a hash of the tool registry for change detection.
-    fn hash_tool_registry(registry: &ToolRegistry) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        registry.definitions().len().hash(&mut hasher);
-        for def in registry.definitions() {
-            def.name.hash(&mut hasher);
-            def.description.hash(&mut hasher);
-        }
-        hasher.finish()
-    }
-
     /// Compute a hash of the team context for change detection.
+    /// PERF-031: FxHash for short non-adversarial cache keys.
     fn hash_team_context(context: &TeamContext) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::Hasher;
+        let mut hasher = FxHasher::default();
         context.is_lead.hash(&mut hasher);
         context.team_name.hash(&mut hasher);
         hasher.finish()

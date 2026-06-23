@@ -226,10 +226,7 @@ impl CodeIndex {
             Ok(g) => g,
             Err(_) => return Ok(None),
         };
-        let mut results = match fts.search(&query.query, limit * 2) {
-            Ok(r) => r,
-            Err(e) => return Err(e),
-        };
+        let mut results = fts.search(&query.query, limit * 2)?;
         drop(fts);
 
         if let Some(ref kind) = query.kind {

@@ -153,7 +153,11 @@ impl WebGatherer {
         for (index, hit) in hits.into_iter().enumerate().take(max_results) {
             match self.fetch.fetch(&hit.url).await {
                 Ok(page) => {
-                    let title = if page.title.is_empty() { hit.title } else { page.title };
+                    let title = if page.title.is_empty() {
+                        hit.title
+                    } else {
+                        page.title
+                    };
                     let body_path = web_body_path(index);
                     tracing::info!(
                         url = %page.url,
@@ -176,7 +180,10 @@ impl WebGatherer {
             }
         }
 
-        tracing::info!(count = sources.len(), "research: web-gathering phase complete");
+        tracing::info!(
+            count = sources.len(),
+            "research: web-gathering phase complete"
+        );
         Ok(sources)
     }
 }
@@ -241,8 +248,15 @@ mod tests {
         pages: std::collections::HashMap<String, WebFetchedPage>,
         fail_urls: Vec<String>,
     ) -> (WebGatherer, Arc<FakeSearch>, Arc<FakeFetch>) {
-        let search = Arc::new(FakeSearch { hits, calls: Mutex::new(Vec::new()) });
-        let fetch = Arc::new(FakeFetch { pages, fail_urls, calls: Mutex::new(Vec::new()) });
+        let search = Arc::new(FakeSearch {
+            hits,
+            calls: Mutex::new(Vec::new()),
+        });
+        let fetch = Arc::new(FakeFetch {
+            pages,
+            fail_urls,
+            calls: Mutex::new(Vec::new()),
+        });
         let g = WebGatherer::new(search.clone(), fetch.clone());
         (g, search, fetch)
     }
@@ -276,15 +290,30 @@ mod tests {
         }
         let g = WebGatherer::new(Arc::new(AlwaysFailSearch), Arc::new(OkFetch));
         let sources = g.gather("topic", 5).await.unwrap();
-        assert!(sources.is_empty(), "search failure must not surface as an error");
+        assert!(
+            sources.is_empty(),
+            "search failure must not surface as an error"
+        );
     }
 
     #[tokio::test]
     async fn gather_creates_web_source_per_hit_with_sequential_body_paths() {
         let hits = vec![
-            WebSearchHit { url: "https://a.example".into(), title: "A".into(), snippet: "".into() },
-            WebSearchHit { url: "https://b.example".into(), title: "B".into(), snippet: "".into() },
-            WebSearchHit { url: "https://c.example".into(), title: "C".into(), snippet: "".into() },
+            WebSearchHit {
+                url: "https://a.example".into(),
+                title: "A".into(),
+                snippet: "".into(),
+            },
+            WebSearchHit {
+                url: "https://b.example".into(),
+                title: "B".into(),
+                snippet: "".into(),
+            },
+            WebSearchHit {
+                url: "https://c.example".into(),
+                title: "C".into(),
+                snippet: "".into(),
+            },
         ];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -316,10 +345,19 @@ mod tests {
         assert_eq!(sources.len(), 3);
 
         for (i, src) in sources.iter().enumerate() {
-            let Source::Web { url, title, body_path, .. } = src else {
+            let Source::Web {
+                url,
+                title,
+                body_path,
+                ..
+            } = src
+            else {
                 panic!("expected Source::Web, got {src:?}");
             };
-            assert_eq!(body_path.as_path(), PathBuf::from(format!("sources/web-{:02}.md", i + 1)).as_path());
+            assert_eq!(
+                body_path.as_path(),
+                PathBuf::from(format!("sources/web-{:02}.md", i + 1)).as_path()
+            );
             assert!(!url.is_empty());
             assert!(!title.is_empty());
         }
@@ -333,17 +371,33 @@ mod tests {
     #[tokio::test]
     async fn gather_skips_individual_fetch_failures() {
         let hits = vec![
-            WebSearchHit { url: "https://ok".into(), title: "OK".into(), snippet: "".into() },
-            WebSearchHit { url: "https://bad".into(), title: "Bad".into(), snippet: "".into() },
+            WebSearchHit {
+                url: "https://ok".into(),
+                title: "OK".into(),
+                snippet: "".into(),
+            },
+            WebSearchHit {
+                url: "https://bad".into(),
+                title: "Bad".into(),
+                snippet: "".into(),
+            },
         ];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
             "https://ok".into(),
-            WebFetchedPage { url: "https://ok".into(), title: "OK".into(), body: "b".into() },
+            WebFetchedPage {
+                url: "https://ok".into(),
+                title: "OK".into(),
+                body: "b".into(),
+            },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
         let sources = g.gather("topic", 5).await.unwrap();
-        assert_eq!(sources.len(), 1, "failed fetch should be skipped, not abort");
+        assert_eq!(
+            sources.len(),
+            1,
+            "failed fetch should be skipped, not abort"
+        );
         if let Source::Web { url, .. } = &sources[0] {
             assert_eq!(url, "https://ok");
         }
@@ -352,15 +406,31 @@ mod tests {
     #[tokio::test]
     async fn gather_respects_max_results() {
         let hits = vec![
-            WebSearchHit { url: "https://1".into(), title: "1".into(), snippet: "".into() },
-            WebSearchHit { url: "https://2".into(), title: "2".into(), snippet: "".into() },
-            WebSearchHit { url: "https://3".into(), title: "3".into(), snippet: "".into() },
+            WebSearchHit {
+                url: "https://1".into(),
+                title: "1".into(),
+                snippet: "".into(),
+            },
+            WebSearchHit {
+                url: "https://2".into(),
+                title: "2".into(),
+                snippet: "".into(),
+            },
+            WebSearchHit {
+                url: "https://3".into(),
+                title: "3".into(),
+                snippet: "".into(),
+            },
         ];
         let mut pages = std::collections::HashMap::new();
         for u in ["https://1", "https://2", "https://3"] {
             pages.insert(
                 u.into(),
-                WebFetchedPage { url: u.into(), title: u.into(), body: "b".into() },
+                WebFetchedPage {
+                    url: u.into(),
+                    title: u.into(),
+                    body: "b".into(),
+                },
             );
         }
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -384,7 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn gather_records_search_call() {
-        let (g, search, _) = gatherer_with(Vec::new(), std::collections::HashMap::new(), Vec::new());
+        let (g, search, _) =
+            gatherer_with(Vec::new(), std::collections::HashMap::new(), Vec::new());
         let _ = g.gather("rust async", 5).await.unwrap();
         let calls = search.calls.lock().unwrap();
         assert_eq!(calls.as_slice(), &["rust async".to_string()]);

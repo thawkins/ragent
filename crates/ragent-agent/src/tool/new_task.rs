@@ -226,11 +226,11 @@ mod tests {
             team_manager: None,
             code_index: None,
             spec_manager: None,
-            active_spec_id: None,
-            config: None,
-        }
-    }
-
+                  active_spec_id: None,
+                  config: None,
+                  cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+              }
+          }
     #[tokio::test]
     async fn test_new_task_without_team_context_tries_to_spawn() {
         let tool = NewTaskTool;

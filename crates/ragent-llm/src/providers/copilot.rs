@@ -371,7 +371,7 @@ impl CopilotClient {
         if let Some(system) = &request.system {
             messages.push(json!({
                 "role": "system",
-                "content": system
+                "content": &**system
             }));
         }
 
@@ -382,10 +382,11 @@ impl CopilotClient {
                     let content_parts: Vec<Value> = parts
                         .iter()
                         .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({
-                                "type": "text",
-                                "text": text
-                            })),
+                            ContentPart::Text { text } => {
+                                Some(json!({                                "type": "text",
+                                    "text": text
+                                }))
+                            }
                             ContentPart::ImageUrl { url } => Some(json!({
                                 "type": "image_url",
                                 "image_url": { "url": url }
