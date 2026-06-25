@@ -1,5 +1,41 @@
 # Changelog
 
+## Version: 0.1.0-alpha.122
+
+### Fixed — `/help` and `/skills` slash output no longer collapses to a single paragraph
+- **`/help` table preserves per-line layout in the TUI** — The `/help` slash
+  command now wraps its command/skill listing in a bare fenced code block
+  (` ```\n … \n``` `) so the markdown → HTML → text pipeline does not reflow
+  every row into one paragraph. Each command/skill stays on its own line and
+  column alignment is preserved instead of being mangled.
+- **`/skills` table preserves per-line layout in the TUI** — Same fix
+  applied to the `/skills` listing: the registered-skills table is wrapped in
+  a bare fenced code block, and `try_extract_research_code_block` now detects
+  the block via the generic `From: /<cmd>` prefix (not just `From: /research`)
+  so `/skills` benefits from the same verbatim rendering path.
+- **`try_extract_research_code_block` generalised to any `From: /<cmd>`
+  response** — Only **bare** fences (a line containing exactly three
+  backticks followed by a newline) are recognised. Responses that use
+  language-tagged fences (e.g. `/tools show` emits multiple ` ```text `
+  blocks) are not intercepted and continue to flow through the normal
+  markdown pipeline.
+
+### Tests
+- New unit tests in `crates/ragent-tui/src/app.rs::tests`:
+  - `test_try_extract_research_code_block_handles_skills_output` — extracts
+    the bare fenced block from a `/skills` response and verifies the skill
+    rows remain on separate lines.
+  - `test_try_extract_research_code_block_handles_help_output` — same check
+    for a `/help` response with both command and skills sections.
+  - `test_try_extract_research_code_block_returns_none_for_non_slash_text` —
+    ensures the helper still returns `None` for plain text that happens to
+    contain a fenced block.
+  - `test_render_markdown_to_ascii_preserves_skills_table_lines` — renders
+    a `/skills` table through `render_markdown_to_ascii` and asserts the two
+    skill lines are not collapsed into one sentence.
+  - `test_render_markdown_to_ascii_preserves_help_command_lines` — same
+    end-to-end check for `/help` output.
+
 ## Version: 0.1.0-alpha.121
 
 ### Fixed — `/research` now actually analyses the gathered sources

@@ -157,21 +157,40 @@ impl MentionSpan {
     }
 }
 
-/// Extract the preformatted code-block body from a `/research` slash response.
+/// Extract the preformatted code-block body from a `From: /<cmd>` slash
+/// response.
 ///
-/// Research CLI output is already plain text (fixed-width tables/bullets), so
-/// we avoid the markdown→HTML→text conversion that mangles columns.  Returns
-/// `None` for non-research responses or for research responses that are not
-/// wrapped in a fenced code block.
+/// Some slash commands produce fixed-width plain-text tables (e.g. `/research
+/// list`, `/skills`).  Passing them through the markdown→HTML→text pipeline
+/// collapses consecutive lines into a single reflowed paragraph and mangles
+/// column alignment.  When such a response contains a bare (un-tagged) fenced
+/// code block, we extract the block body verbatim and render the surrounding
+/// `From:` header as a separate paragraph so the table keeps its original
+/// layout.
+///
+/// Only **bare** fences are recognised — i.e. a line consisting of exactly
+/// three backticks followed by a newline, not ```` ```text ```` / ```` ```rust ````
+/// style fenced blocks.  This means responses like `/tools show`, which use
+/// language-tagged fences for multiple sub-tables, are *not* intercepted and
+/// continue to flow through the normal markdown pipeline.
+///
+/// Returns `None` for responses that are not `From: /<cmd>` or that do not
+/// contain a matching bare fenced code block.
 fn try_extract_research_code_block(text: &str) -> Option<String> {
-    if !text.starts_with("From: /research") {
+    if !text.starts_with("From: /") {
         return None;
     }
-    let fence_start = text.find("\n```\n")?;
-    let body_start = fence_start + 5;
-    let body_end = body_start + text[body_start..].find("\n```")?;
+    // Opening fence must be a bare triple-backtick line: "\n```\n" preceded by
+    // a blank line so we don't accidentally match the closing fence of a
+    // language-tagged block earlier in the text.
+    let body_start = text.find("\n\n```\n")? + 5;
+    // Closing fence may be `\n```\n` (followed by more text) or `\n```\n` at
+    // end-of-string.  `\n```` would terminate early on a four-backtick fence,
+    // but we only emit triple-backtick fences from this codebase.
+    let body_end_off = text[body_start..].find("\n```")?;
+    let body_end = body_start + body_end_off;
     let body = &text[body_start..body_end];
-    let prefix = &text[..fence_start];
+    let prefix = &text[..body_start - 5];
     Some(format!("{}\n\n{}", prefix.trim_end(), body))
 }
 
@@ -5411,7 +5430,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.status = "cost summary".to_string();
             }
             "help" => {
-                let mut help_lines = String::from("From: /help\nAvailable commands:\n");
+                let mut help_lines = String::from("From: /help\nAvailable commands:\n\n```\n");
                 for cmd_def in SLASH_COMMANDS {
                     help_lines.push_str(&format!(
                         "  /{:<18} {}\n",
@@ -5442,6 +5461,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         ));
                     }
                 }
+                help_lines.push_str("```\n");
                 self.append_assistant_text(&help_lines);
 
                 self.status = "help".to_string();
@@ -6087,6 +6107,10 @@ Usage: /provider [show]
                     output.push_str("    Personal:  ~/.ragent/skills/<name>/SKILL.md\n");
                     output.push_str("    Project:   .ragent/skills/<name>/SKILL.md\n");
                 } else {
+                    // Wrap the table body in a fenced code block so the markdown
+                    // pipeline preserves the per-line layout and column alignment
+                    // instead of collapsing every row into a single paragraph.
+                    output.push_str("```\n");
                     // Compute column widths from data
                     let col_cmd = skills
                         .iter()
@@ -6149,6 +6173,7 @@ Usage: /provider [show]
                         ));
                     }
                     output.push_str(&format!("\n  {} skill(s) registered\n", skills.len()));
+                    output.push_str("```\n");
                 }
 
                 self.append_assistant_text(&output);
@@ -15004,11 +15029,79 @@ mod tests {
     }
 
     #[test]
+    fn test_try_extract_research_code_block_handles_skills_output() {
+        let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Access  Description\n  -------   -----  ------  -----------\n  /simplify         both    Reviews recently changed files\n  /debug            both    Troubleshoots current session\n```\n";
+        let extracted = try_extract_research_code_block(text).expect("skills code block");
+        assert!(extracted.contains("From: /skills"));
+        assert!(extracted.contains("Registered Skills:"));
+        assert!(extracted.contains("/simplify"));
+        assert!(extracted.contains("/debug"));
+        // Each skill must stay on its own line — the bug was the markdown
+        // pipeline collapsing all rows into a single reflowed paragraph.
+        assert!(extracted.contains("\n  /simplify"));
+        assert!(extracted.contains("\n  /debug"));
+        assert!(!extracted.contains("```"));
+    }
+
+    #[test]
+    fn test_try_extract_research_code_block_handles_help_output() {
+        let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
+        let extracted = try_extract_research_code_block(text).expect("help code block");
+        assert!(extracted.contains("From: /help"));
+        assert!(extracted.contains("/about"));
+        assert!(extracted.contains("/quit"));
+        assert!(extracted.contains("/simplify"));
+        assert!(extracted.contains("/debug"));
+        // Each command/skill must stay on its own line.
+        assert!(extracted.contains("\n  /simplify"));
+        assert!(extracted.contains("\n  /debug"));
+        assert!(!extracted.contains("```"));
+    }
+
+    #[test]
+    fn test_try_extract_research_code_block_returns_none_for_non_slash_text() {
+        let text = "Hello world\n\n```\nsome code\n```";
+        assert!(try_extract_research_code_block(text).is_none());
+    }
+
+    #[test]
     fn test_render_markdown_to_ascii_bypasses_research_code_blocks() {
         let mut app = test_app();
         let text = "From: /research show\n\n```\nResearch item: x\n```";
         let rendered = app.render_markdown_to_ascii(text);
         assert!(rendered.contains("Research item: x"));
         assert!(!rendered.contains("From: /research show\nFrom:"));
+    }
+
+    #[test]
+    fn test_render_markdown_to_ascii_preserves_skills_table_lines() {
+        let mut app = test_app();
+        let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Description\n  -------   -----  -----------\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
+        let rendered = app.render_markdown_to_ascii(text);
+        // Each skill line must survive the markdown pipeline intact.
+        assert!(rendered.contains("\n  /simplify"));
+        assert!(rendered.contains("\n  /debug"));
+        // The two skill lines must NOT have been merged into a single sentence.
+        assert!(
+            !rendered.contains("/simplify         Reviews recently changed files /debug"),
+            "skills output should not collapse into a single paragraph; got:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn test_render_markdown_to_ascii_preserves_help_command_lines() {
+        let mut app = test_app();
+        let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
+        let rendered = app.render_markdown_to_ascii(text);
+        // Each command must survive the markdown pipeline intact.
+        assert!(rendered.contains("\n  /about"));
+        assert!(rendered.contains("\n  /quit"));
+        assert!(rendered.contains("\n  /simplify"));
+        assert!(rendered.contains("\n  /debug"));
+        // Commands and skills must NOT have been merged into a single sentence.
+        assert!(
+            !rendered.contains("/about            Show info about ragent /quit"),
+            "help output should not collapse into a single paragraph; got:\n{rendered}",
+        );
     }
 }

@@ -1,6 +1,28 @@
 # Release
 
-## Current Version: 0.1.0-alpha.121
+## Current Version: 0.1.0-alpha.122
+
+### Fixed — `/help` and `/skills` slash output no longer collapses to a single paragraph
+- **`/help` table preserves per-line layout in the TUI** — The `/help` slash
+  command now wraps its command/skill listing in a bare fenced code block so
+  the markdown pipeline does not reflow every row into one paragraph. Each
+  command/skill stays on its own line and column alignment is preserved.
+- **`/skills` table preserves per-line layout in the TUI** — Same fix applied
+  to the `/skills` listing: the registered-skills table is wrapped in a bare
+  fenced code block and `try_extract_research_code_block` now detects it via
+  the generic `From: /<cmd>` prefix instead of `From: /research`.
+- **`try_extract_research_code_block` generalised to any `From: /<cmd>`
+  response** — Renamed semantics preserved via an extended docstring; only
+  **bare** fences are recognised, so language-tagged blocks (e.g.
+  `/tools show`) continue to flow through the normal markdown pipeline.
+
+### Tests
+- New unit tests in `crates/ragent-tui/src/app.rs` covering the `/skills` and
+  `/help` code-block extraction paths, the negative case (plain text with a
+  fenced block is not intercepted), and end-to-end markdown rendering of
+  multi-row tables.
+
+## Previous Version: 0.1.0-alpha.121
 
 ### Fixed — `/research` now actually analyses the gathered sources
 - **Supporting files contain the captured body, not a placeholder** — `Source::Web`, `Source::Local`, and `Source::Other` gained an inline `body: String` field. The `WebGatherer` passes the fetched page text into `Source::Web.body`; the `LocalGatherer` writes a context-aware excerpt (matching lines plus one line on either side) into `Source::Local.body`. `render_supporting_file` and the synthesis engine consume the inline body, so `research/<name>/sources/web-NN.md` and `local-NN.md` now contain the actual evidence (with `▶` markers for exact matches and a ` ` marker for context).
