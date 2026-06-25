@@ -1366,6 +1366,12 @@ pub struct App {
     /// The last tier selected by the router for the most recent request.
     /// `None` when no request has been routed yet or the router is not active.
     pub router_current_tier: Option<String>,
+
+    // ── Research progress (`/research create`) ───────────────────────────────
+    /// Live progress tracker for the currently running `/research create` run.
+    /// `None` when no research session is in progress. The TUI renders this as
+    /// a self-updating log list in the message window.
+    pub research_progress: Option<crate::research_progress::ResearchProgress>,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

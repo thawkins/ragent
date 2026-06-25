@@ -362,7 +362,7 @@ impl Mailbox {
                 Ok(bytes) => bytes
                     .iter()
                     .find(|b| !b.is_ascii_whitespace())
-                    .is_some_and(|b| *b == b'[',),
+                    .is_some_and(|b| *b == b'['),
                 Err(_) => false,
             };
 

@@ -17,7 +17,10 @@ use ragent_types::event::{Event, EventBus};
 use serde_json::json;
 use tempfile::tempdir;
 
-async fn collect_events(mut rx: tokio::sync::broadcast::Receiver<Event>, deadline_ms: u64) -> Vec<Event> {
+async fn collect_events(
+    mut rx: tokio::sync::broadcast::Receiver<Event>,
+    deadline_ms: u64,
+) -> Vec<Event> {
     let mut out = Vec::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(deadline_ms);
     loop {
@@ -27,8 +30,8 @@ async fn collect_events(mut rx: tokio::sync::broadcast::Receiver<Event>, deadlin
                 let sleep = tokio::time::timeout(dur, rx.recv()).await;
                 match sleep {
                     Ok(Ok(ev)) => out.push(ev),
-                    Ok(Err(_)) => break,          // lagged / closed — stop
-                    Err(_) => break,               // timed out
+                    Ok(Err(_)) => break, // lagged / closed — stop
+                    Err(_) => break,     // timed out
                 }
             }
             _ => break,
@@ -93,9 +96,17 @@ async fn team_task_complete_publishes_exactly_one_event() {
         "team_name": "perf-005-team",
         "task_id": "t-001",
     });
-    let output = tool.execute(input, &ctx).await.expect("execute must succeed");
+    let output = tool
+        .execute(input, &ctx)
+        .await
+        .expect("execute must succeed");
     assert!(
-        output.metadata.as_ref().and_then(|m| m.get("completed")).and_then(|v| v.as_bool()) == Some(true),
+        output
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("completed"))
+            .and_then(|v| v.as_bool())
+            == Some(true),
         "tool should report completed=true"
     );
 
@@ -122,6 +133,14 @@ async fn team_task_complete_publishes_exactly_one_event() {
 
     // ---- assertion: task is completed on disk ----
     let list = ts.read().expect("read task list");
-    let task = list.tasks.iter().find(|t| t.id == "t-001").expect("find task");
-    assert_eq!(task.status, TaskStatus::Completed, "task should be Completed");
+    let task = list
+        .tasks
+        .iter()
+        .find(|t| t.id == "t-001")
+        .expect("find task");
+    assert_eq!(
+        task.status,
+        TaskStatus::Completed,
+        "task should be Completed"
+    );
 }

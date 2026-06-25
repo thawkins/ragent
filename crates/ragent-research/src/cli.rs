@@ -11,17 +11,20 @@ pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
     /// `ragent research create <name> <topic>` — run a gathering session.
-    Create {
-        /// Validated research name (or raw string if validation hasn't run).
-        name: String,
-        /// Free-form topic description.
-        topic: String,
-        /// Optional FR-019 `--sources-dir <path>`.
-        sources_dir: Option<String>,
-        /// Optional FR-020 `--template <name>`.
-        template: Option<String>,
-    },
-    /// `ragent research list` — list every item.
+          Create {
+              /// Validated research name (or raw string if validation hasn't run).
+              name: String,
+              /// Free-form topic description.
+              topic: String,
+              /// Optional FR-019 `--sources-dir <path>`.
+              sources_dir: Option<String>,
+              /// Optional FR-020 `--template <name>`.
+              template: Option<String>,
+              /// `--no-local` — skip the local-file scanning phase.
+              no_local: bool,
+              /// `--no-specs` — skip the prior-spec cross-reference phase.
+              no_specs: bool,
+          },    /// `ragent research list` — list every item.
     List {
         /// `--all` includes archived items.
         all: bool,
@@ -73,7 +76,8 @@ impl ResearchCliCommand {
             "help" | "-h" | "--help" => Self::Help,
             "create" => Self::parse_create(&rest),
             "list" | "ls" => {
-                                  let all = rest.contains(&"--all");                Self::List { all }
+                let all = rest.contains(&"--all");
+                Self::List { all }
             }
             "open" => Self::parse_open(&rest),
             "search" => {
@@ -86,71 +90,84 @@ impl ResearchCliCommand {
                 name: rest.join(" "),
             },
             other => {
-                // Treat as `create <name> <topic…>` if it looks like a name.
-                let name = other.to_string();
-                let topic = rest.join(" ");
-                if topic.is_empty() {
-                    Self::Unknown(name)
-                } else {
-                    Self::Create {
-                        name,
-                        topic,
-                        sources_dir: None,
-                        template: None,
-                    }
-                }
-            }
-        }
+                              // Treat as `create <name> <topic…>` if it looks like a name.
+                              let name = other.to_string();
+                              let topic = rest.join(" ");
+                              if topic.is_empty() {
+                                  Self::Unknown(name)
+                              } else {
+                                  Self::Create {
+                                      name,
+                                      topic,
+                                      sources_dir: None,
+                                      template: None,
+                                      no_local: false,
+                                      no_specs: false,
+                                  }
+                              }
+                          }        }
     }
 
     fn parse_create(rest: &[&str]) -> Self {
-        // Parse: ragent research create <name> <topic> [--sources-dir <path>] [--template <name>]
-        let mut i = 0;
-        let mut name: Option<String> = None;
-        let mut topic_words: Vec<&str> = Vec::new();
-        let mut sources_dir: Option<String> = None;
-        let mut template: Option<String> = None;
-        while i < rest.len() {
-            let arg = rest[i];
-            match arg {
-                "--sources-dir" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        sources_dir = Some((*v).to_string());
-                        i += 2;
-                    } else {
+              // Parse: ragent research create <name> <topic> [--sources-dir <path>]
+              //        [--template <name>] [--no-local] [--no-specs]
+            let mut i = 0;
+            let mut name: Option<String> = None;
+            let mut topic_words: Vec<&str> = Vec::new();
+            let mut sources_dir: Option<String> = None;
+            let mut template: Option<String> = None;
+            let mut no_local = false;
+            let mut no_specs = false;
+            while i < rest.len() {
+                let arg = rest[i];
+                match arg {
+                    "--sources-dir" => {
+                        if let Some(v) = rest.get(i + 1) {
+                            sources_dir = Some((*v).to_string());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--template" => {
+                        if let Some(v) = rest.get(i + 1) {
+                            template = Some((*v).to_string());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--no-local" => {
+                        no_local = true;
                         i += 1;
                     }
-                }
-                "--template" => {
-                    if let Some(v) = rest.get(i + 1) {
-                        template = Some((*v).to_string());
-                        i += 2;
-                    } else {
+                    "--no-specs" => {
+                        no_specs = true;
                         i += 1;
                     }
-                }
-                _ => {
-                    if name.is_none() {
-                        name = Some(arg.to_string());
-                    } else {
-                        topic_words.push(arg);
+                    _ => {
+                        if name.is_none() {
+                            name = Some(arg.to_string());
+                        } else {
+                            topic_words.push(arg);
+                        }
+                        i += 1;
                     }
-                    i += 1;
                 }
             }
+            let Some(name) = name else {
+                return Self::Unknown("create".to_string());
+            };
+            let topic = topic_words.join(" ");
+            Self::Create {
+                name,
+                topic,
+                sources_dir,
+                template,
+                no_local,
+                no_specs,
+            }
         }
-        let Some(name) = name else {
-            return Self::Unknown("create".to_string());
-        };
-        let topic = topic_words.join(" ");
-        Self::Create {
-            name,
-            topic,
-            sources_dir,
-            template,
-        }
-    }
-
     fn parse_open(rest: &[&str]) -> Self {
         let name = rest
             .iter()
@@ -199,9 +216,12 @@ impl ResearchCliCommand {
            ragent research <SUBCOMMAND> [ARGS]\n\
          \n\
          SUBCOMMANDS:\n\
-           create <name> <topic> [--sources-dir <path>] [--template <name>]\n\
-                 Run an information-gathering session and write RESEARCH.md.\n\
-           list [--all]                  List every research item.\n\
+                      create <name> <topic> [--sources-dir <path>] [--template <name>]\n\
+                            [--no-local] [--no-specs]\n\
+                            Run an information-gathering session and write RESEARCH.md.\n\
+                            --no-local  Skip local-file scanning (in-project + extras).\n\
+                            --no-specs  Skip prior-spec cross-referencing.\n\
+             list [--all]                  List every research item.\n\
            open <name>                   Print the absolute path of RESEARCH.md.\n\
            search <query>                Full-text search across all RESEARCH.md.\n\
            show <name>                   Print metadata for a single item.\n\
@@ -237,6 +257,13 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
         SessionEvent::SpecCaptured { spec_id } => {
             ("spec", serde_json::json!({ "spec_id": spec_id }))
         }
+        SessionEvent::SynthesizeResult { outcome, detail } => (
+            "synthesize",
+            serde_json::json!({
+                "outcome": outcome.as_str(),
+                "detail": detail,
+            }),
+        ),
         SessionEvent::Done { total_sources } => (
             "done",
             serde_json::json!({ "total_sources": total_sources }),
@@ -338,45 +365,116 @@ mod tests {
     }
 
     #[test]
-    fn parse_create_with_topic() {
-        let cmd = ResearchCliCommand::parse("create rust-async async/await idioms in stable Rust");
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-            } => {
-                assert_eq!(name, "rust-async");
-                assert_eq!(topic, "async/await idioms in stable Rust");
-                assert!(sources_dir.is_none());
-                assert!(template.is_none());
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
+          fn parse_create_with_topic() {
+              let cmd = ResearchCliCommand::parse("create rust-async async/await idioms in stable Rust");
+              match cmd {
+                  ResearchCliCommand::Create {
+                      name,
+                      topic,
+                      sources_dir,
+                      template,
+                      no_local,
+                      no_specs,
+                  } => {
+                      assert_eq!(name, "rust-async");
+                      assert_eq!(topic, "async/await idioms in stable Rust");
+                      assert!(sources_dir.is_none());
+                      assert!(template.is_none());
+                      assert!(!no_local);
+                      assert!(!no_specs);
+                  }
+                  other => panic!("unexpected variant: {other:?}"),
+              }
+          }
 
-    #[test]
-    fn parse_create_with_sources_dir_and_template() {
-        let cmd = ResearchCliCommand::parse(
-            "create foo topic words --sources-dir /tmp/notes --template deepdive",
-        );
-        match cmd {
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-            } => {
-                assert_eq!(name, "foo");
-                assert_eq!(topic, "topic words");
-                assert_eq!(sources_dir.as_deref(), Some("/tmp/notes"));
-                assert_eq!(template.as_deref(), Some("deepdive"));
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
+          #[test]
+          fn parse_create_with_sources_dir_and_template() {
+              let cmd = ResearchCliCommand::parse(
+                  "create foo topic words --sources-dir /tmp/notes --template deepdive",
+              );
+              match cmd {
+                  ResearchCliCommand::Create {
+                      name,
+                      topic,
+                      sources_dir,
+                      template,
+                      no_local,
+                      no_specs,
+                  } => {
+                      assert_eq!(name, "foo");
+                      assert_eq!(topic, "topic words");
+                      assert_eq!(sources_dir.as_deref(), Some("/tmp/notes"));
+                      assert_eq!(template.as_deref(), Some("deepdive"));
+                      assert!(!no_local);
+                      assert!(!no_specs);
+                  }
+                  other => panic!("unexpected variant: {other:?}"),
+              }
+          }
 
+          #[test]
+          fn parse_create_with_no_local_flag() {
+              let cmd = ResearchCliCommand::parse("create foo a topic --no-local");
+              match cmd {
+                  ResearchCliCommand::Create {
+                      name,
+                      topic,
+                      no_local,
+                      no_specs,
+                      ..
+                  } => {
+                      assert_eq!(name, "foo");
+                      assert_eq!(topic, "a topic");
+                      assert!(no_local);
+                      assert!(!no_specs);
+                  }
+                  other => panic!("unexpected variant: {other:?}"),
+              }
+          }
+
+          #[test]
+          fn parse_create_with_no_specs_flag() {
+              let cmd = ResearchCliCommand::parse("create foo a topic --no-specs");
+              match cmd {
+                  ResearchCliCommand::Create {
+                      name,
+                      topic,
+                      no_local,
+                      no_specs,
+                      ..
+                  } => {
+                      assert_eq!(name, "foo");
+                      assert_eq!(topic, "a topic");
+                      assert!(!no_local);
+                      assert!(no_specs);
+                  }
+                  other => panic!("unexpected variant: {other:?}"),
+              }
+          }
+
+          #[test]
+          fn parse_create_with_both_no_flags() {
+              let cmd = ResearchCliCommand::parse(
+                  "create foo a topic --no-local --no-specs --sources-dir /tmp/x",
+              );
+            match cmd {
+                ResearchCliCommand::Create {
+                    name,
+                    topic,
+                    sources_dir,
+                    no_local,
+                    no_specs,
+                    ..
+                } => {
+                    assert_eq!(name, "foo");
+                    assert_eq!(topic, "a topic");
+                    assert_eq!(sources_dir.as_deref(), Some("/tmp/x"));
+                    assert!(no_local);
+                    assert!(no_specs);
+                }
+                other => panic!("unexpected variant: {other:?}"),
+            }
+        }
     #[test]
     fn parse_list_all() {
         let cmd = ResearchCliCommand::parse("list --all");
@@ -422,17 +520,24 @@ mod tests {
     }
 
     #[test]
-    fn parse_implicit_create_when_unknown_subcommand() {
-        let cmd = ResearchCliCommand::parse("foo bar baz");
-        match cmd {
-            ResearchCliCommand::Create { name, topic, .. } => {
-                assert_eq!(name, "foo");
-                assert_eq!(topic, "bar baz");
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
-
+          fn parse_implicit_create_when_unknown_subcommand() {
+              let cmd = ResearchCliCommand::parse("foo bar baz");
+              match cmd {
+                  ResearchCliCommand::Create {
+                      name,
+                      topic,
+                      no_local,
+                      no_specs,
+                      ..
+                  } => {
+                      assert_eq!(name, "foo");
+                      assert_eq!(topic, "bar baz");
+                      assert!(!no_local);
+                      assert!(!no_specs);
+                  }
+                  other => panic!("unexpected variant: {other:?}"),
+              }
+          }
     #[test]
     fn help_message_contains_documented_subcommands() {
         let h = ResearchCliCommand::build_help_message();
@@ -500,4 +605,169 @@ mod tests {
         assert_eq!(t.chars().count(), 5);
         assert!(t.ends_with('…'));
     }
+}
+
+// ── Filesystem-backed LocalTool for the CLI ───────────────────────────────
+
+use crate::local_gatherer::{GrepMatch, LocalTool};
+use crate::research_name::ResearchName;
+use async_trait::async_trait;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+/// Filesystem-backed implementation of [`LocalTool`] for use by the
+/// `ragent research` CLI when no agent tool registry is available (T-034).
+///
+/// Behaviour:
+/// - [`FsLocalTool::glob`] runs a synchronous glob over `project_root` and
+///   returns project-relative paths. The implementation is intentionally
+///   simple — it does the standard `walkdir`-style recursion itself so the
+///   CLI doesn't need to depend on the `glob` crate.
+/// - [`FsLocalTool::grep`] is a line-by-line case-insensitive substring
+///   match over any of `terms`.
+/// - [`FsLocalTool::read`] reads the file as UTF-8.
+/// - [`FsLocalTool::list_specs`] lists the directories directly under
+///   `specs/` and returns their base names.
+/// - [`FsLocalTool::spec_title`] reads the first `#` heading of
+///   `specs/<id>/SPEC.md` if present.
+pub struct FsLocalTool;
+
+impl FsLocalTool {
+    /// Build a new filesystem-backed local tool.
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self)
+    }
+}
+
+impl Default for FsLocalTool {
+    fn default() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl LocalTool for FsLocalTool {
+    async fn glob(&self, project_root: &Path, pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+        // Translate a `**/*.ext` style pattern into a walkdir-style scan.
+        // We only support two pattern shapes:
+        //   1. `**/*.<ext>`     → match every file with that extension
+        //   2. `*.<ext>`        → match every file with that extension (1-deep)
+        // Anything else returns an empty vec — the gatherer treats that as
+        // "no candidates" and moves on.
+        let ext = pattern.rsplit('.').next().unwrap_or("");
+        let ext = if ext == pattern { "" } else { ext };
+        if ext.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out: Vec<PathBuf> = Vec::new();
+        walk(project_root, project_root, ext, &mut out).await?;
+        out.sort();
+        Ok(out)
+    }
+
+    async fn grep(&self, path: &Path, terms: &[String]) -> anyhow::Result<Vec<GrepMatch>> {
+        let body = match tokio::fs::read_to_string(path).await {
+            Ok(b) => b,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut out = Vec::new();
+        for (i, line) in body.lines().enumerate() {
+            let lower = line.to_lowercase();
+            if terms.iter().any(|t| lower.contains(&t.to_lowercase())) {
+                out.push(GrepMatch {
+                    line: i + 1,
+                    text: line.to_string(),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn read(&self, path: &Path) -> anyhow::Result<String> {
+        Ok(tokio::fs::read_to_string(path).await?)
+    }
+
+    async fn list_specs(&self, project_root: &Path) -> anyhow::Result<Vec<String>> {
+        let specs_dir = project_root.join("specs");
+        let mut entries = match tokio::fs::read_dir(&specs_dir).await {
+            Ok(d) => d,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let mut out = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('_') || name.starts_with('.') {
+                continue;
+            }
+            if ResearchName::try_new(&name).is_ok() {
+                out.push(name);
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    async fn spec_title(&self, project_root: &Path, spec_id: &str) -> anyhow::Result<String> {
+        let path = project_root.join("specs").join(spec_id).join("SPEC.md");
+        let body = match tokio::fs::read_to_string(&path).await {
+            Ok(b) => b,
+            Err(_) => return Ok(String::new()),
+        };
+        for raw in body.lines() {
+            let line = raw.trim();
+            if let Some(rest) = line.strip_prefix("# ") {
+                return Ok(rest.trim().to_string());
+            }
+            if let Some(rest) = line.strip_prefix("## ") {
+                return Ok(rest.trim().to_string());
+            }
+        }
+        Ok(String::new())
+    }
+}
+
+async fn walk(root: &Path, dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(d) => d,
+        Err(_) => return Ok(()),
+    };
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        let file_type = match entry.file_type().await {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_dir() {
+            // Skip the research/ output directory and obvious junk so the
+            // gatherer doesn't index its own previous outputs.
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == "research"
+                || name == "target"
+                || name == ".git"
+                || name == "node_modules"
+                || name.starts_with('.')
+            {
+                continue;
+            }
+            Box::pin(walk(root, &path, ext, out)).await?;
+        } else if file_type.is_file() {
+            let matches_ext = entry
+                .file_name()
+                .to_string_lossy()
+                .rsplit('.')
+                .next()
+                .map(|e| e == ext)
+                .unwrap_or(false);
+            if matches_ext {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    out.push(rel.to_path_buf());
+                }
+            }
+        }
+    }
+    Ok(())
 }

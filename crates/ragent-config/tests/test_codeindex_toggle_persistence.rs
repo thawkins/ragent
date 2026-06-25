@@ -40,7 +40,10 @@ impl EnvGuard {
             keys: vec![
                 ("XDG_CONFIG_HOME", std::env::var("XDG_CONFIG_HOME").ok()),
                 ("RAGENT_CONFIG", std::env::var("RAGENT_CONFIG").ok()),
-                ("RAGENT_CONFIG_CONTENT", std::env::var("RAGENT_CONFIG_CONTENT").ok()),
+                (
+                    "RAGENT_CONFIG_CONTENT",
+                    std::env::var("RAGENT_CONFIG_CONTENT").ok(),
+                ),
             ],
             cwd: std::env::current_dir().expect("cwd"),
         }
@@ -75,15 +78,9 @@ fn test_codeindex_on_persists_when_global_has_it_disabled() {
     unsafe { std::env::remove_var("RAGENT_CONFIG_CONTENT") };
 
     // Global config: codeindex explicitly disabled.
-    write_global_config(
-        tmp.path(),
-        r#"{ "code_index": { "enabled": false } }"#,
-    );
+    write_global_config(tmp.path(), r#"{ "code_index": { "enabled": false } }"#);
     // Project config: also disabled initially.
-    write_project_config(
-        &project,
-        r#"{ "code_index": { "enabled": false } }"#,
-    );
+    write_project_config(&project, r#"{ "code_index": { "enabled": false } }"#);
 
     std::env::set_current_dir(&project).expect("cwd into project");
 
@@ -106,8 +103,7 @@ fn test_codeindex_on_persists_when_global_has_it_disabled() {
         reloaded.code_index.enabled,
         "❌ codeindex should remain enabled after restart (got disabled). \
          Project file:\n{}",
-        std::fs::read_to_string(project.join(".ragent").join("ragent.json"))
-            .unwrap_or_default()
+        std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
     );
     assert!(
         reloaded.tool_visibility.codeindex,
@@ -148,8 +144,7 @@ fn test_codeindex_off_persists_when_original_config_omitted_enabled() {
         !reloaded.code_index.enabled,
         "❌ codeindex should remain disabled after restart (got enabled). \
          Project file:\n{}",
-        std::fs::read_to_string(project.join(".ragent").join("ragent.json"))
-            .unwrap_or_default()
+        std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
     );
     assert!(
         !reloaded.tool_visibility.codeindex,
@@ -188,7 +183,6 @@ fn test_tools_codeindex_toggle_persists() {
         reloaded.tool_visibility.codeindex,
         "❌ tool_visibility.codeindex should remain on after restart (got off). \
          Project file:\n{}",
-        std::fs::read_to_string(project.join(".ragent").join("ragent.json"))
-            .unwrap_or_default()
+        std::fs::read_to_string(project.join(".ragent").join("ragent.json")).unwrap_or_default()
     );
 }

@@ -189,6 +189,12 @@ enum ResearchCommands {
         /// Optional template name (FR-020)
         #[arg(long)]
         template: Option<String>,
+        /// Skip the local-file scanning phase
+        #[arg(long)]
+        no_local: bool,
+        /// Skip the prior-spec cross-reference phase
+        #[arg(long)]
+        no_specs: bool,
     },
     /// List research items
     List {
@@ -1003,7 +1009,8 @@ async fn main() -> Result<()> {
 async fn handle_research_command(command: ResearchCommands) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{
-        ResearchManager, ResearchSession, SessionConfig, SessionEvent, SessionObserver,
+        LocalGatherer, NoopAnalysisEngine, ResearchManager, ResearchSession, SessionConfig,
+        SessionEvent, SessionObserver,
     };
     use std::sync::Arc;
     let working_dir = std::env::current_dir()?;
@@ -1016,6 +1023,8 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             topic,
             sources_dir,
             template,
+            no_local,
+            no_specs,
         } => {
             let topic = topic.join(" ");
             if topic.is_empty() {
@@ -1027,6 +1036,8 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 topic,
                 sources_dir,
                 template,
+                no_local,
+                no_specs,
             }
         }
         ResearchCommands::List { all } => ResearchCliCommand::List { all },
@@ -1085,18 +1096,19 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                     )
                 })
                 .collect();
-                          print!(
-                              "{}",
-                              ragent_research::render_show_output(
-                                  item.name.as_ref(),
-                                  &item.title,
-                                  &item.topic,
-                                  item.status.as_str(),
-                                  &item.created_at.to_rfc3339(),
-                                  &item.modified_at.to_rfc3339(),
-                                  &sources,
-                              )
-                          );        }
+            print!(
+                "{}",
+                ragent_research::render_show_output(
+                    item.name.as_ref(),
+                    &item.title,
+                    &item.topic,
+                    item.status.as_str(),
+                    &item.created_at.to_rfc3339(),
+                    &item.modified_at.to_rfc3339(),
+                    &sources,
+                )
+            );
+        }
         ResearchCliCommand::Delete { name, yes } => {
             if !yes {
                 eprint!("Are you sure you want to delete research/{name}? [y/N] ");
@@ -1119,6 +1131,8 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             topic,
             sources_dir,
             template,
+            no_local,
+            no_specs,
         } => {
             // Wire the session through a streaming JSON observer so the
             // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
@@ -1132,6 +1146,8 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 topic: topic.clone(),
                 sources_dir: sources_dir.map(std::path::PathBuf::from),
                 template,
+                disable_local: no_local,
+                disable_specs: no_specs,
                 ..SessionConfig::default()
             };
             let title = topic
@@ -1139,7 +1155,18 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 .next()
                 .unwrap_or(&topic)
                 .to_string();
-            let session = ResearchSession::new(manager.clone(), None, None);
+            // Wire up the filesystem-backed local gatherer so the CLI can
+            // produce a useful RESEARCH.md without requiring API keys.
+            // Web search and LLM synthesis are intentionally omitted
+            // because they require external credentials that the CLI does
+            // not have access to without a configured provider.
+            let local = LocalGatherer::new(ragent_research::cli::FsLocalTool::new());
+            let session = ResearchSession::new(
+                manager.clone(),
+                None,
+                Some(local),
+                Arc::new(NoopAnalysisEngine),
+            );
             match session
                 .run(&name, &title, &config, Arc::new(CliObserver))
                 .await

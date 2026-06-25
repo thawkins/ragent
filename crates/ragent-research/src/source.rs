@@ -53,6 +53,12 @@ impl LocalSourceKind {
 /// `research/<name>/sources/` (e.g. `web-01.md`, `local-03.md`). They are
 /// `PathBuf` rather than `String` so that callers can use the existing
 /// filesystem APIs to read them back.
+///
+/// The `body` field carries the captured text itself so the synthesis engine
+/// and the supporting-file renderer have something meaningful to work with
+/// (FR-007, FR-008, FR-021). Old `RESEARCH.md` files written before this
+/// field existed deserialize with `body == ""` thanks to `#[serde(default)]`;
+/// those items will simply have an empty body until re-gathered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source_type", rename_all = "snake_case")]
 pub enum Source {
@@ -66,6 +72,10 @@ pub enum Source {
         captured_at: DateTime<Utc>,
         /// Relative path to the supporting file under `research/<name>/sources/`.
         body_path: PathBuf,
+        /// Captured page text, fenced into the supporting file at write time.
+        /// Empty when the source was loaded from a pre-body-field `RESEARCH.md`.
+        #[serde(default)]
+        body: String,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -80,6 +90,10 @@ pub enum Source {
         body_path: PathBuf,
         /// One-line note explaining why this file is relevant to the topic.
         relevance: String,
+        /// Excerpted file text (the matching lines plus surrounding context),
+        /// embedded in the supporting file at write time.
+        #[serde(default)]
+        body: String,
     },
     /// A prior spec under `specs/` cross-referenced from the research item.
     Spec {
@@ -100,6 +114,9 @@ pub enum Source {
         captured_at: DateTime<Utc>,
         /// Relative path to the supporting file under `research/<name>/sources/`.
         body_path: PathBuf,
+        /// Captured text content, embedded in the supporting file at write time.
+        #[serde(default)]
+        body: String,
     },
 }
 
@@ -143,6 +160,35 @@ impl Source {
             | Self::Other { captured_at, .. } => *captured_at,
         }
     }
+
+    /// Optional relevance note for local and spec sources.
+    pub fn relevance(&self) -> Option<&str> {
+        match self {
+            Self::Local { relevance, .. } | Self::Spec { relevance, .. } => Some(relevance),
+            _ => None,
+        }
+    }
+
+    /// Captured body text for variants that carry one. Returns `Some(body)`
+    /// for web/local/other sources, and `None` for `Source::Spec` (which has
+    /// no body by design — it points at the spec directory itself).
+    ///
+    /// When the source was loaded from an older `RESEARCH.md` that predates
+    /// the `body` field, this returns an empty string.
+    pub fn body(&self) -> Option<&str> {
+        match self {
+            Self::Web { body, .. } | Self::Local { body, .. } | Self::Other { body, .. } => {
+                Some(body.as_str())
+            }
+            Self::Spec { .. } => None,
+        }
+    }
+
+    /// `true` when the source has a non-empty captured body. Used by the
+    /// synthesis engine to skip empty rows when computing prompt budgets.
+    pub fn has_body(&self) -> bool {
+        self.body().map(|b| !b.is_empty()).unwrap_or(false)
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +208,7 @@ mod tests {
             title: "Example".into(),
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
         };
         assert_eq!(web.type_str(), "web");
 
@@ -171,6 +218,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/local-01.md"),
             relevance: "Main library entry".into(),
+            body: "fn main() {}".into(),
         };
         assert_eq!(local.type_str(), "local");
 
@@ -180,6 +228,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/local-02.md"),
             relevance: "External notes".into(),
+            body: String::new(),
         };
         assert_eq!(extra.type_str(), "extra-local");
 
@@ -194,6 +243,7 @@ mod tests {
             label: "Interview transcript".into(),
             captured_at: dt(),
             body_path: PathBuf::from("sources/other-01.md"),
+            body: "Q: ... A: ...".into(),
         };
         assert_eq!(other.type_str(), "other");
     }
@@ -205,6 +255,7 @@ mod tests {
             title: "Example".into(),
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -215,6 +266,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/local-01.md"),
             relevance: "Main library entry".into(),
+            body: String::new(),
         };
         assert_eq!(local.title(), "src/lib.rs");
         assert_eq!(local.path_or_url(), "src/lib.rs");
@@ -236,6 +288,7 @@ mod tests {
             title: "t".into(),
             captured_at: now,
             body_path: PathBuf::from("x"),
+            body: String::new(),
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -247,10 +300,28 @@ mod tests {
             title: "Example".into(),
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn serde_round_trip_web_backward_compatible_without_body() {
+        let json = r#"{
+            "source_type": "web",
+            "url": "https://example.com",
+            "title": "Example",
+            "captured_at": "2024-01-15T10:30:00Z",
+            "body_path": "sources/web-01.md"
+        }"#;
+        let s: Source = serde_json::from_str(json).unwrap();
+        if let Source::Web { body, .. } = s {
+            assert_eq!(body, "");
+        } else {
+            panic!("expected Web variant");
+        }
     }
 
     #[test]
@@ -263,8 +334,9 @@ mod tests {
             "relevance": "Entry point"
         }"#;
         let s: Source = serde_json::from_str(json).unwrap();
-        if let Source::Local { kind, .. } = s {
+        if let Source::Local { kind, body, .. } = s {
             assert_eq!(kind, LocalSourceKind::InProject);
+            assert_eq!(body, "");
         } else {
             panic!("expected Local variant");
         }
@@ -288,10 +360,58 @@ mod tests {
             label: "PDF".into(),
             captured_at: dt(),
             body_path: PathBuf::from("sources/other-01.md"),
+            body: "transcript".into(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn serde_round_trip_other_backward_compatible_without_body() {
+        let json = r#"{
+            "source_type": "other",
+            "label": "PDF",
+            "captured_at": "2024-01-15T10:30:00Z",
+            "body_path": "sources/other-01.md"
+        }"#;
+        let s: Source = serde_json::from_str(json).unwrap();
+        if let Source::Other { body, .. } = s {
+            assert_eq!(body, "");
+        } else {
+            panic!("expected Other variant");
+        }
+    }
+
+    #[test]
+    fn body_and_has_body_for_each_variant() {
+        let web = Source::Web {
+            url: "u".into(),
+            title: "t".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("x"),
+            body: "hello".into(),
+        };
+        assert_eq!(web.body(), Some("hello"));
+        assert!(web.has_body());
+
+        let empty = Source::Web {
+            url: "u".into(),
+            title: "t".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("x"),
+            body: String::new(),
+        };
+        assert_eq!(empty.body(), Some(""));
+        assert!(!empty.has_body());
+
+        let spec = Source::Spec {
+            spec_id: "s".into(),
+            captured_at: dt(),
+            relevance: String::new(),
+        };
+        assert_eq!(spec.body(), None);
+        assert!(!spec.has_body());
     }
 
     #[test]

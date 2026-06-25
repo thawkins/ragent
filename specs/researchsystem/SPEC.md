@@ -25,7 +25,6 @@ The Research System covers:
 
 ### Out of Scope
 
-- AI-driven synthesis of gathered information (the LLM agent already performs synthesis; the Research System just structures inputs and outputs)
 - Real-time collaborative editing of research items
 - Publishing research to external knowledge bases
 - Citation/bibliography management (BibTeX, CSL) — the references index is a lightweight markdown list
@@ -160,6 +159,22 @@ The ragent Research System shall enforce a standard directory layout for researc
 
 `If <the user runs "/research archive <name>">, the <ragent Research System> shall <set the status to archived and exclude the item from default list output unless --all is supplied>.`
 
+### FR-021 — AI-Driven Source Synthesis
+
+`The <ragent Research System> shall <include an analysis phase between gathering and assembly that sends the captured source bodies to the active LLM and asks it to produce a structured analysis>.`
+
+`When <the analysis phase runs>, the <ragent Research System> shall <request four sections from the model: a concise Summary, numbered Findings that cite sources as [#N], a list of In-Project Cross-References, and Open Questions>.`
+
+`If <the LLM is unavailable, misconfigured, or returns empty output>, the <ragent Research System> shall <fall back to the mechanical summary/findings so RESEARCH.md is always populated>.`
+
+`When <the analysis phase starts>, the <ragent Research System> shall <emit a SessionEvent::Phase(Synthesize) progress event so the TUI and CLI can display "synthesizing analysis" in the log>.`
+
+### FR-022 — Graceful Degradation of Synthesis
+
+`The <ragent Research System> shall <wire an LLM-backed analysis engine only when a valid active model is available>.`
+
+`When <no active model is configured>, the <ragent Research System> shall <use a no-op analysis engine and continue with the mechanical fallback>.`
+
 ### FR-014 — CLI Sub-Commands
 
 `The <ragent Research System> shall <provide equivalent CLI sub-commands under "ragent research", matching the TUI /research sub-commands: create, list, open, search, show, delete, archive>.`
@@ -232,7 +247,7 @@ The ragent Research System shall enforce a standard directory layout for researc
 
 ### NFR-007 — Maintainability
 
-`The <ragent Research System> shall <be implemented in a new ragent-research crate that depends only on ragent-types, ragent-config, ragent-llm (for the agent context), and standard crates for HTTP/Markdown>.`
+`The <ragent Research System> shall <be implemented in a new ragent-research crate that depends on ragent-types, ragent-config, ragent-llm, ragent-storage (for provider auth resolution), and standard crates for HTTP/Markdown>.`
 
 ---
 
@@ -278,6 +293,8 @@ The ragent Research System shall enforce a standard directory layout for researc
 
 - `ragent-types` — for IDs, events, errors
 - `ragent-config` — for resolving the project root
+- `ragent-llm` — for provider registry and chat completion in the synthesis phase
+- `ragent-storage` — for resolving provider API keys
 - `ragent-agent` — for the tool registry used during the research session
 - `ragent-tui` — for the `/research` slash command, autocomplete, and viewer
 - `ragent-server` — for the `POST /research` HTTP endpoint
@@ -289,7 +306,8 @@ The ragent Research System shall enforce a standard directory layout for researc
 
 - **Research item** — A single `research/<name>/` directory containing a `RESEARCH.md` and optional supporting files
 - **Research name** — The URL-safe identifier used as the directory name; validated per FR-002
-- **Research session** — The act of running `/research create`; orchestrates web and local gathering
+- **Research session** — The act of running `/research create`; orchestrates web/local gathering, synthesis, and assembly
+- **Synthesis** — The LLM-driven analysis phase that produces Summary, Findings, Cross-References, and Open Questions from gathered sources
 - **Source** — A single piece of captured evidence, either a web URL or a local file
 - **References index** — The final section of `RESEARCH.md` listing every captured source
 - **Cross-reference** — A local file, prior spec, or project document that is relevant to the topic

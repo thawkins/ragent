@@ -1,24 +1,21 @@
-
 <div style="page-break-after: always; text-align: center; padding-top: 15em;">
 
 <h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-      <strong>Version:</strong> 0.1.0-alpha.113</p>
-<p style="font-size: 1.1em;">
-  <strong>Date:</strong> 2026-08-07
-</p>
-<p style="font-size: 1.1em;">
-  <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
-</p>
-
+    <strong>Version:</strong> 0.1.0-alpha.116</p>
+  <p style="font-size: 1.1em;">
+    <strong>Date:</strong> 2026-06-23
+  </p>
+  <p style="font-size: 1.1em;">
+    <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
+  </p>
 <p style="margin-top: 6em; font-size: 0.9em; color: #777;">
-  <a href="https://github.com/thawkins/ragent">github.com/thawkins/ragent</a>
-</p>
+    <a href="https://github.com/thawkins/ragent">github.com/thawkins/ragent</a>
+  </p>
 
 </div>
-
 ---
 
 ## Executive Summary
@@ -104,23 +101,23 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.113). The core architecture, tool system,
+Ragent is in **alpha** (v0.1.0-alpha.116). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, and security layer are functional and under active
 development. The specification below documents the current state of all
 subsystems.
 
-**Current Release Highlights (alpha.104 → alpha.113):**
-- **Research System** — New `/research` slash-command family and `ragent research` CLI for structured web + local cross-referenced research, with `GET/POST/DELETE /research` HTTP endpoints and spec linkage via `--from-research`
-- **`ask_user` standalone** — `ask_user` promoted from alias to standalone event-driven tool with optional multiple-choice `options` support
-- **Internal LLM subsystem removed** — Embedded Candle / LiteRT-LM internal LLM, `/internal-llm` slash commands, `InternalLlmConfig`, and the `internal_llm` Cargo feature have been removed. Compaction, session titles, and memory extraction now use provider-based fallbacks, and the `internal_llm` config key is silently ignored
-- **Model Router Provider** — Intelligent 15-dimension classifier for automatic model selection (complexity, code, vision, reasoning, etc.)
-- **Amazon Bedrock provider** — AWS-hosted models with SigV4 signing, dual Anthropic Messages / Converse APIs, and credential discovery
-- **xAI Grok provider** — New `xai` provider for the xAI Grok API
-- **`/spec impl` and `/spec implement`** — Slash commands to transition a spec to `in_progress`
-- **YOLO mode persistence** — YOLO state is saved to `ragent.json` and restored on startup
-- **HuggingFace discovery robustness** — Public `/v1/models` discovery works without token; fallback to static catalog on empty discovery
-- **Task tool family guidance** — System prompts and JSON schemas now explicitly distinguish `task_complete` (autonomous loop signal) from `team_task_complete` (team task marker); `task_complete` and `list_tasks` are hardwired auto-approved
+**Current Release Highlights (alpha.106 → alpha.116):**
+- **Agent-loop persistence & performance** — Fixed session/cache/storage persistence issues and reduced session-processor hot-path overhead (alpha.116)
+- **COMMSPLAN team subsystem hardening** — Advisory-lock-protected stores, single-source team implementation via `ragent-team`, unified shutdown/idle signaling, and at-least-once mailbox delivery semantics (alpha.114)
+- **Unified replacement matcher** — `edit`, `multiedit`, and `memory_replace` now share a whitespace-tolerant matcher, eliminating many `old_str not found` failures (alpha.114)
+- **Research System** — `/research` slash commands and `ragent research` CLI now wire real gatherers, report completion, render tables correctly, and synthesize a structured analysis via the active LLM in the TUI; spec status corrected to `in_progress` (alpha.111–alpha.113, updated for synthesis)
+- **`ask_user` standalone** — Event-driven question tool with optional multiple-choice `options`; standalone `question` tool removed (alpha.111)
+- **Internal LLM subsystem removed** — Embedded Candle / LiteRT-LM internal LLM, `/internal-llm` slash commands, `InternalLlmConfig`, and the `internal_llm` Cargo feature have been removed (alpha.110)
+- **Microsoft Foundry Local support** — First-class provider integration plus in-process backend option, device validation, and web-service fallback (alpha.106–alpha.109)
+- **Headroom compression lifecycle** — `CompressionStarted`/`CompressionFinished` events, per-iteration threshold gating, and immediate context-window refresh (alpha.106–alpha.107)
+- **Stream timeout split** — `initial_response_timeout_secs` (300 s) decoupled from per-event `timeout_secs` to absorb cloud-provider cold-start latency (alpha.114)
+- **Task tool family guidance** — `task_complete`/`list_tasks` hardwired auto-approved; schemas distinguish autonomous `task_complete` from team `team_task_complete` (alpha.109)
 
 ---
 
@@ -147,6 +144,7 @@ subsystems.
 8. [Code Index](#code-index)
 9. [Memory System](#memory-system)
 10. [Spec Management](#spec-management)
+11. [Research System](#research-system)
 
 ### Part IV: Agent Customization & Extension
 
@@ -175,7 +173,7 @@ subsystems.
 - [Appendix A: Version History](#appendix-a-version-history)
 - [Appendix B: Documentation](#appendix-b-documentation)
 - [Appendix C: Project Contact & Repository](#appendix-c-project-contact--repository)
-- [Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.113)](#appendix-d-changelog-v010-alpha104--v010-alpha113)
+- [Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.116)](#appendix-d-changelog-v010-alpha104--v010-alpha116)
 - [Appendix E: Earlier Changelog (2025-01-16 → 2025-04-21)](#appendix-e-earlier-changelog-2025-01-16--2025-04-21)
 
 ### List of Diagrams
@@ -213,908 +211,647 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 
 ### 1.1 Key Characteristics
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama (local and cloud), xAI Grok, Generic OpenAI-compatible APIs, Azure AI Foundry, Azure Resource (File), and Amazon Bedrock
-- **Comprehensive tool system** — Extensive coverage across file operations, code analysis, GitHub/GitLab integration, web access, office documents, memory, teams, and more
-- **Built-in TUI** — Full-screen ratatui interface with streaming chat, slash commands, and real-time updates
-- **HTTP server** — REST + SSE API for external integrations
-- **Zero external dependencies** — Self-contained binary with SQLite, Tantivy, and tree-sitter compiled in
+| Characteristic | Description |
+|----------------|-------------|
+| **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
+| **Multi-provider** | 12 first-class LLM providers with auto-discovery and health checks |
+| **Tool-rich** | ~111 registered tools across 15 categories |
+| **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
+| **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
+| **Extensible** | Custom agents, skills, MCP servers, and provider modules |
+| **Secure by default** | Permission system, bash safety, file guards, secret redaction |
+
+### 1.2 Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Session** | A single conversation/run with an agent, persisted to SQLite |
+| **Agent Profile** | A named configuration of model, system prompt, tools, and permissions |
+| **Tool** | A typed, invokable capability (file ops, shell, search, etc.) |
+| **Event Bus** | Tokio broadcast channel used for cross-component real-time updates |
+| **Code Index** | Tree-sitter + Tantivy index of the project codebase |
+| **Memory** | Three-tier persistence: file blocks, structured SQLite, optional embeddings |
+| **Skill** | A YAML pack that injects tools, prompts, and file context |
+| **Team** | A named multi-agent workspace with shared tasks and mailbox messaging |
+| **Swarm** | Parallel task decomposition across spawned agents |
+| **Autopilot** | Autonomous mode with auto-approval and iteration limits |
 
 ---
 
-
-
 ## 2. Architecture
+
+Ragent is organised as a Cargo workspace of focused crates. Each crate owns a
+single concern, and the top-level `src/main.rs` wires them together behind a clap
+CLI.
 
 ```mermaid
 graph TB
-    subgraph UI["User Interface"]
-        TUI["TUI<br/>(ratatui)"]
-        HTTP["HTTP Server<br/>(axum)"]
+    subgraph "Workspace Crates"
+        A[ragent-agent]
+        B[ragent-bench]
+        C[ragent-codeindex]
+        D[ragent-config]
+        E[ragent-llm]
+        F[ragent-prompt_opt]
+        G[ragent-server]
+        H[ragent-specs]
+        I[ragent-storage]
+        J[ragent-team]
+        K[ragent-tools-core]
+        L[ragent-tools-extended]
+        M[ragent-tools-vcs]
+        N[ragent-tui]
+        O[ragent-types]
+        P[ragent-research]
     end
-    
-    EventBus["Event Bus (tokio)"]
-    
-    subgraph Core["Core Components"]
-        Session["Session<br/>Processor"]
-        Agent["Agent<br/>System"]
-        Tool["Tool<br/>Registry"]
-    end
-    
-    subgraph Backend["Backend Services"]
-        Provider["Provider<br/>(LLM API)"]
-        Storage["Storage<br/>(SQLite)"]
-        BgAgents["Background<br/>Agents"]
-    end
-    
-    TUI --> EventBus
-    HTTP --> EventBus
-    EventBus --> Session
-    EventBus --> Agent
-    EventBus --> Tool
-    Session --> Provider
-    Tool --> Storage
-    Tool --> BgAgents
+
+    Q[src/main.rs CLI entry]
+    Q --> A
+    Q --> N
+    Q --> G
+    A --> O
+    A --> D
+    A --> E
+    A --> K
+    A --> L
+    A --> J
+    A --> H
+    A --> P
+    N --> A
+    N --> O
+    G --> A
+    G --> O
+    J --> O
+    K --> O
+    L --> O
+    M --> O
+    C --> O
+    I --> O
+    E --> O
+    D --> O
+    F --> O
+    B --> O
+    H --> O
+    P --> O
 ```
 
 **Figure 2:** System Architecture — Full crate and component topology
 
-### 2.3 Event Bus Flow
+### 2.1 Workspace Crates
 
-The event bus is a central tokio broadcast channel that connects all subsystems. Every component publishes events and subscribes to events it cares about.
-
-```mermaid
-graph LR
-    subgraph Events["Event Bus (tokio broadcast)"]
-        EB[EventBus
-        rx/tx channels]
-    end
-
-    TUI -- publishes --> EB
-    HTTP -- publishes --> EB
-    Session -- publishes --> EB
-    Tool -- publishes --> EB
-    Agent -- publishes --> EB
-    EB -- subscribed --> TUI
-    EB -- subscribed --> HTTP
-    EB -- subscribed --> Session
-    EB -- subscribed --> Tool
-    EB -- subscribed --> Agent
-
-    subgraph EventTypes["Core Event Types"]
-        E1[MessageAdded]
-        E2[ToolCallStarted / ToolCallCompleted]
-        E3[PermissionRequested / PermissionReplied]
-        E4[AgentStatusChanged]
-        E5[StreamToken / StreamComplete]
-        E6[SessionSaved]
-        E7[TaskSpawned / TaskCompleted]
-    end
-
-    EB --> EventTypes
-```
-
-**Figure 4:** Event Bus Flow — Internal pub/sub message routing
-
-**Event Flow Example — Tool Execution:**
-1. `Session` sends tool call request to `Tool`
-2. `Tool` publishes `ToolCallStarted` event
-3. `TUI` receives event → updates log panel
-4. `Tool` executes and publishes `ToolCallCompleted` with result
-5. `Session` receives result → adds to conversation history
-6. `Session` publishes `MessageAdded` → TUI updates chat panel
-
----
-
-| Crate | LOC % | Purpose |
-|-------|------:|---------|
-| `ragent-agent` | 34.61% | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
-| `ragent-codeindex` | 9.11% | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
-| `ragent-config` | 1.29% | Configuration types, defaults, and parsing |
-| `ragent-llm` | 4.04% | Provider clients and model/provider registry |
-| `ragent-prompt_opt` | 0.40% | Prompt optimization transformations |
-| `ragent-server` | 2.47% | Axum HTTP routes and SSE streaming |
-| `ragent-storage` | 1.70% | SQLite storage, snapshots, and encrypted credential persistence |
-| `ragent-team` | 3.63% | Team runtime, team state, and team tools |
-| `ragent-tools-core` | 3.56% | Core shell/file/search tools |
-| `ragent-tools-extended` | 7.08% | Extended document/web/memory/codeindex tools |
-| `ragent-tools-vcs` | 2.08% | GitHub and GitLab tool surface |
-| `ragent-tui` | 20.92% | Ratatui terminal interface |
-| `ragent-types` | 1.21% | Shared IDs, events, messages, and sanitization primitives |
-| `ragent-specs` | — | Spec lifecycle management: discovery, validation, status transitions, review, archival |
-| `ragent-bench` | — | Benchmark runner shared between TUI and CLI |
-
-Percentages are based on a fresh count of current Rust `.rs` lines across workspace crates (167,466 total).
+| Crate | Responsibility | Approx. Lines |
+|-------|----------------|---------------|
+| `ragent-types` | Shared IDs, events, messages, errors, sanitisation | ~2,700 |
+| `ragent-config` | Configuration loading, defaults, permission rules | ~1,850 |
+| `ragent-storage` | SQLite persistence, snapshots, encrypted credentials | ~2,800 |
+| `ragent-llm` | Provider clients and model/provider registry | ~6,700 |
+| `ragent-tools-core` | File, shell, search, and utility tools | ~4,100 |
+| `ragent-tools-extended` | Memory, code index, office/PDF, web tools | ~4,300 |
+| `ragent-tools-vcs` | GitHub and GitLab tool surface | ~5,200 |
+| `ragent-agent` | Session processor, agent resolution, tool registry, memory, MCP | ~12,500 |
+| `ragent-team` | Team runtime, shared tasks, mailbox messaging | ~3,900 |
+| `ragent-codeindex` | Tree-sitter parsing, SQLite/Tantivy index, file watcher | ~4,000 |
+| `ragent-server` | Axum HTTP routes and SSE streaming | ~2,400 |
+| `ragent-tui` | Ratatui terminal interface | ~8,900 |
+| `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
+| `ragent-specs` | Spec lifecycle management and validation | ~2,100 |
+| `ragent-prompt_opt` | Prompt optimization templates | ~1,200 |
+| `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
 
 ### 2.2 Crate Dependency Graph
 
 ```mermaid
-graph LR
-    subgraph Foundation["Foundation Crates"]
-        TYPES["ragent-types"]
-        CONFIG["ragent-config"]
-    end
+graph TD
+    T[ragent-types]
+    D[ragent-config]
+    S[ragent-storage]
+    L[ragent-llm]
+    TC[ragent-tools-core]
+    TE[ragent-tools-extended]
+    TV[ragent-tools-vcs]
+    A[ragent-agent]
+    TM[ragent-team]
+    CI[ragent-codeindex]
+    SV[ragent-server]
+    TU[ragent-tui]
+    SP[ragent-specs]
+    PR[ragent-prompt_opt]
+    RS[ragent-research]
+    B[ragent-bench]
 
-    subgraph Data["Data & Storage"]
-        STORAGE["ragent-storage"]
-        CODEIDX["ragent-codeindex"]
-    end
-
-    subgraph Logic["Logic & Orchestration"]
-        LLM["ragent-llm"]
-        AGENT["ragent-agent"]
-        TEAM["ragent-team"]
-        PROMPT["ragent-prompt_opt"]
-    end
-
-    subgraph Interface["User Interface"]
-        TUI["ragent-tui"]
-        SERVER["ragent-server"]
-    end
-
-    subgraph Tools["Tool Crates"]
-        TCORE["ragent-tools-core"]
-        TEXT["ragent-tools-extended"]
-        TVCS["ragent-tools-vcs"]
-    end
-
-    TYPES --> CONFIG
-    TYPES --> STORAGE
-    TYPES --> LLM
-    TYPES --> TCORE
-    CONFIG --> AGENT
-    CONFIG --> TUI
-    STORAGE --> AGENT
-    STORAGE --> CODEIDX
-    LLM --> AGENT
-    TCORE --> AGENT
-    TEXT --> AGENT
-    TVCS --> AGENT
-    CODEIDX --> TEXT
-    AGENT --> TEAM
-    AGENT --> SERVER
-    AGENT --> TUI
-    TEAM --> TUI
-    PROMPT --> TUI
-    PROMPT --> SERVER
+    T --> D
+    T --> S
+    T --> L
+    T --> TC
+    T --> TE
+    T --> TV
+    T --> CI
+    T --> SP
+    T --> RS
+    D --> L
+    D --> A
+    D --> TU
+    S --> A
+    S --> TU
+    L --> A
+    L --> TU
+    L --> SV
+    TC --> A
+    TE --> A
+    TV --> A
+    A --> TU
+    A --> SV
+    A --> TM
+    TM --> A
+    CI --> A
+    SP --> A
+    PR --> TU
+    PR --> A
+    RS --> A
+    B --> TU
+    B --> SV
 ```
 
 **Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
 
-**Dependency Rules:**
-- Foundation crates (`types`, `config`) have no internal dependencies
-- `storage` depends only on `types`
-- `llm` depends on `types` and `config`
-- Tool crates depend on `types` (and `codeindex` for extended tools)
-- `agent` is the integration layer — it depends on most other crates
-- `team` depends on `agent` types
-- `tui` and `server` are terminal layers that depend on `agent` and `team`
-- Circular dependencies are prohibited; the graph is strictly acyclic
+### 2.3 Event Bus Flow
+
+The event bus is a tokio broadcast channel (`tokio::sync::broadcast`). Every
+component can publish and subscribe to strongly-typed events.
+
+```mermaid
+graph LR
+    SP[Session Processor] --> EB[Event Bus]
+    TUI[TUI] --> EB
+    HTTP[HTTP Server] --> EB
+    Tools[Tool Executors] --> EB
+    EB --> SP
+    EB --> TUI
+    EB --> HTTP
+    EB --> Storage[Storage / Memory]
+    EB --> Teams[Team Manager]
+```
+
+**Figure 4:** Event Bus Flow — Internal pub/sub message routing
+
+Key event types include:
+
+| Event | Purpose |
+|-------|---------|
+| `AssistantChunk` | Streaming LLM token or reasoning block |
+| `ToolRequested` / `ToolExecuted` | Tool call lifecycle |
+| `PermissionRequested` / `PermissionReplied` | Permission dialog flow |
+| `QuestionRequested` / `QuestionAnswered` | User question tool |
+| `AgentNotice` | Non-blocking status/information message |
+| `CompressionStarted` / `CompressionFinished` | Headroom compression lifecycle |
+| `TeammateIdle` / `TeammateFailed` / `TeammateResumed` | Team coordination |
+| `SubagentSpawned` / `SubagentCompleted` / `SubagentKilled` | Background agents |
 
 ---
-
----
-
-
 
 ## 3. Core Features
 
 ### 3.1 LLM Providers
 
+Ragent supports multiple providers through a common trait interface. Providers
+are registered in a runtime registry, and the session processor selects one
+based on the active agent/model.
+
 #### Supported Providers
 
-| Provider | ID | Authentication | Features |
-|----------|-----|---------------|----------|
-| **Anthropic** | `anthropic` | `ANTHROPIC_API_KEY` | Streaming, tools, vision, reasoning |
-| **OpenAI** | `openai` | `OPENAI_API_KEY` | Streaming, tools, vision, reasoning |
-| **GitHub Copilot** | `copilot` | Auto-discovered from VS Code | Streaming, tools, vision, reasoning levels |
-| **Ollama** | `ollama` | No key required | Local models, streaming |
-| **Ollama Cloud** | `ollama_cloud` | `OLLAMA_API_KEY` | Remote Ollama servers, dynamic model discovery, vision |
-| **Hugging Face** | `huggingface` | `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Streaming, tools, vision, dynamic model discovery |
-| **Generic OpenAI** | `generic_openai` | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
-| **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
-| **Azure Resource (File)** | `azure_resource` | File-based (`azureresources.json`) | Multiple Azure endpoints from a JSON catalog, per-resource auth, capability tags |
-| **Azure AI Foundry** | `azure_foundry` | `AZURE_AI_FOUNDRY_API_KEY` | OpenAI-compatible endpoints, dynamic model discovery, streaming, tools, vision, reasoning |
-| **xAI Grok** | `xai` | `XAI_API_KEY` | Streaming, tools, reasoning |
-| **Amazon Bedrock** | `bedrock` | AWS credentials | AWS-hosted models (Claude, Nova, Llama, Mistral), streaming, tools, vision |
+| Provider | Local/Cloud | Discovery | Streaming | Vision | Tools | Notes |
+|----------|-------------|-----------|-----------|--------|-------|-------|
+| `anthropic` | Cloud | Static catalog | Yes | Yes | Yes | Claude models, thinking blocks |
+| `openai` | Cloud | Static + dynamic | Yes | Yes | Yes | GPT-4o, o1, etc. |
+| `copilot` | Cloud | Static | Yes | No | Yes | GitHub Copilot token-based |
+| `gemini` | Cloud | Static + dynamic | Yes | Yes | Yes | Google Gemini, up to 2M context |
+| `huggingface` | Cloud | Dynamic | Yes | Yes | Some | HF Inference API |
+| `ollama` | Local | Dynamic | Yes | Yes | Yes | Local Ollama server |
+| `ollama_cloud` | Cloud | Dynamic | Yes | Yes | Yes | Managed Ollama endpoints |
+| `generic_openai` | Either | Config-driven | Yes | Yes | Yes | Any OpenAI-compatible endpoint |
+| `azure_foundry` | Cloud | Dynamic | Yes | Yes | Yes | Microsoft Azure AI Foundry |
+| `azure_resource` | Cloud | File-based | Yes | Yes | Yes | Reads `azureresources.json` |
+| `xai` | Cloud | Static | Yes | Yes | Yes | xAI Grok API |
+| `bedrock` | Cloud | Dynamic | Yes | Yes | Yes | AWS Bedrock, SigV4 signing |
+| `foundry_local` | Local | Dynamic | Yes | Yes | Yes | Microsoft Foundry Local (web + in-process) |
+
+(The registry exposes 13 provider IDs; `foundry_local` and in-process variants
+share the same ID with different backend modes.)
 
 #### Provider Features
 
-- **Health indicators** — Real-time connectivity status (● green/✗ red/● yellow)
-- **Model discovery** — Automatic model listing from provider APIs
-- **Vision support** — Image attachments for supported models
-- **Reasoning levels** — Copilot accepts `reasoning_effort` or `reasoning_level` with `low`/`medium`/`high`/`none`
-- **Context window display** — Status bar shows context utilization percentage
-- **Extended thinking** — Anthropic extended thinking/reasoning support
-- **Usage tracking** — Token usage, quota percentage, and provider plan display where available
-- **Dynamic model metadata** — Provider model pickers surface live-discovered context windows, capabilities, and Copilot premium request multipliers
+| Feature | Description |
+|---------|-------------|
+| **Health checks** | `Provider::health()` returns `Healthy`, `Degraded`, or `Unhealthy` |
+| **Model discovery** | `Provider::discover_models()` returns available models with capabilities |
+| **Streaming** | All providers emit `StreamEvent::Chunk` and `StreamEvent::Done` |
+| **Tool calling** | Providers that support function calling receive tool schemas |
+| **Vision** | Image inputs passed when the model reports vision capability |
+| **Reasoning levels** | Anthropic/OpenAI thinking blocks map to `low`/`medium`/`high` |
 
 #### Anthropic Models
 
-| Model | Context | Max Output | Capabilities |
-|-------|---------|------------|--------------|
-| `claude-sonnet-4-20250514` | 200,000 | 64,000 | reasoning, streaming, vision, tool_use |
-| `claude-3-5-haiku-latest` | 200,000 | 8,192 | streaming, vision, tool_use |
+| Model | Context | Notes |
+|-------|---------|-------|
+| `claude-sonnet-4-20250514` | 200k | Default reasoning model |
+| `claude-opus-4-20250514` | 200k | High capability |
+| `claude-haiku-4-20250514` | 200k | Fast/cheap |
 
 #### OpenAI Models
 
-| Model | Context | Max Output | Capabilities |
-|-------|---------|------------|--------------|
-| `gpt-4o` | 128,000 | 16,384 | streaming, vision, tool_use |
-| `gpt-4o-mini` | 128,000 | 16,384 | streaming, vision, tool_use |
+| Model | Context | Notes |
+|-------|---------|-------|
+| `gpt-4o` | 128k | General purpose, vision |
+| `o3-mini` | 200k | Reasoning |
+| `o1` | 200k | High reasoning |
 
 #### Ollama Cloud Provider
 
-The Ollama Cloud provider connects to remote Ollama servers using native `/api/chat` and `/api/tags` endpoints with Bearer token authentication.
-
-**Configuration:**
-- **Environment Variable:** `OLLAMA_API_KEY` — API key for authenticated Ollama Cloud instances
-- **Default Endpoint:** `https://ollama.com`
-- **Custom Endpoint:** Configurable via `base_url` in `ragent.json`
-
-**Features:**
-- **Dynamic Model Discovery** — Automatically fetches available models from `/api/tags` endpoint
-- **Context Window Detection** — Queries `/api/show` to retrieve actual context length from model metadata
-- **Vision Capability Detection** — Automatically detects vision support from model capabilities
-- **Streaming Support** — Native SSE streaming via `/api/chat` endpoint
-- **Tool Support** — Compatible with Ollama tool-calling format
-
-**Model Listing:**
-```bash
-ragent models --provider ollama_cloud
-```
-
-**Configuration Example (`ragent.json`):**
-```json
-{
-  "provider": {
-    "ollama_cloud": {
-      "thinking": {
-        "enabled": true,
-        "level": "low"
-      },
-      "models": {
-        "llama3.2": {
-          "thinking": {
-            "enabled": true,
-            "level": "high"
-          }
-        }
-      }
-    }
-  }
-}
-```
+- Endpoint configured via `OLLAMA_CLOUD_HOST` or `ragent.json`
+- Dynamic model discovery against `/api/tags`
+- Supports vision models when the Ollama model reports `vision`
 
 #### Ollama (Local) Provider
 
-The local Ollama provider connects to self-hosted Ollama instances (no authentication required for local servers).
-
-**Configuration:**
-- **Environment Variable:** `OLLAMA_HOST` (optional) — Custom server URL (default: `http://127.0.0.1:11434`)
-- **No API Key Required** — Local Ollama servers run without authentication
-
-**Features:**
-- **Local Model Execution** — Run models on local hardware (CPU/GPU)
-- **Dynamic Discovery** — Lists locally available models via `/api/tags` at runtime (placeholder defaults are only used as fallback metadata)
-- **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint
-- **Streaming Support** — Full SSE streaming
-
-**Model Listing:**
-```bash
-ragent models --provider ollama
-```
+- Default endpoint `http://localhost:11434`
+- Dynamic discovery; no API key required
+- Vision support depends on the pulled model
 
 #### Google Gemini Provider
 
-The Google Gemini provider connects to Google's Gemini API for state-of-the-art multimodal models with extensive context windows.
-
-**Authentication:** `GEMINI_API_KEY` environment variable
-
-**Default Models:**
-
-| Model | Context | Cost (Input/Output) | Capabilities |
-|-------|---------|---------------------|--------------|
-| `gemini-2.5-flash-preview-05-20` | 1,048,576 | $0.15 / $0.60 | reasoning, streaming, vision, tool_use |
-| `gemini-2.5-pro-preview-05-06` | 1,048,576 | $1.25 / $10.00 | reasoning, streaming, vision, tool_use |
-| `gemini-2.0-flash` | 1,048,576 | $0.10 / $0.40 | streaming, vision, tool_use |
-| `gemini-2.0-flash-lite` | 1,048,576 | $0.075 / $0.30 | streaming, vision, tool_use |
-| `gemini-1.5-flash` | 1,048,576 | $0.075 / $0.30 | streaming, vision, tool_use |
-| `gemini-1.5-pro` | 2,097,152 | $1.25 / $5.00 | reasoning, streaming, vision, tool_use |
-
-**Features:**
-- **Streaming** — Real-time token-by-token response streaming
-- **Tool Use** — Native function calling for all models
-- **Vision** — Image understanding capabilities
-- **Reasoning** — Available on Pro and Flash 2.5 models
-- **Massive Context Windows** — Up to 2M tokens on 1.5 Pro
-
-**API Base:** `https://generativelanguage.googleapis.com`
+- API key via `GEMINI_API_KEY`
+- Massive context windows (up to 2M tokens)
+- Discovery via Gemini models API
 
 #### Hugging Face Provider
 
-The HuggingFace provider connects to the HuggingFace Inference API, which exposes an OpenAI-compatible `/v1/chat/completions` endpoint. Supports both the free/Pro shared Inference API and dedicated Inference Endpoints.
-
-**Authentication:**
-- **Primary:** `HF_TOKEN` environment variable (standard HuggingFace token)
-- **Legacy:** `HUGGING_FACE_HUB_TOKEN` (older HF token name)
-- **Ragent convention:** `RAGENT_API_KEY_HUGGINGFACE` (auto-checked)
-
-**Default Models:**
-
-| Model | Context | Capabilities |
-|-------|---------|--------------|
-| `meta-llama/Llama-3.1-8B-Instruct` | 128,000 | streaming, tool_use |
-| `meta-llama/Llama-3.1-70B-Instruct` | 128,000 | streaming, tool_use |
-| `mistralai/Mixtral-8x7B-Instruct-v0.1` | 32,000 | streaming, tool_use |
-| `Qwen/Qwen2.5-72B-Instruct` | 128,000 | streaming, tool_use |
-| `microsoft/Phi-3-mini-4k-instruct` | 4,096 | streaming |
-
-**Features:**
-- **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint (same as OpenAI)
-- **Streaming Support** — Full SSE streaming with tool call deltas
-- **Tool Use** — Function calling for models that support it (Llama 3.1+, Mixtral, Qwen)
-- **Dynamic Model Discovery** — Queries HuggingFace Hub API for available text-generation models with warm inference endpoints (up to 50 models)
-- **Model Loading Detection** — Detects 503 "model loading" responses with estimated wait time
-- **Gated Model Handling** — Clear error messages for models requiring license acceptance
-- **Rate Limit Tracking** — Parses `X-RateLimit-Limit`/`X-RateLimit-Remaining` headers
-- **Tool Name Compatibility** — Internally prefixes tool names sent to the Hugging Face router to avoid streaming-mode name rejection, then maps responses back to canonical ragent tool names
-
-**Provider-Specific Options:**
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `wait_for_model` | bool | `true` | Send `x-wait-for-model: true` header to wait for cold models |
-| `use_cache` | bool | `true` | Enable server-side response caching |
-
-**Inference Endpoints:**
-
-For dedicated deployments, configure the custom endpoint URL:
-```json
-{
-  "provider": {
-    "huggingface": {
-      "api": {
-        "base_url": "https://my-endpoint.endpoints.huggingface.cloud"
-      }
-    }
-  }
-}
-```
-
-**Model Listing:**
-```bash
-ragent models --provider huggingface
-```
+- Token via `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN`
+- Public `/v1/models` discovery; falls back to static catalog on empty results
+- Rate-limit tracking
 
 #### Azure AI Foundry Provider
 
-The Azure AI Foundry provider connects to Microsoft Azure AI Foundry models via OpenAI-compatible endpoints with `api-key` header authentication. Supports dynamic model discovery, streaming chat completions, tool calling, vision, and reasoning levels.
-
-**Authentication:**
-- **Primary:** `AZURE_AI_FOUNDRY_API_KEY` environment variable
-- **Base URL:** `AZURE_AI_FOUNDRY_BASE` environment variable (optional, for custom endpoints)
-
-**Configuration Example (`ragent.json`):**
-```json
-{
-  "provider": {
-    "azure_foundry": {
-      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
-      "api": {
-        "base_url": "https://your-endpoint.azure.com"
-      },
-      "thinking": {
-        "enabled": true,
-        "level": "low"
-      }
-    }
-  }
-}
-```
-
-**Features:**
-- **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint with `api-key` header
-- **Dynamic Model Discovery** — Automatically fetches available models from Azure endpoint
-- **Streaming Support** — Full SSE streaming
-- **Tool Support** — Function calling compatible with OpenAI tool format
-- **Vision Support** — Image understanding for vision-capable models
-- **Reasoning Levels** — Supports `low`, `medium`, `high`, `none` reasoning effort (o1, o3-mini models)
-- **Endpoint Logging** — Full resolved endpoint URL logged in TUI log panel for debugging
-
-**Model Listing:**
-```bash
-ragent models --provider azure_foundry
-```
+- API key via `AZURE_AI_FOUNDRY_API_KEY` (or `AZURE_AI_FOUNDRY_API_KEY`)
+- Base URL via `AZURE_AI_FOUNDRY_BASE`
+- OpenAI-compatible endpoints with `api-key` header
+- Dynamic model discovery, tool calling, vision, reasoning levels
+- HTTP 429 retries with `Retry-After` and exponential backoff
 
 #### Azure Resource (File) Provider
 
-The `azure_resource` provider reads Azure endpoint definitions from a user-supplied `azureresources.json` file, enabling registration of multiple Azure-hosted LLM endpoints without rebuilding or reconfiguring ragent. Each entry in the file becomes a first-class model in the provider registry.
+- Reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`
+- Supports per-endpoint API keys, custom context windows, capability tags, thinking config
+- Can route to Anthropic Messages (`/anthropic/v1/messages`) or OpenAI (`/openai/v1/chat/completions`) API shape via `api_type`
 
-**File Locations (searched in order):**
-1. `~/.config/ragent/azureresources.json` — user-global
-2. `.ragent/azureresources.json` — project-local
+### 3.2 Tool System
 
-**Authentication:**
-- Per-resource `api_key` (discouraged) or `api_key_env` (preferred) inside each JSON entry
-- `api_key_env` references an environment variable by name (e.g. `"AZURE_AI_FOUNDRY_API_KEY"`)
+The tool system is the primary way agents interact with the world. Each tool
+has a JSON schema, a permission category, and an async `execute` method.
 
-**Configuration Example (`azureresources.json`):**
-```json
-{
-  "version": "1",
-  "resources": [
-    {
-      "id": "kimi-k2.6",
-      "name": "kimi-k2.6",
-      "endpoint": "https://a1a-52048-dev-ais-shr1-eus2-1.openai.azure.com",
-      "api_key_env": "AZURE_AI_FOUNDRY_API_KEY",
-      "context_window": 128000,
-      "capabilities": ["reasoning", "streaming", "vision", "tool_use"],
-      "thinking": {
-        "enabled": true,
-        "level": "medium",
-        "budget_tokens": 8192
-      }
-    }
-  ]
-}
-```
+#### File Operations Tools (14)
 
-**Features:**
-- **Multi-Endpoint Support** — Register any number of Azure endpoints in a single file
-- **Per-Resource Auth** — Each endpoint can use a different API key or environment variable
-- **Capability Whitelist** — Explicit `capabilities` array enables only listed features; omitted entries get safe defaults (`streaming: true`, `tool_use: true`)
-- **Thinking Config** — Per-model reasoning configuration with `enabled`, `level`, and `budget_tokens`
-- **Context Window** — Customizable per-resource context window (default: 128,000)
-- **File-Based Discovery** — No code changes needed to add or remove endpoints; edit the JSON and reload
-
-**Model Listing:**
-```bash
-ragent models --provider azure_resource
-```
-
-**Validation:**
-- `version` must be exactly `"1"`
-- Each entry requires non-empty `id`, `name`, and `endpoint`
-- Each entry requires at least one of `api_key` or `api_key_env`
-- Duplicate IDs are deduplicated (first wins)
-- Invalid entries are skipped with a warning
-
-        ### 3.2 Tool System
-      
-      #### File Operations Tools (14)
 | Tool | Purpose |
 |------|---------|
-| `read` | Read file contents with line range support |
-| `write` | Create or overwrite files |
-| `create` | Create new file (alternative to write) |
-| `edit` | Replace text in existing files |
-| `multiedit` | Atomic multi-file edits (overlap-checked, applied highest-offset-first) |
-| `patch` | Apply unified diff patches |
-| `rm` | Delete single files |
-| `move_file` | Move/rename files and directories |
-| `copy_file` | Copy files to new location |
-| `mkdir` | Create directories (mkdir -p) |
-| `append_file` | Append text to end of file |
-| `file_info` | Get metadata (size, mtime, type) |
-| `diff_files` | Compare two files |
-| `glob` | Find files matching glob patterns |
+| `read` | Read file contents with line-range support |
+| `write` / `create` | Create or overwrite a file |
+| `edit` | Replace one exact string occurrence |
+| `multiedit` | Apply multiple edits atomically across one or more files |
+| `patch` | Apply a unified diff |
+| `rm` | Delete a single file |
+| `move` / `move_file` | Move or rename a file/directory |
+| `copy` / `copy_file` | Copy a file |
+| `mkdir` / `make_directory` | Create directories |
+| `append_to_file` | Append text to the end of a file |
+| `file_info` | File/directory metadata |
+| `diff_files` | Unified diff between files or strings |
+| `glob` | Find files matching a glob pattern |
 | `list` | List directory contents |
 
 #### File Operation Aliases
 
-| Alias | Maps To |
+| Alias | Maps to |
 |-------|---------|
-| `update_file` | `write` |
+| `read_file` | `read` |
+| `write_file` | `write` |
+| `delete_file` | `rm` |
+| `apply_patch` | `patch` |
+
 #### Execution Tools (3)
 
 | Tool | Purpose |
 |------|---------|
-| `bash` | Execute shell commands with security restrictions |
-| `bash_reset` | Reset bash shell state |
-| `run_code` | Alias for `bash` (legacy name compatibility) |
+| `bash` | Run a shell command with 7-layer safety |
+| `bash_reset` | Reset persistent shell state |
+| `calculator` | Evaluate mathematical expressions |
 
 #### Interactive Tools (4)
 
 | Tool | Purpose |
 |------|---------|
-| `ask_user` | Interactive user prompts (free-text or multiple-choice via `options`) |
-| `think` | Record reasoning notes (no-op) |
-| `todo_read` | Read TODO items |
-| `todo_write` | Manage TODO items |
+| `ask_user` | Ask the user a question (text or multiple-choice) |
+| `think` | Record a reasoning note |
+| `todo_read` | List session TODOs |
+| `todo_write` | Add/update/remove session TODOs |
 
 #### Utility Tools (3)
 
 | Tool | Purpose |
 |------|---------|
-| `calculator` | Evaluate mathematical expressions |
-| `get_env` | Read environment variables |
+| `get_env` | Read non-sensitive environment variables |
+| `question` | *(legacy alias; use `ask_user`)* |
+| `execute_python` | *(deprecated; removed)* |
 
 ### 3.2.1 Tool System Categories Summary
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| **File Operations** | 14 | read, write, create, edit, multiedit, patch, rm, move, copy, mkdir, append, file_info, diff, glob, list |
-| **Execution** | 3 | bash, bash_reset, run_code (alias) |
-| **Search** | 1 | grep |
-| **Web** | 3 | webfetch, websearch, http_request |
-| **Office** | 6 | office_read/write/info, libre_read/write/info |
-| **PDF** | 2 | pdf_read, pdf_write |
-| **Code Index** | 6 | codeindex_search, symbols, references, dependencies, status, reindex |
-| **GitHub** | 10 | Issues and PR management |
-| **GitLab** | 19 | Issues, merge requests, pipelines, and jobs |
-| **Memory** | 8 | memory_read, write, replace, store, recall, forget, search, migrate |
-| **Team** | 20 | Team lifecycle, tasks, messaging, coordination |
-| **Sub-agent** | 5 | new_task, cancel_task, list_tasks, wait_tasks, task_complete |
-| **Plan** | 2 | plan_enter, plan_exit |
-| **MCP** | 1 | mcp_tool (McpToolWrapper) |
-| **Interactive** | 4 | ask_user, think, todo_read, todo_write |
-| **Utility** | 3 | calculator, get_env |
+| Category | Tools | Count |
+|----------|-------|-------|
+| File operations | `read`, `write`, `create`, `edit`, `multiedit`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 15 |
+| Shell / execution | `bash`, `bash_reset`, `calculator` | 3 |
+| Search | `grep`, `codeindex_*` | 6 |
+| Web | `webfetch`, `websearch`, `http_request` | 3 |
+| Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate` | 8 |
+| Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
+| Teams | 20 team lifecycle/task/message tools | 20 |
+| Sub-agents | `new_task`, `cancel_task`, `list_tasks`, `wait_tasks`, `task_complete` | 5 |
+| VCS | 29 GitHub/GitLab issue/PR/MR/pipeline tools | 29 |
+| Office / PDF | `office_read/write/info`, `libre_read/write/info`, `pdf_read/write` | 8 |
+| MCP | `mcp_tool` | 1 |
+| Planning | `plan_enter`, `plan_exit` | 2 |
+| Interactive | `ask_user`, `think`, `todo_read`, `todo_write` | 4 |
+| Utility | `get_env`, `calculator` | 2 |
 
-**Total registered tools: ~111** (across all three tool crates plus aliases).
 #### Team Tools (20)
 
 | Tool | Purpose |
 |------|---------|
-| `team_create` | Create new team |
-| `team_spawn` | Spawn teammate agent |
-| `team_status` | Get team status |
-| `team_idle` | Signal idle state |
-| `team_task_create` | Create team task |
-| `team_task_claim` | Claim task to work on |
-| `team_task_complete` | Mark task complete |
-| `team_task_list` | List team tasks |
-| `team_assign_task` | Assign task to specific teammate |
-| `team_message` | Send message to team member |
-| `team_broadcast` | Broadcast to all teammates |
-| `team_read_messages` | Read mailbox messages |
+| `team_create` | Create a named team |
+| `team_spawn` | Spawn a teammate for a single task |
+| `team_status` | List team members and progress |
+| `team_message` | Send a direct message |
+| `team_broadcast` | Message all active teammates |
+| `team_read_messages` | Read unread mailbox messages |
+| `team_memory_read` / `team_memory_write` | Team-scoped memory access |
+| `team_submit_plan` | Submit a plan for lead approval |
+| `team_approve_plan` | Lead approve/reject a plan |
+| `team_task_create` | Add a team task |
+| `team_task_claim` | Claim a task |
+| `team_task_complete` | Mark a team task done |
+| `team_assign_task` | Lead assigns a task directly |
+| `team_idle` | Signal no more work |
 | `team_shutdown_teammate` | Request teammate shutdown |
 | `team_shutdown_ack` | Acknowledge shutdown request |
-| `team_submit_plan` | Submit plan for approval |
-| `team_approve_plan` | Approve teammate plan |
-| `team_wait` | Wait for teammates to complete |
-| `team_memory_read` | Read team memory |
-| `team_memory_write` | Write to team memory |
+| `team_cleanup` | Delete team on-disk state |
 
 ### 3.3 Agent System
 
+Agents are typed profiles that define what model, system prompt, tools, and
+permissions a session uses.
+
 #### Built-in Agents
 
-| Agent | Purpose | Tool Groups |
-|-------|---------|-------------|
-| `general` | General-purpose assistant | All tools |
-| `coder` | Code-focused tasks | File, bash, search |
-| `task` | Task execution | File, bash |
-| `architect` | Design and planning | All tools |
-| `ask` | Question answering | Read-only tools |
-| `debug` | Debugging assistance | File, bash, search |
-| `code-review` | Code review | Read, diff, github |
-| `orchestrator` | Multi-agent coordination | All tools |
+| Agent | Role |
+|-------|------|
+| `general` | General-purpose assistant |
+| `coder` / `rust-coder` / `python-coder` / `go-coder` / `typescript-coder` | Code specialist |
+| `architect` | High-level design |
+| `ask` | Question-answering |
+| `debug` | Debugging assistant |
+| `code-review` | Review-focused |
+| `orchestrator` | Multi-agent coordination |
+| `plan` | Planning and decomposition |
+| `explore` | Codebase exploration |
+| `title` / `summary` | Short-lived helper agents |
 
 #### Agent Features
 
-- **Custom agents** — User-defined agents via JSON (OASF format) or Markdown profiles
-- **Template variables** — Dynamic injection of context (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`, `{{GIT_STATUS}}`, `{{README}}`)
-- **Permission rules** — Per-agent access control for file paths and commands
-- **Memory scoping** — Project-level and user-level memory for agents
+- **Model binding** — Each agent can specify a `provider/model` or auto-resolve the first available model
+- **Tool visibility** — Agents can restrict which tool categories are exposed
+- **Permissions** — Per-agent permission rules merge with global config
+- **Custom prompts** — Markdown/OASF profiles in `~/.ragent/agents/` or `.ragent/agents/`
 
 ### 3.3.1 Git Platform Integrations
 
-ragent provides native GitHub and GitLab integration tools for managing issues, pull/merge requests, CI/CD pipelines, and project metadata. Both integrations share a similar tool architecture and support repository auto-detection from git remotes. See [Section 18: GitHub & GitLab Integration](#18-github--gitlab-integration) for full details.
+| Platform | Coverage |
+|----------|----------|
+| **GitHub** | Issues, pull requests, comments, reviews, pipelines |
+| **GitLab** | Issues, merge requests, pipelines, jobs, projects |
+
+Authentication uses environment tokens (`GITHUB_TOKEN`, `GITLAB_TOKEN`) or
+configured credentials, with auto-detection from the local git remote.
 
 ### 3.5 Session & Tool Execution Flow
 
 ```mermaid
-sequenceDiagram
-    actor User
-    participant TUI as TUI / HTTP
-    participant SP as Session Processor
-    participant LLM as LLM Provider
-    participant PC as Permission Checker
-    participant TR as Tool Registry
-    participant Tool as Tool Impl
-
-    User->>TUI: Send message
-    TUI->>SP: process_message()
-    SP->>LLM: Build chat request
-    LLM-->>SP: Stream tool call(s)
-    loop For each tool call
-        SP->>PC: check_permission(tool, params)
-        alt Permission required
-            PC->>TUI: Event::PermissionRequested
-            TUI-->>User: Show permission dialog
-            User-->>TUI: Approve / Deny / Always
-            TUI->>PC: PermissionReplied
-        end
-        PC-->>SP: Decision (Allow / Deny)
-        alt Allowed
-            SP->>TR: dispatch(tool, params)
-            TR->>Tool: execute()
-            Tool-->>TR: Result
-            TR-->>SP: ToolResult
-            SP-->>TUI: Event::ToolCallCompleted
-        else Denied
-            SP-->>LLM: Error result (permission denied)
-        end
-    end
-    SP->>LLM: Continue conversation with results
-    LLM-->>SP: Assistant response
-    SP-->>TUI: Event::MessageAdded
-    TUI-->>User: Display response
+graph LR
+    Input[User Input] --> SP[Session Processor]
+    SP --> Agent[Resolve Agent + Model]
+    SP --> LLM[LLM Call]
+    LLM --> ToolCall[Tool Call Request]
+    ToolCall --> Permission[Permission Check]
+    Permission -->|ask| UI[User Prompt]
+    UI --> Decision[Allow / Deny / Always]
+    Decision --> Execute[Tool Execution]
+    Execute --> Result[Tool Result]
+    Result --> SP
+    SP --> Output[Assistant Response]
 ```
 
 **Figure 5:** Session & Tool Execution Flow — LLM call → permission → tool dispatch loop
-
----
 
 ### 3.6 Provider Selection Flow
 
 ```mermaid
 graph TD
-    Start([User Request]) --> Health{Health Check}
-    Health -- Healthy --> ModelDiscovery[Query /models endpoint]
-    Health -- Unhealthy --> Fallback[Try next provider]
-    ModelDiscovery --> CacheModel[Cache metadata in SQLite]
-    CacheModel --> Capabilities{Supports tools?}
-    Capabilities -- Yes --> Streaming[Enable SSE streaming]
-    Capabilities -- No --> NonStreaming[Disable streaming]
-    Streaming --> Execute[Send request]
-    NonStreaming --> Execute
-    Execute --> TokenStream[Stream tokens via EventBus]
-    TokenStream --> TUI_Update[Update TUI / HTTP clients]
-    Fallback --> Health
+    Agent[Agent Profile] --> ModelRef[ModelRef or None]
+    ModelRef -->|explicit| Registry[Provider Registry]
+    ModelRef -->|None| DefaultResolver[Resolve first available model]
+    CLI[--model override] --> Registry
+    Config[default_provider] --> Registry
+    Registry --> Health[Health Check]
+    Health -->|healthy| Use[Use Provider]
+    Health -->|unhealthy| Fallback[Fallback / Error]
 ```
 
 **Figure 6:** Provider Selection Flow — Multi-provider routing and health checks
 
----
-
 ### 3.7 Agent Execution Loop Phases
-
-Each turn of an agent session follows a fixed pipeline of phases. The loop repeats until the LLM returns a final assistant message (no further tool calls), the user interrupts the session, or a safety limit (`max_steps`, token budget, or timeout) is reached.
 
 ```mermaid
 graph LR
-    A[1. Receive Input] --> B[2. Prepare Context]
-    B --> C[3. Send to LLM]
-    C --> D[4. Stream Response]
-    D --> E{Tool Call?}
-    E -- Yes --> F[5. Check Permission]
-    F --> G{Allowed?}
-    G -- Deny --> H[Inject Denied Error]
-    G -- Allow --> I[6. Execute Tool]
-    I --> J[7. Integrate Result]
-    J --> B
-    E -- No --> K[8. Finalise Turn]
-    K --> L[Wait for Next Input]
+    A[Start Turn] --> B[Build Context]
+    B --> C[Compress if Over Threshold]
+    C --> D[Send to LLM]
+    D --> E[Stream Tokens / Tool Calls]
+    E --> F[Execute Tools]
+    F --> G[Record Results]
+    G --> H[End Turn]
+    H -->|next turn| A
 ```
 
-**Figure 16:** Agent Execution Loop Phases — One complete turn from input to response
+**Figure 7:** Agent Execution Loop Phases — One complete turn from input to response
 
 #### Phase Descriptions
 
-| Phase | What Happens | Key Components |
-|-------|-------------|----------------|
-| **1. Receive Input** | User message arrives via TUI (`Enter`) or HTTP POST. The session ID is resolved and the message is appended to the conversation history. | Session Processor, EventBus |
-| **2. Prepare Context** | Build the chat request payload: system prompt (agent profile + AGENTS.md + injected variables), conversation history, available tool schemas, and any compaction/summarisation if near the context-window limit. | Agent Profile, Tool Registry, Context Compaction |
-| **3. Send to LLM** | The configured provider client serialises the request (OpenAI, Anthropic, Gemini, etc. format), adds auth headers, and issues the HTTP request. | Provider Client, HTTP Client |
-| **4. Stream Response** | Tokens arrive via SSE. The session processor forwards them to the EventBus as `StreamToken` events. If a tool call is emitted, streaming pauses and the loop transitions to Phase 5. | EventBus, SSE Stream |
-| **5. Check Permission** | The permission checker evaluates the tool call against rules (hardwired → config → agent-specific → YOLO). Result can be `Allow`, `Deny`, or `Ask` (prompt user via TUI modal). | PermissionChecker, Permission Rules |
-| **6. Execute Tool** | The tool registry dispatches the call to the tool implementation. The tool runs (file op, bash, web fetch, code index query, etc.) and returns a structured result. | Tool Registry, Tool Impl |
-| **7. Integrate Result** | The tool result (or permission-denied error) is injected into the conversation history as a `tool` message. Control returns to Phase 2 for the next LLM call. | Session Processor |
-| **8. Finalise Turn** | When the LLM produces a plain-text response with no tool calls, the assistant message is persisted, token usage is recorded, and the TUI displays the final output. | Storage, EventBus |
+| Phase | Responsibility |
+|-------|----------------|
+| Build Context | Assemble system prompt, memories, code index, conversation history |
+| Compress | Run Headroom compression if `ctx / max_ctx > auto_threshold` |
+| LLM Call | Send request to selected provider |
+| Stream | Emit assistant chunks and tool call events |
+| Execute Tools | Check permissions, run tools, record results |
+| Record | Append assistant message + tool results to SQLite |
 
-#### Safety Limits
+### 3.8 Autonomous Loop Tools
 
-The loop is bounded by configurable guards:
+| Tool | Use |
+|------|-----|
+| `new_task` | Spawn a background sub-agent |
+| `cancel_task` | Cancel a running sub-agent |
+| `list_tasks` | Inspect active sub-agents |
+| `wait_tasks` | Block until sub-agents finish |
+| `task_complete` | **Terminal signal** that ends the autonomous loop |
 
-| Limit | Default | Behaviour When Hit |
-|-------|---------|-------------------|
-| `max_steps` | 500 | Halt and ask user whether to continue |
-| Token budget | Provider/model specific | Pause and warn; user can approve continuation |
-| Timeout | Per-request configurable | Abort the running request and surface error |
-| Context window | Model-specific | Trigger automatic compaction before sending |
-
-#### Streaming Semantics
-
-Responses are streamed token-by-token so the user sees progress in real time:
-1. `StreamToken` events fire for every chunk.
-2. If a tool call is detected mid-stream, the UI shows a collapsible tool-call summary.
-3. Tool results are streamed back as they complete (for async/multi-tool scenarios).
-4. `StreamComplete` signals the end of the turn.
+`task_complete` takes **only** `summary`. `team_task_complete` takes `team_name` + `task_id`.
 
 ---
-
-- **Persistent storage** — SQLite-backed conversation history
-- **Session commands** — `ragent session list`, `resume`, `export`, `import`
-- **Step numbering** — Session-prefixed step numbers (`[sid:step]`) for traceability
-- **Context compaction** — Automatic pre-send context management near window limits
-
----
-
-
 
 ## 4. Security & Permissions
 
 ### 4.1 Permission Security Layers
 
-The permission system is a multi-layered defense-in-depth architecture that controls every tool invocation.
-
 ```mermaid
 graph TD
-    subgraph Layer0["Layer 0: Hardwired Rules"]
-        H1[CodeIndex tools → Always Allow]
-    end
-
-    subgraph Layer1["Layer 1: Permission Rules"]
-        R1[Config rules: allow / deny / ask]
-        R2[Per-agent rules]
-        R3[YOLO mode bypass]
-    end
-
-    subgraph Layer2["Layer 2: Bash Security (7 Layers)"]
-        B1[Safe Command Whitelist]
-        B2[Banned Commands]
-        B3[Denied Patterns]
-        B4[Directory Escape Prevention]
-        B5[Syntax Validation]
-        B6[Obfuscation Detection]
-        B7[User Allowlist/Denylist]
-    end
-
-    subgraph Layer3["Layer 3: File Path Guards"]
-        F1[Path canonicalization]
-        F2[Directory escape check]
-        F3[Symlink resolution]
-        F4[Workspace boundary enforcement]
-    end
-
-    subgraph Layer4["Layer 4: Resource Limits"]
-        L1[Token budget tracking]
-        L2[Context window limits]
-        L3[Max iterations]
-        L4[Timeout enforcement]
-    end
-
-    subgraph Layer5["Layer 5: Secret Redaction"]
-        S1[API key masking in logs]
-        S2[Credential storage encryption]
-    end
-
-    ToolCall["Tool Call"] --> Layer0
-    Layer0 -->|if not hardwired| Layer1
-    Layer1 -->|bash command| Layer2
-    Layer1 -->|file operation| Layer3
-    Layer1 -->|all calls| Layer4
-    Layer1 -->|logging| Layer5
-    Layer2 -->|pass| Decision{Allow?}
-    Layer3 -->|pass| Decision
-    Decision -->|Yes| Execute["Execute Tool"]
-    Decision -->|Ask| UserPrompt["Show Permission Dialog"]
-    UserPrompt -->|Approve| Execute
-    UserPrompt -->|Deny| Reject["Return Denied Error"]
-    Decision -->|No| Reject
+    ToolCall[Tool Call] --> Hardwired[Hardwired Rules]
+    Hardwired -->|codeindex / task_complete / list_tasks| Allow[Always Allow]
+    Hardwired -->|others| Rules[Configured Rules]
+    Rules --> Match[Last Match Wins]
+    Match -->|allow| Allow
+    Match -->|deny| Deny
+    Match -->|ask / no match| Prompt[User Prompt]
+    Prompt -->|always / once| Allow
+    Prompt -->|deny| Deny
+    Prompt -->|timeout| Deny
 ```
 
 **Figure 10:** Permission Security Layers — 5-layer defense-in-depth
 
----
-
 ### 4.2 Bash Security — 7 Layers
 
 ```mermaid
-graph LR
-    A[bash command] --> B{Layer 1<br/>Safe Command?}
-    B -- Yes --> Z[Always Grant]
-    B -- No --> C{Layer 2<br/>Banned Command?}
-    C -- Yes --> X[Deny]
-    C -- No --> D{Layer 3<br/>Denied Pattern?}
-    D -- Yes --> X
-    D -- No --> E{Layer 4<br/>Directory Escape?}
-    E -- Yes --> X
-    E -- No --> F{Layer 5<br/>Syntax Valid?}
-    F -- No --> X
-    F -- Yes --> G{Layer 6<br/>Obfuscated?}
-    G -- Yes --> X
-    G -- No --> H{Layer 7<br/>User List Match?}
-    H -- Deny --> X
-    H -- Allow --> Y[Permission Check]
-    Y --> Z
+graph TD
+    Cmd[Command String] --> L1[Layer 1: Safe Command Whitelist]
+    L1 -->|safe| Auto[Auto-approve]
+    L1 -->|not safe| L2[Layer 2: Banned Commands]
+    L2 -->|banned| Reject
+    L2 -->|ok| L3[Layer 3: Denied Patterns]
+    L3 -->|denied| Reject
+    L3 -->|ok| L4[Layer 4: Directory Escape Check]
+    L4 -->|escape| Reject
+    L4 -->|ok| L5[Layer 5: Syntax Validation]
+    L5 -->|invalid| Reject
+    L5 -->|ok| L6[Layer 6: Obfuscation Detection]
+    L6 -->|obfuscated| Reject
+    L6 -->|ok| L7[Layer 7: User Allow/Deny Lists]
+    L7 -->|deny| Reject
+    L7 -->|allow/ok| Permission[Permission Check]
 ```
 
 **Figure 11:** Bash Security — 7 Layers — Bash command defense flow
-
-**Layer Details:**
-
-| Layer | Name | Description | Test Count |
-|-------|------|-------------|-----------:|
-| 1 | Safe Command Whitelist | 51 commands auto-approved (cat, ls, git, cargo, etc.) | 15 |
-| 2 | Banned Commands | 22 commands always blocked (mkfs, fdisk, useradd, etc.) | 6 |
-| 3 | Denied Patterns | 46 destructive patterns (rm -rf /, fork bombs, etc.) | 8 |
-| 4 | Directory Escape Prevention | Blocks cd/pushd outside workspace | 4 |
-| 5 | Syntax Validation | Runs `sh -n -c` with 1s timeout | 3 |
-| 6 | Obfuscation Detection | Detects base64\|bash, python exec, hex escapes | 5 |
-| 7 | User Allowlist/Denylist | User-configurable via `/bash allow/deny` | 4 |
-
----
 
 ### 4.3 Permission Request Flow
 
 ```mermaid
 sequenceDiagram
+    participant Tool as Tool Executor
     participant SP as Session Processor
-    participant PC as PermissionChecker
-    participant EB as Event Bus
-    participant TUI as TUI / HTTP
+    participant Bus as Event Bus
+    participant UI as TUI / HTTP API
     participant User as User
-
-    SP->>PC: check_permission(tool, params)
-    PC->>PC: Evaluate rules (last match wins)
-    alt Action = Allow
-        PC-->>SP: Decision::Allow
-    else Action = Deny
-        PC-->>SP: Decision::Deny
-    else Action = Ask
-        PC->>EB: Event::PermissionRequested
-        EB->>TUI: Show permission dialog
-        TUI-->>User: Display countdown (M:SS)
-        loop Every 100ms
-            TUI->>TUI: Redraw dialog
-        end
-        User-->>TUI: y / n / always
-        TUI->>EB: Event::PermissionReplied
-        EB->>PC: Forward decision
-        alt Timeout (120s)
-            TUI->>TUI: Show EXPIRED
-            TUI->>EB: Auto-deny
-        end
-        PC-->>SP: Decision::Once / Always / Deny
-    end
+    Tool->>SP: request permission
+    SP->>Bus: PermissionRequested
+    Bus->>UI: render dialog
+    User->>UI: decision (allow/deny/always)
+    UI->>Bus: PermissionReplied
+    Bus->>SP: resume execution
 ```
 
 **Figure 12:** Permission Request Flow — From tool call to user decision
 
----
+Permission requests include:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique request ID |
+| `permission` | Permission type (`file:write`, `bash`, etc.) |
+| `action` | Requested operation description |
+| `path` | Target path (for file operations) |
+| `command` | Command string (for bash) |
+| `created_at` | Unix timestamp |
+| `timeout_secs` | Timeout before auto-deny (default 120 s) |
 
 ### 4.4 Permission Rules Evaluation
 
-Rules are evaluated in order, with **last match wins** semantics:
-
 ```mermaid
-graph TD
-    A[Permission Request] --> B[Load Default Rules]
-    B --> C[Load Global Config Rules]
-    C --> D[Load Agent-Specific Rules]
-    D --> E{Rule Matches?}
-    E -->|No| F[Next Rule]
-    F --> E
-    E -->|Yes| G{Action}
-    G -->|Allow| H[Grant]
-    G -->|Deny| I[Reject]
-    G -->|Ask| J[Prompt User]
+graph LR
+    Rules[Rules List] --> Iterate[Evaluate in order]
+    Iterate --> Match{Glob Match?}
+    Match -->|yes| Record[Record Match]
+    Match -->|no| Next[Next Rule]
+    Record --> Next
+    Next --> More{More Rules?}
+    More -->|yes| Iterate
+    More -->|no| Last[Last Match Wins]
+    Last --> Action[Allow / Deny / Ask]
 ```
 
 **Figure 13:** Permission Rules Evaluation — Rule matching and resolution
 
-**Default Rules:**
-- Read operations → Allow
-- Edit operations → Ask
-- Bash execution → Ask
-- Web access → Ask
-- Todo management → Allow
+Rules are evaluated top-to-bottom; the last matching rule determines the action.
+Built-in default rules include:
+
+| Default | Action |
+|---------|--------|
+| `read` | allow |
+| `edit`, `bash`, `web`, `plan_enter` | ask |
+| `todo` | allow |
+
+### 4.5 File Path Guards
+
+- File-write tools must target paths inside the working directory unless the user
+  explicitly allows escaping.
+- Path normalization resolves `..` and symlinks before permission checks.
+- The `dirs` config block can whitelist additional writable roots.
+
+### 4.6 Secret Redaction
+
+Environment variables matching `*KEY*`, `*SECRET*`, `*TOKEN*`, `*PASSWORD*`
+are redacted from tool outputs and logs.
+
+### 4.7 YOLO Mode
+
+YOLO mode bypasses Layers 2, 3, and 6 of bash security and auto-approves all
+permissions. It is intended for trusted local environments and is persisted
+to `ragent.json`.
+
+```bash
+/yolo        # toggle in TUI
+--yes        # CLI flag
+```
 
 ---
 
-
 ## 5. Configuration
 
-### 5.1 Configuration Files
+### 5.1 Configuration Sources
 
-| File | Purpose |
-|------|---------|
-| `ragent.json` | Project-level configuration |
-| `ragent.jsonc` | Project-level (with comments) |
-| `~/.config/ragent/config.json` | User-global configuration |
+Ragent loads configuration from (highest priority first):
+
+1. `--config <PATH>` CLI argument
+2. `.ragent/ragent.json` (or `ragent.jsonc`) in the working directory
+3. `~/.config/ragent/config.json`
+4. Built-in defaults
+
+The format is compatible with OpenCode's `opencode.json`.
 
 ### 5.2 Configuration Schema
 
@@ -1130,31 +867,28 @@ graph TD
         }
       }
     },
-    "openai": { /* ... */ },
-    "copilot": { /* ... */ },
-    "ollama": { /* ... */ },
-    "generic_openai": { /* ... */ },
-    "azure_foundry": {
-      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
-      "api": { "base_url": "https://your-endpoint.azure.com" },
-      "thinking": { "enabled": true, "level": "low" }
+    "foundry_local": {
+      "in_process": false,
+      "device": "auto",
+      "models_path": "..."
+    },
+    "azure_resource": {
+      "env": ["AZURE_RESOURCE_API_KEY"]
     }
   },
   "defaultAgent": "coder",
-  "permissions": [],
-  "skill_dirs": [],
-  "code_index": {
-    "enabled": true,
-    "max_file_size": 1048576
-  },
+  "permissions": [
+    { "permission": "file:write", "pattern": "src/**", "action": "allow" }
+  ],
   "memory": {
     "enabled": true,
     "structured": { "enabled": true },
-    "semantic": { "enabled": false, "dimensions": 384 },
-    "auto_extract": { "enabled": false, "require_confirmation": true },
-    "compaction": { "enabled": true, "block_size_limit": 4096 },
-    "eviction": { "auto": false, "stale_days": 30 },
-    "decay": { "enabled": true, "half_life_days": 7 }
+    "semantic": { "enabled": false, "dimensions": 384 }
+  },
+  "compression": {
+    "enabled": true,
+    "mode": "default",
+    "auto_threshold": 0.80
   },
   "tool_visibility": {
     "office": true,
@@ -1165,2245 +899,963 @@ graph TD
     "plan": true,
     "codeindex": true
   },
-  "dirs": {
-    "allowlist": [],
-    "denylist": []
+  "yolo": false,
+  "stream": {
+    "timeout_secs": 120,
+    "initial_response_timeout_secs": 300
   },
-      "bash": {
-        "allowlist": [],
-        "denylist": []
-      },
-      "gitlab": {
-        "instance_url": "https://gitlab.com",
-        "token": null,
-        "username": null
-      },
-      "stream": {
-                "initial_response_timeout_secs": 300,
-                "timeout_secs": 120,
-                "max_retries": 3,
-                "retry_backoff_secs": 2
-              },      "compression": {
-        "mode": "default",
-        "auto_threshold": 0.80,
-        "preserve_system": true,
-        "preserve_last_n": 6
-      },
-      "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],  "hooks": [
-    { "trigger": "on_session_start", "command": "echo 'Session started'" }
-  ]
+  "dirs": {
+    "allow_write": ["target/temp/**"]
+  }
 }
 ```
 
-Additional top-level configuration keys:
-
-- `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
-- `tool_visibility` — Toggle visibility of 7 tool families (`office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`). Tools in a hidden family are not advertised to the LLM but remain executable.
-- `dirs` — Directory and file path allowlist / denylist for the permission system.
-- `bash` — User-defined bash command allowlist and denylist.
-- `gitlab` — GitLab instance URL and personal access token for native integration.
-- `stream` — LLM streaming timeouts and retry behaviour.  Two distinct timeouts:
-  - `initial_response_timeout_secs` (default `300`) bounds how long the HTTP client
-    waits for the **first byte** of a streaming response — covers network RTT and
-    provider-side cold-start.  Forwarded to providers as `ChatRequest.stream_timeout_secs`.
-  - `timeout_secs` (default `120`) bounds the gap between **subsequent stream deltas**
-    during an in-flight response; triggers the stall-detection / retry path.
-- `compression` — Headroom context-compression configuration (`mode`, `auto_threshold`, `preserve_system`, `preserve_last_N`).
-- `yolo` — Boolean bypass flag; persisted via `/yolo`.
-- `memory` — Full memory system configuration with `structured`, `semantic`, `auto_extract`, `compaction`, `eviction`, and `decay` sub-sections.
-- `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
-- `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
-
-Thinking configuration uses the shared `ThinkingConfig` type:
-
-- `level` — `auto`, `off`, `low`, `medium`, or `high`
-- `enabled` — explicit on/off switch for providers that separate enablement from effort
-- `budget_tokens` — optional Anthropic thinking budget
-- `display` — optional Anthropic display mode (`full`, `summarized`, `omitted`)
-
-`ThinkingLevel` defaults to `auto`. In the TUI, `/thinking` changes the current session's effective reasoning level while model picker defaults still follow the precedence above.
-
 ### 5.3 Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `GENERIC_OPENAI_API_KEY` | Generic OpenAI-compatible key |
-| `GITHUB_COPILOT_TOKEN` | GitHub Copilot token |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Hugging Face API token |
-| `RAGENT_API_KEY_HUGGINGFACE` | Hugging Face token (ragent convention) |
-| `XAI_API_KEY` | xAI Grok API key |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_PROFILE` / `AWS_SESSION_TOKEN` | Amazon Bedrock credentials |
-| `OLLAMA_API_KEY` | Ollama Cloud authentication |
-| `OLLAMA_HOST` | Ollama local server URL |
-| `AZURE_AI_FOUNDRY_API_KEY` | Azure AI Foundry API key |
-| `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry custom base URL |
-| `RAGENT_LOG_LEVEL` | Log level (trace/debug/info/warn/error) |
-| `RAGENT_YES` | Auto-approve all permissions |
-| `RAGENT_TOKEN` | HTTP API Bearer token |
+| Variable | Provider / Purpose |
+|----------|--------------------|
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `OPENAI_API_KEY` | OpenAI |
+| `GITHUB_TOKEN` | GitHub / Copilot |
+| `GEMINI_API_KEY` | Google Gemini |
+| `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN` | Hugging Face |
+| `AZURE_AI_FOUNDRY_API_KEY`, `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry |
+| `AZURE_RESOURCE_API_KEY` | Azure Resource |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_REGION` | Amazon Bedrock |
+| `XAI_API_KEY` | xAI Grok |
+| `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` | Force Foundry Local web-service path |
+| `TAVILY_API_KEY` | Web search (Tavily) |
 
-### 5.4 Configuration Error Reporting
+### 5.4 Thinking Configuration
 
-Configuration parsing errors are surfaced with actionable diagnostics rather than
-only a generic parse failure. When JSON or JSONC parsing fails, ragent reports:
+Thinking/reasoning is configured per model:
 
-- the full config file path,
-- the line and column number,
-- the problematic source line, and
-- a caret (`^`) pointing at the error position.
+```jsonc
+{
+  "provider": {
+    "anthropic": {
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "thinking": { "enabled": true, "level": "medium" }
+        }
+      }
+    }
+  }
+}
+```
 
-This applies to normal config loading and explicit `--config` CLI usage, helping
-users fix malformed configuration files quickly.
-
----
+Levels: `auto`, `off`, `low`, `medium`, `high`. `budget_tokens` is optional.
 
 ---
 
 ## 6. Terminal User Interface (TUI)
 
-### 6.1 TUI Windows and Overlay Panels
-
-The ragent TUI is built on a multi-layer architecture with a main chat screen, modal overlays, popup windows, and sidebar panels. Each window serves a specific purpose in the user workflow.
-
-#### 6.1.1 Main Screen (Chat)
-
-The primary interface where all conversation happens.
-
-| Component | Description |
-|-----------|-------------|
-| **Status Bar (Line 1)** | Shows session ID, agent name, working directory, git branch, and current status message |
-| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as code index |
-| **Messages Panel** | Scrollable conversation history with syntax highlighting and formatted tool calls |
-| **Input Area** | Multi-line text input with autocomplete support for slash commands and file references |
-| **Log Panel** | Toggleable panel showing step-numbered tool calls with pretty-printed JSON |
-| **Active Agents Subpanel** | Sidebar showing running background agents with progress indicators |
-| **Teams Subpanel** | Sidebar displaying team members, their status, and message counts |
-
-**Access**: This is the default screen when ragent starts (after initial setup).
-
----
-
-#### 6.1.2 Provider Setup Dialog (Modal)
-
-Multi-step wizard for configuring LLM providers.
-
-| Step | Description |
-|------|-------------|
-| **Select Provider** | Choose from Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama, Ollama Cloud, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, or xAI |
-| **Enter API Key** | Secure input with masked characters and endpoint URL entry for Generic OpenAI |
-| **Device Flow** | GitHub Copilot OAuth flow with user code and verification URL |
-| **Select Model** | Browse available models with metadata (context window, cost, capabilities, and Copilot premium request multiplier where available) |
-| **Select Agent** | Choose default agent personality |
-| **Reset Provider** | Remove stored credentials for a provider |
-| **Done** | Confirmation screen showing configured provider and model |
-
-**Access**: `/provider` command, or auto-triggered at first startup
-
----
-
-#### 6.1.3 Agents Popup Window
-
-A floating popup window showing active background agents and their status.
-
-**Purpose**: Monitor and switch between multiple concurrent agent sessions.
-
-**Features**:
-- List of active agents with session IDs
-- Agent status indicators (running, idle, error)
-- Message count per agent
-- Click to focus specific agent session
-- Close button to dismiss
-
-**Access**: Click "Agents" button or press `a`
-
----
-
-#### 6.1.4 Teams Popup Window
-
-A floating popup for team coordination when managing multiple teammates.
-
-**Purpose**: Coordinate work across a team of specialized agents.
-
-**Features**:
-- Team member list with status
-- Message counts (sent/received per teammate)
-- Focus indicator for active teammate
-- Task assignment interface
-- Broadcast messaging capability
-
-**Access**: Click "Teams" button or press `F10`
-
----
-
-#### 6.1.5 Slash Command Autocomplete Menu
-
-An inline popup menu that appears when typing `/` in the input area.
-
-**Purpose**: Quick discovery and selection of slash commands.
-
-**Features**:
-- Real-time filtering as you type
-- Command descriptions
-- Skill vs. builtin command indicators
-- Keyboard navigation (↑/↓) and Enter to select
-- `Esc` closes the menu while preserving the partially typed input and keeping the cursor within valid bounds
-
-**Access**: Type `/` in input area
-
----
-
-#### 6.1.6 File Reference Autocomplete Menu (`@` Menu)
-
-An inline popup for selecting files when using `@` references.
-
-**Purpose**: Quickly reference files in the conversation.
-
-**Features**:
-- Fuzzy file search across project
-- Directory navigation mode
-- Hidden file toggle
-- Recently used files prioritized
-- Preview of selected file
-
-**Access**: Type `@` in input area, optionally followed by partial filename
-
----
-
-#### 6.1.7 History Picker Overlay
-
-A scrollable overlay for browsing and reusing previous inputs.
-
-**Purpose**: Quickly recall and resend previous prompts.
-
-**Features**:
-- Chronological list of previous inputs
-- Search/filter capability
-- Enter to insert, Esc to cancel
-- Persistent across sessions (stored in SQLite)
-
-**Access**: `/history` command or Up arrow with empty input
-
----
-
-#### 6.1.8 Permission Dialog (Modal)
-
-Centered modal for approving or denying permission requests.
-
-**Purpose**: Security gate for file writes, shell commands, and external access.
-
-**Features**:
-- Permission type indicator (file:write, bash:execute, etc.)
-- Target path or command preview
-- One-time (y/n) or always allow options
-- Question mode with text input for user prompts
-
-**Access**: Auto-triggered when tool requires permission
-
----
-
-#### 6.1.9 Context Menu (Right-Click)
-
-A small popup menu for text operations.
-
-**Purpose**: Standard text editing operations in any pane.
-
-**Features**:
-- Cut selected text
-- Copy to clipboard
-- Paste from clipboard
-- Context-aware (disabled when no selection)
-
-**Access**: Right-click in any pane
-
----
-
-#### 6.1.10 MCP Discovery Dialog (Overlay)
-
-An overlay for discovering Model Context Protocol servers.
-
-**Purpose**: Extend tool capabilities via MCP servers.
-
-**Features**:
-- Numbered list of discovered MCP servers
-- Server metadata display
-- Number input to connect
-- Connection feedback
-
-**Access**: `/mcp discover` command
-
----
-
-#### 6.1.11 Output View Overlay
-
-A scrollable panel for viewing raw agent or team member output.
-
-**Purpose**: Inspect unformatted output from specific agents or team members.
-
-**Features**:
-- Session output viewer
-- Team member output viewer
-- Scrollable content
-- Syntax highlighting for code
-
-**Access**: Auto-triggered for certain tool outputs or team member responses
-
----
-
-#### 6.1.12 Memory Browser Overlay
-
-A full-panel overlay for browsing memory blocks.
-
-**Purpose**: View and manage persistent memory across sessions.
-
-**Features**:
-- List of global and project memory blocks
-- Size indicators (with warnings for blocks near limit)
-- Expand/collapse to view full content
-- Keyboard navigation (j/k, Enter, Esc)
-- Search and filter capabilities
-
-**Access**: `/memory` command
-
----
-
-#### 6.1.13 Plan Approval Dialog (Modal)
-
-A centered dialog for approving or rejecting plans from the plan agent.
-
-**Purpose**: Human-in-the-loop approval for plan agent proposals.
-
-**Features**:
-- Plan text display with scrollable content
-- Approve/Reject buttons
-- Cursor navigation between options
-- On approve: switches to plan agent and executes
-- On reject: returns to previous agent
-
-**Access**: Auto-triggered when plan agent submits a plan
-
----
-
-#### 6.1.14 Force-Cleanup Confirmation Modal
-
-A confirmation dialog for destructive team cleanup operations.
-
-**Purpose**: Prevent accidental data loss when force-cleaning team resources.
-
-**Features**:
-- Warning message with team name
-- List of active members that will be affected
-- Explicit confirmation required
-- Cancel option
-
-**Access**: Triggered by `/team cleanup` when team has active members
-
----
-
-#### 6.1.15 Keybindings Help Panel (Overlay)
-
-A scrollable help panel showing all keyboard shortcuts.
-
-**Purpose**: Quick reference for TUI controls.
-
-**Features**:
-- Categorized keybindings
-- Context-aware help (shows relevant shortcuts)
-- Search within help
-- Scroll with arrow keys
-
-**Access**: `?` key when input is empty, or `/help` command
-
----
-
-#### 6.1.16 Session/Message Widget Overlays
-
-Various inline widgets rendered within the message panel.
-
-| Widget | Purpose |
-|--------|---------|
-| **MessageWidget** | Renders individual chat messages with markdown formatting, syntax highlighting, and inline tool call summaries |
-| **Tool Result Summaries** | Collapsible sections showing tool execution results |
-| **File Diff Widgets** | Side-by-side or inline diffs for file edits |
-| **Image Widgets** | Renders attached images with dimensions and preview |
-
----
-
-#### 6.1.17 Window State Summary
-
-| State Field | Window | Access |
-|-------------|--------|--------|
-| `provider_setup` | Provider Setup Dialog | `/provider`, startup |
-| `show_agents_window` | Agents Popup | Click "Agents" button, `a` key |
-| `show_teams_window` | Teams Popup | Click "Teams" button, `F10` key |
-| `slash_menu` | Slash Command Menu | Type `/`; `Esc` closes without clearing the partially typed command |
-| `file_menu` | File Reference Menu | Type `@` |
-| `history_picker` | History Picker | `/history`, Up arrow |
-| `permission_queue` | Permission Dialog | Auto (tool permission) |
-| `context_menu` | Right-Click Menu | Right-click |
-| `mcp_discover` | MCP Discovery | `/mcp discover` |
-| `output_view` | Output View | Auto (tool output) |
-| `memory_browser` | Memory Browser | `/memory` |
-| `plan_approval_pending` | Plan Approval | Auto (plan submission) |
-| `pending_forcecleanup` | Force-Cleanup Modal | `/team cleanup` (with active) |
-| `show_shortcuts` | Keybindings Help | `?` (empty input), `/help` |
-
----
+### 6.1 TUI Layout
+
+The TUI is a ratatui full-screen interface with these panels:
+
+| Panel | Purpose |
+|-------|---------|
+| Chat | Conversation stream with markdown and syntax highlighting |
+| Log | Step-numbered tool calls with pretty-printed JSON |
+| Status bar | Provider/model, context usage, compression indicator, YOLO state |
+| Input | Command-line with slash-command autocomplete |
+| Permission dialog | Modal approval dialog with live countdown (120 s) |
+| Question dialog | Modal user question (free-text or multiple-choice) |
 
 ### 6.2 Slash Commands
 
-| Command | Purpose |
-|---------|---------|
-| **Core** ||
-| `/about` | Show application info, version, and authors |
-| `/help` | Show available slash commands |
-| `/quit`, `/exit` | Exit ragent |
-| **Session & Agent** ||
-| `/agent <name>` | Switch to specific agent |
-| `/agents` | List all agents (built-in and custom) |
-| `/clear` | Clear conversation history |
-| `/compact` | Summarize and compact conversation history |
-| `/resume` | Resume agent from halted state |
-| `/system <prompt>` | Override agent system prompt |
-| **Provider & Model** ||
-| `/model` | Switch active model on current provider |
-| `/thinking auto\|off\|low\|medium\|high` | Switch the active reasoning level for the selected model |
-| `/provider` | Change LLM provider |
-| `/provider_reset` | Reset provider and remove stored credentials |
-| `/llmstats` | Show LLM response time and token throughput |
-| `/cost` | Show token usage and estimated cost |
-| **Context & Config** ||
-| `/context refresh` | Clear cached file tree, git status, README |
-| `/browse_refresh` | Refresh @ file-picker project index |
-| `/config show` | Display all application paths and resolved configuration |
-| `/dirs` | Manage directory / file permission lists (allow/deny) |
-| `/reload [all\|config\|mcp\|skills\|agents]` | Reload customizations |
-| `/init` | Analyze project and write to PROJECT_ANALYSIS.md |
-| **Tasks** ||
-| `/tasks` | List active background tasks |
-| `/cancel <id>` | Cancel a background task |
-| `/bench list` | List supported benchmark suites and profiles |
-| `/bench init <suite-or-all-or-full>` | Initialize benchmark data under `benches/data/<suite>` in sample or full mode |
-| `/bench show` | Show benchmark defaults and the selected model |
-| `/bench run <target>` | Start a background benchmark run for a suite, profile, or `all` target and write workbook results |
-| `/bench status` | Show active or last benchmark run status |
-| `/bench open last` | Show the latest benchmark workbook path(s) and summary |
-| `/bench cancel` | Cancel the active benchmark run |
-| `/abort` | Abort current running agent |
-| **Tools** ||
-| `/tools` | List available tools with parameters |
-| `/bash allow <cmd>` | Add command to bash allowlist |
-| `/bash deny <cmd>` | Add command to bash denylist |
-| `/bash reset` | Reset bash shell state |
-| **Code Index** ||
-| `/codeindex on\|off` | Toggle code indexing |
-| `/codeindex reindex` | Force full re-index |
-| `/codeindex status` | Show index status |
-| `/codeindex lang <language>` | Optional language filter for code index results |
-| **Compression** ||
-| `/compress` | Run the Headroom context-compression pipeline manually |
-| **Spec Management** ||
-| `/spec create <id> <feature>` | Generate SPEC.md + PLAN.md via explore agent |
-| `/spec list [status]` | List specs with optional status filter |
-| `/spec search <query>` | Full-text search across SPEC.md, PLAN.md, and REVIEW.md |
-| `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
-| `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
-| `/spec task <id>` | List tasks for a spec |
-| `/spec impl <id>` | Mark a spec as `in_progress` (alias: `/spec implement`) |
-| `/spec implement <id>` | Mark a spec as `in_progress` (alias: `/spec impl`) |
-| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
-| `/spec deactivate` | Deactivate the active spec |
-| `/spec coverage <id>` | Show requirement coverage report with linked tasks |
-| **Memory** ||
-| `/memory` | Open memory browser |
-| **Team** ||
-| `/team create <name>` | Create new team |
-| `/team open <name>` | Open existing team |
-| `/team close` | Close team session |
-| `/team delete <name>` | Delete team |
-| `/team clear` | Clear team state |
-| `/team tasks` | Show team tasks table |
-| `/team status` | Show team status |
-| `/team message <to> <content>` | Send message to teammate |
-| `/team broadcast <content>` | Broadcast to all teammates |
-| `/team spawn <agent>` | Spawn teammate agent |
-| `/team cleanup` | Cleanup team resources |
-| **Research** ||
-| `/research <name> <topic>` | Run a gathering session and create the research item |
-| `/research list [--all]` | List research items (default excludes archived) |
-| `/research open <name>` | Print the absolute path of RESEARCH.md |
-| `/research search <query>` | Full-text search across all RESEARCH.md files |
-| `/research show <name>` | Show research metadata |
-| `/research delete <name> --yes` | Remove a research item |
-| `/research archive <name>` | Transition a research item to archived status |
-| **MCP** ||
-| `/mcp discover` | Discover MCP servers |
-| `/mcp list` | List connected MCP servers |
-| `/mcp call <server> <tool>` | Call MCP tool |
-| **Optimization** ||
-| `/opt <method> <prompt>` | Optimize prompt |
-| `/opt help` | Show optimization methods |
-| **Swarm & Autopilot** ||
-| `/swarm <prompt>` | Auto-decompose goal into parallel subtasks |
-| `/swarm status` | Check swarm execution status |
-| `/autopilot on [--max-tokens N] [--max-time N]` | Enable autonomous operation |
-| `/autopilot off` | Disable autonomous operation |
-| `/autopilot status` | Show autopilot status |
-| `/yolo` | Toggle YOLO mode (bypass all restrictions) |
-| **Agent Modes & Planning** ||
-| `/mode <role>` | Set agent role: architect, coder, reviewer, debugger, tester, off |
-| `/plan <description>` | Delegate planning to the plan agent |
-| `/profile on\|off` | Toggle the agent-loop profiler panel |
-| `/theme default\|high-contrast` | Switch UI colour theme |
-| **GitHub Integration** ||
-| `/github login` | Authenticate with GitHub |
-| `/github logout` | Remove GitHub credentials |
-| `/github status` | Show GitHub connection status |
-| **GitLab Integration** ||
-| `/gitlab setup` | Configure GitLab connection (instance URL + PAT) |
-| `/gitlab logout` | Remove GitLab credentials |
-| `/gitlab status` | Show GitLab connection status |
-| **Todos** ||
-| `/todos` | Show TODO items |
-| **Skills** ||
-| `/skills` | List registered skills |
-| **Server & Diagnostics** ||
-| `/webapi enable` | Enable HTTP REST API |
-| `/webapi disable` | Disable HTTP REST API |
-| `/doctor` | Run system diagnostics |
-| `/update` | Check for updates |
-| `/update install` | Install updates |
-| **UI & History** ||
-| `/log` | Toggle log panel visibility |
-| `/history` | Browse previous inputs |
-| `/status [clear]` | Show status message history |
-| `/mouse on\|off` | Toggle mouse support |
-| `/inputdiag` | Input diagnostics |
-| `/compact` | Compact context window |
-| `/agent_compact` | Compact agent description |
+| Command | Description |
+|---------|-------------|
+| `/quit` / `/q` | Exit ragent |
+| `/provider` | Open provider setup dialog |
+| `/model` | Select model |
+| `/agent` | Select agent |
+| `/agents` | List loaded agents and diagnostics |
+| `/tools` | Toggle tool visibility |
+| `/codeindex on\|off` | Enable/disable code index |
+| `/codeindex lang <language>` | Filter code index by language |
+| `/compress` | Run Headroom compression manually |
+| `/memory` | Memory management commands |
+| `/yolo` | Toggle YOLO mode |
+| `/team create <name>` | Create a team |
+| `/team open <name>` | Re-open existing team |
+| `/team close` | Close current team |
+| `/team clear` | Reset current team state |
+| `/team delete <name>` | Delete team on disk |
+| `/team cleanup` | Tear down current team |
+| `/team message ...` | Send team message |
+| `/swarm <prompt>` | Decompose prompt into parallel subtasks |
+| `/autopilot on\|off` | Toggle autonomous mode |
+| `/spec list\|search\|show\|impl\|implement` | Spec lifecycle commands |
+| `/research create\|list\|show\|search\|delete` | Research commands |
+| `/config show` | Show resolved configuration |
+| `/dirs` | Show configured writable directories |
+| `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
+| `/mcp discover\|list\|call` | MCP server commands |
+| `/opt <method> <prompt>` | Optimize a prompt |
+| `/update` / `/update install` | Auto-update (reserved; not implemented) |
 
-### Benchmark Runner
-
-The TUI exposes a native benchmark workflow through `/bench` using the currently selected
-provider/model and the shared `ragent-bench` crate.
-
-- **Data roots:** `benches/data/<suite>/`
-- **Result workbooks:** `benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx`
-- **Virtual target:** `all` expands to every registered benchmark suite for both `/bench init` and `/bench run`
-- **Virtual target:** `full` is reserved for complete upstream dataset ingestion across every suite and stays gated until all suites implement full-data initialization
-- **Profiles:** `quick`, `standard`, and `agentic`
-- **Init modes:** default `/bench init` writes local sample fixtures; `/bench init <suite> --full` performs full upstream dataset ingestion when the suite supports it
-- **Background UX:** `/bench run ...` starts a background task, `/bench status` reports active or
-  completed state, `/bench open last` prints the latest workbook path(s), and `/bench cancel`
-  requests shutdown
-- **Resume:** `--resume` reuses an existing same-day workbook only when benchmark, model, and
-  config-hash sidecars match exactly
-
-The benchmark workbook schema is fixed across suites (`run`, `metrics`, `cases`, `artifacts`) so
-HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be compared directly.
-
-### 6.3 Key Bindings
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Send message |
-| `Ctrl+C` | Interrupt current operation |
-| `Esc` | Clear input / Close overlay |
-| `Tab` | Cycle focus between panels |
-| `↑/↓` | Scroll message/log panels |
-| `PgUp/PgDn` | Page scroll |
-| `Home/End` | Jump to start/end |
-| `Alt+V` | Paste image from clipboard |
-| `Right-click` | Context menu (Cut/Copy/Paste) |
-| `p` | Open provider setup |
-| `?` (empty input) | Show keybindings help |
-
-### 6.4 TUI Component Architecture
+### 6.3 TUI Component Architecture
 
 ```mermaid
-graph TB
-    subgraph TUILayer["TUI Layer (ratatui)"]
-        App["App State Machine"]
-        App --> Layout["Layout Engine"]
-        
-        subgraph Panels["Panels"]
-            StatusBar1["Status Bar (Line 1)\nSession / Agent / Dir / Git"]
-            StatusBar2["Status Bar (Line 2)\nProvider / Quota / Context / Services"]
-            Messages["Messages Panel\nMarkdown + Syntax Highlight"]
-            Input["Input Area\nMulti-line + Autocomplete"]
-            LogPanel["Log Panel\nStep-numbered JSON"]
-            Sidebar["Sidebar\nAgents + Teams"]
-        end
-        
-        subgraph Overlays["Overlays / Modals"]
-            ProviderSetup["Provider Setup"]
-            PermissionDlg["Permission Dialog\n+ Countdown"]
-            SlashMenu["Slash Command Menu"]
-            FileMenu["@ File Menu"]
-            HistoryPicker["History Picker"]
-            MemoryBrowser["Memory Browser"]
-            PlanApproval["Plan Approval"]
-            ForceCleanup["Force-Cleanup"]
-                          MCPDiscovery["MCP Discovery"]
-                          OutputView["Output View"]
-                          Keybindings["Keybindings Help"]
-                          end
-    end
-
-    subgraph EventHandling["Event Handling"]
-        KeyEvents["Keyboard Events"]
-        MouseEvents["Mouse Events"]
-        Tick["100ms Tick Timer"]
-    end
-
-    EventHandling --> App
-    App -- renders --> Panels
-    App -- renders --> Overlays
-    App -- publishes --> EventBus["Event Bus"]
-    EventBus -- subscribed --> App
+graph LR
+    App[App State] --> EventLoop[Event Loop]
+    EventLoop --> Terminal[Terminal]
+    App --> Chat[Chat Widget]
+    App --> Log[Log Widget]
+    App --> Input[Input Widget]
+    App --> Status[Status Bar]
+    App --> Dialogs[Permission / Question Dialogs]
+    EventBus --> App
 ```
 
 **Figure 7:** TUI Component Architecture — UI layout and event wiring
 
----
+### 6.4 Permission Dialog Countdown
 
-- **Streaming responses** — Real-time token streaming from LLM
-- **Responsive two-line status bar** — Adapts between full, compact, and minimal layouts based on terminal width
-- **Provider-aware usage display** — Shows quota percentage when available, otherwise token totals and context usage; Copilot plan labels and Ollama context labels are surfaced when known
-- **Step-numbered tool calls** — Cross-session tool call correlation
-- **Pretty-printed JSON** — Formatted tool parameters in log panel
-- **Image attachments** — Visual support with clipboard paste
-- **Mouse support** — Full mouse interaction
-- **Auto-complete** — Slash command and agent name completion
+The permission dialog displays a live countdown:
+
+- Format: `M:SS` (e.g., `1:45`)
+- Shows `EXPIRED` when the 120-second timeout is reached
+- The event loop redraws continuously so the timer decrements without requiring keyboard input
 
 ---
-
-
 
 ## 7. HTTP Server & API
 
-### 7.1 Server Commands
+### 7.1 Starting the Server
 
 ```bash
-ragent serve              # Start server on default port (9100)
-ragent serve --port 8080  # Custom port
+ragent serve --port 9100 --host 127.0.0.1
 ```
 
-### 7.2 API Endpoints
-
-#### Health & Status
+### 7.2 REST Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check - returns "ok" |
+| GET | `/health` | Health check |
+| POST | `/sessions` | Create a session |
+| GET | `/sessions` | List sessions |
+| GET | `/sessions/{id}` | Get session details |
+| POST | `/sessions/{id}/messages` | Send a message (returns SSE stream) |
+| GET | `/sessions/{id}/events` | SSE event stream |
+| GET | `/models` | List available models |
+| GET | `/providers` | List providers |
+| GET | `/agents` | List agents |
+| POST | `/opt` | Prompt optimization |
+| GET/POST/DELETE | `/research` | Research endpoints |
 
-#### Configuration & Providers
+### 7.3 SSE Events
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/config` | Get current application configuration |
-| `GET` | `/providers` | List configured provider IDs |
+The server streams the following event types:
 
-#### Sessions
+| Event | Description |
+|-------|-------------|
+| `assistant_chunk` | Token or reasoning block |
+| `tool_requested` / `tool_executed` | Tool lifecycle |
+| `permission_requested` / `permission_replied` | Permission flow |
+| `question_requested` / `question_answered` | Question tool |
+| `compression_started` / `compression_finished` | Compression lifecycle |
+| `subagent_*` / `teammate_*` | Multi-agent lifecycle |
+| `agent_notice` | Status messages |
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/sessions` | List all sessions |
-| `POST` | `/sessions` | Create new session |
-| `GET` | `/sessions/{id}` | Get session details |
-| `DELETE` | `/sessions/{id}` | Archive/delete a session |
-| `GET` | `/sessions/{id}/messages` | Get messages for a session |
-| `POST` | `/sessions/{id}/messages` | Send message (returns SSE stream) |
-| `POST` | `/sessions/{id}/abort` | Abort an active session |
-| `POST` | `/sessions/{id}/permission/{req_id}` | Reply to a permission request |
+### 7.4 Authentication
 
-#### Tasks (Background Agents)
+The HTTP API uses Bearer token authentication:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/sessions/{id}/tasks` | List tasks for a session |
-| `POST` | `/sessions/{id}/tasks` | Spawn a new background task |
-| `GET` | `/sessions/{id}/tasks/{tid}` | Get task details |
-| `DELETE` | `/sessions/{id}/tasks/{tid}` | Cancel a task |
-
-#### Server-Sent Events (SSE)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/events` | Global SSE event stream (all sessions) |
-| `GET` | `/sessions/{id}/messages` | Session-specific SSE stream |
-
-#### Agents
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/agents` | List available agents |
-| `GET` | `/agents/{name}` | Get agent details |
-
-#### Tools
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/tools` | List available tools |
-| `POST` | `/tools/{name}` | Execute tool |
-
-#### Prompt Optimization
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/opt` | Optimize prompt (requires Bearer token) |
-
-#### Memory API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/memory/blocks` | List memory blocks |
-| `GET` | `/memory/blocks/{scope}/{label}` | Get specific block |
-| `PUT` | `/memory/blocks/{scope}/{label}` | Create/update block |
-| `DELETE` | `/memory/blocks/{scope}/{label}` | Delete block |
-| `POST` | `/memory/store` | Store structured memory |
-| `POST` | `/memory/search` | Search memories |
-| `GET` | `/memory/search` | Search memories (query params) |
-
-#### Orchestrator API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/orchestrate` | Submit a job to the orchestrator |
-| `GET` | `/orchestrate/{job_id}` | Get job status and results |
-| `DELETE` | `/orchestrate/{job_id}` | Cancel a running orchestration job |
-
-#### Response Types
-
-**BlockResponse (Memory blocks):**
-
-```json
-{
-  "scope": "project",
-  "label": "conventions",
-  "content": "Use snake_case...",
-  "read_only": false,
-  "created_at": "2025-01-15T10:30:00Z",
-  "updated_at": "2025-01-15T12:00:00Z"
-}
+```bash
+curl -H "Authorization: Bearer $RAGENT_TOKEN" ...
 ```
 
-**MemoryResponse (Structured memories):**
+`RAGENT_TOKEN` is read from the environment. If unset, the server may allow
+local requests without authentication depending on build configuration.
 
-```json
-{
-  "id": "mem_abc123",
-  "content": "The project uses PostgreSQL...",
-  "category": "tech_stack",
-  "confidence": 0.85,
-  "tags": ["database", "infrastructure"],
-  "created_at": "2025-01-15T10:30:00Z",
-  "last_accessed": "2025-01-16T08:00:00Z"
-}
-```
-
-**Search Request Body (`/memory/search`):**
-
-```json
-{
-  "query": "database configuration",
-  "limit": 10,
-  "semantic": true,
-  "filters": {
-    "category": "tech_stack",
-    "min_confidence": 0.5
-  }
-}
-```
-
-### 7.3 Authentication
-
-- Bearer token generated on server startup
-- Token displayed in console: `Server token: {token}`
-- Include in requests: `Authorization: Bearer {token}`
-
----
-
-### 7.4 HTTP API Request Flow
+### 7.5 HTTP API Request Flow
 
 ```mermaid
 sequenceDiagram
-    participant Client as HTTP Client
-    participant Axum as Axum Router
-    participant Auth as Bearer Auth Middleware
-    participant State as AppState (Shared)
-    participant Session as Session Processor
-    participant EventBus as Event Bus
-    participant SSE as SSE Stream
-
+    participant Client
+    participant Axum
+    participant SP as Session Processor
+    participant LLM
     Client->>Axum: POST /sessions/{id}/messages
-    Axum->>Auth: Validate Bearer token
-    Auth-->>Axum: OK / 401
-    Axum->>State: Lock session state
-    State->>Session: process_message(body)
-    Session->>EventBus: Subscribe to events
-    Session->>LLM: Send chat request
-    LLM-->>Session: Stream tokens
-    loop Stream tokens
-        Session->>EventBus: Publish StreamToken
-        EventBus->>SSE: Forward to client
-        SSE-->>Client: data: {...}
-    end
-    Session->>EventBus: Publish StreamComplete
-    EventBus->>SSE: Close stream
-    SSE-->>Client: event: complete
-    Session->>State: Unlock
+    Axum->>SP: dispatch message
+    SP->>LLM: streaming request
+    LLM-->>SP: chunks / tool calls
+    SP-->>Axum: events
+    Axum-->>Client: SSE stream
 ```
 
 **Figure 8:** HTTP API Request Flow — REST + SSE lifecycle
 
 ---
 
----
-
-
+# Part III: Data & Knowledge Systems
 
 ---
-
-# Part II: Data & Knowledge Systems
-
----
-
 
 ## 8. Code Index
 
 ### 8.1 Overview
 
-The Code Index is a built-in codebase indexing, search, and retrieval system that provides agents with deep, structured understanding of the codebase. Unlike simple text search (grep), it extracts symbols, their relationships, and enables semantic code exploration.
+The code index provides fast, local, read-only code intelligence. It is built
+on tree-sitter parsing and Tantivy full-text search, with a SQLite metadata
+store.
 
-**Key Features:**
-- **Zero external dependencies** — Everything compiles into the ragent binary (tree-sitter, SQLite, Tantivy)
-- **User-controllable** — Enable/disable at any time via `/codeindex on|off`
-- **Non-intrusive** — Zero overhead when disabled
-- **Incremental updates** — Only re-indexes changed files using content hashing (Blake3)
-- **Real-time file watching** — Automatic re-indexing on file changes
-- **Fast search** — Sub-100ms symbol lookup across large codebases
+### 8.2 Supported Languages
 
-### 8.2 Architecture
+Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform,
+CMake, Gradle, Maven, and more (15+ grammars compiled-in).
+
+### 8.3 Architecture
 
 ```mermaid
-graph TB
-    subgraph CodeIndex["ragent-codeindex crate"]
-        Scanner["File Scanner<br/>(ignore crate)"]
-        Parser["Parser<br/>(tree-sitter)"]
-        Extractor["Symbol Extractor<br/>(per-language)"]
-        Watcher["File Watcher<br/>(notify crate)"]
-        Worker["Background Worker<br/>(tokio task)"]
-        
-        subgraph IndexStore["Index Store (SQLite)"]
-            Files["indexed_files"]
-            Symbols["symbols"]
-            Imports["imports"]
-            References["references"]
-        end
-        
-        FTS["Tantivy FTS Index<br/>(full-text search)"]
-        
-        subgraph Tools["Tool Interface"]
-            T1["codeindex_search"]
-            T2["codeindex_symbols"]
-            T3["codeindex_references"]
-            T4["codeindex_dependencies"]
-            T5["codeindex_status"]
-            T6["codeindex_reindex"]
-        end
-    end
-    
-    Scanner --> Parser
-    Parser --> Extractor
-    Extractor --> Worker
-    Scanner --> IndexStore
-    Watcher -->|queue| Worker
-    Worker --> IndexStore
-    IndexStore --> FTS
-    IndexStore --> Tools
+graph LR
+    Scan[File Scanner] --> Parse[Tree-sitter Parser]
+    Parse --> Store[(SQLite Metadata)]
+    Parse --> Index[Tantivy FTS Index]
+    Query[Tool Query] --> Index
+    Query --> Store
 ```
 
 **Figure 9:** Code Index Pipeline — File scan → parse → index → search
 
-**Components:**
-| Component | Purpose |
-|-----------|---------|
-| **File Scanner** | Walk directory trees, respect `.gitignore`, compute content hashes |
-| **File Watcher** | Real-time filesystem change detection via `notify` crate |
-| **Parser** | Tree-sitter AST parsing with per-language grammar support |
-| **Symbol Extractor** | Per-language AST walkers extract symbols, imports, and references |
-| **Index Store** | SQLite persistence for files, symbols, imports, references |
-| **Search Engine** | Tantivy full-text index + structured SQLite queries |
-| **Tree Cache** | LRU cache of parse trees for incremental re-parsing |
-| **Background Worker** | Async indexing worker with debounce, dedup, and batching |
-
-### 8.3 Supported Languages
-
-| Language | Extensions | Symbols Extracted |
-|----------|------------|-------------------|
-| **Rust** | `.rs` | Functions, structs, enums, traits, impls, modules, consts, statics, type aliases, macros |
-| **Python** | `.py` | Functions, classes, methods, decorators, imports, async functions |
-| **TypeScript** | `.ts`, `.tsx` | Functions, classes, interfaces, types, enums, namespaces, imports |
-| **JavaScript** | `.js`, `.jsx` | Functions, classes, methods, arrow functions, imports |
-| **Go** | `.go` | Functions, structs, interfaces, methods, imports, type definitions |
-| **C/C++** | `.c`, `.cpp`, `.h`, `.hpp` | Functions, structs, unions, enums, classes, namespaces, includes |
-| **Java** | `.java` | Classes, interfaces, enums, methods, constructors, annotations |
-| **OpenSCAD** | `.scad` | Modules, functions, variable declarations, include/use statements, call references |
-| **Terraform** | `.tf`, `.tfvars` | Resource blocks, data blocks, module calls, variables, locals, outputs, provider blocks |
-| **CMake** | `.cmake`, `CMakeLists.txt` | Functions, macros, blocks, foreach/while loops, if conditions, commands, include/add_subdirectory |
-| **Gradle (Groovy)** | `.gradle` | Classes, methods, functions, closures, imports, annotations, DSL block calls |
-| **Gradle (Kotlin)** | `.gradle.kts` | Classes, functions, properties, type aliases, imports, companion objects, DSL calls |
-| **Maven** | `pom.xml` | Project coordinates, dependencies, modules, plugins, profiles, properties, repositories |
-
-### 8.4 Data Model
-
-#### Indexed Files
-```rust
-struct FileEntry {
-    path: String,          // Relative path from project root
-    language: String,      // "rust", "python", "typescript", etc.
-    content_hash: String,    // Blake3 hash for change detection
-    indexed_at: String,    // ISO 8601 timestamp
-    file_size: i64,        // Bytes
-}
-```
-
-#### Symbols
-```rust
-struct Symbol {
-    name: String,          // Symbol name
-    kind: SymbolKind,      // Function, Struct, Enum, Trait, etc.
-    visibility: Visibility, // Public, Private, Restricted
-    file_path: String,     // Source file path
-    start_line: u32,       // 1-based line number
-    start_col: u32,        // 1-based column
-    end_line: u32,         // End line
-    end_col: u32,          // End column
-    doc: Option<String>,   // Doc comment / documentation
-}
-```
-
-**SymbolKind Taxonomy:**
-| Kind | Description |
-|------|-------------|
-| `function` | Named function or method |
-| `struct` | Struct or class definition |
-| `enum` | Enum type |
-| `trait` | Trait or interface definition |
-| `impl` | Implementation block |
-| `const` | Constant definition |
-| `static` | Static variable |
-| `type_alias` | Type alias |
-| `module` | Module or namespace |
-| `macro` | Macro definition |
-| `field` | Struct/class field |
-| `variant` | Enum variant |
-
-### 8.6 Control
-
-```bash
-/codeindex on           # Enable indexing
-/codeindex off          # Disable indexing
-/codeindex status       # Show current status
-/codeindex reindex      # Force full re-index
-/codeindex clear        # Delete all indexed data
-```
-
-Configuration in `ragent.json`:
-
-```jsonc
-{
-  "code_index": {
-    "enabled": true,
-    "index_dir": ".ragent/code_index",  // Custom location
-    "max_file_size": 1048576,             // 1MB default
-    "extra_exclude_dirs": ["vendor", "node_modules", "target"],
-    "extra_exclude_patterns": ["*.min.js", "*.d.ts"]
-  }
-}
-```
-
-### 8.7 Code Index Tools
-
-All tools are available to agents and can be called directly in conversations.
-Because they perform local, read-only analysis, the codeindex tool family is
-hardwired as always allowed and bypasses interactive permission prompts.
-
-#### `codeindex_search`
-
-Full-text search across symbols, documentation, and code.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `query` | string | Search query (supports boolean operators) |
-| `language` | string? | Filter by language (e.g., "rust") |
-| `file_pattern` | string? | Filter by file path pattern (e.g., "src/**/*.rs") |
-| `max_results` | integer? | Maximum results (default: 20, max: 100) |
-
-**Example:**
-```json
-{
-  "query": "config parser",
-  "language": "rust",
-  "file_pattern": "crates/ragent-agent/**/*.rs",
-  "max_results": 10
-}
-```
-
-**Returns:** List of search results with symbol info, file path, and relevance score.
-
----
-
-#### `codeindex_symbols`
-
-Query symbols from the codebase index with optional filters.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | string? | Filter by symbol name (substring match) |
-| `kind` | string? | Filter by symbol kind ("function", "struct", "enum", etc.) |
-| `file_path` | string? | Filter by file path substring |
-| `language` | string? | Filter by programming language |
-| `visibility` | string? | Filter by visibility ("public", "private", "restricted") |
-| `limit` | integer? | Maximum results (default: 50, max: 200) |
-
-**Example:**
-```json
-{
-  "name": "parse",
-  "kind": "function",
-  "language": "rust",
-  "limit": 20
-}
-```
-
-**Returns:** Structured symbol information with signatures and documentation.
-
----
-
-#### `codeindex_references`
-
-Find all references to a symbol by name across the indexed codebase.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `symbol` | string | The symbol name to find references for |
-| `limit` | integer? | Maximum results (default: 50, max: 200) |
-
-**Example:**
-```json
-{
-  "symbol": "AgentConfig",
-  "limit": 100
-}
-```
-
-**Returns:** File locations grouped by file, with reference kind (call, type, field_access).
-
----
-
-#### `codeindex_dependencies`
-
-Query file-level dependencies from the code index.
-
-**Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | string | File path to query dependencies for |
-| `direction` | string? | "imports" (what this file uses) or "dependents" (what uses this file) |
-
-**Example:**
-```json
-{
-  "path": "crates/ragent-agent/src/agent/mod.rs",
-  "direction": "dependents"
-}
-```
-
-**Returns:** List of file paths that depend on (or are imported by) the target file.
-
----
-
-#### `codeindex_status`
-
-Show current status and statistics of the codebase index.
-
-**No parameters.**
-
-**Returns:**
-- Files indexed
-- Symbols extracted
-- Languages detected
-- Index size on disk
-- Timestamps
-
-**Example Output:**
-```json
-{
-  "files_indexed": 128,
-  "symbols_extracted": 3427,
-  "languages": {
-    "rust": 89,
-    "python": 23,
-    "typescript": 16
-  },
-  "index_size_bytes": 2457600,
-  "last_updated": "2026-04-14T09:30:00Z"
-}
-```
-
----
-
-#### `codeindex_reindex`
-
-Trigger a full re-index of the codebase. Use after major file changes or when search results seem stale.
-
-**No parameters.**
-
-**Note:** This can take several minutes for large codebases. Progress is shown in the TUI.
-
----
-
-
-## 9. Memory System
-
-The memory system provides persistent, structured storage of facts, patterns, preferences, and insights across sessions. It operates across three tiers with automatic extraction, decay, compaction, and optional semantic search.
-
-### 9.1 Three-Tier Architecture
-
-| Tier | Storage | Access | Purpose |
-|------|---------|--------|---------|
-| **File Blocks** | `~/.ragent/memory/` and `.ragent/memory/` | `memory_read` / `memory_write` | Human-readable markdown notes organised by topic |
-| **Structured Store** | SQLite (`memory` table) | `memory_store` / `memory_recall` / `memory_forget` | Typed, tagged, confidence-scored facts with full-text search |
-| **Semantic Search** | ONNX embeddings (optional) | `memory_search` | Embedding-based similarity search via `all-MiniLM-L6-v2` |
-
-### 9.2 Memory Tools
+### 8.4 Code Index Tools
 
 | Tool | Purpose |
 |------|---------|
-| `memory_read` | Read a named memory block (e.g. `memory_read(label="patterns")`) |
-| `memory_write` | Write or append to a memory block with optional YAML frontmatter |
-| `memory_replace` | Replace a specific string within a named memory block (whitespace-tolerant, shares the `edit`/`multiedit` matcher) |
-| `memory_store` | Store a structured memory with category, tags, and confidence score |
-| `memory_recall` | Full-text search across structured memories with filtering |
-| `memory_forget` | Delete memories by ID, age, confidence, category, or tags |
-| `memory_search` | Semantic similarity search (embeddings-based) |
-| `memory_migrate` | Analyse a flat `MEMORY.md` and propose splitting into named blocks |
+| `codeindex_search` | Full-text search across indexed code |
+| `codeindex_symbols` | Search for symbols by name |
+| `codeindex_references` | Find references to a symbol |
+| `codeindex_dependencies` | Query file-level imports/dependents |
+| `codeindex_status` | Show index status |
+| `codeindex_reindex` | Trigger a full re-index |
 
-### 9.2.1 Unified Whitespace-Tolerant Matcher
+All code index tools are **hardwired always-allowed** because they are read-only
+and local-only.
 
-The `edit`, `multiedit`, and `memory_replace` tools share a single seven-pass
-replacement matcher implemented in `ragent_tools_core::replace`
-(`find_replacement_range` / `find_replacement_range_diag`). This eliminates
-`old_str not found` failures caused by common LLM output quirks where the
-supplied search string no longer byte-matches the file content. Passes are
-attempted in order; the first pass that yields a unique match wins:
+### 8.5 Incremental Updates
 
-1. **Exact** — raw substring search.
-2. **CRLF-normalised** — strips `\r` from both sides, then maps the match back
-   to original byte offsets. Handles files with `\r\n` line endings when the
-   LLM generates `\n`-only search strings (the `read` tool strips `\r` via
-   `.lines()`).
-3. **Trailing-whitespace-stripped** — strips trailing spaces/tabs from every
-   line. Handles files with trailing whitespace the LLM silently omitted.
-4. **Leading-whitespace-stripped** — strips leading spaces/tabs from every
-   line. Handles LLMs that read line-numbered output and drop the code's
-   leading indentation. The **common** indentation of the matched file lines
-   is re-applied to `new_str` while preserving relative indentation.
-5. **Collapsed-whitespace** — collapses all whitespace runs to single spaces
-   for comparison, then replaces whole lines. Handles tabs-vs-spaces, double
-   spaces, and mixed indentation. On multiple candidates the one whose
-   per-line leading whitespace is closest to the needle's is preferred.
-6. **Blank-line-normalised** — tolerates at most one leading and one trailing
-   blank-line difference between `old_str` and the file, handling
-   `str::lines()` inconsistencies.
-7. **Final-newline-normalised** — tolerates trailing `\n` presence
-   disagreements in either direction (file has it / needle has it, both
-   directions, including CRLF variants).
-
-`multiedit` additionally resolves every edit against the **original** file
-content (so byte ranges are stable), pairwise-checks edits on the same file
-for overlap (rejecting with a clear error naming the edit indices and file
-path), and applies non-overlapping edits highest-end-offset-first so the JSON
-input order does not matter. `NotFound` diagnostics carry the last matching
-pass attempted and a best-effort closest-line hint.
-
-### 9.3 Memory Browser
-
-The TUI provides a full-panel memory browser accessible via `/memory`:
-
-- Lists global and project memory blocks
-- Shows size indicators with warnings for blocks near the 64 KB limit
-- Expand/collapse to view full content
-- Keyboard navigation (`j`/`k`, `Enter`, `Esc`)
-- Search and filter capabilities
-
-### 9.4 Structured Memory Categories
-
-| Category | Description | Example |
-|----------|-------------|---------|
-| `fact` | Objective information about the project | "Uses tokio for async runtime" |
-| `pattern` | Recurring code or workflow patterns | "Prefer `anyhow::Result` in main" |
-| `preference` | User working preferences | "Use 4-space indentation" |
-| `insight` | Deeper understanding or analysis | "Codebase follows clean architecture" |
-| `error` | Known issues and their resolutions | "Don't use `git checkout` to rewind files" |
-| `workflow` | Standard operating procedures | "Update CHANGELOG.md before pushing" |
-
-### 9.5 Auto-Extraction
-
-When `memory_extraction_enabled` is true in the configuration, the agent automatically extracts memories from conversations. Key facts, patterns, and insights are identified and stored with appropriate categories and confidence scores.
-
-### 9.6 HTTP API Endpoints
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/memory/blocks` | List all memory blocks |
-| `GET` | `/memory/blocks/{label}` | Read a specific memory block |
-| `DELETE` | `/memory/blocks/{label}` | Delete a memory block |
-| `POST` | `/memory/search` | Semantic search across memories |
-| `POST` | `/memory/store` | Store a structured memory |
-| `POST` | `/memory/forget` | Delete memories matching criteria |
+A file watcher detects changes and incrementally updates the index. Language
+filtering is available via `/codeindex lang <language>`.
 
 ---
 
+## 9. Memory System
+
+### 9.1 Three Tiers
+
+| Tier | Storage | Use Case |
+|------|---------|----------|
+| **File blocks** | Markdown files in `.ragent/memory/` or `~/.ragent/memory/` | Long-form notes, patterns, preferences |
+| **Structured store** | SQLite via `memory_store` / `memory_recall` | Facts, errors, workflows with tags/confidence |
+| **Semantic search** | Optional embeddings (`all-MiniLM-L6-v2`) | Similarity-based recall |
+
+### 9.2 Memory Operations
+
+| Tool | Purpose |
+|------|---------|
+| `memory_read` | Read a memory block file |
+| `memory_write` | Write/append to a memory block file |
+| `memory_replace` | Replace a string in a named block |
+| `memory_store` | Store a structured memory entry |
+| `memory_recall` | Full-text search structured memories |
+| `memory_search` | Semantic/keyword search across memories |
+| `memory_forget` | Delete memories by filter |
+| `memory_migrate` | Split a flat MEMORY.md into blocks |
+
+### 9.3 Automatic Extraction
+
+After each assistant turn the system can extract:
+
+- Project facts and patterns
+- Errors and their resolutions
+- User preferences
+- Workflows and standard operating procedures
+
+Extracted memories are tagged with category, confidence, and source.
+
+### 9.4 Decay, Compaction, and Knowledge Graph
+
+- Memories decay in relevance over time unless accessed or reinforced.
+- Compaction summarises old memories.
+- A lightweight knowledge graph links related memories by tag and reference.
+
+---
 
 ## 10. Spec Management
 
 ### 10.1 Overview
 
-The Spec Management system provides a structured workflow for writing, tracking, and enforcing software specifications alongside code. It ensures that every significant feature or change is preceded by a clear, reviewable specification that lives in version control under the `specs/` directory.
+Ragent includes a built-in specification lifecycle for tracking features,
+requirements, and implementation tasks.
 
-**Key Features:**
-- **Directory conventions** — Standardised `specs/<spec-id>/` layout with `SPEC.md` and `PLAN.md`
-- **EARS templates** — Boilerplate generation with numbered requirement placeholders
-- **Validation** — Automated checks for spec completeness and EARS syntax compliance
-- **Status tracking** — State machine for spec lifecycle (draft → review → approved → implemented → verified → archived)
-- **Plan linkage** — Mandatory `PLAN.md` pairing with every `SPEC.md`
-- **Research linkage** — Optional `research: <name>` declarations in `PLAN.md` or `## Related Research` section in `SPEC.md` link the spec to prior research captured under `research/<name>/RESEARCH.md`
-- **Tool integration** — Slash commands and programmatic APIs for spec operations
-- **Reporting** — Listing, filtering, and coverage summaries across a project
+### 10.2 Directory Layout
 
-### 10.2 Directory Structure
+Specs live in `specs/<SpecId>/`:
 
 ```
 specs/
-├── <spec-id>/
-│   ├── SPEC.md          # EARS-formatted specification
-│   └── PLAN.md          # Implementation plan with linked tasks
-├── <another-spec>/
-│   ├── SPEC.md
-│   └── PLAN.md
-└── ...
+└── testspec/
+    ├── SPEC.md        # Requirements and status
+    ├── PLAN.md        # Implementation tasks
+    └── REPORT.md      # Optional audit/completion report
 ```
 
-**Rules enforced by the system:**
-- Every spec lives in a subdirectory of `specs/` named after the spec identifier
-- Each spec directory must contain both `SPEC.md` and `PLAN.md`
-- Spec IDs use only alphanumeric characters, hyphens, and underscores
+### 10.3 Spec Status Lifecycle
 
-### 10.3 Spec Lifecycle Status
+```mermaid
+graph LR
+    draft[draft] --> in_progress[in_progress]
+    in_progress --> implemented[implemented]
+    implemented --> in_review[in_review]
+    in_review --> verified[verified]
+    in_review --> draft
+    verified --> archived[archived]
+```
 
-| Status | Meaning | Allowed Next States |
-|--------|---------|---------------------|
-| `draft` | Initial creation, requirements being written | `in_review` |
-| `in_review` | Under peer review | `draft` (with feedback), `approved` |
-| `approved` | Review passed, ready for implementation | `in_progress` |
-| `in_progress` | Being implemented | `implemented` |
-| `implemented` | Code complete, awaiting verification | `verified` |
-| `verified` | Tests pass, acceptance criteria met | `archived` |
-| `archived` | Retired spec | `draft` (reopen) |
-
-### 10.4 Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/spec create <id> <feature> [--from-research <name>]` | Generate `SPEC.md` + `PLAN.md` via explore agent. `--from-research` pre-populates a `## Related Research` section. |
-| `/spec list [status]` | List specs with optional status filter |
-| `/spec search <query>` | Full-text search across `SPEC.md`, `PLAN.md`, and `REVIEW.md` |
-| `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
-| `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
-| `/spec task <id>` | List tasks for a spec |
-| `/spec impl <id>` | Mark a spec as `in_progress` (alias: `/spec implement`) |
-| `/spec implement <id>` | Mark a spec as `in_progress` (alias: `/spec impl`) |
-| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
-| `/spec deactivate` | Deactivate the active spec |
-| `/spec coverage <id>` | Show requirement coverage report with linked tasks |
-
-### 10.5 Programmatic Tools
-
-Five spec tools are available to agents for programmatic access:
+### 10.4 Spec Tools
 
 | Tool | Purpose |
 |------|---------|
-| `spec_list` | List all specs with optional status filter |
-| `spec_read` | Read a spec by ID — returns full markdown, requirements, tasks, and metadata |
-| `spec_search` | Full-text search across spec content |
-| `spec_coverage` | Generate a requirement coverage report |
-| `spec_task_update` | Update the status of a task within a spec |
+| `spec_list` | List specifications |
+| `spec_read` | Read a spec by ID |
+| `spec_search` | Search specs by keyword |
+| `spec_coverage` | Generate requirement coverage report |
+| `spec_task_update` | Update a plan task status |
+
+### 10.5 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/spec list` | List specs |
+| `/spec search <query>` | Search specs |
+| `/spec show <id>` | Read a spec |
+| `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
 
 ### 10.6 Research Linkage
 
-A spec can reference one or more research items (see [§21. Research System](#21-research-system) below) in two ways:
-
-1. **`PLAN.md` dependency lines** — Anywhere outside a code fence, add `research: <name>`. Multiple declarations are allowed; duplicates are ignored.
-2. **`SPEC.md` frontmatter list** — `research: ["rust-async", "tokio-runtime"]` plus a `## Related Research` section that links to each captured `RESEARCH.md`.
-
-When the spec is created via `/spec create ... --from-research <name>`, the frontmatter and section are pre-populated automatically.
-
-### 10.7 EARS Notation
-
-Requirements are written in EARS (Easy Approach to Requirements Syntax) notation. The system validates that every requirement conforms to one of five templates:
-
-1. **Ubiquitous** — `The <system> shall <requirement>.`
-2. **Event-Driven** — `When <event>, the <system> shall <requirement>.`
-3. **State-Driven** — `While <state>, the <system> shall <requirement>.`
-4. **Optional** — `Where <feature> is <configured>, the <system> shall <requirement>.`
-5. **Unwanted** — `If <condition>, the <system> shall <requirement>.`
-
-### 10.7 Active Spec Context Injection
-
-When a spec is activated via `/spec activate <id>`:
-- The spec's requirements and tasks are injected into the agent's system prompt
-- The agent receives structured context about the spec's goals and acceptance criteria
-- This keeps the agent aligned with the specification during implementation
+Specs can reference research outputs via `--from-research` and `research:`
+lines in `PLAN.md`.
 
 ---
 
+# Part III: Data & Knowledge Systems (continued)
+
+## 11. Research System
+
+### 11.1 Overview
+
+The `/research` slash command and `ragent research` CLI create structured
+research items under `research/<name>/`. Each item contains captured sources
+(web pages, local files, prior specs) and a single `RESEARCH.md` document.
+
+### 11.2 Source Gathering
+
+A research session runs in phases:
+
+1. **Setup** — validate name and create the skeleton `RESEARCH.md`.
+2. **Web** — issue `websearch` queries and fetch pages via `webfetch`.
+3. **Local** — scan project files with `glob`/`grep`/`read`. Each captured
+   file produces an excerpt showing the matching lines plus one line of
+   context on either side, and a `relevance` note that names the matched
+   keyword(s) and the first matching line.
+4. **Specs** — cross-reference prior specs under `specs/`.
+5. **Synthesize** — (TUI only, when an active model is configured) send the
+   captured source bodies to the LLM and ask for Summary, Findings,
+   In-Project Cross-References, and Open Questions. The session emits a
+   `SynthesizeResult` event so the UI can distinguish LLM-synthesized output
+   from the mechanical fallback.
+6. **Assemble** — combine frontmatter, analysis, and References Index.
+7. **Finalize** — mark the item `Complete` and refresh `research/INDEX.md`.
+
+Supporting files under `research/<name>/sources/` (e.g. `web-01.md`,
+`local-02.md`) contain the **actual** captured body — web pages render into
+plain text, local files become keyword-anchored excerpts — so a reader can
+audit the evidence without re-running the search.
+
+### 11.3 AI-Driven Synthesis
+
+When the TUI builds a `ResearchSession` with an active provider/model, an
+`LlmAnalysisEngine` is wired in. The engine sends a single prompt containing
+truncated source bodies and requests structured markdown sections. The result
+is parsed and used to populate the final `RESEARCH.md`.
+
+If the LLM call fails or returns empty output, the session falls back to a
+**mechanical digest** that is still useful:
+
+- **Summary** — names the captured web titles (top 3), local file paths
+  (top 3), and cross-referenced specs, and is transparent that no LLM
+  analysis was applied.
+- **Findings** — one bullet per source with the matched keywords, an
+  excerpt, and a relevance note.
+- **In-Project Cross-References** — table of local files with relevance
+  notes.
+- **Open Questions** — suggests gaps (missing web sources, missing local
+  files, etc.) and recommends re-running with a configured LLM.
+
+Synthesis failures are logged at `error` level (not `warn`) and surfaced via
+the `SynthesizeResult { outcome: FallbackError, detail }` event so the user
+can see why the LLM path failed.
+### 11.4 Output Document
+
+Every `RESEARCH.md` contains:
+
+- YAML frontmatter with `name`, `title`, `status`, `created`, `modified`, `sources`
+- `# Title:` heading
+- `## Topic`
+- `## Summary`
+- `## Findings` (numbered)
+- `## In-Project Cross-References` (table)
+- `## Open Questions`
+- `## References Index` (table)
+
+### 11.5 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
+| `/research list` | List research items |
+| `/research open <name>` | Show the path to `RESEARCH.md` |
+| `/research show <name>` | Show metadata |
+| `/research search <query>` | Search across all `RESEARCH.md` files |
+| `/research delete <name>` | Delete a research item |
+| `/research archive <name>` | Archive a research item |
+
+---
+
+# Part IV: Agent Customization & Extension
+
+---
 
 ## 11. Custom Agents
 
-Custom agents extend ragent's built-in agent personalities with user-defined profiles. Agents are stored as JSON (OASF format) or Markdown files and loaded automatically at startup.
+### 11.1 Storage Locations
 
-### 11.1 Discovery Paths
+Custom agents can be defined in JSON using the Open Agentic Schema Framework
+(OASF):
 
-Custom agents are discovered from two locations, with project-local taking precedence:
+- `~/.ragent/agents/` — user-global
+- `.ragent/agents/` — project-local (higher priority)
 
-| Priority | Directory |
-|----------|-----------|
-| 1 (lower) | `~/.ragent/agents/` |
-| 2 (higher) | `[PROJECT]/.ragent/agents/` |
-
-### 11.2 File Formats
-
-#### OASF JSON Format
+### 11.2 Agent Schema
 
 ```json
 {
-  "name": "my-reviewer",
-  "description": "Code reviewer focused on security",
-  "version": "1.0.0",
-  "schema_version": "0.7.0",
-  "modules": [{
-    "type": "ragent/agent/v1",
-    "payload": {
-      "system_prompt": "You are an expert code reviewer...",
-      "mode": "primary",
-      "max_steps": 30,
-      "thinking": { "enabled": true, "level": "high" },
-      "permissions": [
-        { "permission": "file:write", "pattern": "src/**", "action": "allow" }
-      ],
-      "skills": ["security-review", "rust-linting"]
-    }
-  }]
+  "name": "rust-reviewer",
+  "description": "Reviews Rust code for idioms and safety",
+  "model": "anthropic/claude-sonnet-4-20250514",
+  "system_prompt": "You are a meticulous Rust reviewer...",
+  "tools": ["read", "edit", "bash", "codeindex_search"],
+  "permissions": [
+    { "permission": "file:write", "pattern": "crates/**", "action": "allow" }
+  ]
 }
 ```
 
-#### Markdown Format
+### 11.3 Template Variables
 
-Uses YAML frontmatter between `---` delimiters with the markdown body as the system prompt:
+System prompts and file contexts support variables:
 
-```markdown
----
-name: my-reviewer
-version: 1.0.0
-model: anthropic/claude-sonnet-4-20250514
-skills:
-  - security-review
-permissions:
-  - permission: file:write
-    pattern: src/**
-    action: allow
----
+| Variable | Expansion |
+|----------|-----------|
+| `{{WORKING_DIR}}` | Current working directory |
+| `{{FILE_TREE}}` | Project file tree |
+| `{{AGENTS_MD}}` | Discovered AGENTS.md content |
+| `{{DATE}}` | Current UTC date |
 
-You are an expert code reviewer focused on security vulnerabilities...
-```
+### 11.4 Loading and Diagnostics
 
-### 11.3 Agent Configuration Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `system_prompt` | string | The agent's personality and instructions |
-| `mode` | string | `primary` (main agent) or `secondary` (helper) |
-| `max_steps` | integer | Maximum tool calls per turn |
-| `thinking` | object | Reasoning configuration: `{ enabled, level, budget_tokens }` |
-| `permissions` | array | Per-agent permission rules |
-| `skills` | array | Skills this agent can invoke |
-| `model` | string | Default model in `provider/model` format |
-| `memory_scope` | string | `user`, `project`, or `none` |
-
-### 11.4 Agent Diagnostics
-
-Use `/agents` to list all loaded agents including custom ones. Custom agents are marked with a yellow `[custom]` badge. Diagnostics show any load errors or skipped files.
-
-### 11.5 OASF Annotations
-
-OASF records support taxonomy annotations for discoverability:
-
-- `skills` — OASF skill taxonomy (e.g. `software_engineering/code_review`)
-- `domains` — OASF domain taxonomy (e.g. `technology/software_development`)
-- `locators` — Source code or registry references
+Use `/agents` to list loaded agents, view diagnostics, and confirm custom
+profiles are parsed correctly. Custom agents display a `[custom]` badge in the
+agent picker.
 
 ---
-
 
 ## 12. Skills System
 
-Skills are loadable instruction packs that inject tools, prompts, and file context into agent sessions. Each skill is defined by a `SKILL.md` file with YAML frontmatter and a markdown body.
+### 12.1 Overview
 
-### 12.1 Skill Discovery
+Skills are loadable YAML packs that inject tools, system prompts, and file
+context into an agent session. They are useful for domain-specific workflows
+(e.g., Rust embedded development, Terraform infrastructure).
 
-Skills are discovered from multiple sources with priority order:
+### 12.2 Skill Locations
 
-| Priority | Scope | Path |
-|----------|-------|------|
-| 0 | Bundled | Built into ragent binary |
-| 1 | Enterprise | Managed settings |
-| 2 | OpenSkills Global | `~/.agent/skills/`, `~/.claude/skills/` |
-| 3 | Personal | `~/.ragent/skills/<name>/SKILL.md` |
-| 4 | OpenSkills Project | `.agent/skills/`, `.claude/skills/` |
-| 5 | Project | `.ragent/skills/<name>/SKILL.md` |
+- Bundled skills in `assets/skills/`
+- Custom skills in `~/.ragent/skills/` or `.ragent/skills/`
 
-Higher-priority scopes override lower ones when names conflict.
-
-### 12.2 Skill Structure
-
-```
-.ragent/skills/
-  deploy/
-    SKILL.md            # Skill instructions and frontmatter (required)
-    scripts/            # Helper scripts the skill can invoke
-    templates/          # Template files for the agent to fill in
-    examples/           # Example outputs showing expected format
-    resources/          # Reference materials
-```
-
-### 12.3 SKILL.md Frontmatter
+### 12.3 Skill Format
 
 ```yaml
----
-name: deploy
-version: 1.0.0
-description: Deploy the application to staging
-argument_hint: "[environment]"
-user_invocable: true
-disable_model_invocation: false
-allowed_tools:
+name: rust-embedded
+prompt: |
+  You are an expert in embedded Rust (no_std, RTIC, embassy).
+context_files:
+  - "assets/skills/rust-embedded/context.md"
+tools:
+  - read
+  - edit
   - bash
-  - write
-model: "anthropic/claude-sonnet-4-20250514"
-context: fork
-agent: general-purpose
----
-
-# Deploy Skill
-
-When the user types `/deploy [environment]`, deploy the application...
+  - codeindex_search
 ```
 
-### 12.4 Skill Fields
+### 12.4 Activation
 
-| Field | Description |
-|-------|-------------|
-| `name` | Unique identifier (lowercase, hyphens, max 64 chars) |
-| `description` | What the skill does; used for auto-invocation matching |
-| `argument_hint` | Shown during autocomplete (e.g. `"[environment]"`) |
-| `user_invocable` | If `false`, hidden from `/` menu; only agent can invoke |
-| `disable_model_invocation` | If `true`, only user can invoke via `/name` |
-| `allowed_tools` | Tools the agent can use without permission when this skill is active |
-| `model` | Override model when this skill is active |
-| `context` | `fork` to run in a forked subagent context |
-| `agent` | Subagent type when `context` is `fork` |
-
-### 12.5 Invocation
-
-Skills are invoked by including `/skillname` in a message or by the agent auto-invoking based on description matching. Arguments after the skill name are passed to the skill body via template substitution.
-
-### 12.6 Template Variables
-
-Skill bodies support variable substitution:
-
-| Variable | Description |
-|----------|-------------|
-| `$0` | Full argument string |
-| `$1`, `$2`, ... | Individual arguments |
-| `${RAGENT_SKILL_DIR}` | Directory containing the skill's `SKILL.md` |
-| `${RAGENT_SESSION_ID}` | Current session ID |
-| `${RAGENT_WORKING_DIR}` | Current working directory |
-
-### 12.7 Bundled Skills
-
-Ragent ships with 4 bundled skills:
-
-| Skill | Purpose |
-|-------|---------|
-| `simplify` | Review recently changed files for code quality, reuse, and efficiency issues |
-| `debug` | Troubleshoot current session by reading debug logs |
-| `security-audit` | Security-focused code review |
-| `test-coverage` | Analyse test coverage gaps |
-
-### 12.8 Dynamic Context Injection
-
-Skills can enable dynamic context with `allow_dynamic_context: true`. This allows `!command` syntax within the skill body to execute shell commands and inject their output into the context.
+Skills can be loaded via slash command or the `/skills` picker.
 
 ---
-
 
 ## 13. Prompt Optimization
 
-The prompt optimization system transforms plain prompts into structured frameworks using template-based meta-prompts. No external API calls are needed — the optimization is performed by sending the framework's system prompt to the current LLM provider.
+### 13.1 Overview
 
-### 13.1 Optimization Methods
+The `/opt` slash command (and `POST /opt` endpoint) transforms a plain prompt
+into one of 12 structured frameworks without an LLM call.
 
-| Method | Name | Description |
-|--------|------|-------------|
-| `co_star` | CO-STAR | Context, Objective, Identity, Tone, Audience, Result |
-| `crispe` | CRISPE | Capacity/Role, Request, Intent, Steps, Persona, Examples |
-| `cot` | Chain-of-Thought | Step-by-step reasoning scaffold with self-checks |
-| `draw` | DRAW | Professional AI image prompt optimizer |
-| `rise` | RISE | Recursive Introspection — iterative self-improvement loop |
-| `o1_style` | O1-STYLE | Thinking/step/reflection/reward structured reasoning |
-| `meta` | Meta Prompting | Distil to a concise, high-signal meta-prompt |
-| `variational` | VARI | Variational planning content-generation scaffold |
-| `q_star` | Q* | XML Q*/A* intelligent iterative prompt optimizer |
-| `openai` | OpenAI | Detailed GPT-style system prompt with guidelines |
-| `claude` | Claude | Anthropic-style XML instruction generator with examples |
-| `microsoft` | Microsoft | Azure AI optimised prompt with quality targets |
+### 13.2 Methods
 
-### 13.2 Usage
+| Method | Description |
+|--------|-------------|
+| `co_star` | Context, Objective, Scope, Task, Action, Result |
+| `crispe` | Context, Role, Intent, Steps, Persona, Examples |
+| `cot` | Chain-of-Thought step-by-step reasoning |
+| `draw` | Image prompt structure |
+| `rise` | Role, Intent, Scope, Examples |
+| `o1_style` | Stylized creative tokens and constraints |
+| `meta` | Meta Prompting — generate the internal prompt |
+| `variational` | Multiple prompt candidates + selection criteria |
+| `q_star` | Iterative query refinement |
+| `openai` | OpenAI/GPT system+user adapter |
+| `claude` | Anthropic Claude adapter |
+| `microsoft` | Microsoft Azure AI adapter |
 
-**TUI:**
+### 13.3 Example
+
 ```
-/opt help                    # Show method table
-/opt co_star Explain lifetimes
-/opt cot Solve two-sum
-/opt draw A futuristic city at sunset
+/opt co_star Explain Rust lifetimes
 ```
-
-**HTTP API:**
-```bash
-curl -s -X POST http://localhost:9100/opt \
-  -H "Authorization: Bearer $RAGENT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
-```
-
-### 13.3 How It Works
-
-1. The user selects a method and provides a raw prompt.
-2. The system loads the method's meta-prompt (system message) from the template library.
-3. The meta-prompt and user's input are sent to the current LLM provider.
-4. The LLM returns the optimised, structured prompt.
-5. The result is displayed in the TUI or returned via the HTTP API.
-
-### 13.4 Completer Trait
-
-The optimization is decoupled from any specific LLM backend via the `Completer` trait:
-
-```rust
-#[async_trait]
-pub trait Completer: Send + Sync {
-    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String>;
-}
-```
-
-Implementations connect to the session's active provider and model.
-
-### 13.5 Method Aliases
-
-Methods can be referenced by multiple aliases for convenience:
-
-| Method | Aliases |
-|--------|---------|
-| `co_star` | `costar`, `co-star` |
-| `crispe` | `crisper` |
-| `cot` | `chain_of_thought`, `chain-of-thought`, `chainofthought` |
-| `o1_style` | `o1-style`, `o1` |
-| `meta` | `meta_prompting`, `meta-prompting` |
-| `variational` | `vari` |
-| `q_star` | `qstar`, `q-star`, `q*` |
-| `microsoft` | `ms`, `azure` |
 
 ---
 
+# Part V: Multi-Agent Coordination
+
+---
 
 ## 14. Teams
 
-The team system enables multi-agent coordination with named teammates, shared task lists, mailbox messaging, and task assignment. Teams are persisted on disk and can be created, opened, closed, and cleaned up through slash commands.
-
 ### 14.1 Core Concepts
 
-| Concept | Description |
-|---------|-------------|
-| **Team** | A named group of agents with shared state and tasks |
-| **Teammate** | An individual agent instance within a team |
-| **Task** | A work item with title, description, status, and optional dependencies |
-| **Mailbox** | Message queue per teammate for asynchronous communication |
-| **Memory Scope** | Per-teammate persistent memory (`user`, `project`, or `none`) |
+A **team** is a named workspace with:
+
+- A roster of teammates (each with an agent type and task)
+- A shared task list stored in `tasks.json`
+- A per-member mailbox stored in `mailbox.json`
+- A team configuration in `team.json`
 
 ### 14.2 Team Lifecycle
 
 ```mermaid
 graph LR
-    A["/team create name"] --> B[Team Created]
-    B --> C["/team spawn agent"]
-    C --> D[Teammate Running]
-    D --> E["/team task_create"]
-    E --> F[Task Available]
-    F --> G[teammate claims task]
-    G --> H[Task In Progress]
-    H --> I[teammate completes task]
-    I --> J[Task Done]
-    J --> K{More tasks?}
-    K -->|Yes| F
-    K -->|No| L["/team cleanup"]
-    L --> M[Team Destroyed]
+    Create[team_create] --> Spawn[team_spawn]
+    Spawn --> Work[Tasks + Messages]
+    Work --> Idle[team_idle]
+    Work --> Shutdown[team_shutdown_teammate]
+    Idle --> Cleanup[team_cleanup]
+    Shutdown --> Cleanup
 ```
 
 ### 14.3 Team Tools (20)
 
 | Tool | Purpose |
 |------|---------|
-| `team_create` | Create a new team with a unique name |
-| `team_spawn` | Spawn a teammate agent into the team |
-| `team_cleanup` | Tear down a team and remove its on-disk resources |
-| `team_status` | Get team member list, states, and task progress summary |
-| `team_idle` | Signal that a teammate has no more tasks to work on |
-| `team_task_create` | Add a new task to the team's shared task list |
-| `team_task_claim` | Claim the next available task (or a specific task ID) |
-| `team_task_complete` | Mark a claimed task as completed |
-| `team_task_list` | List all tasks with status, assignment, and dependencies |
-| `team_assign_task` | Assign a specific pending task to a named teammate |
-| `team_message` | Send a direct message to one team member |
-| `team_broadcast` | Send a message to all active teammates simultaneously |
-| `team_read_messages` | Read unread messages from the teammate's mailbox |
-| `team_shutdown_teammate` | Request graceful or immediate shutdown of a teammate (lead-only). Pass `immediate: true` to cancel the agent loop and mark `Stopped` without waiting for `team_shutdown_ack`. |
-| `team_shutdown_ack` | Acknowledge a shutdown request and terminate |
-| `team_submit_plan` | Submit a plan to the team lead for approval |
-| `team_approve_plan` | Approve or reject a teammate's submitted plan (lead-only) |
-| `team_wait` | Block until teammates finish their current work |
-| `team_memory_read` | Read from a teammate's persistent memory directory |
-| `team_memory_write` | Write to a teammate's persistent memory directory |
+| `team_create` | Create team |
+| `team_spawn` | Spawn teammate |
+| `team_status` | Team status |
+| `team_message` | Direct message |
+| `team_broadcast` | Broadcast to active teammates |
+| `team_read_messages` | Read mailbox |
+| `team_memory_read` / `team_memory_write` | Team memory access |
+| `team_submit_plan` | Submit plan for approval |
+| `team_approve_plan` | Lead approve/reject plan |
+| `team_task_create` | Add task |
+| `team_task_claim` | Claim task |
+| `team_task_complete` | Complete task |
+| `team_assign_task` | Lead assigns task |
+| `team_idle` | Signal idle |
+| `team_shutdown_teammate` | Shutdown teammate (graceful/immediate) |
+| `team_shutdown_ack` | Acknowledge shutdown |
+| `team_cleanup` | Remove team state |
 
 ### 14.4 Team Slash Commands
 
 | Command | Purpose |
 |---------|---------|
-| `/team create <name>` | Create new team |
-| `/team open <name>` | Open existing team |
-| `/team close` | Close team session |
-| `/team delete <name>` | Delete team |
-| `/team clear` | Clear team state |
-| `/team tasks` | Show team tasks table |
-| `/team status` | Show team status |
-| `/team message <to> <content>` | Send message to teammate |
-| `/team broadcast <content>` | Broadcast to all teammates |
-| `/team spawn <agent>` | Spawn teammate agent |
-| `/team cleanup` | Cleanup team resources |
+| `/team create <name>` | Create a new team |
+| `/team open <name>` | Open an existing team |
+| `/team close` | Close current team |
+| `/team clear` | Reset current team state |
+| `/team delete <name>` | Delete a team |
+| `/team cleanup` | Tear down current team |
+| `/team message <to> <text>` | Send direct message |
 
 ### 14.5 Task Dependencies
 
-Tasks can declare dependencies on other tasks. A task cannot be claimed until all its dependencies are completed. This enables sequential workflows within parallel teams.
+Tasks can declare `depends_on` task IDs. A task cannot be claimed until all its
+dependencies are completed.
 
 ### 14.6 Plan Approval Workflow
 
-Teammates can submit plans to the team lead for approval before starting implementation:
-
-1. Teammate calls `team_submit_plan` with their intended approach
-2. Lead receives the plan via `team_read_messages`
-3. Lead calls `team_approve_plan` with `approved: true` or `approved: false`
-4. If approved, teammate exits plan-pending mode and begins implementation
-5. If rejected, teammate receives feedback and revises
-
----
+1. Teammate calls `team_submit_plan`.
+2. Lead reviews and calls `team_approve_plan` (approved=true/false).
+3. On approval, teammate proceeds with implementation.
 
 ### 14.7 Blueprints
 
-Blueprints are pre-built team templates that define which teammates to spawn and what seed tasks to create. When a team is created with a blueprint, all teammates are spawned automatically with their role-specific prompts.
-
 #### Blueprint Storage Locations
 
-Blueprints are searched in priority order:
-
-1. **Project-local:** `[PROJECT]/.ragent/blueprints/teams/<name>/`
-2. **Global:** `~/.ragent/blueprints/teams/<name>/`
+- `~/.ragent/blueprints/teams/<name>/`
+- `.ragent/blueprints/teams/<name>/`
 
 #### Blueprint Directory Structure
 
-```text
-.ragent/blueprints/teams/code-review/
-  README.md              # Team description (copied to team directory)
-  spawn-prompts.json     # Teammate definitions with role-specific prompts
-  task-seed.json         # Initial tasks seeded on team creation
+```
+<blueprint>/
+├── spawn-prompts.json   # Agent type definitions
+├── task-seed.json       # Initial task list
+└── context.md           # Shared context
 ```
 
 #### spawn-prompts.json Format
 
-Defines teammates to auto-spawn when the team is created:
-
-```json
-[
-  {
-    "tool_name": "team_spawn",
-    "teammate_name": "security-reviewer",
-    "agent_type": "general",
-    "prompt": "Perform a focused security review of the codebase..."
-  },
-  {
-    "tool_name": "team_spawn",
-    "teammate_name": "test-reviewer",
-    "agent_type": "general",
-    "prompt": "Review test coverage and identify gaps..."
-  }
-]
-```
-
-Fields:
-- `tool_name` — Must be `"team_spawn"`
-- `teammate_name` — Unique name for the teammate within the team
-- `agent_type` — Agent type to use (`general`, `coder`, `architect`, etc.)
-- `prompt` — Role-specific instructions prepended to the teammate's context
-- `memory` — Optional persistent memory scope (`user`, `project`, or `none`)
-- `model` — Optional model override in `provider/model` format
-
-#### task-seed.json Format
-
-Defines initial tasks created when the team is set up:
-
-```json
-[
-  {
-    "tool": "team_task_create",
-    "input": {
-      "title": "Audit authentication boundaries",
-      "description": "Confirm session/auth checks protect privileged actions."
-    }
-  }
-]
-```
-
-Both `"input"` and `"args"` keys are supported for tool arguments.
-
-#### Blueprint Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/team blueprint` | List all installed blueprints |
-| `/team blueprint <name>` | Show detailed summary of a specific blueprint |
-| `/team create <blueprint> [name]` | Create a new team from a blueprint (blueprint is required) |
-
-The list view shows a table with blueprint name, scope (project/global), teammate count, task count, and description. The detail view shows the full README, teammate table, seed tasks, and usage instructions.
-
-#### Work Context Propagation
-
-When creating a team from a blueprint, the `context` parameter is critical — it tells every auto-spawned teammate exactly what code to target:
-
-```bash
-/team create code-review my-review-team
-Review the crates/ragent-server directory for security issues
-```
-
-The context is prepended to each teammate's spawn prompt from the blueprint. Without it, teammates only receive their generic role prompt.
-
-#### Blueprint Best Practices
-
-- **Always use blueprints** for repeatable team patterns — they save time and reduce errors
-- **Do not re-spawn blueprint teammates** — they are spawned automatically by `team_create`
-- **Provide detailed context** when creating a team so teammates know exactly what to work on
-- **Keep prompts focused** in `spawn-prompts.json` — each teammate should have a clear, scoped responsibility
-- **Seed tasks with concrete goals** in `task-seed.json` so teammates have immediate work to claim
-
----
-
-
-## 15. Swarm Mode
-
-Swarm mode automatically decomposes a high-level goal into parallel subtasks, creates an ephemeral team, and coordinates execution. It is ideal for large tasks that can be broken into independent work items.
-
-### 15.1 How Swarm Works
-
-1. **Decomposition** — The LLM analyses the prompt and produces a JSON decomposition with 2–8 independent subtasks and optional dependency edges.
-2. **Team Creation** — An ephemeral team named `swarm-<timestamp>` is created.
-3. **Teammate Spawning** — One teammate is spawned per subtask with a tailored prompt.
-4. **Dependency Resolution** — Tasks with `depends_on` are blocked until prerequisites complete.
-5. **Progress Monitoring** — The TUI shows real-time status: spawning, blocked, in-progress, and completed counts.
-6. **Auto-Completion** — When all tasks finish, the swarm auto-summarises results.
-
-### 15.2 Swarm Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
-| `/swarm status` | Show live progress of the active swarm |
-| `/swarm cancel` | Cancel the active swarm and clean up |
-| `/swarm help` | Show usage help |
-
-### 15.3 Decomposition Format
-
-The LLM returns a JSON object with an array of subtasks:
-
 ```json
 {
-  "tasks": [
+  "agents": [
     {
-      "id": "s1",
-      "title": "Short title",
-      "description": "Detailed instructions for the agent...",
-      "depends_on": [],
+      "name": "security-reviewer",
       "agent_type": "general",
-      "model": null
+      "prompt": "Review the target files for security issues..."
     }
   ]
 }
 ```
 
-Each subtask has:
-- `id` — Unique identifier (e.g. `s1`, `s2`)
-- `title` — Short human-readable title
-- `description` — Full instructions for the teammate
-- `depends_on` — IDs of subtasks that must complete first
-- `agent_type` — Optional agent type override (defaults to `general`)
-- `model` — Optional model override in `provider/model` format
+#### task-seed.json Format
 
-### 15.4 Swarm State
+```json
+{
+  "tasks": [
+    { "title": "Scan for injection risks", "description": "..." }
+  ]
+}
+```
 
-The TUI tracks swarm state including:
-- `team_name` — Name of the ephemeral backing team
-- `prompt` — Original user prompt
-- `decomposition` — The LLM-produced task breakdown
-- `spawned` — Whether all teammates have been spawned
-- `completed` — Whether the orchestrator has collected all results
+#### Blueprint Slash Commands
 
-### 15.5 Limitations
+| Command | Purpose |
+|---------|---------|
+| `/team create <name> --blueprint <bp>` | Create team from blueprint |
 
-- Only one swarm can be active at a time; start a new one after cancelling the current swarm.
-- Requires a configured model with JSON mode support for reliable decomposition.
-- Subtask descriptions must be detailed enough for agents to work without further clarification.
+#### Work Context Propagation
+
+When a team is created with a blueprint, the work context is prepended to every
+teammate's spawn prompt. This context includes target directories, expected
+outputs, and any constraints.
+
+#### Blueprint Best Practices
+
+- Keep prompts under ~500 words.
+- Reference files by path rather than pasting content.
+- Spawn one teammate per independent work item.
+- Use `/team_wait` after spawning to avoid racing ahead.
 
 ---
 
+## 15. Swarm Mode
+
+### 15.1 How Swarm Works
+
+The `/swarm <prompt>` slash command decomposes a user request into parallel
+subtasks and spawns multiple agents to work on them concurrently. A synthesis
+agent combines the outputs into a final answer.
+
+### 15.2 Swarm Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/swarm <prompt>` | Decompose and run parallel swarm |
+| `/swarm status` | Show active swarm tasks |
+| `/swarm kill` | Cancel active swarm |
+
+### 15.3 Decomposition Format
+
+Swarm decomposition returns a JSON or Markdown list of subtasks:
+
+```json
+{
+  "tasks": [
+    { "id": "1", "agent": "explore", "prompt": "Find all auth-related files" },
+    { "id": "2", "agent": "code-review", "prompt": "Review auth logic for issues" }
+  ]
+}
+```
+
+### 15.4 Swarm State
+
+Swarm state is tracked in memory and via the team store when teammates are
+used. The TUI active-agents panel shows per-agent status and progress.
+
+### 15.5 Limitations
+
+- Swarm requires a provider with enough throughput for parallel calls.
+- Cloud providers may hit rate limits; exponential retry backoff mitigates this.
+- Synthesis depends on the quality of subtask outputs.
+
+---
 
 ## 16. Autopilot Mode
 
-Autopilot mode enables the agent to operate autonomously, continuing to iterate on a task without user intervention until the task is complete, a safety limit is reached, or the user stops it.
-
 ### 16.1 How Autopilot Works
 
-1. **Activation** — User runs `/autopilot on` with optional token and time budgets.
-2. **Autonomous Loop** — The agent processes messages, makes tool calls, and continues iterating automatically.
-3. **Completion** — The agent calls `task_complete` with a summary, or the user runs `/autopilot off`.
-4. **Safety Limits** — Hard stops prevent runaway execution.
+Autopilot runs the agent loop without requiring user approval for each step. It
+is useful for long-running, low-risk tasks.
 
 ### 16.2 Autopilot Slash Commands
 
 | Command | Purpose |
 |---------|---------|
-| `/autopilot on [--max-tokens N] [--max-time N]` | Enable autonomous operation with optional limits |
-| `/autopilot off` | Disable autonomous operation and return to interactive mode |
-| `/autopilot status` | Show autopilot status, elapsed time, and remaining budget |
+| `/autopilot on` | Enable autopilot |
+| `/autopilot off` | Disable autopilot |
+| `/autopilot on --max-tokens N` | Enable with token budget |
+| `/autopilot on --max-time N` | Enable with time budget (seconds) |
 
 ### 16.3 Safety Limits
 
-| Limit | Default | Behaviour When Hit |
-|-------|---------|-------------------|
-| `max_steps` | 500 | Halt and ask user whether to continue |
-| Token budget | Optional (`--max-tokens`) | Stop and display summary |
-| Time limit | Optional (`--max-time` in seconds) | Stop and display summary |
-| Context window | Model-specific | Trigger automatic compaction |
+| Limit | Default | Description |
+|-------|---------|-------------|
+| Max iterations | 50 | Hard cap on tool/turn loops |
+| Max tokens | configurable | Total token budget |
+| Max time | configurable | Wall-clock budget |
+| Permissions | auto-approve | Only within allowed rule set |
 
 ### 16.4 Completion Signalling
 
-Agents in autopilot mode call `task_complete` to signal completion:
+Autopilot ends when:
 
-```
-task_complete(summary: "Implemented feature X with tests and documentation")
-```
-
-This publishes a `TaskCompleted` event, displays the summary to the user, and exits autopilot mode.
-
-> ⚠️ **Do not confuse with `team_task_complete`.** The two tools have similar
-> names but very different signatures. `task_complete` takes **only**
-> `summary` and ends the autonomous loop. `team_task_complete` takes
-> `team_name` + `task_id` and is used inside team workflows to mark a
-> claimed task complete.  Calling `task_complete(task_id=...)` is one of the
-> most common model mistakes — the system prompt carries a `## Task Tool
-> Family` section that explicitly calls this out.
+- The agent calls `task_complete(summary)`.
+- A safety limit is reached.
+- The user sends `/autopilot off` or `Esc`.
 
 ### 16.4.1 `new_task` parameter contract
 
-`new_task` is the sub-agent spawn tool. It has **two required parameters**
-(`agent` AND `task`) and both must be supplied — calls with only one of
-them will fail with `Missing required parameter: …`.  This is encoded in
-the JSON schema (`required: ["agent", "task"]`,
-`additionalProperties: false`) and in the tool description.  The system
-prompt also includes the contract in the `## Task Tool Family` section
-so models do not omit `task` or `agent` by mistake.
+`new_task` spawns a sub-agent with a bounded task. The sub-agent should finish
+with `task_complete`.
 
 ### 16.5 Status Display
 
-When active, the status bar shows:
-- `⚡ autopilot` — Normal operation
-- `autopilot: time limit reached` — Time budget exhausted
-- `autopilot stopped: task complete` — Agent finished successfully
+Autopilot state is shown in the status bar as `AUTOPILOT` with iteration and
+token counters.
 
 ---
-
 
 ## 17. Orchestrator & Multi-Agent Coordination
 
-The orchestrator provides primitives for coordinating multiple agents in a single workflow. It supports job dispatch, progress tracking, and result aggregation.
-
 ### 17.1 Core Components
 
-| Component | Purpose |
-|-----------|---------|
-| `AgentRegistry` | Maintains a registry of available agents and their capabilities |
-| `Coordinator` | Dispatches jobs to agents and collects results |
-| `InProcessRouter` | Actor-style message routing between agents |
-| `JobDescriptor` | Defines a job with required capabilities and payload |
+| Component | Responsibility |
+|-----------|----------------|
+| `Coordinator` | High-level task decomposition and dispatch |
+| `AgentPool` | Manages active sub-agents |
+| `ConflictResolver` | Detects and resolves conflicting edits |
+| `TransportAdapters` | Bridges TUI, HTTP, and mailbox transports |
 
 ### 17.2 Coordinator API
 
-```rust
-use ragent_agent::orchestrator::{Coordinator, JobDescriptor};
+The coordinator exposes methods for:
 
-let coord = Coordinator::new(registry);
-
-// Synchronous job (blocks until all agents respond)
-let result = coord.start_job_sync(JobDescriptor {
-    id: "job-1".to_string(),
-    required_capabilities: vec!["search".to_string()],
-    payload: "find TODOs".to_string(),
-}).await?;
-
-// Asynchronous job (returns job ID, subscribe to events)
-let job_id = coord.start_job_async(desc).await?;
-let mut events = coord.subscribe_job_events(&job_id).await?;
-```
+- `decompose(prompt)` → list of subtasks
+- `dispatch(subtasks)` → spawn agents
+- `collect(results)` → aggregate outputs
+- `synthesize(results)` → final response
 
 ### 17.3 HTTP API Endpoints
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/orchestrator/metrics` | Return live counter snapshot |
-| `POST` | `/orchestrator/start` | Start a multi-agent job |
-| `GET` | `/orchestrator/jobs/{id}` | Poll job status and results |
+Orchestrator operations are available via `/sessions/{id}/messages` when the
+session is configured with the `orchestrator` agent.
 
 ### 17.4 Conflict Resolution
 
-The `policy` submodule provides conflict resolution strategies:
+When multiple agents edit the same file, the conflict resolver:
 
-- **Last-write-wins** — Simple timestamp-based resolution
-- **Human-in-the-loop** — Escalate conflicts to the user for decision
-- **Merge strategies** — Automatic merging for compatible changes
+1. Detects overlapping edits.
+2. Applies non-overlapping edits highest-end-offset-first.
+3. Reports conflicts for manual resolution.
 
 ### 17.5 Transport Adapters
 
-The `transport` submodule supports pluggable communication:
-
-- `InProcessRouter` — In-process actor-style messaging
-- `HttpRouter` — HTTP-based inter-process communication
-- `RouterComposite` — Combine multiple transport layers
+| Adapter | Use |
+|---------|-----|
+| TUI | Real-time UI updates |
+| HTTP SSE | Remote clients |
+| Mailbox | Team teammate notifications |
 
 ### 17.6 Current Status
 
-The orchestrator is at MVP level with in-process coordination. HTTP endpoints are available but the full distributed coordination (leader election, cluster formation) is planned for a future milestone.
+The orchestrator is functional for swarm decomposition and simple parallel
+workflows. Advanced conflict resolution across arbitrary file sets is under
+active development.
 
 ---
 
+# Part VI: External Integrations
+
+---
 
 ## 18. GitHub & GitLab Integration
 
-Ragent provides native GitHub and GitLab integration tools through the `ragent-tools-vcs` crate, enabling agents to manage issues, pull/merge requests, CI/CD pipelines, and project metadata. Both platforms share a similar tool architecture and support repository auto-detection from git remotes, but authenticate and name resources differently.
-
 ### 18.1 GitHub Authentication & Slash Commands
 
-**Authentication:**
-- **Token:** Stored securely in the ragent SQLite database
-- **Auto-detected from VS Code:** If the GitHub Copilot extension is installed, ragent can reuse the existing Copilot token
-
-**Slash Commands:**
-| Command | Purpose |
-|---------|---------|
-| `/github login` | Authenticate with GitHub |
-| `/github logout` | Remove GitHub credentials |
-| `/github status` | Show GitHub connection status |
+Authentication uses `GITHUB_TOKEN`. GitHub Enterprise is supported via the
+`github_api_base` config.
 
 ### 18.2 GitHub Issue Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `github_issues_list` | List issues with filtering | `state` (open/closed/all), `labels`, `limit` |
-| `github_issues_get` | Get issue details | `number` |
-| `github_issues_create` | Create a new issue | `title`, `body`, `labels`, `assignees` |
-| `github_issues_comment` | Add comment to an issue | `number`, `body` |
-| `github_issues_close` | Close an issue | `number`, `comment` (optional) |
+| Tool | Purpose |
+|------|---------|
+| `github_list_issues` | List repository issues |
+| `github_get_issue` | Read an issue |
+| `github_create_issue` | Create an issue |
+| `github_update_issue` | Update an issue |
+| `github_close_issue` | Close an issue |
 
 ### 18.3 GitHub Pull Request Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `github_pr_list` | List pull requests | `state`, `base`, `limit` |
-| `github_pr_get` | Get PR details and diff | `number` |
-| `github_pr_create` | Create a new pull request | `title`, `body`, `base`, `head`, `draft` |
-| `github_pr_merge` | Merge a pull request | `number`, `method` (merge/squash/rebase) |
-| `github_pr_review` | Submit a PR review | `number`, `event` (approve/comment/request_changes), `body` |
+| Tool | Purpose |
+|------|---------|
+| `github_list_prs` | List PRs |
+| `github_get_pr` | Read a PR |
+| `github_create_pr` | Create a PR |
+| `github_merge_pr` | Merge a PR |
+| `github_close_pr` | Close a PR |
 
 ### 18.4 GitHub Auto-Detection
 
-Owner and repository are automatically detected from the git remote:
-
-```text
-git remote get-url origin
-→ https://github.com/owner/repo.git  → owner="owner", repo="repo"
-→ git@github.com:owner/repo.git      → owner="owner", repo="repo"
-```
-
-Falls back to explicit `--owner` and `--repo` parameters if detection fails.
-
----
+The local git remote is inspected for `github.com` or a configured GitHub
+Enterprise host. When detected, GitHub tools are exposed automatically.
 
 ### 18.5 GitLab Authentication & Slash Commands
 
-**Configuration:**
-- **Instance URL:** The GitLab instance URL (e.g., `https://gitlab.com` or a self-hosted instance)
-- **Personal Access Token (PAT):** Stored securely in the ragent SQLite database via `/gitlab setup`
-
-**Slash Commands:**
-| Command | Purpose |
-|---------|---------|
-| `/gitlab setup` | Configure GitLab connection (instance URL + PAT) |
-| `/gitlab logout` | Remove stored GitLab credentials |
-| `/gitlab status` | Show GitLab connection status |
+Authentication uses `GITLAB_TOKEN` or `gitlab.com` OAuth. Self-managed GitLab
+is supported via `gitlab_api_base`.
 
 ### 18.6 GitLab Issue Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `gitlab_issues_list` | List issues with filtering | `project_id`, `state` (opened/closed/all), `labels`, `limit` |
-| `gitlab_issues_get` | Get issue details | `project_id`, `issue_iid` |
-| `gitlab_issues_create` | Create a new issue | `project_id`, `title`, `body`, `labels`, `assignee_ids` |
-| `gitlab_issues_comment` | Add comment to an issue | `project_id`, `issue_iid`, `body` |
-| `gitlab_issues_close` | Close an issue | `project_id`, `issue_iid` |
+| Tool | Purpose |
+|------|---------|
+| `gitlab_list_issues` | List project issues |
+| `gitlab_get_issue` | Read an issue |
+| `gitlab_create_issue` | Create an issue |
+| `gitlab_close_issue` | Close an issue |
 
 ### 18.7 GitLab Merge Request Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `gitlab_mr_list` | List merge requests | `project_id`, `state`, `target_branch`, `limit` |
-| `gitlab_mr_get` | Get MR details and diff | `project_id`, `mr_iid` |
-| `gitlab_mr_create` | Create a new merge request | `project_id`, `title`, `body`, `source_branch`, `target_branch` |
-| `gitlab_mr_merge` | Merge a merge request | `project_id`, `mr_iid`, `squash` |
+| Tool | Purpose |
+|------|---------|
+| `gitlab_list_prs` | List MRs |
+| `gitlab_get_pr` | Read an MR |
+| `gitlab_create_pr` | Create an MR |
 
 ### 18.8 GitLab CI/CD Pipeline Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `gitlab_pipeline_list` | List pipelines | `project_id`, `status`, `limit` |
-| `gitlab_pipeline_get` | Get pipeline details | `project_id`, `pipeline_id` |
-| `gitlab_ci_list` | List CI jobs for a pipeline | `project_id`, `pipeline_id` |
-| `gitlab_ci_get` | Get CI job details and logs | `project_id`, `job_id` |
+| Tool | Purpose |
+|------|---------|
+| `gitlab_get_pipeline` | Read a pipeline |
+| `gitlab_list_jobs` | List pipeline jobs |
+| `gitlab_get_job` | Read a job |
+| `gitlab_retry_job` | Retry a job |
+| `gitlab_cancel_job` | Cancel a job |
 
 ### 18.9 GitLab Project Tools
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `gitlab_project_get` | Get project metadata | `project_id` or `path_with_namespace` |
+| Tool | Purpose |
+|------|---------|
+| `gitlab_list_projects` | List accessible projects |
+| `gitlab_get_project` | Read project metadata |
 
 ### 18.10 GitLab Auto-Detection
 
-When operating inside a Git repository with a GitLab remote, ragent can auto-detect the `project_id` or `path_with_namespace` from the git remote configuration:
-
-```text
-git remote get-url origin
-→ https://gitlab.com/owner/repo.git  → path_with_namespace="owner/repo"
-→ git@gitlab.com:owner/repo.git      → path_with_namespace="owner/repo"
-```
-
-Falls back to explicit `project_id` or `path_with_namespace` parameters if detection fails.
-
+GitLab tools are auto-enabled when a `gitlab.com` or configured self-managed
+host is detected in the git remote.
 
 ---
 
 ## 19. MCP Integration (Model Context Protocol)
 
-The MCP subsystem acts as a client for the [Model Context Protocol](https://modelcontextprotocol.io/), letting ragent discover, connect to, and call tools hosted by external MCP servers. The integration is built on the `rmcp` crate and is currently functional for local-stdio servers.
-
 ### 19.1 Discovery
 
-MCP servers are discovered by scanning the system `PATH` for known executable names. The following servers are recognised out of the box:
+Ragent can discover MCP servers automatically. Known server types include:
 
-| Server | Executable(s) | Purpose |
-|--------|--------------|---------|
-| Filesystem | `mcp-server-filesystem` | Local file browsing |
-| GitHub | `mcp-server-github`, `gh-mcp` | GitHub API access |
-| Git | `mcp-server-git` | Git repository operations |
-| PostgreSQL | `mcp-server-postgres` | Database queries |
-| SQLite | `mcp-server-sqlite` | SQLite queries |
-| Memory | `mcp-server-memory` | Persistent memory store |
-| Brave Search | `mcp-server-brave-search` | Web search |
-| Fetch | `mcp-server-fetch` | HTTP fetch |
-| Puppeteer | `mcp-server-puppeteer` | Browser automation |
-
-**TUI slash command:** `/mcp discover` — scan PATH and list discovered servers.
+- `filesystem`
+- `git`
+- `github`
+- `fetch`
+- `sqlite`
+- `postgres`
+- `brave-search`
+- `everything`
+- `puppeteer`
 
 ### 19.2 Configuration
 
-Discovered servers can be persisted in `ragent.json` under the `mcp_servers` key. Each entry specifies the transport (currently `stdio` only) and any required environment variables or working-directory overrides.
+MCP servers are configured in `ragent.json`:
 
-```json
+```jsonc
 {
-  "mcp_servers": {
-    "filesystem": {
-      "transport": "stdio",
-      "command": "mcp-server-filesystem",
-      "args": ["/home/user/projects"]
-    }
+  "mcp": {
+    "servers": [
+      {
+        "name": "fetch",
+        "command": "uvx",
+        "args": ["mcp-server-fetch"]
+      }
+    ]
   }
 }
 ```
 
 ### 19.3 Tool Bridging
 
-When an MCP server is connected, its exposed tools are wrapped by `McpToolWrapper` and injected into the active tool registry. The wrapper translates between ragent's native `Tool` trait and MCP's JSON-RPC tool schema, so the LLM can invoke MCP tools exactly like built-in tools.
+MCP tools are wrapped as `mcp_tool` and exposed to the agent with dynamically
+generated JSON schemas. The wrapper handles:
 
-**TUI slash commands:**
-| Command | Purpose |
-|---------|---------|
-| `/mcp list` | List connected MCP servers and their tools |
-| `/mcp call <server> <tool>` | Call an MCP tool directly from the TUI |
+- stdio transport
+- request/response correlation
+- error translation
 
 ### 19.4 Status
 
-- **Implemented:** Discovery, stdio client, tool wrapping, TUI commands.
-- **Not yet implemented:** SSE transport, remote MCP servers, resource subscriptions.
+MCP support is functional for stdio servers. Auto-discovery and configuration
+editing are supported via `/mcp` slash commands.
 
 ---
 
-## 21. Research System
-
-> **Status:** In progress — foundational types, gatherers, and TUI/HTTP integration are implemented; manager CRUD, session orchestrator, `RESEARCH.md` assembler, references index generator, and benchmarks are still pending (see [`specs/researchsystem/PLAN.md`](researchsystem/PLAN.md)).
-
-The Research System is the first stage of the standard ragent workflow: **research → spec → implement**. It runs a gathering session that combines web search and local file cross-referencing, then writes a self-contained `RESEARCH.md` you can reference later from a spec.
-
-### 21.1 Directory Layout
-
-```text
-research/
-├── INDEX.md                       derived cache (regenerated on every change)
-├── _templates/                    optional research templates
-│   └── deepdive.md
-└── <name>/
-    ├── RESEARCH.md                YAML frontmatter + 6 required sections
-    └── sources/
-        ├── web-NN.md
-        ├── local-NN.md
-        ├── spec-NN.md
-        └── other-NN.md
-```
-
-The directory name is the validated research name — lowercase ASCII letters/digits/hyphens, 3–64 chars, starting with a letter.
-
-### 21.2 Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/research <name> <topic>` | Run a gathering session and create the item |
-| `/research list [--all]` | List every item (default excludes archived) |
-| `/research open <name>` | Print the absolute path of `RESEARCH.md` |
-| `/research search <query>` | Full-text search across all `RESEARCH.md` files |
-| `/research show <name>` | Show metadata: name, title, status, sources |
-| `/research delete <name> --yes` | Remove the item (with confirmation) |
-| `/research archive <name>` | Transition to `archived` status |
-| `/research help` | Show the help message |
-
-### 21.3 CLI Sub-Commands
-
-`ragent research create|list|open|search|show|delete|archive` mirrors the TUI. Progress is emitted as machine-readable JSON lines prefixed with `ragent-research:` so callers can pipe through `jq`:
-
-```bash
-ragent research create rust-async "async/await idioms" 2>&1 \
-  | grep ragent-research \
-  | jq -R 'fromjson? | .payload'
-```
-
-### 21.4 HTTP API
-
-When the server is running (`ragent serve`), the research API is mounted under the auth-protected prefix:
-
-| Verb | Path | Body / Query | Description |
-|------|------|--------------|-------------|
-| `GET` | `/research` | — | List every item (excludes archived). |
-| `POST` | `/research` | `{name, topic, sources_dir?, template?}` | Create + run a gathering session. |
-| `GET` | `/research/<name>` | — | Show a single item with related hits. |
-| `DELETE` | `/research/<name>` | `?confirm=delete-<name>` | Delete an item (confirmation token required). |
-
-### 21.5 RESEARCH.md Sections
-
-Every `RESEARCH.md` has six numbered sections plus a References Index:
-
-1. **Topic** — the description that triggered the research.
-2. **Summary** — a one-paragraph overview of the captured evidence.
-3. **Findings** — numbered findings, each citing references like `[#1]`.
-4. **In-Project Cross-References** — relevant project files with one-line relevance notes.
-5. **Open Questions** — items the LLM should answer in a follow-up.
-6. **References Index** — markdown table of every captured source.
-
-### 21.6 Lifecycle Status
-
-- `draft` — created, no gathering run yet.
-- `in-progress` — a session is mid-flight; `RESEARCH.md` is being written.
-- `complete` — `RESEARCH.md` is fully written and references are indexed.
-- `archived` — terminal; excluded from default list (pass `--all` to include).
-
-### 21.7 Spec Linkage
-
-A spec can reference one or more research items in two ways:
-
-1. **`PLAN.md` dependency lines** — Anywhere outside a code fence, add `research: <name>`. Multiple declarations are allowed; duplicates are ignored.
-2. **`SPEC.md` frontmatter list** — `research: ["rust-async", "tokio-runtime"]` plus a `## Related Research` section that links to each captured `RESEARCH.md`.
-
-When the spec is created via `/spec create ... --from-research <name>`, the frontmatter and section are pre-populated automatically.
-
-### 21.8 Non-Functional Properties
-
-- **Atomic writes** — every file write goes through `ResearchIo::atomic_write` (write to `.tmp` then rename) so concurrent viewers never see a partially-written file.
-- **Path traversal rejection** — names containing `..`, `/`, `\\`, or a leading dot are rejected by `ResearchName::try_new` per FR-017.
-- **Closest-name suggestions** — missing-item errors include the three closest existing names by Levenshtein distance per FR-018.
-- **Web source untrusted content** — supporting files fence captured page bodies in markdown ```text``` blocks per NFR-006.
-- **Per-source size cap** — captured bodies larger than 256 KiB are truncated with a marker so `RESEARCH.md` never balloons.
-- **Criterion benchmark** — `cargo bench -p ragent-research --bench gathering_bench` provides a baseline measurement of the gathering engine.
-
-Full user guide: [`docs/research.md`](docs/research.md).
+# Part VII: Operations & Reference
 
 ---
 
 ## 20. Auto-Update Mechanism
 
-> **Status:** Planned — not yet implemented.
-
-An automatic update check is on the roadmap. The TUI already reserves the `/update` and `/update install` slash commands, but they currently return a "not implemented" message. When completed, this subsystem will:
+An automatic update check is on the roadmap. The TUI already reserves the `/update`
+and `/update install` slash commands, but they currently return a "not implemented"
+message. When completed, this subsystem will:
 
 - Query a GitHub releases endpoint for the latest version tag.
 - Compare against the compile-time version baked into the binary.
 - Offer a one-command download-and-replace flow for supported platforms.
 
-Until then, users should update via `cargo install` or by downloading the latest release binary manually.
+Until then, users should update via `cargo install` or by downloading the latest
+release binary manually.
 
 ---
 
@@ -3415,11 +1867,16 @@ Until then, users should update via `cargo install` or by downloading the latest
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| v0.1.0-alpha.113 | 2026-08-07 | Research-system TUI integration wired real gatherers and completion reporting; improved keyword matching and table rendering; corrected spec status to `in_progress` |
-| v0.1.0-alpha.112 | 2026-08-06 | Corrected research-system spec status from `implemented` to `draft` |
-| v0.1.0-alpha.111 | 2026-08-06 | `ask_user` promoted to standalone event-driven tool with multiple-choice `options`; removed standalone `question` tool |
-| v0.1.0-alpha.110 | 2026-08-06 | Removed internal LLM subsystem (Candle, LiteRT-LM, `/internal-llm` commands, `internal_llm` feature) |
-| v0.1.0-alpha.105 | 2026-08-02 | Headroom compression pipeline, Model Router Provider, compression config, YOLO persistence, `/compress`, `/spec impl`, TUI toggle persistence |
+| v0.1.0-alpha.116 | 2026-06-23 | Agent-loop persistence/performance fixes; COMMSPLAN team unification, mailbox delivery semantics, unified whitespace-tolerant `edit`/`multiedit`/`memory_replace` matcher, swarm retry backoff |
+| v0.1.0-alpha.113 | 2026-06-20 | Research-system TUI integration wired real gatherers and completion reporting; improved keyword matching and table rendering; corrected spec status to `in_progress` |
+| v0.1.0-alpha.112 | 2026-06-20 | Corrected research-system spec status from `implemented` to `draft` |
+| v0.1.0-alpha.111 | 2026-06-20 | `ask_user` promoted to standalone event-driven tool with multiple-choice `options`; removed standalone `question` tool |
+| v0.1.0-alpha.110 | 2026-06-20 | Removed internal LLM subsystem (Candle, LiteRT-LM, `/internal-llm` commands, `internal_llm` feature) |
+| v0.1.0-alpha.109 | 2026-06-16 | In-process Foundry Local backend, `in_process` provider option, task tool family guidance |
+| v0.1.0-alpha.108 | 2026-06-15 | Foundry Local internal-LLM backend; fixed empty SSE stream by polling `/models/loaded` |
+| v0.1.0-alpha.107 | 2026-06-15 | Compression pipeline threshold gating on `auto_threshold` |
+| v0.1.0-alpha.106 | 2026-06-14 | Microsoft Foundry Local provider integration; Headroom compression lifecycle events |
+| v0.1.0-alpha.105 | 2026-06-08 | Headroom compression pipeline, Model Router Provider, compression config, YOLO persistence, `/compress`, TUI toggle persistence |
 | v0.1.0-alpha.104 | 2026-07-15 | Amazon Bedrock provider, xAI Grok provider, `/spec impl` and `/spec implement` slash commands |
 | v0.1.0-alpha.88 | 2025-01-22 | Fixed context compaction bug in `compact_history_with_atomic_tool_calls`; resolved premature loop break when trimming tool call pairs |
 | v0.1.0-alpha.87 | 2025-01-22 | Fixed `read` tool instructions (clarified `end_line` is absolute); strengthened remote push prohibitions in `AGENTS.md`; reorganized SPEC.md sections and numbering |
@@ -3438,7 +1895,7 @@ Until then, users should update via `cargo install` or by downloading the latest
 | v0.1.0-alpha.57 | 2025-01-16 | MS Office/LibreOffice fixes, todo summary updates |
 | v0.1.0-alpha.49 | 2025-01-17 | Permission dialog live countdown, config parse error enhancement, codeindex hardwired permissions, crate extraction milestones |
 | v0.1.0-alpha.48 | 2025-01-17 | Permission milestones complete, bash security layers, more permissions fixes |
-| v0.1.0-alpha.47 | 2025-01-17 | Crate reorganisation (ragent-types, ragent-config, ragent-storage, ragent-llm) |
+| v0.1.0-alpha.47 | 2025-01-17 | Crate reorganisation (`ragent-types`, `ragent-config`, `ragent-storage`, `ragent-llm`) |
 
 ---
 
@@ -3466,36 +1923,68 @@ All documentation markdown files are located in `docs/` except for these root fi
 
 ---
 
-## Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.113)
+## Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.116)
 
 ### Added
-- Research System — `/research` slash commands, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, spec linkage via `--from-research` and `research:` lines in `PLAN.md`
-- `ragent-research` crate — `ResearchName`, `Source`, `ResearchStatus`, `ResearchItem`, web/local gatherers, and plan-dep parser
-- `ask_user` standalone tool — event-driven question prompts with optional multiple-choice `options`
-- Headroom compression pipeline — automatic per-iteration compaction, `/compress` slash command, `CompressionStarted`/`CompressionFinished` events
+- COMMSPLAN team subsystem hardening (M1–M4)
+  - M1: Advisory-lock-protected file stores (`*.json.lock` + UUID temp files) for `Mailbox`, `TaskStore`, and `TeamStore`
+  - M2: Single-source team implementation — `ragent-agent` source-includes team runtime and 20 team tools from `ragent-team` via `#[path]`; CI guard `scripts/check-team-duplication.sh`
+  - M3: `team_wait` liveness fixes, `team_idle` publishes `TeammateIdle`, unified shutdown path with `immediate` parameter
+  - M4: Mailbox peek/ack at-least-once semantics, `team_assign_task` notifications, `team_broadcast` per-recipient results, `team_message` recipient validation, `team_read_messages` snake_case schema
+- Unified whitespace-tolerant replacement matcher — `edit`, `multiedit`, and `memory_replace` now share `ragent_tools_core::replace`, tolerating CRLF, trailing/leading whitespace, collapsed whitespace, blank-line edges, and final-newline mismatches
+- Swarm teammate retry backoff — exponential with jitter (`1 s, 2 s, 4 s, 8 s` capped at 30 s)
+- Microsoft Foundry Local provider integration — first-class TUI support, `[local]` badge, health checks, config merging (`auto_start`, `device`, `models_path`)
+- Microsoft Foundry Local internal-LLM backend (`FoundryLocalExecutor`) and in-process backend (`FoundryLocalInProcClient`)
+- Headroom compression pipeline — BM25 scoring, CCR store, aggressive/conservative/default modes, `/compress` slash command
+- Headroom compression lifecycle events — `CompressionStarted`/`CompressionFinished` with `original_tokens`, `compressed_tokens`, `compression_ratio`, `did_compress`
 - Model Router Provider — 15-dimension classifier for automatic model selection
 - Amazon Bedrock provider — SigV4 signing, dual Anthropic Messages / Converse APIs, 9 default models, credential discovery
 - xAI Grok provider — `xai` provider for the xAI Grok API
+- Research System — `/research` slash commands, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, spec linkage via `--from-research` and `research:` lines in `PLAN.md`
+- `ragent-research` crate — `ResearchName`, `Source`, `ResearchStatus`, `ResearchItem`, web/local gatherers, plan-dep parser
+- `ask_user` standalone tool — event-driven question prompts with optional multiple-choice `options`
 - `/spec impl` and `/spec implement` slash commands
 - YOLO mode persistence — saved to `ragent.json` and restored on startup
 - `compression` config block in `ragent.json`
+- `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` environment escape hatch
 
 ### Removed
-- Internal LLM subsystem — Candle GGUF, LiteRT-LM, `/internal-llm` slash commands, `InternalLlmConfig`, and `internal_llm` Cargo feature
+- Internal LLM subsystem — Candle GGUF, LiteRT-LM, `/internal-llm` slash commands, `InternalLlmConfig`, `internal_llm` Cargo feature, and all related tests/docs
 - Standalone `question` tool (functionality moved into `ask_user`)
 
 ### Changed
+- `ask_user` promoted from alias to standalone event-driven tool; permission auto-approval key renamed from `question` to `ask_user`
+- `multiedit` now resolves every edit against original content, detects byte-range overlap, and applies non-overlapping edits highest-end-offset-first so JSON order no longer matters
+- `edit` / `multiedit` / `memory_replace` diagnostics now report edit index, file, last matching pass, and a best-effort closest-line hint
+- Relative indentation preservation — `reindent_with` now uses the common leading whitespace of all matched file lines and leaves blank lines untouched
+- `team_read_messages` now peeks unread messages and acknowledges only after building `ToolOutput` (at-least-once delivery)
+- `team_broadcast` reports per-recipient `succeeded`/`failed` arrays instead of aborting on first failure
+- `team_assign_task` rejects `Stopped`/`Failed` teammates and pushes a mailbox notification to the assignee
+- `team_message` validates recipient state before delivery
+- `team_shutdown_teammate` gained `immediate: bool` parameter (default `false`)
+- Foundry Local provider routing branches on `provider.foundry_local.in_process` (default `false`)
+- `provider.foundry_local.device` values validated to `auto`, `cpu`, `gpu`, or `npu`
 - HuggingFace provider discovery now tolerates missing token and falls back to the static catalog on empty discovery
 - `task_complete` and `list_tasks` are hardwired auto-approved
 - Built-in agents no longer hardcode Anthropic Claude; they auto-resolve the first available model
 - Provider setup dialog scrolls and supports all 12 providers
-- TUI `/codeindex`, `/internal-llm` (before removal), and `/tools` toggles now persist to project-local `.ragent/ragent.json`
+- TUI `/codeindex`, `/internal-llm` (before removal), and `/tools` toggles persist to project-local `.ragent/ragent.json`
+- Compression pipeline gates on `auto_threshold` (default 0.80) before running
+- `last_input_tokens` now updates directly from `CompressionFinished` events
 
 ### Fixed
-- Research-system spec status corrected from overstated `implemented` to `in_progress`
-- `/research create` now wires real gatherers and reports completion in the TUI
+- Agent-loop persistence and performance issues — fixed session/cache/storage races and reduced session-processor hot-path overhead (alpha.116)
+- Research-system spec status corrected from overstated `implemented` to `draft` (alpha.112)
+- Research-system spec status corrected from `draft` to `in_progress` to reflect shipped framework tasks (alpha.113)
+- `/research create` now wires real web/local/spec gatherers and reports completion in the TUI
 - Research keyword matching improved for punctuation-heavy topics
+- `/research list|show|search` table rendering preserves fixed-width formatting
+- Microsoft Foundry Local empty SSE stream after model preparation — readiness now polls `/models/loaded`
 - Context window display lag after compression — `ctx:` refreshes immediately from `CompressionFinished` events
+- `old_str not found` on blank-line / final-newline edge differences
+- Collapsed-whitespace false `MultipleMatches` in replacement matcher
+- Swarm synthesis task timeouts on cloud LLM providers due to lockstep linear retries
+- Team subsystem TOCTOU data-loss races via lock-file-protected stores
 
 ## Appendix E: Earlier Changelog (2025-01-16 → 2025-04-21)
 

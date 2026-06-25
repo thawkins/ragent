@@ -1,5 +1,117 @@
 # Changelog
 
+## Version: 0.1.0-alpha.121
+
+### Fixed — `/research` now actually analyses the gathered sources
+- **Supporting files contain the captured body, not a placeholder** — `Source::Web`,
+  `Source::Local`, and `Source::Other` gained an inline `body: String` field. The
+  `WebGatherer` now passes the fetched page text into `Source::Web.body`; the
+  `LocalGatherer` reads each candidate file and writes a context-aware excerpt
+  (matching lines plus one line on either side) into `Source::Local.body`.
+  `render_supporting_file` and the synthesis engine both consume the inline body,
+  so `research/<name>/sources/web-NN.md` and `local-NN.md` now contain the
+  actual evidence (with `▶` markers for exact matches and a ` ` marker for
+  context) instead of the legacy `(see WebGatherer for the captured body)`
+  placeholder. Old `RESEARCH.md` files without the new field deserialize with
+  `body == ""` thanks to `#[serde(default)]`.
+- **Local source relevance note is now informative** — The previous "X keyword
+  match(es) for research topic" string has been replaced by a note that names
+  the matched keywords (truncated to 3, e.g. `…(+N)` for the tail) and a 120-char
+  snippet of the first matching line. Driven by the new
+  `LocalGatherer::build_relevance_note` and `collect_matched_terms` helpers.
+- **Mechanical fallback summary/findings are useful, not skeletal** — When no
+  LLM synthesis is available (CLI, or TUI without an active model, or LLM call
+  failed), the default `Summary` now names the captured web titles and local
+  file paths grouped by type, the default `Findings` is one bullet per source
+  with a 240-char excerpt, and the default `Open Questions` suggests concrete
+  gaps and re-running with a configured LLM. The Summary is also transparent
+  that no LLM analysis was applied.
+- **Synthesis errors are visible, not silently swallowed** — The
+  `ResearchSession::run` synthesize step now matches on the outcome and emits a
+  `SessionEvent::SynthesizeResult { outcome, detail }` whose outcome is one of
+  `Llm`, `FallbackEmpty`, `FallbackError`, `NoLlm`. Failures are logged at
+  `error` level (not `warn`) and the message bubbles through to the TUI
+  progress tracker and the CLI JSON emitter. Also fixed a latent bug where
+  `analysis_is_noop` always returned `false` because `Any::type_id` on a trait
+  object returns the trait object's `TypeId`, not the underlying concrete
+  type's — replaced with a small `is_noop_marker()` trait method that
+  `NoopAnalysisEngine` overrides to `true`.
+- **CLI now wires up the local gatherer** — `ragent research create` used to
+  call `ResearchSession::new(manager, None, None, NoopAnalysisEngine)`,
+  producing a `RESEARCH.md` with 0 sources regardless of project contents. It
+  now uses the new `ragent_research::cli::FsLocalTool` (a filesystem-backed
+  `LocalTool`) so the CLI produces useful output without API keys. Web search
+  and LLM synthesis still require credentials and remain off in the CLI.
+
+### Added
+- **`ragent_research::cli::FsLocalTool`** — Public filesystem-backed
+  implementation of `LocalTool` for CLI use. Walks the project root,
+  greps line-by-line, reads files, and lists `specs/<id>` directories.
+  Skips `research/`, `target/`, `.git/`, `node_modules/`, and dot-prefixed
+  directories so the gatherer doesn't index its own previous outputs.
+- **`ragent_research::session::SynthesizeOutcome` enum** —
+  `Llm | FallbackEmpty | FallbackError | NoLlm` so callers can attribute the
+  resulting `RESEARCH.md` summary to the path that produced it.
+- **`SessionEvent::SynthesizeResult`** — New event emitted after the
+  synthesis phase with the outcome and an optional detail string.
+- **`ragent_research::analysis::AnalysisEngine::is_noop_marker()`** — Default
+  trait method (`false`) overridden by `NoopAnalysisEngine` (`true`).
+- **`LocalGatherer::build_relevance_note`, `build_local_excerpt`,
+  `collect_matched_terms`, `MAX_LOCAL_EXCERPT_LINES`** — Public helpers used
+  by both the gatherer and the synthesis fallback.
+- **`Source::body()` and `Source::has_body()`** — Accessor helpers on
+  `Source` for the new body field.
+
+### Changed
+- **`Source` enum** — `Source::Web`, `Source::Local`, `Source::Other` gained a
+  `body: String` field with `#[serde(default)]`. All call sites (gatherers,
+  tests, fixture files) updated accordingly.
+- **`LocalGatherer::score_candidates`** — Now returns
+  `(LocalCandidate, Vec<GrepMatch>, Vec<String>)` so the caller has the
+  matched terms and per-line hits needed to build the relevance note and
+  excerpt.
+- **`ResearchSession::synthesize`** — Prefers the inline `Source::body`
+  field over reading from the on-disk supporting file (the latter still
+  works as a fallback for items loaded from older `RESEARCH.md` files).
+
+### Tests
+- **199 unit tests + 8 integration tests for `ragent-research`** (up from
+    181 + 7) covering body propagation, new relevance notes, mechanical
+    fallback content, `SynthesizeResult` event emission, and the new
+    `FsLocalTool`.
+
+## Version: 0.1.0-alpha.120 (unreleased)
+## Version: 0.1.0-alpha.119 (unreleased)
+
+### Added — LLM-driven synthesis for `/research create`
+- **`/research create` now analyzes sources with the active LLM** — The TUI research
+  session gained a `Synthesize` phase between gathering and assembly. When an
+  active provider/model is configured, `ResearchSession` sends the captured
+  source bodies (web pages and local excerpts) to the LLM with a structured
+  prompt requesting `## Summary`, numbered `## Findings` with `[#N]` citations,
+  `## In-Project Cross-References`, and `## Open Questions`. The response is parsed
+  and used to populate `RESEARCH.md`. If the LLM is unavailable, misconfigured, or
+  returns empty output, the session falls back to the existing mechanical
+  summary/findings.
+- **New `ragent-research::analysis` module** — Introduces `AnalysisEngine`,
+  `NoopAnalysisEngine`, `LlmAnalysisEngine`, `SourceBody`, and
+  `AnalysisResult` so callers can plug in alternative analysis implementations.
+- **Updated TUI wiring** — `build_research_session` in
+  `crates/ragent-tui/src/research_adapter.rs` now accepts an optional
+  `ProviderRegistry` and active `ModelRef` and constructs an `LlmAnalysisEngine`
+  when both are present. CLI and HTTP research creation endpoints continue to use
+  `NoopAnalysisEngine`, preserving their current behaviour.
+- **Progress tracking** — `SessionPhase::Synthesize` and the research progress
+  tracker now display the synthesis phase in the TUI log.
+
+### Changed
+- **`ragent-research` dependencies** — Added `ragent-llm`, `ragent-config`, and
+  `ragent-storage` (dev-only for tests) so the crate can build LLM clients and
+  accept provider auth without leaking storage types across the public API.
+- **Research system specification** — `specs/researchsystem/SPEC.md` updated with
+  FR-021 (AI-Driven Source Synthesis) and FR-022 (Graceful Degradation of
+  Synthesis), plus a new Research System section in the top-level `SPEC.md`.
+
 ## Version: 0.1.0-alpha.116 (unreleased)
 
 ### Fixed — persistence and performance of agent loop
@@ -908,3 +1020,4 @@
 
 ### Added
 - **Initial commit** — Project created.
+

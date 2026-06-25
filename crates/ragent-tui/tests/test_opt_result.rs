@@ -36,7 +36,9 @@ fn make_app() -> App {
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
         cached_tool_names: parking_lot::RwLock::new(None),
-            team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
     });

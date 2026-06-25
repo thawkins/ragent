@@ -14,6 +14,7 @@ pub mod layout_teams;
 pub mod logo;
 pub mod panels;
 pub mod research_adapter;
+pub mod research_progress;
 pub mod theme;
 pub mod tips;
 pub mod tracing_layer;

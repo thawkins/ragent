@@ -19,9 +19,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use ragent_agent::event::EventBus;
-use ragent_team::team::{
-    MemberStatus, Task, TaskList, TaskStatus, TeamMember, TeamStore,
-};
+use ragent_team::team::{MemberStatus, Task, TaskList, TaskStatus, TeamMember, TeamStore};
 
 /// A minimal `TeamManager`-like fixture exposing only the PERF-023 cache
 /// surface. We cannot easily construct a real `TeamManager` here (it needs a

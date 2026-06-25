@@ -9,9 +9,13 @@ description = "Research system for ragent: structured research items with web an
 
 [dependencies]
 ragent-types = { path = "../ragent-types" }
+ragent-config = { path = "../ragent-config" }
+ragent-llm = { path = "../ragent-llm" }
+ragent-storage = { path = "../ragent-storage" }
 
 async-trait = { workspace = true }
 chrono = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

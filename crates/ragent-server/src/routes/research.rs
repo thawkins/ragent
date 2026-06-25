@@ -25,7 +25,8 @@ use serde::{Deserialize, Serialize};
 use crate::routes::AppState;
 
 use ragent_research::{
-    ResearchManager, ResearchSession, SearchHit, SessionConfig, SessionEvent, SessionObserver,
+    NoopAnalysisEngine, ResearchManager, ResearchSession, SearchHit, SessionConfig, SessionEvent,
+    SessionObserver,
 };
 
 /// Build the `/research` sub-router.
@@ -98,6 +99,10 @@ struct CreateResearchRequest {
     title: Option<String>,
     sources_dir: Option<String>,
     template: Option<String>,
+    #[serde(default)]
+    no_local: bool,
+    #[serde(default)]
+    no_specs: bool,
 }
 
 async fn create_research(
@@ -109,6 +114,8 @@ async fn create_research(
         topic: req.topic.clone(),
         sources_dir: req.sources_dir.map(PathBuf::from),
         template: req.template,
+        disable_local: req.no_local,
+        disable_specs: req.no_specs,
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {
@@ -137,7 +144,7 @@ async fn create_research(
     let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observer = Collector(events.clone());
 
-    let session = ResearchSession::new(manager.clone(), None, None);
+    let session = ResearchSession::new(manager.clone(), None, None, Arc::new(NoopAnalysisEngine));
     match session
         .run(&req.name, &title, &config, Arc::new(observer))
         .await

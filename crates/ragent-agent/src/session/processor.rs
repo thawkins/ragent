@@ -1146,38 +1146,38 @@ impl SessionProcessor {
             // per cache TTL.
             crate::agent::collect_prompt_context(&working_dir).await
         };
-                  // PERF-028: offload the memory-block + SQLite memory reads onto a
-                  // blocking-pool thread so the synchronous file I/O
-                  // (`FileBlockStorage`, `load_legacy_memory`, `PROJECT_ANALYSIS.md`,
-                  // `Storage::list_memories`/`get_memory_tags`) does not stall the
-                  // tokio worker thread during system-prompt assembly.
-                  let memory_section = {
-                      let _scope = profiler.scope("prompt.build_memory_section");
-                      let wd = working_dir.clone();
-                      let storage = Arc::clone(self.session_manager.storage());
-                      let memory_cfg = session_config.memory.clone();
-                      tokio::task::spawn_blocking(move || {
-                          crate::agent::build_memory_prompt_section(&wd, Some(&storage), Some(&memory_cfg))
-                      })
-                      .await
-                      .unwrap_or_default()
-                  };
-                  let mut system_prompt = {
-                      let _scope = profiler.scope("prompt.build_system_prompt");
-                      crate::agent::build_system_prompt_with_storage_and_memory(
-                          agent,
-                          &working_dir,
-                          &file_tree,
-                          Some(&skill_registry),
-                          Some(&git_status),
-                          Some(&readme),
-                          Some(&agents_md),
-                          Some(self.session_manager.storage()),
-                          Some(&session_config.memory),
-                          Some(&memory_section),
-                      )
-                  };
-                  // Inject a tool reference listing so the model knows the exact tool names.        //
+        // PERF-028: offload the memory-block + SQLite memory reads onto a
+        // blocking-pool thread so the synchronous file I/O
+        // (`FileBlockStorage`, `load_legacy_memory`, `PROJECT_ANALYSIS.md`,
+        // `Storage::list_memories`/`get_memory_tags`) does not stall the
+        // tokio worker thread during system-prompt assembly.
+        let memory_section = {
+            let _scope = profiler.scope("prompt.build_memory_section");
+            let wd = working_dir.clone();
+            let storage = Arc::clone(self.session_manager.storage());
+            let memory_cfg = session_config.memory.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::agent::build_memory_prompt_section(&wd, Some(&storage), Some(&memory_cfg))
+            })
+            .await
+            .unwrap_or_default()
+        };
+        let mut system_prompt = {
+            let _scope = profiler.scope("prompt.build_system_prompt");
+            crate::agent::build_system_prompt_with_storage_and_memory(
+                agent,
+                &working_dir,
+                &file_tree,
+                Some(&skill_registry),
+                Some(&git_status),
+                Some(&readme),
+                Some(&agents_md),
+                Some(self.session_manager.storage()),
+                Some(&session_config.memory),
+                Some(&memory_section),
+            )
+        };
+        // Inject a tool reference listing so the model knows the exact tool names.        //
         // Sub-agents receive a detailed reference that includes parameter schemas,
         // mirroring the full instructions the primary agent receives.
         //
@@ -1185,28 +1185,29 @@ impl SessionProcessor {
         // reference keyed by the tool-registry hash, so subsequent steps
         // (and subsequent turns within the same session) skip the
         // registry iteration entirely.
-                  let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
-                  // PERF-013: route sub-agent tool references through the same
-                  // `SystemPromptCache` as primary agents so the detailed parameter
-                  // schema section is built at most once per session instead of on
-                  // every sub-agent `process_user_message` call. The cache key is
-                  // the registry version (PERF-012), so the section is rebuilt only
-                  // when tools are registered/hidden at runtime (e.g. MCP servers).
-                  let tool_reference = if is_subagent {
-                      let cache = self.system_prompt_cache();
-                      cache
-                          .get_tool_reference(&self.tool_registry, |registry| {
-                              build_detailed_tool_reference_section(registry)
-                          })
-                          .unwrap_or_else(|| build_detailed_tool_reference_section(&self.tool_registry))
-                  } else {
-                      let cache = self.system_prompt_cache();
-                      cache
-                          .get_tool_reference(&self.tool_registry, |registry| {
-                              build_tool_reference_section(registry)
-                          })
-                          .unwrap_or_default()
-                  };        system_prompt.push_str(&tool_reference);
+        let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
+        // PERF-013: route sub-agent tool references through the same
+        // `SystemPromptCache` as primary agents so the detailed parameter
+        // schema section is built at most once per session instead of on
+        // every sub-agent `process_user_message` call. The cache key is
+        // the registry version (PERF-012), so the section is rebuilt only
+        // when tools are registered/hidden at runtime (e.g. MCP servers).
+        let tool_reference = if is_subagent {
+            let cache = self.system_prompt_cache();
+            cache
+                .get_tool_reference(&self.tool_registry, |registry| {
+                    build_detailed_tool_reference_section(registry)
+                })
+                .unwrap_or_else(|| build_detailed_tool_reference_section(&self.tool_registry))
+        } else {
+            let cache = self.system_prompt_cache();
+            cache
+                .get_tool_reference(&self.tool_registry, |registry| {
+                    build_tool_reference_section(registry)
+                })
+                .unwrap_or_default()
+        };
+        system_prompt.push_str(&tool_reference);
 
         // Inject question-tool guidance so the model knows how to present
         // multiple-choice prompts effectively.
@@ -1604,8 +1605,7 @@ impl SessionProcessor {
         // The final save still moves the owned `Vec` out of the `Arc` via
         // `Arc::try_unwrap` (or falls back to a clone if another reference is
         // outstanding, which is rare on the final save).
-        let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> =
-            std::sync::Arc::new(Vec::new());
+        let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> = std::sync::Arc::new(Vec::new());
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
         let mut task_completeness_nudged = false;
@@ -2164,50 +2164,50 @@ impl SessionProcessor {
             if last_input_tokens > 0 {
                 last_reported_input_tokens = last_input_tokens;
             }
-                          // Collect parts from this turn
-                          {
-                              let _scope = profiler.scope("loop.response.process");
-                              if !reasoning_buffer.is_empty() {
-                                  let _scope = profiler.scope("loop.response.store_reasoning_part");
-                                  // PERF-029: `Arc::make_mut` gives COW semantics — if this
-                                  // is the only reference (the common case mid-turn), no
-                                  // clone is incurred; otherwise the Vec is cloned once.
-                                  std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Reasoning {
-                                      text: reasoning_buffer.clone(),
-                                  });
-                              }
-                              if !text_buffer.is_empty() {
-                                  // Log the model response text
-                                  let response_preview = if text_buffer.len() > 200 {
-                                      let mut end = 200;
-                                      while end > 0 && !text_buffer.is_char_boundary(end) {
-                                          end -= 1;
-                                      }
-                                      format!("{}…", &text_buffer[..end])
-                                  } else {
-                                      text_buffer.clone()
-                                  };
-                                  let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
-                                  cumulative_model_wait_ms += model_elapsed_ms;
-                                  {
-                                      let _scope = profiler.scope("loop.response.publish_model_response");
-                                      self.event_bus.publish(Event::ModelResponse {
-                                          session_id: session_id.to_string(),
-                                          text: response_preview,
-                                          elapsed_ms: model_elapsed_ms,
-                                          input_tokens: last_input_tokens,
-                                          output_tokens: last_output_tokens,
-                                      });
-                                  }
-                                  {
-                                      let _scope = profiler.scope("loop.response.store_text_part");
-                                      // PERF-029: COW push via `Arc::make_mut`.
-                                      std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Text {
-                                          text: text_buffer.clone(),
-                                      });
-                                  }
-                              }
-                          }
+            // Collect parts from this turn
+            {
+                let _scope = profiler.scope("loop.response.process");
+                if !reasoning_buffer.is_empty() {
+                    let _scope = profiler.scope("loop.response.store_reasoning_part");
+                    // PERF-029: `Arc::make_mut` gives COW semantics — if this
+                    // is the only reference (the common case mid-turn), no
+                    // clone is incurred; otherwise the Vec is cloned once.
+                    std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Reasoning {
+                        text: reasoning_buffer.clone(),
+                    });
+                }
+                if !text_buffer.is_empty() {
+                    // Log the model response text
+                    let response_preview = if text_buffer.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !text_buffer.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}…", &text_buffer[..end])
+                    } else {
+                        text_buffer.clone()
+                    };
+                    let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
+                    cumulative_model_wait_ms += model_elapsed_ms;
+                    {
+                        let _scope = profiler.scope("loop.response.publish_model_response");
+                        self.event_bus.publish(Event::ModelResponse {
+                            session_id: session_id.to_string(),
+                            text: response_preview,
+                            elapsed_ms: model_elapsed_ms,
+                            input_tokens: last_input_tokens,
+                            output_tokens: last_output_tokens,
+                        });
+                    }
+                    {
+                        let _scope = profiler.scope("loop.response.store_text_part");
+                        // PERF-029: COW push via `Arc::make_mut`.
+                        std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Text {
+                            text: text_buffer.clone(),
+                        });
+                    }
+                }
+            }
             // Execute tool calls if any were emitted, regardless of finish_reason.
             // Some Ollama models send tool calls but set done_reason to "stop" rather
             // than "tool_calls", so we cannot rely on finish_reason alone.
@@ -2325,27 +2325,30 @@ impl SessionProcessor {
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
-                                                  Ok((
-                                                      tc,
-                                                      input,
-                                                      status,
-                                                      output_value,
-                                                      error,
-                                                      duration_ms,
-                                                      result_content,
-                                                      tool_metadata,
-                                                  )) => {
-                                                      // PERF-029: COW push via `Arc::make_mut`.
-                                                      std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::ToolCall {
-                                                          tool: tc.name.clone(),
-                                                          call_id: tc.id.clone(),
-                                                          state: ToolCallState {
-                                                              status,
-                                                              input,
-                                                              output: output_value,
-                                                              error,                                    duration_ms: Some(duration_ms),
+                        Ok((
+                            tc,
+                            input,
+                            status,
+                            output_value,
+                            error,
+                            duration_ms,
+                            result_content,
+                            tool_metadata,
+                        )) => {
+                            // PERF-029: COW push via `Arc::make_mut`.
+                            std::sync::Arc::make_mut(&mut assistant_parts).push(
+                                MessagePart::ToolCall {
+                                    tool: tc.name.clone(),
+                                    call_id: tc.id.clone(),
+                                    state: ToolCallState {
+                                        status,
+                                        input,
+                                        output: output_value,
+                                        error,
+                                        duration_ms: Some(duration_ms),
+                                    },
                                 },
-                            });
+                            );
 
                             tool_result_parts.push(ContentPart::ToolResult {
                                 tool_use_id: tc.id.clone(),
@@ -2955,75 +2958,74 @@ impl SessionProcessor {
             }
 
             // Persist intermediate progress so that output inspectors (e.g.
-                      // the teammate output overlay) can show steps while the agent is
-                      // still running.  Fire-and-forget on a blocking thread.
-                      {
-                          let _scope = profiler.scope("storage.assistant_interim.update");
-                          // Compute a cheap content hash so we skip the blocking storage
-                          // write when the assistant_parts haven't changed since the last
-                          // interim update (e.g. while waiting for the LLM).
-                          //
-                          // PERF-029: iterate over the `Arc<Vec<MessagePart>>` via
-                          // `&*assistant_parts` (deref to the slice) so the hash loop
-                          // works unchanged.
-                                                      let current_hash = {
-                                                          // PERF-031: FxHash for the interim-content hash
-                                                          // (non-adversarial, called on every poll).
-                                                          use std::hash::{Hash, Hasher};
-                                                          use rustc_hash::FxHasher;
-                                                          let mut hasher = FxHasher::default();
-                                                          for part in &*assistant_parts {
-                                                              std::mem::discriminant(part).hash(&mut hasher);
-                                                              match part {
-                                                                  MessagePart::Text { text } => text.hash(&mut hasher),
-                                                                  MessagePart::ToolCall {
-                                                                      tool,
-                                                                      call_id,
-                                                                      state,
-                                                                  } => {
-                                                                      tool.hash(&mut hasher);
-                                                                      call_id.hash(&mut hasher);
-                                                                      state.input.to_string().hash(&mut hasher);
-                                                                      if let Some(out) = &state.output {
-                                                                          out.to_string().hash(&mut hasher);
-                                                                      }
-                                                                      if let Some(err) = &state.error {
-                                                                          err.hash(&mut hasher);
-                                                                      }
-                                                                  }                                      MessagePart::Reasoning { text } => text.hash(&mut hasher),
-                                      MessagePart::Image(img) => {
-                                          img.mime_type.hash(&mut hasher);
-                                          img.path.hash(&mut hasher);
-                                      }
-                                  }
-                              }
-                              hasher.finish()
-                          };
-                          if last_interim_hash != Some(current_hash) {
-                              // PERF-029: `Arc::clone` here is O(1) — the interim
-                              // `Message::new` receives an owned `Vec` via
-                              // `(*assistant_parts).clone()`, but the clone only
-                              // happens when the hash actually changed (i.e. real
-                              // progress), not on every poll.
-                              let mut interim = Message::new(
-                                  session_id,
-                                  Role::Assistant,
-                                  (*assistant_parts).clone(),
-                              );
-                              interim.id = assistant_msg_id.clone();
-                              let _ = self.storage_op(move |s| s.update_message(&interim)).await;
-                              last_interim_hash = Some(current_hash);
-                          }
-                      }
-                  }
+            // the teammate output overlay) can show steps while the agent is
+            // still running.  Fire-and-forget on a blocking thread.
+            {
+                let _scope = profiler.scope("storage.assistant_interim.update");
+                // Compute a cheap content hash so we skip the blocking storage
+                // write when the assistant_parts haven't changed since the last
+                // interim update (e.g. while waiting for the LLM).
+                //
+                // PERF-029: iterate over the `Arc<Vec<MessagePart>>` via
+                // `&*assistant_parts` (deref to the slice) so the hash loop
+                // works unchanged.
+                let current_hash = {
+                    // PERF-031: FxHash for the interim-content hash
+                    // (non-adversarial, called on every poll).
+                    use rustc_hash::FxHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = FxHasher::default();
+                    for part in &*assistant_parts {
+                        std::mem::discriminant(part).hash(&mut hasher);
+                        match part {
+                            MessagePart::Text { text } => text.hash(&mut hasher),
+                            MessagePart::ToolCall {
+                                tool,
+                                call_id,
+                                state,
+                            } => {
+                                tool.hash(&mut hasher);
+                                call_id.hash(&mut hasher);
+                                state.input.to_string().hash(&mut hasher);
+                                if let Some(out) = &state.output {
+                                    out.to_string().hash(&mut hasher);
+                                }
+                                if let Some(err) = &state.error {
+                                    err.hash(&mut hasher);
+                                }
+                            }
+                            MessagePart::Reasoning { text } => text.hash(&mut hasher),
+                            MessagePart::Image(img) => {
+                                img.mime_type.hash(&mut hasher);
+                                img.path.hash(&mut hasher);
+                            }
+                        }
+                    }
+                    hasher.finish()
+                };
+                if last_interim_hash != Some(current_hash) {
+                    // PERF-029: `Arc::clone` here is O(1) — the interim
+                    // `Message::new` receives an owned `Vec` via
+                    // `(*assistant_parts).clone()`, but the clone only
+                    // happens when the hash actually changed (i.e. real
+                    // progress), not on every poll.
+                    let mut interim =
+                        Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
+                    interim.id = assistant_msg_id.clone();
+                    let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+                    last_interim_hash = Some(current_hash);
+                }
+            }
+        }
 
-                  // 6. Final save of assistant message (update the pre-created placeholder).
-                  // PERF-029: `Arc::try_unwrap` avoids a clone when this is the only
-                  // outstanding reference (the common case at end-of-turn).
-                  let parts_owned = std::sync::Arc::try_unwrap(assistant_parts)
-                      .unwrap_or_else(|arc| (*arc).clone());
-                  let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
-                  assistant_msg.id = assistant_msg_id;        {
+        // 6. Final save of assistant message (update the pre-created placeholder).
+        // PERF-029: `Arc::try_unwrap` avoids a clone when this is the only
+        // outstanding reference (the common case at end-of-turn).
+        let parts_owned =
+            std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
+        let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
+        assistant_msg.id = assistant_msg_id;
+        {
             let _scope = profiler.scope("storage.assistant_final.update");
             let msg = assistant_msg.clone();
             self.storage_op(move |s| s.update_message(&msg)).await?;
@@ -3419,8 +3421,8 @@ fn resolve_team_context_for_session(
 fn history_version_of(messages: &[Message]) -> u64 {
     // PERF-031: FxHash for the cheap history-version cache key
     // (non-adversarial, called on every agent step).
-    use std::hash::{Hash, Hasher};
     use rustc_hash::FxHasher;
+    use std::hash::{Hash, Hasher};
     let mut hasher = FxHasher::default();
     messages.len().hash(&mut hasher);
     if let Some(last) = messages.last() {

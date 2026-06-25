@@ -577,16 +577,16 @@ impl TeamManager {
                 tracing::debug!(team = %manager.team_name, attempt, "Reconcile attempt");
                 match TeamStore::load(&manager.team_dir) {
                     Ok(store) => {
-                                                  // Collect candidates to spawn, then drop the lock before spawning.
-                                                  let to_spawn: Vec<(
-                                                      String,
-                                                      String,
-                                                      String,
-                                                      Option<crate::agent::ModelRef>,
-                                                  )> = {
-                                                      // PERF-025: DashMap — no async read guard; we just
-                                                      // check `contains_key` on each candidate's agent_id.
-                                                      store.config.members.iter()
+                        // Collect candidates to spawn, then drop the lock before spawning.
+                        let to_spawn: Vec<(
+                            String,
+                            String,
+                            String,
+                            Option<crate::agent::ModelRef>,
+                        )> = {
+                            // PERF-025: DashMap — no async read guard; we just
+                            // check `contains_key` on each candidate's agent_id.
+                            store.config.members.iter()
                                                           .filter(|m| m.status == crate::team::config::MemberStatus::Spawning)
                                                           .filter(|m| {
                                                               if m.session_id.is_some() {
@@ -600,7 +600,7 @@ impl TeamManager {
                                                                                         true
                                                                                     })                                .map(|m| (m.name.clone(), m.agent_type.clone(), m.spawn_prompt.clone().unwrap_or_default(), m.model_override.clone()))
                                                           .collect()
-                                                  };
+                        };
                         if to_spawn.is_empty() {
                             tracing::info!(team = %manager.team_name, attempt, "No queued spawning members found; reconciliation complete");
                             break;

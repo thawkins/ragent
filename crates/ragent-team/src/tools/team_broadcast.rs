@@ -93,27 +93,24 @@ impl Tool for TeamBroadcastTool {
         // field that differs is `to`) and move each into its own async task.
         let succeeded: Vec<String> = Vec::with_capacity(active.len());
         let failed: Vec<Value> = Vec::with_capacity(active.len());
-        let push_futs = active
-            .iter()
-            .map(|(agent_id, name)| {
-                let team_dir = team_dir.clone();
-                let from = from.clone();
-                let agent_id = agent_id.clone();
-                let name = name.clone();
-                let content = content.to_string();
-                async move {
-                    let outcome = Mailbox::open(&team_dir, &agent_id)
-                        .and_then(|mailbox| {
-                            mailbox.push(MailboxMessage::new(
-                                from,
-                                agent_id.clone(),
-                                MessageType::Broadcast,
-                                content,
-                            ))
-                        });
-                    (agent_id, name, outcome)
-                }
-            });
+        let push_futs = active.iter().map(|(agent_id, name)| {
+            let team_dir = team_dir.clone();
+            let from = from.clone();
+            let agent_id = agent_id.clone();
+            let name = name.clone();
+            let content = content.to_string();
+            async move {
+                let outcome = Mailbox::open(&team_dir, &agent_id).and_then(|mailbox| {
+                    mailbox.push(MailboxMessage::new(
+                        from,
+                        agent_id.clone(),
+                        MessageType::Broadcast,
+                        content,
+                    ))
+                });
+                (agent_id, name, outcome)
+            }
+        });
         let results = join_all(push_futs).await;
 
         let mut succeeded = succeeded;

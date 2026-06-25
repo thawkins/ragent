@@ -1142,7 +1142,10 @@ impl ToolRegistry {
     /// and `set_hidden()` so the next `definitions()` call rebuilds the
     /// sorted `Vec<ToolDefinition>` from scratch.
     fn invalidate_definitions_cache(&self) {
-        let mut guard = self.definitions_cache.write().expect("definitions cache lock poisoned");
+        let mut guard = self
+            .definitions_cache
+            .write()
+            .expect("definitions cache lock poisoned");
         *guard = None;
         self.version
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1153,8 +1156,7 @@ impl ToolRegistry {
     /// tool set has changed.
     #[must_use]
     pub fn version(&self) -> u64 {
-        self.version
-            .load(std::sync::atomic::Ordering::Relaxed)
+        self.version.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Marks the given tool names as hidden so they are excluded from

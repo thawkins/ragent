@@ -384,11 +384,13 @@ mod tests {
             label: "first".into(),
             captured_at: Utc::now(),
             body_path: "sources/other-01.md".into(),
+            body: String::new(),
         };
         let s2 = Source::Other {
             label: "second".into(),
             captured_at: Utc::now(),
             body_path: "sources/other-02.md".into(),
+            body: String::new(),
         };
         item.add_source(s1.clone()).add_source(s2.clone());
         assert_eq!(item.sources.len(), 2);
@@ -506,6 +508,7 @@ mod tests {
             label: "example".into(),
             captured_at: Utc::now(),
             body_path: "sources/other-01.md".into(),
+            body: String::new(),
         });
         let json = serde_json::to_string(&item).unwrap();
         let back: ResearchItem = serde_json::from_str(&json).unwrap();

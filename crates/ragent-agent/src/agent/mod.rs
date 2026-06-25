@@ -1862,7 +1862,10 @@ pub fn build_memory_prompt_section(
     }
 
     // Load PROJECT_ANALYSIS.md if present (legacy).
-    let project_analysis = working_dir.join(".ragent").join("memory").join("PROJECT_ANALYSIS.md");
+    let project_analysis = working_dir
+        .join(".ragent")
+        .join("memory")
+        .join("PROJECT_ANALYSIS.md");
     if let Ok(content) = std::fs::read_to_string(&project_analysis)
         && !content.trim().is_empty()
     {
@@ -2033,8 +2036,16 @@ pub fn build_system_prompt_with_storage(
     memory_config: Option<&crate::MemoryConfig>,
 ) -> String {
     build_system_prompt_with_storage_inner(
-        agent, working_dir, file_tree, skills, git_status, readme, agents_md,
-        storage, memory_config, None,
+        agent,
+        working_dir,
+        file_tree,
+        skills,
+        git_status,
+        readme,
+        agents_md,
+        storage,
+        memory_config,
+        None,
     )
 }
 
@@ -2056,8 +2067,16 @@ pub fn build_system_prompt_with_storage_and_memory(
     memory_section: Option<&str>,
 ) -> String {
     build_system_prompt_with_storage_inner(
-        agent, working_dir, file_tree, skills, git_status, readme, agents_md,
-        storage, memory_config, memory_section,
+        agent,
+        working_dir,
+        file_tree,
+        skills,
+        git_status,
+        readme,
+        agents_md,
+        storage,
+        memory_config,
+        memory_section,
     )
 }
 
@@ -2241,11 +2260,12 @@ fn build_system_prompt_with_storage_inner(
     // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {
-                  let builtins = builtin_agents();
-                  let spawnable: Vec<&AgentInfo> = builtins
-                      .iter()
-                      .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
-                      .collect();        let max_background_agents = crate::Config::load()
+        let builtins = builtin_agents();
+        let spawnable: Vec<&AgentInfo> = builtins
+            .iter()
+            .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
+            .collect();
+        let max_background_agents = crate::Config::load()
             .map(|c| c.experimental.max_background_agents)
             .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS);
 

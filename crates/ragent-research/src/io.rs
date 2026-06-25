@@ -411,11 +411,13 @@ mod tests {
                 label: "first".into(),
                 captured_at: Utc::now(),
                 body_path: PathBuf::from("sources/other-01.md"),
+                body: String::new(),
             },
             Source::Other {
                 label: "second".into(),
                 captured_at: Utc::now(),
                 body_path: PathBuf::from("sources/other-02.md"),
+                body: String::new(),
             },
         ];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());
@@ -429,6 +431,7 @@ mod tests {
             label: "a|b".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/other-01.md"),
+            body: String::new(),
         }];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());
         assert!(idx.contains(r"a\|b"), "pipe must be escaped: {idx}");

@@ -484,4 +484,87 @@ mod compression_feature_tests {
             "LLM-reported 70% must override an estimate that would say >80%"
         );
     }
+
+    /// Regression test for the "compression not firing at 80%" bug
+    /// (reported against Ollama Cloud / Kimi K2 with a custom tokenizer).
+    ///
+    /// Scenario: the LLM reports we're at 99% of the context window
+    /// (260_000 input tokens out of 262_144), but the LOCAL `EstimatingCounter`
+    /// returns a much smaller number (e.g. 50_000) because the local
+    /// tokenizer diverges from the provider's tokenizer.
+    ///
+    /// Before the fix, the per-iteration gate would fire (because the
+    /// reported count exceeds threshold) but `compress_history` would
+    /// bail out internally (because the local estimate is under
+    /// threshold), so the payload was never actually reduced and the
+    /// context window kept overflowing.
+    ///
+    /// The fix removes the local-estimate threshold check from
+    /// `compress_history`. The callers already enforce the gate via
+    /// `should_compress_with_reported` (per-iteration) and
+    /// `should_compress` (initial-history), and the compressor logic
+    /// keeps the original content if no benefit is found — so removing
+    /// the threshold check can never increase output size.
+    #[test]
+    fn test_per_iteration_compression_actually_reduces_payload_when_reported_is_high() {
+        use ragent_agent::compression::pipeline::compress_chat_messages;
+        use ragent_agent::llm::{ChatContent, ChatMessage as LlmChatMessage};
+        use ragent_agent::session::processor::should_compress_with_reported;
+
+        // Build a chat-history payload with JSON, diff and log content as
+        // separate parts so each compressor routes to the right one.
+        let big_json = r#"{"users":[
+            {"id":1,"name":"Alice","email":"alice@example.com","role":"admin","created_at":"2025-01-01T00:00:00Z"},
+            {"id":2,"name":"Bob","email":"bob@example.com","role":"user","created_at":"2025-01-02T00:00:00Z"},
+            {"id":3,"name":"Charlie","email":"charlie@example.com","role":"user","created_at":"2025-01-03T00:00:00Z"}
+        ]}"#.repeat(50);
+        let big_diff = "diff --git a/foo b/foo\n--- a/foo\n+++ b/foo\n@@ -1,5 +1,5 @@\n-old line\n+new line\n context line\n more context\n".repeat(40);
+        let big_log = "[INFO] 2025-01-01 request received\n[WARN] 2025-01-01 slow response\n[ERROR] 2025-01-02 timeout\n[INFO] 2025-01-02 retry succeeded\n".repeat(40);
+
+        let chat_messages = vec![
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("Read these files please".to_string()),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(big_json),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(big_diff),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(big_log),
+            },
+        ];
+        let config = CompressionConfig::default(); // auto_threshold = 0.80
+        let context_window: usize = 128_000;
+        // LLM reports 99% of the context window — gate must fire.
+        let last_reported_input_tokens: u64 = 260_000;
+
+        // Pre-condition: the gate fires (reported count exceeds threshold).
+        assert!(
+            should_compress_with_reported(
+                &chat_messages,
+                context_window,
+                0.80,
+                last_reported_input_tokens,
+            ),
+            "Gate should fire when LLM reports 260K tokens in a 128K window"
+        );
+
+        // Run the actual compression pipeline.
+        let result = compress_chat_messages(&chat_messages, context_window, 8192, &config);
+
+        // Post-condition: compression actually reduces the payload.
+        assert!(
+            result.stats.compressed_tokens < result.stats.original_tokens,
+            "compress_chat_messages should reduce the payload when called \
+             after the gate fires. Original: {}, Compressed: {}",
+            result.stats.original_tokens,
+            result.stats.compressed_tokens,
+        );
+    }
 }

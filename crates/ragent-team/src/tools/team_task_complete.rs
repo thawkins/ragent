@@ -81,31 +81,31 @@ impl Tool for TeamTaskCompleteTool {
         // on every `team_task_complete` call.
         if tracing::enabled!(tracing::Level::DEBUG) {
             if let Ok(list) = store.read() {
-            let task_summary: Vec<String> = list
-                .tasks
-                .iter()
-                .map(|t| {
-                    format!(
-                        "{} ({})",
-                        t.id,
-                        match t.status {
-                            crate::team::TaskStatus::Pending => "pending",
-                            crate::team::TaskStatus::InProgress => "in_progress",
-                            crate::team::TaskStatus::Completed => "completed",
-                            crate::team::TaskStatus::Cancelled => "cancelled",
-                        }
-                    )
-                })
-                .collect();
-                      tracing::debug!(
-                          agent_id = %agent_id,
-                          team_name = %team_name,
-                          task_id = %task_id,
-                          tasks = ?task_summary,
-                          "team_task_complete: attempting to complete"
-                      );
-                  }
-              }
+                let task_summary: Vec<String> = list
+                    .tasks
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "{} ({})",
+                            t.id,
+                            match t.status {
+                                crate::team::TaskStatus::Pending => "pending",
+                                crate::team::TaskStatus::InProgress => "in_progress",
+                                crate::team::TaskStatus::Completed => "completed",
+                                crate::team::TaskStatus::Cancelled => "cancelled",
+                            }
+                        )
+                    })
+                    .collect();
+                tracing::debug!(
+                    agent_id = %agent_id,
+                    team_name = %team_name,
+                    task_id = %task_id,
+                    tasks = ?task_summary,
+                    "team_task_complete: attempting to complete"
+                );
+            }
+        }
         let task = match store.complete(task_id, &agent_id) {
             Ok(t) => t,
             Err(e) => {
@@ -170,41 +170,41 @@ impl Tool for TeamTaskCompleteTool {
             });
         }
 
-                  // M5-T7: publish TeamTaskCompleted so the TUI/SSE observe the
-                  // completion (the event variant already existed but was never
-                  // published).
-                  // PERF-018: prefer the in-memory `TeamManager` (when available on
-                  // the `ToolContext`) for the lead session id instead of loading
-                  // `TeamStore` from disk on every completion.
-                  let lead_sid = ctx
-                      .team_manager
-                      .as_ref()
-                      .and_then(|tm| tm.lead_session_id().map(str::to_string))
-                      .or_else(|| {
-                          crate::team::TeamStore::load(&team_dir)
-                              .ok()
-                              .map(|s| s.config.lead_session_id.clone())
-                      })
-                      .unwrap_or_else(|| ctx.session_id.clone());
-                  ctx.event_bus.publish(Event::TeamTaskCompleted {
-                      session_id: lead_sid,
-                      team_name: team_name.to_string(),
-                      agent_id: agent_id.clone(),
-                      task_id: task.id.clone(),
-                  });
+        // M5-T7: publish TeamTaskCompleted so the TUI/SSE observe the
+        // completion (the event variant already existed but was never
+        // published).
+        // PERF-018: prefer the in-memory `TeamManager` (when available on
+        // the `ToolContext`) for the lead session id instead of loading
+        // `TeamStore` from disk on every completion.
+        let lead_sid = ctx
+            .team_manager
+            .as_ref()
+            .and_then(|tm| tm.lead_session_id().map(str::to_string))
+            .or_else(|| {
+                crate::team::TeamStore::load(&team_dir)
+                    .ok()
+                    .map(|s| s.config.lead_session_id.clone())
+            })
+            .unwrap_or_else(|| ctx.session_id.clone());
+        ctx.event_bus.publish(Event::TeamTaskCompleted {
+            session_id: lead_sid,
+            team_name: team_name.to_string(),
+            agent_id: agent_id.clone(),
+            task_id: task.id.clone(),
+        });
 
-                  // M8-T3: clear the member's current_task_id now that the task is
-                  // completed.
-                  // PERF-018: a single `TeamStore::load` + `save` cycle clears the
-                  // field. (The previous version also did exactly one load here after
-                  // PERF-005 removed the duplicate event publish; this comment just
-                  // records that the count remains at one disk read+write.)
-                  if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
-                      if let Some(m) = store.config.member_by_id_mut(&agent_id) {
-                          m.current_task_id = None;
-                      }
-                      let _ = store.save();
-                  }
+        // M8-T3: clear the member's current_task_id now that the task is
+        // completed.
+        // PERF-018: a single `TeamStore::load` + `save` cycle clears the
+        // field. (The previous version also did exactly one load here after
+        // PERF-005 removed the duplicate event publish; this comment just
+        // records that the count remains at one disk read+write.)
+        if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
+            if let Some(m) = store.config.member_by_id_mut(&agent_id) {
+                m.current_task_id = None;
+            }
+            let _ = store.save();
+        }
         Ok(ToolOutput {
             content: format!(
                 "Task '{}' marked as completed by '{}'.\nTitle: {}",

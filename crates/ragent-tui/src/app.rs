@@ -43,21 +43,24 @@ use ragent_types::{ThinkingConfig, ThinkingLevel};
 /// `AgentNotice` with the real session id routes the progress line through
 /// the existing log + chat rendering, updates the status bar, and avoids
 /// polluting the tool-call list.
+///
+/// Each event is encoded with [`crate::research_progress::encode_progress_event`]
+/// (sentinel-prefixed JSON) so the TUI can route it to the structured
+/// [`ResearchProgress`](crate::research_progress::ResearchProgress) log list
+/// rendered in the message window.
 struct TuiResearchObserver {
     app_event_bus: Arc<EventBus>,
     session_id: String,
+    /// Research item name, captured at spawn time so progress events carry it.
+    name: String,
+    /// Research topic, captured at spawn time so progress events carry it.
+    topic: String,
 }
 
 impl ragent_research::SessionObserver for TuiResearchObserver {
     fn on_event(&self, event: ragent_research::SessionEvent) {
-        let message = match &event {
-            ragent_research::SessionEvent::Done { total_sources } => {
-                format!(
-                    "research: complete — {total_sources} source(s) gathered. Use `/research open <name>` to view the result."
-                )
-            }
-            _ => ragent_research::render_session_event_json(&event),
-        };
+        let message =
+            crate::research_progress::encode_progress_event(&self.name, &self.topic, &event);
         self.app_event_bus.publish(Event::AgentNotice {
             session_id: self.session_id.clone(),
             message,
@@ -118,12 +121,13 @@ impl Completer for RagentCompleter {
                 role: "user".to_string(),
                 content: ChatContent::Text(user.to_string()),
             }]),
-                          tools: Arc::new(vec![]),
-                          temperature: None,
-                          top_p: None,
-                          max_tokens: None,
-                          system: Some(std::sync::Arc::from(system)),
-                          options: Default::default(),            session_id: None,
+            tools: Arc::new(vec![]),
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: Some(std::sync::Arc::from(system)),
+            options: Default::default(),
+            session_id: None,
             request_id: None,
             stream_timeout_secs: None,
             thinking: None,
@@ -650,6 +654,7 @@ impl App {
             config_paths: app_config.config_paths.clone(),
             router_enabled: false,
             router_current_tier: None,
+            research_progress: None,
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
@@ -12364,6 +12369,27 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 ref session_id,
                 ref message,
             } if self.is_current_session(session_id) => {
+                // Research progress events are sentinel-prefixed; route them
+                // to the dedicated progress log list instead of the generic
+                // agent-notice chat bubble.
+                if let Some(decoded) = crate::research_progress::decode_progress_event(message) {
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("research: {} — {}", decoded.phase.as_str(), decoded.detail),
+                    );
+                    let progress = self.research_progress.get_or_insert_with(|| {
+                        crate::research_progress::ResearchProgress::new(
+                            decoded.name.clone(),
+                            decoded.topic.clone(),
+                        )
+                    });
+                    progress.apply(decoded.phase, decoded.status, decoded.detail);
+                    if let Some(total) = decoded.total_sources {
+                        progress.finish(total);
+                    }
+                    self.refresh_research_progress_message();
+                    return;
+                }
                 self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
                 // The instruction-file-discovery summary is multi-line and is
                 // also rendered into the message window. Suppressing it in
@@ -13169,28 +13195,39 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         let observer = Arc::new(TuiResearchObserver {
             app_event_bus: self.event_bus.clone(),
             session_id: self.session_id.clone().unwrap_or_default(),
+            name: String::new(),
+            topic: String::new(),
         });
 
         match cmd {
             ResearchCliCommand::Help => unreachable!(),
             ResearchCliCommand::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-            } => {
-                self.status = format!("research: writing research/{name}/RESEARCH.md…");
-                self.push_log_no_agent(
-                    LogLevel::Info,
-                    format!("research: create '{name}' for topic: {topic}"),
-                );
-                let config = SessionConfig {
-                    topic: topic.clone(),
-                    sources_dir: sources_dir.map(std::path::PathBuf::from),
-                    template,
-                    ..SessionConfig::default()
-                };
-                let title = topic
+                              name,
+                              topic,
+                              sources_dir,
+                              template,
+                              no_local,
+                              no_specs,
+                          } => {
+                              self.status = format!("research: writing research/{name}/RESEARCH.md…");
+                              self.push_log_no_agent(
+                                  LogLevel::Info,
+                                  format!("research: create '{name}' for topic: {topic}"),
+                              );
+                              // Seed the live progress tracker so the message window shows
+                              // a log list of each phase as it runs.
+                              self.research_progress = Some(crate::research_progress::ResearchProgress::new(
+                                  &name, &topic,
+                              ));
+                              self.refresh_research_progress_message();
+                              let config = SessionConfig {
+                                  topic: topic.clone(),
+                                  sources_dir: sources_dir.map(std::path::PathBuf::from),
+                                  template,
+                                  disable_local: no_local,
+                                  disable_specs: no_specs,
+                                  ..SessionConfig::default()
+                              };                let title = topic
                     .split_whitespace()
                     .next()
                     .unwrap_or(&topic)
@@ -13203,25 +13240,40 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.event_bus.clone(),
                     Some(self.storage.clone()),
                     config_arc,
+                    Some(self.provider_registry.clone()),
+                    self.agent_info.model.clone(),
                 );
-                let observer_clone = observer.clone();
+                let observer_clone = Arc::new(TuiResearchObserver {
+                    app_event_bus: observer.app_event_bus.clone(),
+                    session_id: observer.session_id.clone(),
+                    name: name.clone(),
+                    topic: topic.clone(),
+                });
                 let name_for_spawn = name.clone();
                 let topic_for_assistant = topic.clone();
+                let event_bus_for_spawn = self.event_bus.clone();
+                let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
                     let outcome = session
                         .run(&name_for_spawn, &title, &config, observer_clone)
                         .await;
                     match outcome {
-                        Ok(o) => eprintln!(
-                            "research: created research/{} with {} sources",
-                            o.research_name,
-                            o.sources.len()
-                        ),
-                        Err(e) => eprintln!("research: error: {e}"),
+                        Ok(o) => event_bus_for_spawn.publish(Event::AgentNotice {
+                            session_id: session_id_for_spawn.clone(),
+                            message: format!(
+                                "research: created research/{} with {} sources",
+                                o.research_name,
+                                o.sources.len()
+                            ),
+                        }),
+                        Err(e) => event_bus_for_spawn.publish(Event::AgentNotice {
+                            session_id: session_id_for_spawn.clone(),
+                            message: format!("research: error: {e}"),
+                        }),
                     }
                 });
                 let rendered = format!(
-                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\nTopic: {topic_for_assistant}\n\nEach phase (web, local, specs, assemble, finalize) streams a JSON line into the log panel.\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
+                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\nTopic: {topic_for_assistant}\n\nWatch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
                 );
                 self.append_assistant_text(&rendered);
             }
@@ -14334,6 +14386,44 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.session_id.as_deref() == Some(session_id)
     }
 
+    /// Re-render the live research-progress log list into the message window.
+    ///
+    /// Finds the existing progress message (an assistant message whose first
+    /// text part starts with the `🔬 Research Progress` header) and replaces
+    /// its text, or inserts a fresh one if none exists yet. This keeps the
+    /// progress as a single, self-updating log block rather than one chat
+    /// bubble per phase event.
+    fn refresh_research_progress_message(&mut self) {
+        let Some(progress) = self.research_progress.as_ref() else {
+            return;
+        };
+        let rendered = self.render_markdown_to_ascii(&progress.render());
+        const HEADER: &str = "🔬 Research Progress";
+
+        // Replace the existing progress message in place, if present.
+        for msg in self.messages.iter_mut() {
+            if msg.role != Role::Assistant {
+                continue;
+            }
+            if let Some(MessagePart::Text { text }) = msg.parts.first_mut()
+                && text.starts_with(HEADER)
+            {
+                *text = rendered;
+                return;
+            }
+        }
+
+        // Otherwise insert a new assistant message carrying the progress log.
+        if let Some(ref sid) = self.session_id {
+            self.force_new_message = false;
+            self.messages.push(Message::new(
+                sid.clone(),
+                Role::Assistant,
+                vec![MessagePart::Text { text: rendered }],
+            ));
+        }
+    }
+
     /// Count the total number of output lines produced by assistant messages.
     fn assistant_output_lines(&self) -> usize {
         self.messages
@@ -14602,19 +14692,20 @@ mod tests {
             permission_checker,
             event_bus: event_bus.clone(),
             task_manager: std::sync::OnceLock::new(),
-                          team_manager: std::sync::OnceLock::new(),
-                          // M8-T1: team-context cache (unused in tests, but required by the
-                          // struct literal). Mirrors the wiring in `src/main.rs`.
-                          team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-                              std::collections::HashMap::new(),
-                          )),
-                          mcp_client: std::sync::OnceLock::new(),            code_index: std::sync::OnceLock::new(),
+            team_manager: std::sync::OnceLock::new(),
+            // M8-T1: team-context cache (unused in tests, but required by the
+            // struct literal). Mirrors the wiring in `src/main.rs`.
+            team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            mcp_client: std::sync::OnceLock::new(),
+            code_index: std::sync::OnceLock::new(),
             extraction_engine: std::sync::OnceLock::new(),
             stream_config: ragent_core::config::StreamConfig::default(),
             active_spec: tokio::sync::RwLock::new(None),
             spec_manager: std::sync::OnceLock::new(),
             cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
+            cached_tool_names: parking_lot::RwLock::new(None),
             auto_approve: false,
             system_prompt_cache: parking_lot::RwLock::new(None),
         });

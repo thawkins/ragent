@@ -6,9 +6,9 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::{
-    GrepMatch, LocalGatherer, LocalTool, ResearchManager, ResearchSession, SessionConfig,
-    SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
-    WebSearchTool,
+    GrepMatch, LocalGatherer, LocalTool, NoopAnalysisEngine, ResearchManager, ResearchSession,
+    SessionConfig, SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer,
+    WebSearchHit, WebSearchTool,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -150,7 +150,12 @@ fn bench_gathering(c: &mut Criterion) {
     let local = LocalGatherer::new(Arc::new(FakeLocal { files }));
 
     let manager = ResearchManager::new(&research_root);
-    let session = ResearchSession::new(manager, Some(web), Some(local));
+    let session = ResearchSession::new(
+        manager,
+        Some(web),
+        Some(local),
+        Arc::new(ragent_research::NoopAnalysisEngine),
+    );
     let config = SessionConfig {
         topic: "Rust async".into(),
         max_web_results: n_hits,

@@ -168,8 +168,9 @@ impl ResearchManager {
                 }
             }
         }
-                  // Sort by modified descending (FR-004) — newest first.
-                  items.sort_by_key(|a| std::cmp::Reverse(a.modified_at));        Ok(items)
+        // Sort by modified descending (FR-004) — newest first.
+        items.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
+        Ok(items)
     }
 
     // ── Show (T-009) ──────────────────────────────────────────────────────
@@ -709,6 +710,7 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary");
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -742,6 +744,7 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
         });
         let doc = ResearchDocument {
             item,

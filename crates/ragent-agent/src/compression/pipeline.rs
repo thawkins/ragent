@@ -834,23 +834,41 @@ pub fn compress_history(
 ) -> CompressionResult {
     let original_tokens = count_tokens(history);
 
-    // If we're under the threshold, no compression needed.
+    // Compute the threshold for informational logging only.
+    //
+    // The actual gate is enforced by the callers (per-iteration check via
+    // `should_compress_with_reported` and initial-history check via
+    // `should_compress`). When the caller has decided to compress, we MUST
+    // run the pipeline — even when the LOCAL estimate is below the
+    // threshold — because:
+    //
+    //   1. The provider's tokenizer can report a much higher token count
+    //      than the local `EstimatingCounter`, so the local estimate is
+    //      unreliable for some models (e.g. Kimi K2 with a custom
+    //      tokenizer, GPT-OSS, etc.).
+    //   2. The compressor logic already short-circuits on tiny parts
+    //      (`text.len() < 200` at the per-part check) and keeps the
+    //      original content if compression produces no benefit, so
+    //      removing the threshold short-circuit cannot increase output
+    //      size.
+    //   3. The previous behaviour caused the per-iteration gate to fire
+    //      (LLM reported > 80%) but the actual compression to bail out
+    //      internally (local estimate < 80%), so the payload was never
+    //      reduced and the context window kept overflowing.
     let threshold = (context_window as f64 * config.auto_threshold) as usize;
-    if original_tokens <= threshold {
+    if original_tokens > threshold {
+        info!(
+            original_tokens,
+            threshold, "History exceeds compression threshold, running pipeline"
+        );
+    } else {
         debug!(
             original_tokens,
-            threshold, "History under compression threshold, skipping"
+            threshold,
+            "History under local-estimate threshold, \
+                        running pipeline anyway because caller requested compression"
         );
-        return CompressionResult {
-            messages: history.to_vec(),
-            stats: CompressionStats::from_tokens(original_tokens, original_tokens),
-        };
     }
-
-    info!(
-        original_tokens,
-        threshold, "History exceeds compression threshold, running pipeline"
-    );
 
     // Build the CCR store for stashing originals.
     let mut ccr_store = CcrStoreHandle::in_memory();

@@ -5,7 +5,8 @@
 //! FR-018 closest-match paths.
 
 use ragent_research::{ResearchItem, ResearchManager, ResearchName, ResearchStatus, Source};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -69,6 +70,7 @@ async fn write_document_persists_supports_files_and_index() {
         title: "Example".into(),
         captured_at: chrono::Utc::now(),
         body_path: PathBuf::from("sources/web-01.md"),
+        body: "page text".into(),
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -76,6 +78,7 @@ async fn write_document_persists_supports_files_and_index() {
         captured_at: chrono::Utc::now(),
         body_path: PathBuf::from("sources/local-01.md"),
         relevance: "anchor file".into(),
+        body: "fn main() {}".into(),
     });
     let doc = ragent_research::ResearchDocument {
         item,
@@ -147,4 +150,289 @@ async fn search_finds_text_across_research_items() {
     let hits = mgr.search("Rust", 10).await.unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].name, "rust-async");
+}
+
+#[tokio::test]
+async fn session_uses_analysis_engine_to_synthesize_findings() {
+    use async_trait::async_trait;
+    use ragent_research::{
+        AnalysisEngine, AnalysisResult, CrossReference, LocalGatherer, LocalTool, NoopObserver,
+        ResearchManager, ResearchSession, SessionConfig,
+    };
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    struct MockEngine;
+
+    #[async_trait]
+    impl AnalysisEngine for MockEngine {
+        async fn analyze(
+            &self,
+            topic: &str,
+            sources: &[ragent_research::SourceBody],
+        ) -> anyhow::Result<AnalysisResult> {
+            assert_eq!(topic, "Rust async");
+            assert!(
+                !sources.is_empty(),
+                "sources should be passed to the engine"
+            );
+            Ok(AnalysisResult {
+                summary: "LLM-generated summary of Rust async.".into(),
+                findings: vec!["Finding A: async/await is useful.".into()],
+                cross_references: vec![CrossReference {
+                    path: "src/lib.rs".into(),
+                    relevance: "core async code".into(),
+                }],
+                open_questions: vec!["What about cancellation safety?".into()],
+            })
+        }
+    }
+
+    struct FakeLocal {
+        files: HashMap<PathBuf, String>,
+    }
+
+    #[async_trait]
+    impl LocalTool for FakeLocal {
+        async fn glob(&self, _root: &Path, pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+            let ext = pattern.rsplit('.').next().unwrap_or("");
+            Ok(self
+                .files
+                .keys()
+                .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false))
+                .cloned()
+                .collect())
+        }
+        async fn grep(
+            &self,
+            path: &Path,
+            terms: &[String],
+        ) -> anyhow::Result<Vec<ragent_research::GrepMatch>> {
+            let body = self.files.get(path).cloned().unwrap_or_default();
+            let mut out = Vec::new();
+            for (i, line) in body.lines().enumerate() {
+                let l = line.to_lowercase();
+                if terms.iter().any(|t| l.contains(t)) {
+                    out.push(ragent_research::GrepMatch {
+                        line: i + 1,
+                        text: line.to_string(),
+                    });
+                }
+            }
+            Ok(out)
+        }
+        async fn read(&self, path: &Path) -> anyhow::Result<String> {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("missing"))
+        }
+        async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn spec_title(&self, _root: &Path, _id: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+    let f = tmp.path().join("notes.md");
+    tokio::fs::write(&f, "Rust async programming is great.")
+        .await
+        .unwrap();
+
+    let manager = ResearchManager::new(&research_root);
+    let local_tool = Arc::new(FakeLocal {
+        files: HashMap::from([(f.clone(), "Rust async programming is great.".into())]),
+    });
+    let local = LocalGatherer::new(local_tool);
+    let session = ResearchSession::new(manager, None, Some(local), Arc::new(MockEngine));
+
+    let config = SessionConfig {
+        topic: "Rust async".into(),
+        max_local_sources: 5,
+        ..SessionConfig::default()
+    };
+    session
+        .run("rust-async", "Rust Async", &config, Arc::new(NoopObserver))
+        .await
+        .unwrap();
+
+    let body = tokio::fs::read_to_string(research_root.join("rust-async/RESEARCH.md"))
+        .await
+        .unwrap();
+    assert!(
+        body.contains("LLM-generated summary"),
+        "RESEARCH.md should contain the synthesized summary\n{body}"
+    );
+    assert!(
+        body.contains("Finding A: async/await is useful."),
+        "RESEARCH.md should contain the synthesized finding\n{body}"
+    );
+    assert!(
+        body.contains("What about cancellation safety?"),
+        "RESEARCH.md should contain the synthesized open question\n{body}"
+    );
+    assert!(
+        body.contains("src/lib.rs"),
+        "RESEARCH.md should contain the synthesized cross-reference\n{body}"
+    );
+
+    // Supporting file must contain the actual captured body, not the legacy
+    // "(see LocalGatherer for the captured excerpt)" placeholder.
+    let supporting =
+        tokio::fs::read_to_string(research_root.join("rust-async/sources/local-01.md"))
+            .await
+            .unwrap();
+    assert!(
+        supporting.contains("Rust async programming is great."),
+        "supporting file should contain captured body, got:\n{supporting}"
+    );
+    assert!(
+        !supporting.contains("(see LocalGatherer for the captured excerpt)"),
+        "supporting file must not contain the legacy placeholder"
+    );
+}
+
+#[tokio::test]
+async fn session_writes_supporting_files_with_actual_web_bodies() {
+    use async_trait::async_trait;
+    use ragent_research::{
+        AnalysisEngine, AnalysisResult, LocalGatherer, LocalTool, ResearchManager, ResearchSession,
+        SessionConfig, SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer,
+        WebSearchHit, WebSearchTool,
+    };
+    use std::sync::Mutex;
+
+    struct FakeSearch;
+    #[async_trait]
+    impl WebSearchTool for FakeSearch {
+        async fn search(
+            &self,
+            _query: &str,
+            _max_results: usize,
+        ) -> anyhow::Result<Vec<WebSearchHit>> {
+            Ok(vec![WebSearchHit {
+                url: "https://example.com/page".into(),
+                title: "Example Page".into(),
+                snippet: String::new(),
+            }])
+        }
+    }
+    struct FakeFetch;
+    #[async_trait]
+    impl WebFetchTool for FakeFetch {
+        async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+            Ok(WebFetchedPage {
+                url: url.to_string(),
+                title: "Example Page".into(),
+                body: "Real page body — talks about Rust lifetimes.".into(),
+            })
+        }
+    }
+    struct NoLocal;
+    #[async_trait]
+    impl LocalTool for NoLocal {
+        async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+        async fn grep(
+            &self,
+            _path: &Path,
+            _terms: &[String],
+        ) -> anyhow::Result<Vec<ragent_research::GrepMatch>> {
+            Ok(Vec::new())
+        }
+        async fn read(&self, _path: &Path) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+        async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+            Ok(Vec::new())
+        }
+        async fn spec_title(&self, _root: &Path, _spec_id: &str) -> anyhow::Result<String> {
+            Ok(String::new())
+        }
+    }
+
+    #[derive(Default)]
+    struct CaptureObserver {
+        events: Mutex<Vec<SessionEvent>>,
+    }
+    impl SessionObserver for CaptureObserver {
+        fn on_event(&self, event: SessionEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+    let manager = ResearchManager::new(&research_root);
+    let web = WebGatherer::new(Arc::new(FakeSearch), Arc::new(FakeFetch));
+    let local = LocalGatherer::new(Arc::new(NoLocal));
+    let session = ResearchSession::new(manager, Some(web), Some(local), Arc::new(EmptyAnalysis));
+
+    struct EmptyAnalysis;
+    #[async_trait]
+    impl AnalysisEngine for EmptyAnalysis {
+        async fn analyze(
+            &self,
+            _topic: &str,
+            _sources: &[ragent_research::SourceBody],
+        ) -> anyhow::Result<AnalysisResult> {
+            // Simulate an LLM that returned empty content — exercises the
+            // mechanical fallback path while still proving the supporting
+            // files contain real body content.
+            Ok(AnalysisResult::default())
+        }
+    }
+
+    let observer = Arc::new(CaptureObserver::default());
+    let cfg = SessionConfig {
+        topic: "rust lifetimes".into(),
+        max_web_results: 5,
+        max_local_sources: 5,
+        ..SessionConfig::default()
+    };
+    session
+        .run("lifetime-check", "Lifetime Check", &cfg, observer.clone())
+        .await
+        .unwrap();
+
+    // Supporting web file must contain the fetched body text.
+    let supporting =
+        tokio::fs::read_to_string(research_root.join("lifetime-check/sources/web-01.md"))
+            .await
+            .unwrap();
+    assert!(
+        supporting.contains("Real page body — talks about Rust lifetimes."),
+        "web supporting file should contain actual body, got:\n{supporting}"
+    );
+    assert!(
+        !supporting.contains("(see WebGatherer for the captured body)"),
+        "web supporting file must not contain the legacy placeholder"
+    );
+
+    // RESEARCH.md must contain a real summary that names the web title and
+    // either mentions the body excerpt (LLM path) or the title + a
+    // fallback note.
+    let research_md = tokio::fs::read_to_string(research_root.join("lifetime-check/RESEARCH.md"))
+        .await
+        .unwrap();
+    assert!(
+        research_md.contains("Example Page"),
+        "RESEARCH.md must reference the captured web title, got:\n{research_md}"
+    );
+
+    // The SynthesizeResult event must have fired.
+    let events = observer.events.lock().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::SynthesizeResult { .. })),
+        "session must emit a SynthesizeResult event"
+    );
 }

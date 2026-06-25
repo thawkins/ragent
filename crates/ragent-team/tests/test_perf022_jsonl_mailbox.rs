@@ -41,17 +41,29 @@ fn test_push_writes_jsonl_format() {
     let team_dir = team_dir_for(&dir, "jsonl-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new("lead", "tm-001", MessageType::Message, "hello"))
+        .push(MailboxMessage::new(
+            "lead",
+            "tm-001",
+            MessageType::Message,
+            "hello",
+        ))
         .expect("push");
 
     let path = mailbox_path(&team_dir, "tm-001");
     let raw = std::fs::read_to_string(&path).expect("read");
     let first = raw.trim_start().chars().next();
-    assert_eq!(first, Some('{'), "first char should be {{ for JSONL, got {first:?}");
+    assert_eq!(
+        first,
+        Some('{'),
+        "first char should be {{ for JSONL, got {first:?}"
+    );
     // Each non-empty line must be a complete JSON object.
     let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
     assert_eq!(lines.len(), 1, "one line expected after first push");
-    assert!(lines[0].contains("\"content\":\"hello\""), "line should contain the message content");
+    assert!(
+        lines[0].contains("\"content\":\"hello\""),
+        "line should contain the message content"
+    );
 }
 
 /// A legacy single-JSON-array mailbox file is still readable via `read_all`
@@ -109,13 +121,22 @@ fn test_legacy_file_migrates_to_jsonl_on_push() {
 
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new("lead", "tm-001", MessageType::Message, "new body"))
+        .push(MailboxMessage::new(
+            "lead",
+            "tm-001",
+            MessageType::Message,
+            "new body",
+        ))
         .expect("push after legacy");
 
     let path = mailbox_path(&team_dir, "tm-001");
     let raw = std::fs::read_to_string(&path).expect("read migrated file");
     let first = raw.trim_start().chars().next();
-    assert_eq!(first, Some('{'), "file should be JSONL after migration push");
+    assert_eq!(
+        first,
+        Some('{'),
+        "file should be JSONL after migration push"
+    );
 
     let all = mailbox.read_all().expect("read_all after migrate");
     assert_eq!(all.len(), 2, "both old and new messages should be present");
@@ -136,13 +157,23 @@ fn test_push_is_append_only_after_jsonl() {
     let team_dir = team_dir_for(&dir, "append-team");
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     mailbox
-        .push(MailboxMessage::new("lead", "tm-001", MessageType::Message, "first"))
+        .push(MailboxMessage::new(
+            "lead",
+            "tm-001",
+            MessageType::Message,
+            "first",
+        ))
         .expect("first push");
 
     let path = mailbox_path(&team_dir, "tm-001");
     let raw_before = std::fs::read_to_string(&path).expect("read");
     mailbox
-        .push(MailboxMessage::new("lead", "tm-001", MessageType::Message, "second"))
+        .push(MailboxMessage::new(
+            "lead",
+            "tm-001",
+            MessageType::Message,
+            "second",
+        ))
         .expect("second push");
     let raw_after = std::fs::read_to_string(&path).expect("read again");
 
@@ -163,11 +194,17 @@ fn test_jsonl_reader_skips_blank_lines() {
 
     // Build a JSONL body with a blank line in the middle.
     let m1 = serde_json::to_string(&MailboxMessage::new(
-        "lead", "tm-001", MessageType::Message, "one",
+        "lead",
+        "tm-001",
+        MessageType::Message,
+        "one",
     ))
     .unwrap();
     let m2 = serde_json::to_string(&MailboxMessage::new(
-        "lead", "tm-001", MessageType::Message, "two",
+        "lead",
+        "tm-001",
+        MessageType::Message,
+        "two",
     ))
     .unwrap();
     let body = format!("{m1}\n\n{m2}\n");
@@ -175,7 +212,11 @@ fn test_jsonl_reader_skips_blank_lines() {
 
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     let all = mailbox.read_all().expect("read_all");
-    assert_eq!(all.len(), 2, "blank line should be skipped, yielding two messages");
+    assert_eq!(
+        all.len(),
+        2,
+        "blank line should be skipped, yielding two messages"
+    );
     assert_eq!(all[0].content, "one");
     assert_eq!(all[1].content, "two");
 }
@@ -189,7 +230,12 @@ fn test_mark_all_read_works_on_jsonl() {
     let mailbox = Mailbox::open(&team_dir, "tm-001").expect("open mailbox");
     for content in ["a", "b", "c"] {
         mailbox
-            .push(MailboxMessage::new("lead", "tm-001", MessageType::Message, content))
+            .push(MailboxMessage::new(
+                "lead",
+                "tm-001",
+                MessageType::Message,
+                content,
+            ))
             .expect("push");
     }
 

@@ -19,8 +19,9 @@ use ragent_core::{
     tool::ToolContext as AgentToolContext,
 };
 use ragent_research::{
-    GrepMatch, LocalGatherer, LocalTool, ResearchManager, ResearchSession, WebFetchTool,
-    WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    AnalysisEngine, GrepMatch, LlmAnalysisEngine, LocalGatherer, LocalTool, NoopAnalysisEngine,
+    ResearchManager, ResearchSession, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
+    WebSearchTool,
 };
 
 /// Build a [`ResearchSession`] backed by the agent tool `registry`.
@@ -28,6 +29,10 @@ use ragent_research::{
 /// If `websearch`/`webfetch` are present, web gathering is enabled.  If
 /// `glob`/`grep`/`read`/`list` are present, local gathering is enabled.
 /// Missing tools are silently omitted so the session degrades gracefully.
+///
+/// If `active_model` is supplied and a `ProviderRegistry` is available, an
+/// LLM-backed analysis engine is wired in so the final `RESEARCH.md` contains
+/// synthesized summary/findings/cross-references/open questions.
 #[must_use]
 pub fn build_research_session(
     registry: &Arc<ragent_core::tool::ToolRegistry>,
@@ -37,6 +42,8 @@ pub fn build_research_session(
     event_bus: Arc<EventBus>,
     storage: Option<Arc<Storage>>,
     config: Option<Arc<Config>>,
+    provider_registry: Option<Arc<ragent_core::provider::ProviderRegistry>>,
+    active_model: Option<ragent_core::agent::ModelRef>,
 ) -> ResearchSession {
     let web = build_web_gatherer(
         registry,
@@ -54,7 +61,66 @@ pub fn build_research_session(
         storage.clone(),
         config.clone(),
     );
-    ResearchSession::new(manager, web, local)
+    let analysis: Arc<dyn AnalysisEngine> = match (provider_registry, active_model) {
+        (Some(registry), Some(model_ref)) => {
+            let base_url = resolve_base_url(
+                &model_ref.provider_id,
+                storage.as_deref(),
+                config.as_deref(),
+            );
+            let api_key = storage
+                .as_deref()
+                .and_then(|s| s.get_provider_auth(&model_ref.provider_id).ok().flatten());
+            Arc::new(
+                LlmAnalysisEngine::new(registry, &model_ref.provider_id, &model_ref.model_id)
+                    .with_api_key(api_key)
+                    .with_base_url(base_url),
+            )
+        }
+        _ => Arc::new(NoopAnalysisEngine),
+    };
+    ResearchSession::new(manager, web, local, analysis)
+}
+
+/// Resolve a provider-specific base URL from storage/config/env, mirroring the
+/// resolution used by the TUI and benchmark runner.
+fn resolve_base_url(
+    provider_id: &str,
+    storage: Option<&Storage>,
+    config: Option<&Config>,
+) -> Option<String> {
+    match provider_id {
+        "copilot" => storage.and_then(|s| s.get_setting("copilot_api_base").ok().flatten()),
+        "generic_openai" => storage
+            .and_then(|s| s.get_setting("generic_openai_api_base").ok().flatten())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                config
+                    .and_then(|c| c.provider.get("generic_openai"))
+                    .and_then(|p| p.api.as_ref())
+                    .and_then(|api| api.base_url.clone())
+            })
+            .or_else(|| {
+                std::env::var("GENERIC_OPENAI_API_BASE")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+            }),
+        "azure_foundry" => storage
+            .and_then(|s| s.get_setting("azure_foundry_api_base").ok().flatten())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                config
+                    .and_then(|c| c.provider.get("azure_foundry"))
+                    .and_then(|p| p.api.as_ref())
+                    .and_then(|api| api.base_url.clone())
+            })
+            .or_else(|| {
+                std::env::var("AZURE_AI_FOUNDRY_BASE")
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+            }),
+        _ => None,
+    }
 }
 
 fn build_tool_context(
@@ -378,6 +444,8 @@ mod tests {
             "test-session".into(),
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             Arc::new(EventBus::new(256)),
+            None,
+            None,
             None,
             None,
         );

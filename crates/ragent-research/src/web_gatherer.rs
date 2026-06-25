@@ -34,7 +34,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 
+use crate::document::fence_source_body;
 use crate::source::Source;
+
+/// Cap a captured web body at the same byte budget used by the supporting
+/// file renderer so the body stored on the `Source` matches what ends up on
+/// disk. Keeps runaway pages from blowing up the synthesis prompt.
+fn fence_captured_body(body: &str) -> String {
+    fence_source_body(body)
+}
 
 /// Search-result row returned by a [`WebSearchTool`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,10 +167,15 @@ impl WebGatherer {
                         page.title
                     };
                     let body_path = web_body_path(index);
+                    // Cap the body at MAX_SOURCE_BODY_BYTES so a runaway page
+                    // doesn't blow up the synthesis prompt or the supporting
+                    // file. The truncation marker keeps the file self-explanatory.
+                    let body = fence_captured_body(&page.body);
                     tracing::info!(
                         url = %page.url,
                         title = %title,
                         body_path = %body_path.display(),
+                        body_chars = body.chars().count(),
                         "research: captured web source"
                     );
                     sources.push(Source::Web {
@@ -170,6 +183,7 @@ impl WebGatherer {
                         title,
                         captured_at: Utc::now(),
                         body_path,
+                        body,
                     });
                 }
                 Err(e) => {

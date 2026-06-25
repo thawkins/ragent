@@ -127,6 +127,9 @@ pub struct LocalGatherConfig {
     /// Keyword terms derived from the research topic (split on whitespace,
     /// lowercased, deduped, length ≥ 2 chars).
     pub terms: Vec<String>,
+    /// When `true`, skip the spec cross-reference pass that produces
+    /// [`Source::Spec`] entries. Defaults to `false`.
+    pub skip_specs: bool,
 }
 
 impl Default for LocalGatherConfig {
@@ -135,6 +138,7 @@ impl Default for LocalGatherConfig {
             globs: DEFAULT_GLOBS.iter().map(|s| s.to_string()).collect(),
             max_local_sources: DEFAULT_MAX_LOCAL_SOURCES,
             terms: Vec::new(),
+            skip_specs: false,
         }
     }
 }
@@ -203,18 +207,34 @@ impl LocalGatherer {
         // 2. Score candidates by grep hits and keep the top N.
         let scored = self.score_candidates(&candidates, &terms).await;
         let mut sources = Vec::new();
-        for (index, (candidate, score)) in scored
+        for (index, (candidate, matches, matched_terms)) in scored
             .into_iter()
             .take(config.max_local_sources)
             .enumerate()
         {
             let body_path = local_body_path(index);
-            let relevance = format!("{} keyword match(es) for research topic", score);
+            // Read the file so we can embed an excerpt in the supporting file
+            // and so the relevance note can show the *first* matching line
+            // instead of just a keyword count.
+            let raw_body = match self.tool.read(&candidate.path).await {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %candidate.path.display(),
+                        error = %e,
+                        "research: read failed during local gathering; capturing matches only"
+                    );
+                    String::new()
+                }
+            };
+            let excerpt = build_local_excerpt(&raw_body, &matches, MAX_LOCAL_EXCERPT_LINES);
+            let relevance = build_relevance_note(&matched_terms, &matches);
             tracing::info!(
                 path = %candidate.path.display(),
                 kind = ?candidate.kind,
-                score,
-                body_path = %body_path.display(),
+                matches = matches.len(),
+                matched_terms = ?matched_terms,
+                body_chars = excerpt.chars().count(),
                 "research: captured local source"
             );
             sources.push(Source::Local {
@@ -223,13 +243,22 @@ impl LocalGatherer {
                 captured_at: Utc::now(),
                 body_path,
                 relevance,
+                body: excerpt,
             });
         }
 
-        // 3. Cross-reference prior specs (FR-009).
-        let spec_sources = self
-            .gather_specs(project_root, &terms, config.max_local_sources)
-            .await;
+        // 3. Cross-reference prior specs (FR-009). Skipped when the caller
+        // set `skip_specs: true` (e.g. via `--no-specs`).
+        let spec_sources = if config.skip_specs {
+            tracing::info!(
+                project_root = %project_root.display(),
+                "research: skipping spec cross-reference (skip_specs=true)"
+            );
+            Vec::new()
+        } else {
+            self.gather_specs(project_root, &terms, config.max_local_sources)
+                .await
+        };
         sources.extend(spec_sources);
 
         tracing::info!(
@@ -275,12 +304,13 @@ impl LocalGatherer {
         &self,
         candidates: &[LocalCandidate],
         terms: &[String],
-    ) -> Vec<(LocalCandidate, usize)> {
+    ) -> Vec<(LocalCandidate, Vec<GrepMatch>, Vec<String>)> {
         let mut scored = Vec::new();
         for candidate in candidates {
             match self.tool.grep(&candidate.path, terms).await {
                 Ok(matches) if !matches.is_empty() => {
-                    scored.push((candidate.clone(), matches.len()));
+                    let matched_terms = collect_matched_terms(&matches, terms);
+                    scored.push((candidate.clone(), matches, matched_terms));
                 }
                 Ok(_) => { /* no match, skip */ }
                 Err(e) => {
@@ -292,8 +322,12 @@ impl LocalGatherer {
                 }
             }
         }
-        // Stable sort: highest score first, then by path for determinism.
-        scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.path.cmp(&b.0.path)));
+        // Stable sort: highest match-count first, then by path for determinism.
+        scored.sort_by(|a, b| {
+            b.1.len()
+                .cmp(&a.1.len())
+                .then_with(|| a.0.path.cmp(&b.0.path))
+        });
         scored
     }
 
@@ -357,11 +391,150 @@ impl LocalGatherer {
     }
 }
 
+/// Maximum number of lines to include in a local source excerpt. Keeps the
+/// supporting file small and the synthesis prompt focused on the most
+/// relevant context around each keyword match.
+pub const MAX_LOCAL_EXCERPT_LINES: usize = 30;
+
 /// Compute the zero-padded supporting-file path for the Nth local source.
 ///
 /// Index 0 → `local-01.md`, index 1 → `local-02.md`, etc.
 pub fn local_body_path(index: usize) -> PathBuf {
     PathBuf::from(format!("sources/local-{:02}.md", index + 1))
+}
+
+/// Build the `body` field for a [`Source::Local`] entry.
+///
+/// Produces a markdown excerpt that:
+/// - Header line showing the file path and match count.
+/// - Up to `MAX_LOCAL_EXCERPT_LINES` matching lines plus surrounding context
+///   (one line of context on either side when available).
+/// - A trailing ellipsis marker if there were more matches.
+///
+/// When the body is empty (read failed) we fall back to the matched lines
+/// only, since those are still informative.
+pub fn build_local_excerpt(body: &str, matches: &[GrepMatch], max_lines: usize) -> String {
+    if matches.is_empty() {
+        return String::new();
+    }
+    let lines: Vec<(usize, &str)> = body.lines().enumerate().collect();
+    // Defensive: clamp the requested max to at least one line so we never
+    // accidentally produce an empty excerpt when the caller asks for 0.
+    let max_lines = max_lines.max(1);
+    // Build a set of match line numbers (1-based, like GrepMatch.line).
+    let mut match_set: std::collections::BTreeSet<usize> = matches.iter().map(|m| m.line).collect();
+    // For each match, also include one line of context on either side
+    // (when available). Context lines are tagged so we don't render the
+    // exact line twice if it's both a match and a context neighbour.
+    let mut context_lines: Vec<usize> = Vec::new();
+    for m in matches {
+        if m.line > 1 {
+            context_lines.push(m.line - 1);
+        }
+        context_lines.push(m.line + 1);
+    }
+    for c in context_lines {
+        if c >= 1 {
+            match_set.insert(c);
+        }
+    }
+
+    let mut out = String::new();
+    let total_matches = matches.len();
+    out.push_str(&format!("Excerpt — {total_matches} keyword match(es)\n\n"));
+    let mut included = 0usize;
+    let mut last_emitted: Option<usize> = None;
+    for (idx, text) in &lines {
+        let one_based = idx + 1;
+        if !match_set.contains(&one_based) {
+            continue;
+        }
+        if let Some(prev) = last_emitted {
+            if one_based > prev + 1 {
+                out.push_str("…\n");
+            }
+        }
+        let marker = if matches.iter().any(|m| m.line == one_based) {
+            "▶"
+        } else {
+            " "
+        };
+        // Truncate the per-line text so a single very long line doesn't
+        // dominate the excerpt.
+        let line_text: String = text.chars().take(200).collect();
+        out.push_str(&format!("{marker} {one_based:>4}: {line_text}\n"));
+        last_emitted = Some(one_based);
+        included += 1;
+        if included >= max_lines {
+            break;
+        }
+    }
+    if total_matches > included {
+        out.push_str(&format!(
+            "\n… ({remaining} more match(es) elided)\n",
+            remaining = total_matches.saturating_sub(included)
+        ));
+    }
+    out
+}
+
+/// Build the `relevance` note for a [`Source::Local`] entry.
+///
+/// Replaces the legacy "X keyword match(es) for research topic" string with a
+/// more informative note: the matched keywords (truncated to 3) plus a short
+/// snippet of the first matching line so the user can see *why* the file is
+/// relevant without opening it.
+pub fn build_relevance_note(matched_terms: &[String], matches: &[GrepMatch]) -> String {
+    if matches.is_empty() {
+        return "matched no keyword terms (relevance tag retained)".into();
+    }
+    let terms_str = if matched_terms.is_empty() {
+        "keyword match(es)".to_string()
+    } else {
+        let shown: Vec<&str> = matched_terms.iter().take(3).map(String::as_str).collect();
+        if matched_terms.len() > 3 {
+            format!("{}, …(+{})", shown.join(", "), matched_terms.len() - 3)
+        } else {
+            shown.join(", ")
+        }
+    };
+    let first = matches
+        .first()
+        .map(|m| m.text.trim())
+        .unwrap_or("")
+        .chars()
+        .take(120)
+        .collect::<String>();
+    if first.is_empty() {
+        format!("{} match(es) on: {}", matches.len(), terms_str)
+    } else {
+        format!(
+            "{} match(es) on: {} — \"{}\"",
+            matches.len(),
+            terms_str,
+            first
+        )
+    }
+}
+
+/// Walk the grep matches and figure out which of `terms` actually appeared.
+/// Returns a deduplicated, lowercase vec preserving first-seen order.
+pub fn collect_matched_terms(matches: &[GrepMatch], terms: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for m in matches {
+        let lower = m.text.to_lowercase();
+        for term in terms {
+            let t = term.to_lowercase();
+            if t.len() < 2 {
+                continue;
+            }
+            if lower.contains(&t) && seen.insert(t.clone()) {
+                out.push(t);
+            }
+        }
+    }
+    out
 }
 
 /// Derive keyword terms for `topic`, falling back to `fallback` when
@@ -665,32 +838,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gather_includes_spec_sources_with_relevance_notes() {
-        let mut fs = FakeFs::default();
-        fs.specs
-            .insert("auth-refactor".into(), "Auth refactor plan".into());
-        fs.specs
-            .insert("model-router".into(), "Model router provider".into());
-        let (g, _) = gatherer_with_fs(fs);
-        let cfg = LocalGatherConfig {
-            terms: vec!["auth".into()],
-            max_local_sources: 5,
-            ..LocalGatherConfig::default()
-        };
-        let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
-        let spec_sources: Vec<&Source> = sources
-            .iter()
-            .filter(|s| matches!(s, Source::Spec { .. }))
-            .collect();
-        assert_eq!(spec_sources.len(), 2);
-        if let Source::Spec { relevance, .. } = spec_sources[0] {
-            assert!(
-                relevance.contains("Auth refactor plan") || relevance.contains("Model router"),
-                "relevance should include the spec title: {relevance}"
-            );
-        }
-    }
+          async fn gather_includes_spec_sources_with_relevance_notes() {
+              let mut fs = FakeFs::default();
+              fs.specs
+                  .insert("auth-refactor".into(), "Auth refactor plan".into());
+              fs.specs
+                  .insert("model-router".into(), "Model router provider".into());
+              let (g, _) = gatherer_with_fs(fs);
+              let cfg = LocalGatherConfig {
+                  terms: vec!["auth".into()],
+                  max_local_sources: 5,
+                  ..LocalGatherConfig::default()
+              };
+              let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
+              let spec_sources: Vec<&Source> = sources
+                  .iter()
+                  .filter(|s| matches!(s, Source::Spec { .. }))
+                  .collect();
+              assert_eq!(spec_sources.len(), 2);
+              if let Source::Spec { relevance, .. } = spec_sources[0] {
+                  assert!(
+                      relevance.contains("Auth refactor plan") || relevance.contains("Model router"),
+                      "relevance should include the spec title: {relevance}"
+                  );
+              }
+          }
 
+          #[tokio::test]
+          async fn gather_skips_spec_sources_when_skip_specs_is_true() {
+              let mut fs = FakeFs::default();
+              fs.specs
+                  .insert("auth-refactor".into(), "Auth refactor plan".into());
+              fs.specs
+                  .insert("model-router".into(), "Model router provider".into());
+              fs.files.insert(
+                  root().join("README.md"),
+                  "authentication notes here\n".into(),
+              );
+              let (g, _) = gatherer_with_fs(fs);
+              let cfg = LocalGatherConfig {
+                  terms: vec!["auth".into()],
+                  max_local_sources: 5,
+                  skip_specs: true,
+                  ..LocalGatherConfig::default()
+              };
+              let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
+              let spec_count = sources
+                  .iter()
+                  .filter(|s| matches!(s, Source::Spec { .. }))
+                  .count();
+              assert_eq!(
+                  spec_count, 0,
+                  "spec sources should be omitted when skip_specs=true"
+              );
+              // Local sources should still be present.
+              let local_count = sources
+                  .iter()
+                  .filter(|s| matches!(s, Source::Local { .. }))
+                  .count();
+              assert!(local_count >= 1);
+          }
     #[tokio::test]
     async fn gather_returns_empty_when_no_files_match() {
         let mut fs = FakeFs::default();
@@ -802,5 +1009,107 @@ mod tests {
         assert_eq!(local_body_path(0), PathBuf::from("sources/local-01.md"));
         assert_eq!(local_body_path(9), PathBuf::from("sources/local-10.md"));
         assert_eq!(local_body_path(99), PathBuf::from("sources/local-100.md"));
+    }
+
+    #[test]
+    fn collect_matched_terms_returns_dedup_lowercased_terms() {
+        let matches = vec![
+            GrepMatch {
+                line: 1,
+                text: "Async Rust is great".to_string(),
+            },
+            GrepMatch {
+                line: 2,
+                text: "tokio async runtime".to_string(),
+            },
+        ];
+        let terms = vec!["async".into(), "RUST".into(), "missing".into()];
+        let got = collect_matched_terms(&matches, &terms);
+        // Order is first-seen; "async" appears twice (line 1 + 2) but is deduped.
+        assert_eq!(got, vec!["async".to_string(), "rust".to_string()]);
+    }
+
+    #[test]
+    fn build_relevance_note_includes_matched_terms_and_first_line_snippet() {
+        let matches = vec![
+            GrepMatch {
+                line: 1,
+                text: "pub async fn main() { … }".to_string(),
+            },
+            GrepMatch {
+                line: 7,
+                text: "let runtime = tokio::runtime::Runtime::new();".to_string(),
+            },
+        ];
+        let note = build_relevance_note(&["async".into(), "tokio".into()], &matches);
+        assert!(note.contains("2 match(es)"));
+        assert!(note.contains("async, tokio"));
+        assert!(note.contains("pub async fn main()"));
+    }
+
+    #[test]
+    fn build_relevance_note_truncates_long_matched_term_lists() {
+        let matched: Vec<String> = (0..10).map(|i| format!("term{i}")).collect();
+        let matches = vec![GrepMatch {
+            line: 1,
+            text: "term0 term1 term2".to_string(),
+        }];
+        let note = build_relevance_note(&matched, &matches);
+        assert!(note.contains("(+7)"));
+    }
+
+    #[test]
+    fn build_local_excerpt_emits_match_lines_with_markers_and_omits_header() {
+        let body = "\
+header line one
+header line two
+fn async_main() {}
+header line four
+let runtime = tokio::new();
+";
+        let matches = vec![
+            GrepMatch {
+                line: 3,
+                text: "fn async_main() {}".to_string(),
+            },
+            GrepMatch {
+                line: 5,
+                text: "let runtime = tokio::new();".to_string(),
+            },
+        ];
+        let out = build_local_excerpt(body, &matches, 30);
+        // Header is emitted at the top of the excerpt body.
+        assert!(out.contains("Excerpt —"));
+        // Match lines are marked with the ▶ glyph.
+        assert!(out.contains("▶"));
+        // Context lines (one either side) are emitted with the space marker.
+        assert!(out.contains("header line two"));
+        assert!(out.contains("header line four"));
+    }
+
+    #[test]
+    fn build_local_excerpt_truncates_at_max_lines() {
+        let body: String = (1..=100)
+            .map(|i| format!("match line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let matches: Vec<GrepMatch> = (1..=100)
+            .map(|i| GrepMatch {
+                line: i,
+                text: format!("match line {i}"),
+            })
+            .collect();
+        let out = build_local_excerpt(&body, &matches, 5);
+        // Only 5 lines of excerpt plus the trailing ellipsis marker should be
+        // present.
+        assert!(out.contains("5 more match(es) elided"));
+        assert!(!out.contains("match line 6"));
+    }
+
+    #[test]
+    fn build_local_excerpt_handles_empty_match_list() {
+        let body = "fn main() {}";
+        let out = build_local_excerpt(body, &[], 30);
+        assert_eq!(out, "");
     }
 }

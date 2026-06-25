@@ -293,12 +293,17 @@ pub fn fence_source_body(body: &str) -> String {
 /// Returns `None` when the variant has no body content to write (currently
 /// just `Source::Spec`, which points at the spec directory itself rather
 /// than capturing an excerpt).
+///
+/// When the captured `body` is empty (e.g. older research items loaded from
+/// disk that predate the body field, or a fetch that returned no text) we
+/// emit a clearly-marked placeholder so the file is still self-describing.
 pub fn render_supporting_file(source: &Source) -> Option<String> {
     match source {
         Source::Web {
             url,
             title,
             captured_at,
+            body,
             ..
         } => Some(format!(
             "# Web source\n\n\
@@ -309,13 +314,18 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             url = url,
             title = title,
             captured = captured_at.to_rfc3339(),
-            body = "(see WebGatherer for the captured body)",
+            body = if body.is_empty() {
+                "(no body captured for this source)"
+            } else {
+                body.as_str()
+            },
         )),
         Source::Local {
             path,
             kind,
             captured_at,
             relevance,
+            body,
             ..
         } => {
             let kind_label = match kind {
@@ -331,12 +341,19 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                 path = path,
                 relevance = relevance,
                 captured = captured_at.to_rfc3339(),
-                body = "(see LocalGatherer for the captured excerpt)",
+                body = if body.is_empty() {
+                    "(no excerpt captured — file could not be read)"
+                } else {
+                    body.as_str()
+                },
             ))
         }
         Source::Spec { .. } => None,
         Source::Other {
-            label, captured_at, ..
+            label,
+            captured_at,
+            body,
+            ..
         } => Some(format!(
             "# Other source\n\n\
              - Label: {label}\n\
@@ -344,7 +361,11 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
              ```text\n{body}\n```\n",
             label = label,
             captured = captured_at.to_rfc3339(),
-            body = "(see caller for the captured body)",
+            body = if body.is_empty() {
+                "(no body captured for this source)"
+            } else {
+                body.as_str()
+            },
         )),
     }
 }
@@ -549,10 +570,25 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            body: "page body content".into(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
         assert!(out.contains("URL: https://example.com"));
+        assert!(out.contains("page body content"));
+    }
+
+    #[test]
+    fn render_supporting_file_produces_web_placeholder_when_body_empty() {
+        let source = Source::Web {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
+        };
+        let out = render_supporting_file(&source).expect("web must produce a body");
+        assert!(out.contains("no body captured"));
     }
 
     #[test]
@@ -563,10 +599,26 @@ mod tests {
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/local-01.md"),
             relevance: "External notes".into(),
+            body: "excerpt text".into(),
         };
         let out = render_supporting_file(&source).expect("local must produce a body");
         assert!(out.contains("# Local source (extra (--sources-dir))"));
         assert!(out.contains("Path: notes/extra.md"));
+        assert!(out.contains("excerpt text"));
+    }
+
+    #[test]
+    fn render_supporting_file_produces_local_placeholder_when_body_empty() {
+        let source = Source::Local {
+            path: "missing.md".into(),
+            kind: LocalSourceKind::InProject,
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/local-01.md"),
+            relevance: "could not read".into(),
+            body: String::new(),
+        };
+        let out = render_supporting_file(&source).expect("local must produce a body");
+        assert!(out.contains("no excerpt captured"));
     }
 
     #[test]

@@ -40,6 +40,7 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod analysis;
 pub mod cli;
 pub mod document;
 pub mod io;
@@ -53,9 +54,13 @@ pub mod source;
 pub mod status;
 pub mod web_gatherer;
 
+pub use analysis::{
+    AnalysisEngine, AnalysisResult, LlmAnalysisEngine, NoopAnalysisEngine, SourceBody,
+    build_source_bodies,
+};
 pub use cli::{
-    ResearchCliCommand, render_list_output, render_search_output, render_session_event_json,
-    render_show_output,
+    FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
+    render_session_event_json, render_show_output,
 };
 pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
@@ -66,7 +71,8 @@ pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{ResearchItem, ResearchItemError};
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch, LocalGatherConfig, LocalGatherError,
-    LocalGatherer, LocalTool, derive_terms, local_body_path,
+    LocalGatherer, LocalTool, MAX_LOCAL_EXCERPT_LINES, build_local_excerpt, build_relevance_note,
+    collect_matched_terms, derive_terms, local_body_path,
 };
 pub use manager::{
     IndexTimestamp, ResearchError, ResearchManager, SearchHit, render_document_for,

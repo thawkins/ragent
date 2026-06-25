@@ -46,7 +46,10 @@ fn test_team_context_cache_hit_within_ttl() {
 
     // Read within the 5 s TTL — should be a hit.
     let cached = cache.read().get(&session_id).cloned();
-    assert!(cached.is_some(), "cache should have an entry for the session");
+    assert!(
+        cached.is_some(),
+        "cache should have an entry for the session"
+    );
     let (cached_ctx, fetched_at) = cached.unwrap();
     assert_eq!(cached_ctx.team_name, "team-a");
     assert_eq!(cached_ctx.agent_id, "lead");
@@ -115,7 +118,10 @@ fn test_team_context_cache_invalidation_clears_all_entries() {
 
     // The processor does `cache.write().clear()` after a `team_*` tool.
     cache.write().clear();
-    assert!(cache.read().is_empty(), "invalidation should clear all entries");
+    assert!(
+        cache.read().is_empty(),
+        "invalidation should clear all entries"
+    );
 }
 
 /// When a session is not part of any team, the processor evicts any stale
@@ -222,7 +228,10 @@ fn test_current_task_id_set_and_cleared_via_store() {
     assert_eq!(claimed.assigned_to.as_deref(), Some("tm-001"));
 
     let mut store = TeamStore::load(&store.dir).expect("reload store");
-    let m = store.config.member_by_id_mut("tm-001").expect("find member");
+    let m = store
+        .config
+        .member_by_id_mut("tm-001")
+        .expect("find member");
     m.current_task_id = Some("t-001".to_string());
     store.save().expect("save store");
 
@@ -233,11 +242,17 @@ fn test_current_task_id_set_and_cleared_via_store() {
     // Simulate team_task_complete: complete the task, then clear current_task_id.
     ts.complete("t-001", "tm-001").expect("complete task");
     let mut store = TeamStore::load(&store.dir).expect("reload store");
-    let m = store.config.member_by_id_mut("tm-001").expect("find member");
+    let m = store
+        .config
+        .member_by_id_mut("tm-001")
+        .expect("find member");
     m.current_task_id = None;
     store.save().expect("save store");
 
     let store = TeamStore::load(&store.dir).expect("reload store");
     let m = store.config.member_by_id("tm-001").expect("find member");
-    assert!(m.current_task_id.is_none(), "current_task_id should be cleared after completion");
+    assert!(
+        m.current_task_id.is_none(),
+        "current_task_id should be cleared after completion"
+    );
 }
