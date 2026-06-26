@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.125
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.125`.
+
 ## Version: 0.1.0-alpha.124
 
 ### Changed

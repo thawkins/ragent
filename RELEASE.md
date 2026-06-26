@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.124
+## Current Version: 0.1.0-alpha.125
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.125`.
+
+## Previous Version: 0.1.0-alpha.124
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.124`.
