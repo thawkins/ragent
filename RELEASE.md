@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.122
+## Current Version: 0.1.0-alpha.124
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.124`.
+
+## Previous Version: 0.1.0-alpha.122
 
 ### Fixed — `/help` and `/skills` slash output no longer collapses to a single paragraph
 - **`/help` table preserves per-line layout in the TUI** — The `/help` slash
