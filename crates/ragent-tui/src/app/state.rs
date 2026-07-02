@@ -1307,6 +1307,12 @@ pub struct App {
     /// auto-send this text to the agent to continue processing.
     pub autopilot_pending_continue: Option<String>,
 
+    // ── /spec impl sequential driver ────────────────────────────────────────
+    /// Active `/spec impl` run, if any. Drives tasks one at a time: after each
+    /// agent turn ends, the TUI checks the just-run task's status and, if
+    /// completed, dispatches the next task's prompt.
+    pub spec_impl_state: Option<SpecImplState>,
+
     // ── Processing timing (for log breakdown) ───────────────────────────────
     /// Wall-clock instant when the current prompt was sent (for total elapsed time).
     pub prompt_start_time: Option<std::time::Instant>,
@@ -1381,6 +1387,26 @@ pub struct PlanApprovalState {
     pub plan_text: String,
     /// Whether the dialog cursor is on Approve (true) or Reject (false).
     pub cursor_approve: bool,
+}
+
+/// State for a `/spec impl` run that drives tasks one at a time.
+///
+/// After each agent turn ends, the TUI checks the just-run task's status via
+/// `SpecManager` and, if it is `Completed`, dispatches the next task's prompt.
+/// If the task is not completed, the run stops and the user can re-run
+/// `/spec impl` to resume.
+#[derive(Debug, Clone)]
+pub struct SpecImplState {
+    /// The spec ID being implemented.
+    pub spec_id: String,
+    /// Root directory of the specs folder (`<cwd>/specs`).
+    pub specs_root: std::path::PathBuf,
+    /// Task IDs in execution order (after resume filtering).
+    pub task_ids: Vec<String>,
+    /// 1-based rank of the task currently being worked on.
+    pub current_rank: usize,
+    /// Total number of tasks to execute (`task_ids.len()`).
+    pub total: usize,
 }
 
 /// Specialised agent behaviour modes (M2 Task 2.3).

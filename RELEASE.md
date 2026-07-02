@@ -1,22 +1,37 @@
 # Release
 
-## Current Version: 0.1.0-alpha.126
+## Current Version: 0.1.0-alpha.127
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.127`.
+- **Dead-code removal** — Audited every `#[allow(dead_code)]` site across the
+  workspace and removed ~579 net lines of genuinely unreachable code.
+  Removed items include: `cleanup_unused_locks` and the whole
+  `ragent-agent/src/tool/file_lock.rs` module (a duplicate of the
+  `ragent-tools-core` file-lock); `get_attribute` (maven parser);
+  `orch_metrics` HTTP handler (route never registered); the deprecated
+  `render_status_bar` v1 and `render_plan_approval_dialog` (superseded by
+  v2 / widget-based rendering); `GREP_PATTERNS` (predictive); seven unused
+  style helpers (`style_healthy`, `style_warning`, `style_error`,
+  `style_info`, `style_healthy_bold`, `style_warning_bold`,
+  `style_error_bold`); the standalone `AzureFoundry::discover_models`
+  method; `FailedToolCall.timestamp`; `FindDiag.pass` / `FindDiag.closest_line`;
+  `ShellType::program`; and `resolve_base_url` (research analysis). Stale
+  `#[allow(dead_code)]` attributes were also removed from items that are
+  actually used (`SAFE_COMMANDS`, `char_wrap`, `push_log_no_agent`).
+- **`/spec impl` sequential driver** — Fixed the bug where `/spec impl`
+  only ran the first task. The compound single-prompt injection was
+  replaced with an event-driven outer loop that dispatches one task per
+  agent turn, checks the task status via `SpecManager` after each turn,
+  and advances to the next task (or stops with a resumable message) on
+  `Event::MessageEnd`. Added `SpecImplRunner::task_prompt`,
+  `build_single_task_prompt`, `total_to_execute`, and `task_id_at` APIs
+  plus a new `SpecImplState` TUI state struct.
+
+## Previous Version: 0.1.0-alpha.126
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.126`.
-- **Compression pipeline fixes** — Addressed issues in the context
-  compression pipeline (`/compress`) so it behaves correctly under the
-  updated agent loop.
-- **Test updates** — Refreshed and repaired tests across multiple crates
-  to track API and behaviour changes from the compression work and
-  related refactors.
-- **Warning fixes** — Resolved compiler/clippy warnings surfaced by the
-  latest tool and config changes.
-
-## Previous Version: 0.1.0-alpha.125
-
-### Changed
-- **Workspace version** — Bumped to `0.1.0-alpha.125`.
 
 ## Previous Version: 0.1.0-alpha.124
 

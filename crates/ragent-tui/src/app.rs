@@ -643,6 +643,7 @@ impl App {
             autopilot_time_limit_secs: None,
             autopilot_started_at: None,
             autopilot_pending_continue: None,
+            spec_impl_state: None,
             sid_to_display_name: HashMap::new(),
             next_agent_index: 1,
             prompt_start_time: None,
@@ -8848,7 +8849,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let runner_result: Result<SpecImplRunner, String> =
                             tokio::task::block_in_place(|| {
                                 rt.block_on(async {
-                                    match SpecImplRunner::new(&spec_id, specs_root, opts).await {
+                                    match SpecImplRunner::new(&spec_id, specs_root.clone(), opts)
+                                        .await
+                                    {
                                         Ok(r) => Ok(r),
                                         Err(e) => Err(format!("spec impl failed: {}", e)),
                                     }
@@ -8871,56 +8874,46 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         // Display summary
                                         self.append_assistant_text(&impl_result.summary);
 
-                                        if is_dry_run || impl_result.prompt.is_empty() {
+                                        if is_dry_run || impl_result.total_tasks == 0 {
                                             self.status =
                                                 format!("spec: {} dry-run complete", spec_id);
                                         } else {
-                                            // Inject the execution prompt into the agent session
-                                            let session_id =
-                                                self.session_id.clone().unwrap_or_default();
-
-                                            // Use coder agent for implementation
-                                            let mut agent = self.agent_info.clone();
-                                            self.apply_selected_model_and_thinking(&mut agent);
-
-                                            let msg = Message::user_text(
-                                                &session_id,
-                                                &impl_result.prompt,
+                                            // Drive tasks ONE AT A TIME. The previous
+                                            // implementation injected the entire compound
+                                            // prompt in a single `process_message` call,
+                                            // which meant the agent would often stop after
+                                            // the first task (considering its immediate goal
+                                            // satisfied) and never reach the remaining
+                                            // tasks. Instead, we store the execution order
+                                            // and dispatch the first task's prompt now; the
+                                            // `Event::MessageEnd` handler advances to the
+                                            // next task once the agent marks the current
+                                            // one `completed`.
+                                            let task_ids: Vec<String> = runner
+                                                .execution_order()
+                                                .iter()
+                                                .map(|&i| runner.tasks()[i].id.clone())
+                                                .collect();
+                                            let total = task_ids.len();
+                                            self.spec_impl_state = Some(
+                                                crate::app::state::SpecImplState {
+                                                    spec_id: spec_id.clone(),
+                                                    specs_root: specs_root.clone(),
+                                                    task_ids,
+                                                    current_rank: 1,
+                                                    total,
+                                                },
                                             );
-                                            self.messages.push(msg);
 
-                                            let processor = self.session_processor.clone();
-                                            let flag = Arc::new(AtomicBool::new(false));
-                                            self.cancel_flag = Some(flag.clone());
-                                            self.is_processing = true;
-                                            self.status = format!(
-                                                "spec: implementing {} ({} tasks)",
-                                                spec_id, impl_result.total_tasks
-                                            );
-
-                                            let event_bus = self.event_bus.clone();
-                                            let prompt = impl_result.prompt;
-                                            let sid = session_id;
-                                            tokio::spawn(async move {
-                                                if let Err(e) = processor
-                                                    .process_message(&sid, &prompt, &agent, flag)
-                                                    .await
-                                                {
-                                                    tracing::warn!(
-                                                        error = %e,
-                                                        "spec: implementation failed"
-                                                    );
-                                                    event_bus.publish(
-                                                        ragent_core::event::Event::AgentError {
-                                                            session_id: sid,
-                                                            error: format!(
-                                                                "spec implementation failed: {}",
-                                                                e
-                                                            ),
-                                                        },
-                                                    );
-                                                }
-                                            });
+                                            // Dispatch the first task's prompt.
+                                            if let Some(prompt) = runner.task_prompt(1) {
+                                                self.dispatch_spec_impl_task(
+                                                    prompt,
+                                                    &spec_id,
+                                                    1,
+                                                    total,
+                                                );
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -12173,6 +12166,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     self.execute_plan_delegation(session_id, task, context);
                 }
 
+                // /spec impl sequential driver: after each agent turn ends,
+                // check the just-run task's status and dispatch the next task
+                // (or finish the run). Skip when the turn was cancelled so the
+                // user can resume manually with `/spec impl`.
+                if self.spec_impl_state.is_some() && *reason != FinishReason::Cancelled {
+                    self.advance_spec_impl();
+                }
+
                 // Autopilot auto-continue: after agent completes a turn without calling
                 // task_complete, automatically send a continuation prompt so the agent
                 // keeps working towards its goal.
@@ -13197,7 +13198,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     }
 
     /// Helper: push log with no agent_id (for backwards compatibility during transition).
-    #[allow(dead_code)]
     pub fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
         self.push_log(level, message, None);
     }
@@ -14677,6 +14677,202 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         if let Some(text) = self.autopilot_pending_continue.take() {
             self.dispatch_user_message(text, vec![]);
         }
+    }
+
+    /// Dispatch a single `/spec impl` task prompt into the agent session.
+    ///
+    /// This is the per-task driver: it injects `prompt` as a fresh user
+    /// message and starts an agent turn. When the turn ends, the
+    /// `Event::MessageEnd` handler calls [`advance_spec_impl`] to check the
+    /// task's status and dispatch the next task's prompt (or finish the run).
+    fn dispatch_spec_impl_task(
+        &mut self,
+        prompt: String,
+        spec_id: &str,
+        rank: usize,
+        total: usize,
+    ) {
+        let session_id = self.session_id.clone().unwrap_or_default();
+
+        // Use the coder agent for implementation.
+        let mut agent = self.agent_info.clone();
+        self.apply_selected_model_and_thinking(&mut agent);
+
+        let msg = Message::user_text(&session_id, &prompt);
+        self.messages.push(msg);
+
+        let processor = self.session_processor.clone();
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        self.is_processing = true;
+        self.status =
+            format!("spec: implementing {spec_id} — task {rank}/{total}");
+
+        let event_bus = self.event_bus.clone();
+        let sid = session_id;
+        tokio::spawn(async move {
+            if let Err(e) = processor.process_message(&sid, &prompt, &agent, flag).await {
+                tracing::warn!(error = %e, "spec: implementation failed");
+                event_bus.publish(ragent_core::event::Event::AgentError {
+                    session_id: sid,
+                    error: format!("spec implementation failed: {e}"),
+                });
+            }
+        });
+    }
+
+    /// Advance the active `/spec impl` run after an agent turn ends.
+    ///
+    /// Reads the spec from disk to check the task at `current_rank`. If the
+    /// task is `Completed`, dispatches the next task's prompt (or transitions
+    /// the spec to `implemented` when all tasks are done). If the task is not
+    /// completed, stops the run and reports the failure so the user can
+    /// re-run `/spec impl` to resume.
+    ///
+    /// This is the core of the sequential driver: it replaces the old
+    /// single-compound-prompt approach where the agent would often stop after
+    /// the first task and never reach the remaining ones.
+    fn advance_spec_impl(&mut self) {
+        use ragent_specs::{SpecManager, spec::SpecStatus};
+
+        let Some(state) = self.spec_impl_state.clone() else {
+            return;
+        };
+        let rt = tokio::runtime::Handle::current();
+        let mgr = SpecManager::new(&state.specs_root);
+        let sid = match ragent_specs::spec::SpecId::new(&state.spec_id) {
+            Some(id) => id,
+            None => {
+                self.spec_impl_state = None;
+                self.append_assistant_text(&format!(
+                    "From: /spec impl\n\n⚠️ Invalid spec ID `{}` — run stopped.",
+                    state.spec_id,
+                ));
+                return;
+            }
+        };
+
+        // Read the spec to check the just-run task's status.
+        let spec = tokio::task::block_in_place(|| {
+            rt.block_on(async { mgr.read_spec(&sid).await })
+        });
+        let spec = match spec {
+            Ok(s) => s,
+            Err(e) => {
+                self.spec_impl_state = None;
+                self.append_assistant_text(&format!(
+                    "From: /spec impl\n\n⚠️ Failed to read spec `{}` after task {}: {}",
+                    state.spec_id, state.current_rank, e,
+                ));
+                return;
+            }
+        };
+
+        let current_task_id = state
+            .task_ids
+            .get(state.current_rank.saturating_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let task_status = spec
+            .tasks
+            .iter()
+            .find(|t| t.id == current_task_id)
+            .map(|t| t.status)
+            .unwrap_or(ragent_specs::spec::TaskStatus::Pending);
+
+        if task_status != ragent_specs::spec::TaskStatus::Completed {
+            // Task did not complete — stop the run so the user can resume.
+            self.spec_impl_state = None;
+            self.append_assistant_text(&format!(
+                "From: /spec impl\n\n🚫 Task **{}** ({}/{}) is **{}** — run stopped.\n\n\
+                 Re-run `/spec impl {}` to resume from this task.",
+                current_task_id, state.current_rank, state.total,
+                task_status.as_str(), state.spec_id,
+            ));
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!(
+                    "spec impl: task {} not completed (status={})",
+                    current_task_id,
+                    task_status.as_str(),
+                ),
+            );
+            return;
+        }
+
+        // Task completed — advance to the next task or finish the run.
+        let next_rank = state.current_rank + 1;
+        if next_rank > state.total {
+            // All tasks done — transition the spec to `implemented`.
+            self.spec_impl_state = None;
+            let mut spec = spec;
+            if spec.status == SpecStatus::InProgress {
+                if let Err(e) = tokio::task::block_in_place(|| {
+                    rt.block_on(async {
+                        mgr.transition(&mut spec, SpecStatus::Implemented, "spec-impl").await
+                    })
+                }) {
+                    self.push_log_no_agent(
+                        LogLevel::Warn,
+                        format!("spec impl: failed to transition to implemented: {e}"),
+                    );
+                }
+            }
+            self.append_assistant_text(&format!(
+                "From: /spec impl\n\n🎉 All {} tasks completed for spec **{}**. \
+                 Spec status set to `implemented`.",
+                state.total, state.spec_id,
+            ));
+            self.status = format!("spec: {} implemented", state.spec_id);
+            return;
+        }
+
+        // Dispatch the next task's prompt.
+        let next_task_id = state
+            .task_ids
+            .get(next_rank.saturating_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        // Build the next task's prompt via a fresh runner so we don't need to
+        // carry the `SpecImplRunner` across turns (it owns the parsed tasks).
+        let opts = ragent_specs::ImplOptions::new();
+        let runner = match tokio::task::block_in_place(|| {
+            rt.block_on(async {
+                ragent_specs::SpecImplRunner::new(&state.spec_id, state.specs_root.clone(), opts)
+                    .await
+            })
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                self.spec_impl_state = None;
+                self.append_assistant_text(&format!(
+                    "From: /spec impl\n\n⚠️ Failed to rebuild runner for task {}: {}",
+                    next_rank, e,
+                ));
+                return;
+            }
+        };
+        let prompt = match runner.task_prompt(next_rank) {
+            Some(p) => p,
+            None => {
+                self.spec_impl_state = None;
+                self.append_assistant_text(&format!(
+                    "From: /spec impl\n\n⚠️ No task at rank {} — run stopped.",
+                    next_rank,
+                ));
+                return;
+            }
+        };
+
+        // Update the state's current_rank before dispatching.
+        if let Some(s) = self.spec_impl_state.as_mut() {
+            s.current_rank = next_rank;
+        }
+        self.append_assistant_text(&format!(
+            "From: /spec impl\n\n✅ Task **{}** completed ({}/{}). Next: **{}**.",
+            current_task_id, state.current_rank, state.total, next_task_id,
+        ));
+        self.dispatch_spec_impl_task(prompt, &state.spec_id, next_rank, state.total);
     }
 }
 

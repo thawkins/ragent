@@ -295,38 +295,6 @@ fn get_tag_name(ctx: &Ctx, node: Node) -> String {
     String::new()
 }
 
-/// Get the attribute value of an element by attribute name.
-#[allow(dead_code)]
-fn get_attribute(ctx: &Ctx, node: Node, attr_name: &str) -> Option<String> {
-    let cursor = &mut node.walk();
-    for child in node.children(cursor) {
-        if child.kind() == "STag" || child.kind() == "EmptyElemTag" {
-            let inner = &mut child.walk();
-            for c in child.children(inner) {
-                if c.kind() == "Attribute" {
-                    let attr_cursor = &mut c.walk();
-                    let mut found_name = false;
-                    let mut found_value = false;
-                    let mut value = String::new();
-                    for ac in c.children(attr_cursor) {
-                        if ac.kind() == "Name" && ctx.text(ac) == attr_name {
-                            found_name = true;
-                        }
-                        if ac.kind() == "AttValue" && found_name {
-                            value = ctx.text(ac).trim_matches('"').to_string();
-                            found_value = true;
-                        }
-                    }
-                    if found_name && found_value {
-                        return Some(value);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Get the direct text content of an element (no nested element children).
 fn get_element_text(ctx: &Ctx, node: Node) -> String {
     let cursor = &mut node.walk();

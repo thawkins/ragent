@@ -526,18 +526,6 @@ struct OrchestrateRequest {
     mode: Option<String>,
 }
 
-/// `GET /orchestrator/metrics` — return live counter snapshot.
-#[allow(dead_code)]
-async fn orch_metrics(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    match &state.coordinator {
-        Some(c) => {
-            let snap = c.metrics_snapshot();
-            serialize_response(snap, "orch_metrics")
-        }
-        None => error_response(StatusCode::SERVICE_UNAVAILABLE, "orchestrator not enabled"),
-    }
-}
-
 /// `POST /orchestrator/start` — start a multi-agent job.
 async fn orch_start(
     State(state): State<AppState>,

@@ -527,22 +527,6 @@ fn truncate_body(body: &str, max_chars: usize) -> String {
     out
 }
 
-/// Resolve a provider-specific base URL from the environment. This is the
-/// minimal set needed for research synthesis; it mirrors the values used by
-/// the benchmark runner and the TUI.
-#[allow(dead_code)]
-fn resolve_base_url(provider_id: &str) -> Option<String> {
-    match provider_id {
-        "generic_openai" => std::env::var("GENERIC_OPENAI_API_BASE")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_BASE")
-            .ok()
-            .filter(|s| !s.trim().is_empty()),
-        _ => None,
-    }
-}
-
 /// Build [`SourceBody`] values from the gathered [`Source`] list and a function
 /// that can read each source's captured body text.
 pub fn build_source_bodies<S: AsRef<str>>(

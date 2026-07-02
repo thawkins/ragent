@@ -241,6 +241,9 @@ impl Tool for EditTool {
 /// Handle the create-file operation (FR-006): `old_string` is empty and the
 /// file must not already exist. Writes `new_string` to a new file and returns
 /// a snippet of the created content.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 async fn create_file(
     path: &Path,
@@ -305,6 +308,9 @@ async fn create_file(
 /// available, so the stale-file check is a no-op. This keeps the tool usable
 /// for one-shot edits while delivering the critical safety property for
 /// sessions that use the `read` tool before editing.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
     let recorded = ctx
@@ -351,6 +357,9 @@ fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 /// Record (or refresh) the edit timestamp for `path` so a follow-up edit in
 /// the same session does not trip the stale-file check on a file we just
 /// wrote.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)

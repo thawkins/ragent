@@ -27,7 +27,6 @@ use globset::{GlobSet, GlobSetBuilder};
 ///
 /// These patterns are always considered safe for file operations and do not require
 /// user confirmation. Empty by default, but can be extended with commonly safe patterns.
-#[allow(dead_code)]
 pub const BUILTIN_ALLOWLIST: &[&str] = &[
     // Currently empty - can be extended with safe patterns like:
     // "target/**",    // Build artifacts
@@ -39,7 +38,6 @@ pub const BUILTIN_ALLOWLIST: &[&str] = &[
 ///
 /// These patterns represent dangerous locations where file operations should always be blocked
 /// to prevent accidental system damage or data loss.
-#[allow(dead_code)]
 pub const BUILTIN_DENYLIST: &[&str] = &[
     // System-critical directories
     "/bin/**",

@@ -86,39 +86,24 @@ pub enum FindDiagKind {
 /// (`pass`), and — when discoverable — the 0-based line number of the closest
 /// near-match attempt (`closest_line`). This lets callers like `multiedit`
 /// produce actionable error messages (WSPLAN M3-T4).
-///
-/// The `pass` and `closest_line` fields are kept for diagnostic tooling and
-/// debugging; the core matcher discards them via the `From<FindDiag>` for
-/// `FindError` conversion, so they are allowed to be dead code in builds that
-/// do not surface full diagnostics.
 #[derive(Debug, Clone)]
 pub struct FindDiag {
     /// What kind of failure occurred.
     pub kind: FindDiagKind,
-    /// Name of the last matching pass attempted (e.g. `"collapsed"`).
-    #[allow(dead_code)]
-    pub pass: &'static str,
-    /// 0-based line number of the closest near-match attempt, when known.
-    #[allow(dead_code)]
-    pub closest_line: Option<usize>,
 }
 
 impl FindDiag {
     /// Build a `NotFound` diagnostic.
-    pub(crate) fn not_found(pass: &'static str, closest_line: Option<usize>) -> Self {
+    pub(crate) fn not_found(_pass: &'static str, _closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::NotFound,
-            pass,
-            closest_line,
         }
     }
 
     /// Build a `MultipleMatches` diagnostic.
-    pub(crate) fn multiple(pass: &'static str, count: usize, closest_line: Option<usize>) -> Self {
+    pub(crate) fn multiple(_pass: &'static str, count: usize, _closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::MultipleMatches(count),
-            pass,
-            closest_line,
         }
     }
 }

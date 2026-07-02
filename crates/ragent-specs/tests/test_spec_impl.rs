@@ -230,3 +230,75 @@ fn test_find_dependents_transitive() {
     assert!(deps.contains(&"T-004".to_string()));
     assert!(!deps.contains(&"T-003".to_string()));
 }
+
+/// `SpecImplRunner::build_single_task_prompt` is the per-task prompt used by
+/// the TUI's sequential `/spec impl` driver. It must name the task, its spec,
+/// its position in the run, the requirement, and the `spec_task_update`
+/// instruction with the correct spec_id/task_id.
+#[test]
+fn test_build_single_task_prompt_contains_required_fields() {
+    use ragent_specs::impl_runner::SpecImplRunner;
+
+    let task = PlanTask {
+        id: "T-003".into(),
+        title: "Build parser".into(),
+        requirement: "FR-003, FR-004".into(),
+        effort: Effort::M,
+        priority: Priority::Critical,
+        dependencies: vec!["T-001".into()],
+        status: TaskStatus::Pending,
+    };
+    let prompt = SpecImplRunner::build_single_task_prompt(&task, "myspec", 2, 5);
+
+    // Header identifies the task, title, and spec.
+    assert!(prompt.contains("T-003"), "prompt must name the task id");
+    assert!(prompt.contains("Build parser"), "prompt must name the title");
+    assert!(prompt.contains("myspec"), "prompt must name the spec");
+
+    // Position in the run.
+    assert!(prompt.contains("task 2 of 5"), "prompt must state rank/total");
+
+    // Requirement is included.
+    assert!(prompt.contains("FR-003"), "prompt must include requirement refs");
+    assert!(prompt.contains("FR-004"));
+
+    // spec_task_update instruction with correct spec_id and task_id.
+    assert!(prompt.contains("spec_task_update"));
+    assert!(prompt.contains("spec_id=\"myspec\""));
+    assert!(prompt.contains("task_id=\"T-003\""));
+    assert!(prompt.contains("status=\"completed\""));
+    assert!(prompt.contains("blocked"), "prompt must mention blocked fallback");
+}
+
+/// `build_single_task_prompt` should not depend on the task's dependencies
+/// field (it is the prompt for implementing THIS task, not its dependents).
+#[test]
+fn test_build_single_task_prompt_independent_of_dependencies() {
+    use ragent_specs::impl_runner::SpecImplRunner;
+
+    let task_no_deps = PlanTask {
+        id: "T-001".into(),
+        title: "Define types".into(),
+        requirement: "FR-001".into(),
+        effort: Effort::S,
+        priority: Priority::Critical,
+        dependencies: vec![],
+        status: TaskStatus::Pending,
+    };
+    let task_with_deps = PlanTask {
+        id: "T-001".into(),
+        title: "Define types".into(),
+        requirement: "FR-001".into(),
+        effort: Effort::S,
+        priority: Priority::Critical,
+        dependencies: vec!["T-000".into()],
+        status: TaskStatus::Pending,
+    };
+
+    let p1 = SpecImplRunner::build_single_task_prompt(&task_no_deps, "s", 1, 1);
+    let p2 = SpecImplRunner::build_single_task_prompt(&task_with_deps, "s", 1, 1);
+    // The per-task prompt is identical regardless of dependencies — the
+    // driver only guarantees the task's own deps are already completed by
+    // the time it is dispatched.
+    assert_eq!(p1, p2);
+}

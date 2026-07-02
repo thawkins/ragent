@@ -151,11 +151,6 @@ impl AzureFoundryClient {
         }
     }
 
-    /// Discover available models from the Azure AI Foundry endpoint.
-    #[allow(dead_code)]
-    pub(crate) async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
-        discover_azure_foundry_models(&self.api_key, &self.base_url).await
-    }
 }
 
 /// Standalone function to discover Azure AI Foundry models.

@@ -153,6 +153,70 @@ impl SpecImplRunner {
         &self.execution_order
     }
 
+    /// Number of tasks that will be executed in this run
+    /// (i.e. the length of [`execution_order`](Self::execution_order),
+    /// after resume filtering).
+    pub fn total_to_execute(&self) -> usize {
+        self.execution_order.len()
+    }
+
+    /// Get the task ID at the given 1-based rank in the execution order.
+    ///
+    /// Returns `None` if `rank` is out of range (rank < 1 or rank > total).
+    pub fn task_id_at(&self, rank: usize) -> Option<&str> {
+        self.execution_order
+            .get(rank.checked_sub(1)?)
+            .map(|&idx| self.tasks[idx].id.as_str())
+    }
+
+    /// Build a focused single-task prompt for the task at the given 1-based
+    /// rank in the execution order.
+    ///
+    /// The prompt tells the agent to implement exactly one task and then use
+    /// `spec_task_update` to mark it `completed` (or `blocked` on failure).
+    /// Returns `None` if `rank` is out of range.
+    ///
+    /// This is the per-task prompt used by the TUI's sequential task-driving
+    /// loop: after each agent turn ends, the TUI checks the task status and,
+    /// if completed, dispatches the next task's prompt.
+    pub fn task_prompt(&self, rank: usize) -> Option<String> {
+        let total = self.execution_order.len();
+        let idx = *self.execution_order.get(rank.checked_sub(1)?)?;
+        let task = &self.tasks[idx];
+        Some(Self::build_single_task_prompt(task, &self.spec_name, rank, total))
+    }
+
+    /// Build the prompt for a single task (FR-021), with a header noting the
+    /// task's position in the overall run.
+    ///
+    /// Public so tests can exercise it without constructing a full
+    /// `SpecImplRunner` (which requires on-disk spec files).
+    pub fn build_single_task_prompt(
+        task: &PlanTask,
+        spec_name: &str,
+        rank: usize,
+        total: usize,
+    ) -> String {
+        let mut prompt = format!(
+            "Implement task **{}** ({}) for spec **{}**.\n\n\
+             This is task {rank} of {total} in the implementation plan.\n\n",
+            task.id, task.title, spec_name,
+        );
+        prompt.push_str(&format!(
+            "#### Task {}: {}\n\n**Requirement:** {}\n\n",
+            task.id, task.title, task.requirement,
+        ));
+        prompt.push_str(&format!(
+            "Implement this task now. After completing it, you MUST use the \
+             `spec_task_update` tool with spec_id=\"{spec}\", \
+             task_id=\"{id}\", status=\"completed\". \
+             If the task cannot be completed, mark it as `blocked` with the \
+             same tool.\n",
+            spec = spec_name, id = task.id,
+        ));
+        prompt
+    }
+
     /// Run the implementation plan.
     ///
     /// Returns an `ImplResult` with the prompt to inject into the agent

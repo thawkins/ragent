@@ -50,8 +50,11 @@ pub struct MultiEditTool;
 // appears only because the integration test target re-imports this source
 // file via `#[path]` and compiles a fresh copy that is not wired into a
 // registry.
-#[allow(dead_code)]
 /// A single edit operation parsed from the input JSON.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
+#[allow(dead_code)]
 struct EditOp {
     path: PathBuf,
     old_str: String,
@@ -61,6 +64,9 @@ struct EditOp {
 /// A resolved edit: the original input index, the byte range against the
 /// original file content, and the effective replacement text (which may have
 /// indentation re-applied by the shared matcher).
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 struct ResolvedEdit {
     /// Index of this edit in the original JSON `edits` array (for diagnostics).
@@ -413,6 +419,9 @@ pub(crate) fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
 /// `path`, compare the current on-disk mtime against it and return an error if
 /// the file is newer. When no timestamp has been recorded, the check is a
 /// no-op (no baseline available).
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
     let recorded = ctx
@@ -457,6 +466,9 @@ fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 /// Record (or refresh) the edit timestamp for `path` so a follow-up edit in
 /// the same session does not trip the stale-file check on a file we just
 /// wrote.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
 #[allow(dead_code)]
 fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)

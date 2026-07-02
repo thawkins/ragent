@@ -71,14 +71,6 @@ impl ShellType {
         matches!(self, ShellType::Bash | ShellType::GitBash(_))
     }
 
-    /// Returns the executable path to invoke.
-    #[allow(dead_code)]
-    fn program(&self) -> &std::ffi::OsStr {
-        match self {
-            ShellType::Bash => std::ffi::OsStr::new("bash"),
-            ShellType::GitBash(p) | ShellType::PowerShell(p) => p.as_os_str(),
-        }
-    }
 }
 
 // ── Shell discovery ───────────────────────────────────────────────────────
@@ -280,7 +272,6 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 // Safe commands: only these exact prefixes are auto-approved without user prompting.
 // The check is prefix-based: a command is safe if it equals the entry exactly OR starts
 // with the entry followed by a space (so "ls" matches "ls -la", "git" matches "git status", etc.).
-#[allow(dead_code)]
 const SAFE_COMMANDS: &[&str] = &[
     // --- File management ---
     "ls",

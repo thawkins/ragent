@@ -621,57 +621,6 @@ fn build_line2_right(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Styling Helper Functions
-// ────────────────��────────────────────────────────────────────────────────────
-/// Create a healthy (green) style.
-#[allow(dead_code)]
-fn style_healthy() -> Style {
-    Style::default().fg(colors::HEALTHY)
-}
-
-/// Create a warning (yellow) style.
-#[allow(dead_code)]
-fn style_warning() -> Style {
-    Style::default().fg(colors::WARNING)
-}
-
-/// Create an error (red) style.
-#[allow(dead_code)]
-fn style_error() -> Style {
-    Style::default().fg(colors::ERROR)
-}
-
-/// Create an info/progress (cyan) style.
-#[allow(dead_code)]
-fn style_info() -> Style {
-    Style::default().fg(colors::IN_PROGRESS)
-}
-
-/// Create a bold healthy style.
-#[allow(dead_code)]
-fn style_healthy_bold() -> Style {
-    Style::default()
-        .fg(colors::HEALTHY)
-        .add_modifier(Modifier::BOLD)
-}
-
-/// Create a bold warning style.
-#[allow(dead_code)]
-fn style_warning_bold() -> Style {
-    Style::default()
-        .fg(colors::WARNING)
-        .add_modifier(Modifier::BOLD)
-}
-
-/// Create a bold error style.
-#[allow(dead_code)]
-fn style_error_bold() -> Style {
-    Style::default()
-        .fg(colors::ERROR)
-        .add_modifier(Modifier::BOLD)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Utility Functions
 // ─────────────────────────────────────────────────────────────────────────────
 

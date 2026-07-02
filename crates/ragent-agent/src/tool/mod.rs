@@ -15,8 +15,6 @@ pub use mcp_tool::McpToolWrapper;
 pub mod aliases;
 /// Task cancellation tool.
 pub mod cancel_task;
-/// Per-file locking for concurrent edit operations.
-mod file_lock;
 pub mod github_issues;
 pub mod github_prs;
 /// GitLab issue tools (list, get, create, comment, close).

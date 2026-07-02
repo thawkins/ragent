@@ -117,9 +117,6 @@ struct FailedToolCall {
     input: String,
     /// Error message from the tool.
     error: String,
-    /// Timestamp of the failure.
-    #[allow(dead_code)]
-    timestamp: chrono::DateTime<Utc>,
 }
 
 impl ExtractionEngine {
@@ -449,7 +446,6 @@ impl ExtractionEngine {
             tool_name: tool_name.to_string(),
             input: input_str,
             error: error.to_string(),
-            timestamp: Utc::now(),
         });
         debug!("Tracked tool failure: {tool_name} in session {session_id}");
     }

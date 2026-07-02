@@ -42,15 +42,6 @@ const GLOB_PATTERNS: [&str; 5] = [
     "Let me list",
 ];
 
-#[allow(dead_code)]
-const GREP_PATTERNS: [&str; 5] = [
-    "Let me search for",
-    "I'll search for",
-    "Let me find",
-    "I need to find",
-    "Let me grep",
-];
-
 /// Predicted tool call with confidence score and pre-fetched data.
 #[derive(Debug, Clone)]
 pub struct PredictedToolCall {
