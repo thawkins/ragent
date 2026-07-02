@@ -14,7 +14,6 @@ use rustc_hash::FxHasher;
 
 use crate::agent::AgentInfo;
 use crate::llm::ChatMessage;
-use crate::message::Message;
 use crate::tool::{TeamContext, ToolRegistry};
 use ragent_types::ThinkingConfig;
 
@@ -391,8 +390,6 @@ pub struct SessionState {
     cached_chat_messages: Vec<ChatMessage>,
     /// Number of messages last time we checked
     last_message_count: usize,
-    /// Running token count estimate
-    estimated_token_count: usize,
     /// Last time the cache was updated
     last_updated: std::time::Instant,
     /// Session ID this state belongs to
@@ -422,7 +419,6 @@ impl SessionState {
         Self {
             cached_chat_messages: Vec::new(),
             last_message_count: 0,
-            estimated_token_count: 0,
             last_updated: std::time::Instant::now(),
             session_id: session_id.into(),
             thinking: ThinkingConfig::default(),
@@ -452,7 +448,6 @@ impl SessionState {
     pub fn clear(&mut self) {
         self.cached_chat_messages.clear();
         self.last_message_count = 0;
-        self.estimated_token_count = 0;
         self.last_updated = std::time::Instant::now();
         self.last_history_version = 0;
         self.cached_serialised = None;
@@ -494,71 +489,6 @@ impl SessionState {
     pub fn cached_serialised(&self) -> Option<&[u8]> {
         self.cached_serialised.as_deref()
     }
-
-    /// Get the current estimated token count.
-    #[must_use]
-    pub fn estimated_token_count(&self) -> usize {
-        self.estimated_token_count
-    }
-
-    /// Check if compression should be triggered based on token threshold.
-    #[must_use]
-    pub fn should_compress(&self, context_window: usize) -> bool {
-        // Trigger compression at 80% of context window to avoid emergency compression.
-        let threshold = context_window.saturating_mul(80).saturating_div(100);
-        self.estimated_token_count > threshold
-    }
-}
-
-/// Token estimator for approximate token counting.
-///
-/// Uses a simple heuristic: ~4 characters per token on average.
-/// This is fast but approximate - use tiktoken for precise counting when needed.
-pub struct TokenEstimator;
-
-impl TokenEstimator {
-    /// Characters per token estimate (average for English text).
-    pub const CHARS_PER_TOKEN: usize = 4;
-    /// Base overhead per message in tokens.
-    pub const MESSAGE_OVERHEAD: usize = 10;
-
-    /// Estimate token count for a piece of text.
-    #[must_use]
-    pub fn estimate_text(text: &str) -> usize {
-        text.len().saturating_div(Self::CHARS_PER_TOKEN)
-    }
-
-    /// Estimate token count for a message.
-    #[must_use]
-    pub fn estimate_message(msg: &Message) -> usize {
-        let text_len: usize = msg
-            .parts
-            .iter()
-            .map(|p| match p {
-                crate::message::MessagePart::Text { text } => text.len(),
-                crate::message::MessagePart::ToolCall { tool, state, .. } => {
-                    tool.len()
-                        + state
-                            .output
-                            .as_ref()
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.len())
-                            .unwrap_or(0)
-                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                }
-                crate::message::MessagePart::Image { .. } => 1000, // Rough estimate for image
-                crate::message::MessagePart::Reasoning { text } => text.len(),
-            })
-            .sum();
-
-        text_len.saturating_div(Self::CHARS_PER_TOKEN) + Self::MESSAGE_OVERHEAD
-    }
-
-    /// Estimate token count for a slice of messages.
-    #[must_use]
-    pub fn estimate_messages(messages: &[Message]) -> usize {
-        messages.iter().map(Self::estimate_message).sum()
-    }
 }
 
 /// Extension trait to add caching support to SessionProcessor.
@@ -590,21 +520,6 @@ mod tests {
 
         invalidate_all_caches();
         assert!(cached.get(current_cache_version()).is_none());
-    }
-
-    #[test]
-    fn test_token_estimator() {
-        // "hello world" = 11 chars / 4 = ~3 tokens + 10 overhead = 13
-        let msg = Message::user_text("test", "hello world");
-        let estimate = TokenEstimator::estimate_message(&msg);
-        assert!(estimate >= 10); // At least overhead
-        assert!(estimate < 50); // Shouldn't be too high
-    }
-
-    #[test]
-    fn test_session_state_should_compress() {
-        let state = SessionState::new("test-session");
-        assert!(!state.should_compress(100000));
     }
 
     #[test]

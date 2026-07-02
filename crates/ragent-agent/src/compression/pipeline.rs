@@ -149,6 +149,7 @@ pub fn count_tokens(messages: &[Message]) -> usize {
                 MessagePart::Text { text } => text.clone(),
                 MessagePart::ToolCall { tool, state, .. } => {
                     let mut s = tool.clone();
+                    s.push_str(&state.input.to_string());
                     if let Some(output) = state.output.as_ref().and_then(|v| v.as_str()) {
                         s.push_str(output);
                     }
@@ -1639,4 +1640,65 @@ fn test_should_compress_chat_messages_over_threshold() {
         },
     ];
     assert!(should_compress_chat_messages(&chat_messages, 1_000, 0.80));
+}
+
+#[test]
+fn test_count_tokens_includes_tool_call_input() {
+    use crate::message::{MessagePart, Role, ToolCallState, ToolCallStatus};
+    use serde_json::json;
+
+    let large_input = "x ".repeat(50_000);
+    let state = ToolCallState {
+        status: ToolCallStatus::Completed,
+        input: json!({"content": large_input}),
+        output: Some(json!({"ok": true})),
+        error: None,
+        duration_ms: Some(1),
+    };
+    let msg = Message::new(
+        "test-session",
+        Role::Assistant,
+        vec![MessagePart::ToolCall {
+            tool: "write_file".to_string(),
+            call_id: "call-1".to_string(),
+            state,
+        }],
+    );
+
+    let count = count_tokens(&[msg]);
+    assert!(
+        count > 12_000,
+        "count_tokens should include large tool-call input arguments; got {count}"
+    );
+}
+
+#[test]
+fn test_count_tokens_tool_call_input_changes_threshold() {
+    use crate::message::{MessagePart, Role, ToolCallState, ToolCallStatus};
+    use serde_json::json;
+
+    let large_input = "x ".repeat(40_000);
+    let state = ToolCallState {
+        status: ToolCallStatus::Completed,
+        input: json!({"content": large_input}),
+        output: Some(json!({"ok": true})),
+        error: None,
+        duration_ms: Some(1),
+    };
+    let msg = Message::new(
+        "test-session",
+        Role::Assistant,
+        vec![MessagePart::ToolCall {
+            tool: "write_file".to_string(),
+            call_id: "call-2".to_string(),
+            state,
+        }],
+    );
+
+    // 80% of a 10_000-token window is 8_000. The large input alone is ~40k
+    // chars / 4 + overhead, so it should cross the threshold.
+    assert!(
+        should_compress(&[msg], 10_000, 0.80),
+        "should_compress must fire when tool-call input dominates the window"
+    );
 }

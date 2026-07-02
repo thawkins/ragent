@@ -25,13 +25,12 @@ fn session_state_starts_empty() {
     let state = SessionState::new("s1");
     assert_eq!(state.session_id(), "s1");
     assert_eq!(state.cached_serialised(), None);
-    assert_eq!(state.estimated_token_count(), 0);
 }
 
 #[test]
 fn cached_chat_messages_for_version_returns_none_for_first_call() {
     let mut state = SessionState::new("s1");
-    let msgs = vec![user_message("m1", "hello")];
+    let _msgs = [user_message("m1", "hello")];
     let version = 42u64;
     let result = state.cached_chat_messages_for_version(version);
     assert!(result.is_none());
@@ -40,7 +39,7 @@ fn cached_chat_messages_for_version_returns_none_for_first_call() {
 #[test]
 fn cached_chat_messages_for_version_hits_on_repeat() {
     let mut state = SessionState::new("s1");
-    let msgs = vec![user_message("m1", "hello")];
+    let msgs = [user_message("m1", "hello")];
     let version = 7u64;
     // First call: miss.
     assert!(state.cached_chat_messages_for_version(version).is_none());
@@ -63,7 +62,7 @@ fn cached_chat_messages_for_version_hits_on_repeat() {
 #[test]
 fn cached_chat_messages_for_version_misses_on_version_change() {
     let mut state = SessionState::new("s1");
-    let msgs = vec![user_message("m1", "hello")];
+    let msgs = [user_message("m1", "hello")];
     state.store_chat_messages(
         msgs.iter()
             .map(|m| ragent_llm::llm::ChatMessage {
@@ -84,7 +83,7 @@ fn cached_chat_messages_for_version_misses_on_version_change() {
 #[test]
 fn clear_resets_caches() {
     let mut state = SessionState::new("s1");
-    let msgs = vec![user_message("m1", "hello")];
+    let msgs = [user_message("m1", "hello")];
     state.store_chat_messages(
         msgs.iter()
             .map(|m| ragent_llm::llm::ChatMessage {
@@ -105,7 +104,7 @@ trait TextClone {
 impl TextClone for MessagePart {
     fn text_clone(&self) -> String {
         match self {
-            MessagePart::Text { text } => text.clone(),
+            Self::Text { text } => text.clone(),
             _ => String::new(),
         }
     }

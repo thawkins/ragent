@@ -9,8 +9,11 @@ use anyhow::{Context, Result};
 
 use super::fuzzy::{collect_project_files, fuzzy_match};
 use super::parse::{FileRef, ParsedRef, parse_refs};
-use crate::tool::office_read;
-use crate::tool::pdf_read;
+// Source-of-truth for office/PDF reading lives in ragent-tools-extended;
+// the agent-local copies under crate::tool are dormant duplicates slated
+// for removal (see DCREMOVALPLAN.md M2.1 / M4).
+use ragent_tools_extended::office_read;
+use ragent_tools_extended::pdf_read;
 
 /// Maximum content size per resolved reference (50 KB).
 const MAX_CONTENT_SIZE: usize = 50 * 1024;
@@ -142,10 +145,14 @@ async fn resolve_url(url: &str, raw: &str) -> Result<ResolvedRef> {
         .await
         .with_context(|| format!("Failed to read response from '@{raw}'"))?;
 
-    // Simple HTML detection and conversion
+    // Simple HTML detection and conversion.  html2text can panic on malformed
+    // HTML, so isolate it and fall back to the raw body if it does.
     let processed = if body.trim_start().starts_with("<!") || body.trim_start().starts_with("<html")
     {
-        html2text::from_read(body.as_bytes(), 120).unwrap_or(body)
+        match std::panic::catch_unwind(|| html2text::from_read(body.as_bytes(), 120)) {
+            Ok(Ok(text)) => text,
+            _ => body,
+        }
     } else {
         body
     };

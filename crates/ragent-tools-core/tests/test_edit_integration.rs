@@ -1,13 +1,17 @@
-//! Integration tests for `EditTool` on real temp files (WSPLAN M4-T1).
+//! Integration tests for the renewed `EditTool` (editrenewal spec).
 //!
-//! Exercises the shared seven-pass matcher end-to-end through the `edit` tool
-//! against temp files containing: CRLF line endings, tab indentation, trailing
-//! spaces, missing final newline, and blank-line differences. All cases must
-//! succeed without `old_str not found`.
+//! The renewed `edit` tool uses **strict exact-match** replacement (FR-004):
+//! `old_string` must match the file byte-for-byte, including whitespace,
+//! indentation, and line endings. These tests cover exact match, multiple
+//! matches, missing file, stale file, create/delete/update operations,
+//! no-change rejection, snippet generation, canonical vs legacy parameter
+//! names, and deprecation-warning metadata (FR-013).
 
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use ragent_tools_core::edit::EditTool;
+use ragent_tools_core::read::ReadTool;
 use ragent_tools_core::{Tool, ToolContext};
 use serde_json::json;
 use tempfile::TempDir;
@@ -17,6 +21,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         session_id: "test".to_string(),
         working_dir: working_dir.to_path_buf(),
         event_bus: Arc::new(ragent_types::event::EventBus::new(64)),
+        read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     }
 }
 
@@ -29,20 +34,21 @@ fn write_file(dir: &std::path::Path, name: &str, content: &str) -> std::path::Pa
     path
 }
 
-/// Helper: run an edit and assert the resulting file content.
+/// Helper: run an edit with canonical params and assert the resulting file
+/// content.
 async fn assert_edit(
     dir: &std::path::Path,
     file: &str,
     initial: &str,
-    old_str: &str,
-    new_str: &str,
+    old_string: &str,
+    new_string: &str,
     expected: &str,
 ) {
     let path = write_file(dir, file, initial);
     let input = json!({
-        "path": file,
-        "old_str": old_str,
-        "new_str": new_str,
+        "file_path": file,
+        "old_string": old_string,
+        "new_string": new_string,
     });
     let _out = EditTool
         .execute(input, &ctx(dir))
@@ -52,147 +58,22 @@ async fn assert_edit(
     assert_eq!(result, expected, "file content after edit");
 }
 
-// ── CRLF ──────────────────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_edit_crlf_file_lf_needle() {
-    let tmp = TempDir::new().unwrap();
-    // File has CRLF; needle uses LF only (as the `read` tool would produce).
-    // The matcher's CRLF pass replaces the matched bytes with `new_str` verbatim,
-    // so the trailing CRLF on the last matched line is replaced by the needle's
-    // LF-only new_str. The file's final newline becomes LF.
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {\r\n    bar\r\n}\r\n",
-        "fn foo() {\n    bar\n}\n",
-        "fn foo() {\n    baz\n}\n",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
+/// Helper: run an edit and expect it to fail, returning the error message.
+async fn expect_edit_error(
+    dir: &std::path::Path,
+    file: &str,
+    initial: &str,
+    input: serde_json::Value,
+) -> String {
+    write_file(dir, file, initial);
+    let err = EditTool
+        .execute(input, &ctx(dir))
+        .await
+        .expect_err("edit should fail");
+    format!("{err}")
 }
 
-// ── Tab indentation ───────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_edit_tab_indent_file_space_needle() {
-    let tmp = TempDir::new().unwrap();
-    // File uses tab indentation; needle drops leading whitespace entirely
-    // (leading-WS pass) and the matcher re-applies the tab indent.
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "\tfn foo() {\n\t\tlet x = 1;\n\t}\n",
-        "fn foo() {\n    let x = 1;\n}\n",
-        "fn foo() {\n    let x = 2;\n}\n",
-        "\tfn foo() {\n\t    let x = 2;\n\t}\n",
-    )
-    .await;
-}
-
-// ── Trailing spaces ───────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_edit_trailing_spaces_file() {
-    let tmp = TempDir::new().unwrap();
-    // File has trailing spaces the needle omits (trailing-WS pass).
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {  \n    bar  \n}\n",
-        "fn foo() {\n    bar\n}\n",
-        "fn foo() {\n    baz\n}\n",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
-}
-
-// ── Missing final newline ─────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_edit_missing_final_newline_file() {
-    let tmp = TempDir::new().unwrap();
-    // File lacks a trailing newline; needle includes one (final-newline pass).
-    // The matcher's final-newline pass replaces the matched core with `new_str`,
-    // so `new_str` (which ends with `\n`) is spliced in place of the core,
-    // yielding a file that now ends with a newline.
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {\n    bar\n}",
-        "fn foo() {\n    bar\n}\n",
-        "fn foo() {\n    baz\n}\n",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_edit_extra_final_newline_needle() {
-    let tmp = TempDir::new().unwrap();
-    // File has trailing newline; needle lacks it (final-newline pass, other dir).
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {\n    bar\n}\n",
-        "fn foo() {\n    bar\n}",
-        "fn foo() {\n    baz\n}",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
-}
-
-// ── Blank-line differences ────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_edit_blank_line_in_needle() {
-    let tmp = TempDir::new().unwrap();
-    // Needle has a leading blank line the file lacks (blank-line pass).
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {\n    bar\n}\n",
-        "\nfn foo() {\n    bar\n}\n",
-        "fn foo() {\n    baz\n}\n",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_edit_blank_line_in_file() {
-    let tmp = TempDir::new().unwrap();
-    // File has a leading blank line the needle lacks (blank-line pass).
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "\nfn foo() {\n    bar\n}\n",
-        "fn foo() {\n    bar\n}\n",
-        "fn foo() {\n    baz\n}\n",
-        "\nfn foo() {\n    baz\n}\n",
-    )
-    .await;
-}
-
-// ── Collapsed whitespace (tabs + extra internal spaces) ───────────────────────
-
-#[tokio::test]
-async fn test_edit_collapsed_whitespace() {
-    let tmp = TempDir::new().unwrap();
-    // File uses tab indentation AND extra internal spaces; needle uses spaces
-    // for indent and single internal spaces (collapsed pass).
-    assert_edit(
-        tmp.path(),
-        "a.rs",
-        "\tlet  x  =  1;\n\tlet  y  =  2;\n",
-        "let x = 1;\nlet y = 2;\n",
-        "let x = 1;\nlet y = 99;\n",
-        "\tlet x = 1;\n\tlet y = 99;\n",
-    )
-    .await;
-}
-
-// ── Exact match (baseline) ────────────────���───────────────────────────────────
+// ── Exact match (baseline) ───────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_edit_exact_match_baseline() {
@@ -208,24 +89,390 @@ async fn test_edit_exact_match_baseline() {
     .await;
 }
 
-// ── NotFound surfaces a clear error ───────────────────────────────────────────
+// ── Strict matching: whitespace mismatches are rejected (FR-004) ─────────────
+
+#[tokio::test]
+async fn test_edit_strict_rejects_crlf_mismatch() {
+    let tmp = TempDir::new().unwrap();
+    // File has CRLF; old_string uses LF only — strict matcher must reject.
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() {\n    bar\n}\n",
+        "new_string": "fn foo() {\n    baz\n}\n",
+    });
+    let msg = expect_edit_error(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {\r\n    bar\r\n}\r\n",
+        input,
+    )
+    .await;
+    assert!(
+        msg.contains("not found"),
+        "strict matcher should reject CRLF mismatch: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_strict_rejects_trailing_space_mismatch() {
+    let tmp = TempDir::new().unwrap();
+    // File has trailing spaces the old_string omits — strict matcher must reject.
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() {\n    bar\n}\n",
+        "new_string": "fn foo() {\n    baz\n}\n",
+    });
+    let msg = expect_edit_error(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {  \n    bar  \n}\n",
+        input,
+    )
+    .await;
+    assert!(
+        msg.contains("not found"),
+        "strict matcher should reject trailing-space mismatch: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_strict_accepts_exact_crlf() {
+    let tmp = TempDir::new().unwrap();
+    // old_string matches the file exactly (including CRLF) — must succeed.
+    assert_edit(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {\r\n    bar\r\n}\r\n",
+        "fn foo() {\r\n    bar\r\n}\r\n",
+        "fn foo() {\r\n    baz\r\n}\r\n",
+        "fn foo() {\r\n    baz\r\n}\r\n",
+    )
+    .await;
+}
+
+// ── Multiple matches (FR-004, FR-005) ────────────────────────────────────────
+
+#[tokio::test]
+async fn test_edit_multiple_matches_errors() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "dup\nmid\ndup\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "dup",
+        "new_string": "DUP",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("non-unique old_string must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("2 times"),
+        "error should report the match count: {msg}"
+    );
+    assert!(
+        msg.contains("exactly once") || msg.contains("unique"),
+        "error should guide toward uniqueness: {msg}"
+    );
+}
+
+// ── NotFound (FR-004) ────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn test_edit_not_found_errors() {
     let tmp = TempDir::new().unwrap();
     write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
     let input = json!({
-        "path": "a.rs",
-        "old_str": "nonexistent code here",
-        "new_str": "x",
+        "file_path": "a.rs",
+        "old_string": "nonexistent code here",
+        "new_string": "x",
     });
     let err = EditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("missing old_str must error");
+        .expect_err("missing old_string must error");
     let msg = format!("{err}");
     assert!(
-        msg.contains("old_str not found"),
+        msg.contains("not found"),
         "error should mention not found: {msg}"
+    );
+}
+
+// ── Create operation (FR-006): empty old_string ──────────────────────────────
+
+#[tokio::test]
+async fn test_edit_create_new_file() {
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("new.rs");
+    assert!(!path.exists());
+
+    let input = json!({
+        "file_path": "new.rs",
+        "old_string": "",
+        "new_string": "fn main() {}\n",
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("create should succeed");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn main() {}\n");
+    let meta = out.metadata.unwrap();
+    assert_eq!(meta["created"], true);
+}
+
+#[tokio::test]
+async fn test_edit_create_rejects_existing_file() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "existing\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "",
+        "new_string": "new content",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("create on existing file must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("already exists"),
+        "error should say the file already exists: {msg}"
+    );
+    // File must be unchanged.
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "existing\n"
+    );
+}
+
+// ── Delete operation (FR-006): empty new_string ──────────────────────────────
+
+#[tokio::test]
+async fn test_edit_delete_matched_text() {
+    let tmp = TempDir::new().unwrap();
+    assert_edit(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {\n    bar\n}\n",
+        "    bar\n",
+        "",
+        "fn foo() {\n}\n",
+    )
+    .await;
+}
+
+// ── No-change rejection (FR-007) ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_edit_no_change_rejected() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 1 }",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("identical old/new must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("identical") || msg.contains("No changes"),
+        "error should reject the no-op edit: {msg}"
+    );
+}
+
+// ── Stale-file detection (FR-003) ────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_edit_stale_file_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let c = ctx(tmp.path());
+
+    // Simulate a prior read by recording an older timestamp.
+    {
+        let mut map = c.read_timestamps.write().unwrap();
+        map.insert(
+            path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+                - 5_000, // 5 seconds in the past
+        );
+    }
+
+    // Now bump the file's mtime to be newer than the recorded read time.
+    let future = SystemTime::now() + std::time::Duration::from_secs(10);
+    let _ = filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future));
+
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 2 }",
+    });
+    let err = EditTool
+        .execute(input, &c)
+        .await
+        .expect_err("stale file must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("modified after") || msg.contains("stale"),
+        "error should report stale file: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_fresh_file_accepted() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let c = ctx(tmp.path());
+
+    // Record a read timestamp at the file's current mtime (fresh).
+    let mtime = std::fs::metadata(&path)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    {
+        let mut map = c.read_timestamps.write().unwrap();
+        map.insert(path.clone(), mtime);
+    }
+
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 2 }",
+    });
+    let _ = EditTool
+        .execute(input, &c)
+        .await
+        .expect("fresh file edit should succeed");
+}
+
+// ── Snippet generation (FR-008) ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_edit_returns_snippet_with_line_numbers() {
+    let tmp = TempDir::new().unwrap();
+    let mut initial = String::new();
+    for i in 1..=12 {
+        initial.push_str(&format!("line {}\n", i));
+    }
+    write_file(tmp.path(), "a.rs", &initial);
+
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "line 6\n",
+        "new_string": "line 6 edited\n",
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    let meta = out.metadata.unwrap();
+    let snippet = meta["snippet"].as_str().unwrap_or(out.content.as_str());
+
+    // Snippet should include line numbers and the edited line marker.
+    assert!(snippet.contains("6"), "snippet should reference line 6: {snippet}");
+    assert!(
+        snippet.contains("edited"),
+        "snippet should show the edited content: {snippet}"
+    );
+    // Should include context before (line 2) and after (line 10).
+    assert!(snippet.contains("line 2"), "snippet should include context before: {snippet}");
+    assert!(snippet.contains("line 10"), "snippet should include context after: {snippet}");
+}
+
+// ── Canonical vs legacy parameter names (FR-001, FR-012) ─────────────────────
+
+#[tokio::test]
+async fn test_edit_canonical_param_names() {
+    let tmp = TempDir::new().unwrap();
+    assert_edit(
+        tmp.path(),
+        "a.rs",
+        "fn foo() { 1 }\n",
+        "fn foo() { 1 }",
+        "fn foo() { 2 }",
+        "fn foo() { 2 }\n",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_edit_legacy_param_names_accepted() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let input = json!({
+        "path": "a.rs",
+        "old_str": "fn foo() { 1 }",
+        "new_str": "fn foo() { 2 }",
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("legacy params should be accepted");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() { 2 }\n"
+    );
+    // Should emit a deprecation warning in metadata.
+    let meta = out.metadata.unwrap();
+    assert!(
+        meta.get("deprecation_warning").is_some(),
+        "legacy params should produce a deprecation_warning: {meta}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_canonical_params_no_deprecation_warning() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 2 }",
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    let meta = out.metadata.unwrap();
+    assert!(
+        meta.get("deprecation_warning").is_none(),
+        "canonical params should NOT produce a deprecation_warning: {meta}"
+    );
+}
+
+// ── Read-then-edit integration (FR-003 end-to-end) ───────────────────────────
+
+#[tokio::test]
+async fn test_read_then_edit_no_stale_error() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let c = ctx(tmp.path());
+
+    // Read the file first (records the timestamp).
+    let read_input = json!({ "path": "a.rs" });
+    let _ = ReadTool.execute(read_input, &c).await.unwrap();
+
+    // Immediately edit — file mtime == recorded read time, so no stale error.
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 2 }",
+    });
+    let _ = EditTool
+        .execute(input, &c)
+        .await
+        .expect("read-then-edit should succeed without stale error");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() { 2 }\n"
     );
 }

@@ -90,6 +90,7 @@ async fn write_document_persists_supports_files_and_index() {
         }],
         open_questions: vec!["What about errors?".into()],
         template_body: None,
+        decomposed_queries: Vec::new(),
     };
     mgr.write_document(&doc).await.unwrap();
 
@@ -254,6 +255,7 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
     let config = SessionConfig {
         topic: "Rust async".into(),
         max_local_sources: 5,
+        disable_local: false,
         ..SessionConfig::default()
     };
     session

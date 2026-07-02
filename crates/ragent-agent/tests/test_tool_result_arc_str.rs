@@ -25,7 +25,7 @@ fn large_tool_result_returns_arc_str() {
     let result = tool_result_content_for_llm("read", &content, Some(&json!({"total_lines": 600})));
     let as_str: &str = result.as_ref();
     assert!(as_str.contains("[tool result truncated for context"));
-    assert!(as_str.contains("x"));
+    assert!(as_str.contains('x'));
 }
 
 #[test]

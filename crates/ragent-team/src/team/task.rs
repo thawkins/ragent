@@ -766,7 +766,7 @@ impl TaskStore {
     pub async fn read_blocking(&self) -> Result<TaskList> {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.read()
         })
         .await?
@@ -776,7 +776,7 @@ impl TaskStore {
     pub async fn claim_next_blocking(&self, agent_id: String) -> Result<(Option<Task>, bool)> {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.claim_next(&agent_id)
         })
         .await?
@@ -786,7 +786,7 @@ impl TaskStore {
     pub async fn claim_specific_blocking(&self, task_id: String, agent_id: String) -> Result<Task> {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.claim_specific(&task_id, &agent_id)
         })
         .await?
@@ -796,7 +796,7 @@ impl TaskStore {
     pub async fn complete_blocking(&self, task_id: String, agent_id: String) -> Result<Task> {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.complete(&task_id, &agent_id)
         })
         .await?
@@ -806,7 +806,7 @@ impl TaskStore {
     pub async fn add_task_blocking(&self, task: Task) -> Result<()> {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.add_task(task)
         })
         .await?
@@ -819,7 +819,7 @@ impl TaskStore {
     {
         let team_dir = self.team_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let store = TaskStore::open(&team_dir)?;
+            let store = Self::open(&team_dir)?;
             store.update_task(&task_id, f)
         })
         .await?

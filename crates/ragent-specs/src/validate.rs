@@ -41,6 +41,10 @@ static RE_SECTION_HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(#{2,4})\s+(.+)$").expect("section header regex should compile")
 });
 
+static RE_INLINE_REQUIREMENT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(FR|NFR)-(\d+)\.\s+(.*)$").expect("inline requirement regex should compile")
+});
+
 static RE_REQUIREMENT_HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(#{2,3})\s+(FR|NFR)-(\d+)\s*[-–—]\s*(.*)$")
         .expect("requirement header regex should compile")
@@ -338,13 +342,28 @@ pub fn parse_requirements(content: &str) -> Vec<ParsedRequirement> {
                 ears_text,
                 ears_line,
             });
+        } else if let Some(caps) = RE_INLINE_REQUIREMENT.captures(lines[i]) {
+            // Alternative format: "FR-###.  The system shall ..." as a plain paragraph.
+            let id = format!("{}-{}", &caps[1], &caps[2]);
+            let ears_text = caps[3].trim().to_string();
+            let title = if ears_text.len() > 50 {
+                format!("{:.47}...", ears_text)
+            } else {
+                ears_text.clone()
+            };
+            reqs.push(ParsedRequirement {
+                id,
+                title,
+                header_line: i + 1,
+                ears_text,
+                ears_line: i + 1,
+            });
         }
         i += 1;
     }
 
     reqs
 }
-
 /// Extract required section headers from a SPEC.md.
 pub fn extract_sections(content: &str) -> Vec<(usize, String, usize)> {
     let mut sections = Vec::new();

@@ -110,13 +110,33 @@ With optional flags:
 
 ```text
 /research create litertlm-port how to add a LiteRT-LM backend --sources-dir notes/
-/research create deepdive-async tokio runtime internals --template deepdive
+/research create deepdive-async tokio runtime internals --template deepdive --use-local --use-specs
+/research create deepdive-async tokio runtime internals --iterations 5 --depth deep --format executive-summary
 ```
 
 | Flag | Purpose |
 |---|---|
 | `--sources-dir <path>` | Pull additional local files from an extra directory (FR-019). |
 | `--template <name>` | Use a template from `research/_templates/<name>.md` (FR-020). |
+| `--use-local` | Enable local-file scanning (in-project + `--sources-dir`). |
+| `--use-specs` | Enable prior-spec cross-referencing. |
+| `--iterations N` | Override the default maximum number of research iterations. |
+| `--depth shallow|standard|deep` | Choose a preset iteration/source budget (`shallow`=1 it., `standard`=3, `deep`=5). |
+| `--format report|executive-summary|comparison-table|source-bibliography` | Select the output artifact (default: `report`). |
+
+By default, only web sources are gathered. Local and spec phases must be
+explicitly requested with `--use-local` and `--use-specs`.
+
+### `/research continue` — resume an in-progress session
+
+Loads the saved `state.json` for an item and runs the next iteration of the
+research loop. You can optionally add a follow-up requirement, which is appended
+to the topic and added as a new sub-question (FR-004, T-012, T-014).
+
+```text
+/research continue tokio-runtime
+/research continue tokio-runtime focus on io_uring integration
+```
 
 After it finishes, the assistant message prints:
 
@@ -301,6 +321,63 @@ Then run:
 ```bash
 ragent research create rust-async "topic" --template deepdive
 ```
+
+## Iterative Research Loop
+
+The `researchext` engine drives research in iterations:
+
+1. **Plan** — decompose the topic into focused sub-questions.
+2. **Gather** — capture sources for pending sub-questions in parallel.
+3. **Synthesize** — produce findings from the evidence.
+4. **Verify** — check that each finding cites a source that supports it.
+5. **Critique** — score the result and detect missing-link gaps.
+6. **Stop or iterate** — continue until complete, out of budget, or no longer
+   improving.
+
+Iterations stop when every sub-question is answered, the iteration budget is
+exhausted, or the evaluation score stops improving (unless `--depth deep` or
+`--iterations` forces more work).
+
+## Persistence and Resume
+
+Every in-progress research item writes a `state.json` file alongside its
+`RESEARCH.md`. The file contains the current plan, sub-question statuses,
+captured sources, evaluation score, iteration count, evidence gaps, and follow-up
+queries. Use `/research continue <name>` to resume from this state instead of
+starting over (FR-009, T-013). Add an optional follow-up message to refine the
+plan in-flight:
+
+```text
+/research continue tokio-runtime focus on io_uring integration
+```
+
+## Output Formats
+
+The `--format` flag selects the artifact produced at the end of a session:
+
+| Format | Description |
+|---|---|
+| `report` | Full multi-section `RESEARCH.md` (default). |
+| `executive-summary` | One-page summary. |
+| `comparison-table` | Comparison table across key entities. |
+| `source-bibliography` | Standalone bibliography of all captured sources. |
+
+## Research Loop Events
+
+The engine emits structured JSON-line events for every phase:
+
+| `kind` | Payload | Meaning |
+|---|---|---|
+| `plan_updated` | `{sub_questions}` | Topic decomposed into sub-questions. |
+| `sub_question_status_changed` | `{id, status}` | Sub-question lifecycle change. |
+| `web` | `{url, title}` | Web source captured. |
+| `local` | `{path, score}` | Local file captured. |
+| `source_failed` | `{source?, error}` | A fetch failed and was recorded. |
+| `critic` | `{score?, gaps}` | Evaluation score and new gaps. |
+| `verification` | `{passed, issues}` | Claim-to-source verification result. |
+| `follow_up_queries` | `{queries}` | Bridge queries for missing links. |
+| `iteration_completed` | `{iteration, score?}` | One loop iteration finished. |
+| `done` | `{total_sources}` | Session complete. |
 
 ## Linking a Spec to Research
 

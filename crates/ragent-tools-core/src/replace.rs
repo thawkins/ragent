@@ -30,7 +30,8 @@
 //! 7. **Final-newline-normalised** – tolerate trailing `\n` presence
 //!    disagreements in either direction.
 
-/// Error returned by [`find_replacement_range`] when no unique match is found.
+/// Error returned by [`find_replacement_range`] and [`find_exact_replacement_range`]
+/// when no unique match is found.
 #[derive(Debug)]
 pub enum FindError {
     /// The needle does not match anywhere in the content under any pass.
@@ -40,6 +41,34 @@ pub enum FindError {
     MultipleMatches(usize),
 }
 
+/// Find the unique byte range `[start, end)` in `content` where `needle` should
+/// be replaced using **only** exact substring matching.
+///
+/// This is the strict matcher used by the renewed `edit` tool to match Claude
+/// Code semantics: whitespace, indentation, and line endings must match exactly.
+///
+/// Returns `(start, end, new_str)` on success. `new_str` is returned unchanged
+/// because exact matching never needs indentation re-application.
+///
+/// # Errors
+///
+/// - [`FindError::NotFound`] if `needle` does not occur in `content`.
+/// - [`FindError::MultipleMatches(n)`] if `needle` occurs more than once.
+pub fn find_exact_replacement_range(
+    content: &str,
+    needle: &str,
+    new_str: &str,
+) -> Result<(usize, usize, String), FindError> {
+    let count = content.matches(needle).count();
+    if count == 0 {
+        return Err(FindError::NotFound);
+    }
+    if count > 1 {
+        return Err(FindError::MultipleMatches(count));
+    }
+    let start = content.find(needle).unwrap();
+    Ok((start, start + needle.len(), new_str.to_string()))
+}
 /// Diagnostic kind carried by [`FindDiag`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindDiagKind {
@@ -57,13 +86,20 @@ pub enum FindDiagKind {
 /// (`pass`), and — when discoverable — the 0-based line number of the closest
 /// near-match attempt (`closest_line`). This lets callers like `multiedit`
 /// produce actionable error messages (WSPLAN M3-T4).
+///
+/// The `pass` and `closest_line` fields are kept for diagnostic tooling and
+/// debugging; the core matcher discards them via the `From<FindDiag>` for
+/// `FindError` conversion, so they are allowed to be dead code in builds that
+/// do not surface full diagnostics.
 #[derive(Debug, Clone)]
 pub struct FindDiag {
     /// What kind of failure occurred.
     pub kind: FindDiagKind,
     /// Name of the last matching pass attempted (e.g. `"collapsed"`).
+    #[allow(dead_code)]
     pub pass: &'static str,
     /// 0-based line number of the closest near-match attempt, when known.
+    #[allow(dead_code)]
     pub closest_line: Option<usize>,
 }
 
@@ -467,7 +503,7 @@ fn leading_ws(line: &str) -> &str {
 /// `lines`. Blank lines are ignored (they contribute no indentation). Returns
 /// the longest prefix of spaces/tabs shared by all non-blank lines; if there
 /// are no non-blank lines, returns an empty slice.
-fn common_leading_ws<'a>(lines: &[&'a str]) -> &'a str {
+pub(crate) fn common_leading_ws<'a>(lines: &[&'a str]) -> &'a str {
     let mut common: Option<&'a str> = None;
     for line in lines {
         if line.trim().is_empty() {
@@ -697,254 +733,3 @@ fn disambiguate_by_whitespace_proximity(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn check(content: &str, needle: &str) -> (usize, usize) {
-        let (s, e, _) = find_replacement_range(content, needle, "").expect("should find match");
-        (s, e)
-    }
-
-    fn check_with_new(content: &str, needle: &str, new_str: &str) -> (usize, usize, String) {
-        find_replacement_range(content, needle, new_str).expect("should find match")
-    }
-
-    #[test]
-    fn exact_match() {
-        let c = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, "    bar\n");
-        assert_eq!(&c[s..e], "    bar\n");
-    }
-
-    #[test]
-    fn crlf_normalised_match() {
-        let c = "fn foo() {\r\n    bar\r\n}\r\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\r\n    bar\r\n}\r\n");
-    }
-
-    #[test]
-    fn trailing_whitespace_match() {
-        let c = "fn foo() {  \n    bar  \n}\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {  \n    bar  \n}\n");
-    }
-
-    #[test]
-    fn trailing_whitespace_and_crlf() {
-        let c = "fn foo() {  \r\n    bar  \r\n}\r\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], c);
-    }
-
-    #[test]
-    fn not_found_returns_err() {
-        let c = "hello world\n";
-        assert!(matches!(
-            find_replacement_range(c, "goodbye", ""),
-            Err(FindError::NotFound)
-        ));
-    }
-
-    #[test]
-    fn multiple_matches_returns_err() {
-        let c = "foo\nfoo\n";
-        assert!(matches!(
-            find_replacement_range(c, "foo", ""),
-            Err(FindError::MultipleMatches(2))
-        ));
-    }
-
-    #[test]
-    fn byte_offset_of_line_basic() {
-        let s = "a\nb\nc\n";
-        assert_eq!(byte_offset_of_line(s, 0), 0);
-        assert_eq!(byte_offset_of_line(s, 1), 2);
-        assert_eq!(byte_offset_of_line(s, 2), 4);
-        assert_eq!(byte_offset_of_line(s, 3), 6);
-        assert_eq!(byte_offset_of_line(s, 99), 6); // beyond end → len
-    }
-
-    #[test]
-    fn leading_whitespace_stripped_match() {
-        let c = "fn setup() {\n    registry.register(A);\n    registry.register(B);\n}\n";
-        let needle = "registry.register(A);\nregistry.register(B);\n";
-        let new_str = "registry.register(A);\nregistry.register(C);\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(
-            &c[s..e],
-            "    registry.register(A);\n    registry.register(B);\n"
-        );
-        assert_eq!(
-            effective,
-            "    registry.register(A);\n    registry.register(C);\n"
-        );
-    }
-
-    #[test]
-    fn leading_whitespace_match_preserves_relative_indent() {
-        let c = "    fn foo() {\n        let x = 1;\n    }\n";
-        let needle = "fn foo() {\n    let x = 1;\n}\n";
-        let new_str = "fn foo() {\n    let x = 2;\n}\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "    fn foo() {\n        let x = 1;\n    }\n");
-        assert_eq!(effective, "    fn foo() {\n        let x = 2;\n    }\n");
-    }
-
-    #[test]
-    fn collapsed_whitespace_match() {
-        let c = "\tlet  x  =  1;\n\tlet  y  =  2;\n";
-        let needle = "let x = 1;\nlet y = 2;\n";
-        let new_str = "let x = 1;\nlet y = 99;\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "\tlet  x  =  1;\n\tlet  y  =  2;\n");
-        assert_eq!(effective, "\tlet x = 1;\n\tlet y = 99;\n");
-    }
-
-    // ── M1-T1: blank-line normalisation ───────────────────────────────────────
-
-    #[test]
-    fn blank_line_leading_in_needle() {
-        let c = "fn foo() {\n    bar\n}\n";
-        let needle = "\nfn foo() {\n    bar\n}\n";
-        let new_str = "fn foo() {\n    baz\n}\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}\n");
-        assert_eq!(effective, new_str);
-    }
-
-    #[test]
-    fn blank_line_trailing_in_needle() {
-        let c = "fn foo() {\n    bar\n}\n";
-        let needle = "fn foo() {\n    bar\n}\n\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}\n");
-    }
-
-    #[test]
-    fn blank_line_leading_in_file() {
-        let c = "\nfn foo() {\n    bar\n}\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}\n");
-    }
-
-    #[test]
-    fn blank_line_trailing_in_file() {
-        let c = "fn foo() {\n    bar\n}\n\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}\n");
-    }
-
-    #[test]
-    fn blank_line_both_edges_differ() {
-        let c = "\nfn foo() {\n    bar\n}\n\n";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}\n");
-    }
-
-    // ── M1-T2: final-newline normalisation ────────────────────────────────────
-
-    #[test]
-    fn final_newline_file_has_needle_lacks() {
-        let c = "fn foo() {\n    bar\n}\n";
-        let needle = "fn foo() {\n    bar\n}";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}");
-    }
-
-    #[test]
-    fn final_newline_needle_has_file_lacks() {
-        let c = "fn foo() {\n    bar\n}";
-        let needle = "fn foo() {\n    bar\n}\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\n    bar\n}");
-    }
-
-    #[test]
-    fn final_newline_crlf_disagreement() {
-        let c = "fn foo() {\r\n    bar\r\n}\r\n";
-        let needle = "fn foo() {\n    bar\n}";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "fn foo() {\r\n    bar\r\n}");
-    }
-
-    // ── M1-T3: collapsed-whitespace false-positive reduction ───────────────────
-
-    #[test]
-    fn collapsed_disambiguates_by_whitespace_proximity() {
-        // Two lines collapse to the same signature, and earlier passes all see
-        // multiple matches (or none), so we reach pass 5 collapsed with >1
-        // candidate. The matcher should prefer the candidate whose leading
-        // whitespace is closest to the needle's, rather than erroring.
-        //
-        // Needle has no leading indent (0 chars). Line A has an 8-space indent,
-        // line B has a 4-space indent. Both lines contain the needle's exact
-        // core (so exact / trailing-WS see multiple matches), and both collapse
-        // to the same signature. B (4 chars from 0) is closer than A (8 chars),
-        // so B wins.
-        let c = "        let  x = 1;\n    let  x = 1;\n";
-        let needle = "let  x = 1;\n";
-        let (s, e) = check(c, needle);
-        assert_eq!(&c[s..e], "    let  x = 1;\n");
-    }
-
-    #[test]
-    fn collapsed_tie_still_errors() {
-        let c = "    let  x = 1;\n    let  x = 1;\n";
-        let needle = "let  x = 1;\n";
-        assert!(matches!(
-            find_replacement_range(c, needle, ""),
-            Err(FindError::MultipleMatches(_))
-        ));
-    }
-
-    // ── M1-T4: relative indentation preservation in reindent_with ─────────────
-
-    #[test]
-    fn reindent_preserves_relative_indentation_nested() {
-        let c = "    fn foo() {\n        let x = 1;\n    }\n";
-        let needle = "fn foo() {\n    let x = 1;\n}\n";
-        let new_str = "fn foo() {\n    let x = 2;\n}\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "    fn foo() {\n        let x = 1;\n    }\n");
-        assert_eq!(effective, "    fn foo() {\n        let x = 2;\n    }\n");
-    }
-
-    #[test]
-    fn reindent_tab_vs_space_preserves_relative() {
-        let c = "\tfn foo() {\n\t\tlet x = 1;\n\t}\n";
-        let needle = "fn foo() {\n    let x = 1;\n}\n";
-        let new_str = "fn foo() {\n    let x = 2;\n}\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "\tfn foo() {\n\t\tlet x = 1;\n\t}\n");
-        assert_eq!(effective, "\tfn foo() {\n\t    let x = 2;\n\t}\n");
-    }
-
-    #[test]
-    fn reindent_blank_lines_left_untouched() {
-        let c = "    fn foo() {\n\n    }\n";
-        let needle = "fn foo() {\n\n}\n";
-        let new_str = "fn foo() {\n\n}\n";
-        let (s, e, effective) = check_with_new(c, needle, new_str);
-        assert_eq!(&c[s..e], "    fn foo() {\n\n    }\n");
-        assert_eq!(effective, "    fn foo() {\n\n    }\n");
-    }
-
-    #[test]
-    fn common_leading_ws_handles_mixed_indent() {
-        let lines = vec!["    foo", "  bar"];
-        assert_eq!(common_leading_ws(&lines), "  ");
-        let lines = vec!["    foo", "", "    bar"];
-        assert_eq!(common_leading_ws(&lines), "    ");
-        let lines = vec!["", "  ", ""];
-        assert_eq!(common_leading_ws(&lines), "");
-    }
-}

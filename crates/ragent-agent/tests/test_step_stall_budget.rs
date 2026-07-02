@@ -21,8 +21,10 @@ fn stream_config_default_step_budget_is_at_least_5_secs() {
 
 #[test]
 fn stream_config_can_be_overridden() {
-    let mut cfg = StreamConfig::default();
-    cfg.timeout_secs = 123;
+    let cfg = StreamConfig {
+        timeout_secs: 123,
+        ..StreamConfig::default()
+    };
     assert_eq!(cfg.timeout_secs, 123);
 }
 

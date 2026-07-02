@@ -10,21 +10,35 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> <topic>` — run a gathering session.
-          Create {
-              /// Validated research name (or raw string if validation hasn't run).
-              name: String,
-              /// Free-form topic description.
-              topic: String,
-              /// Optional FR-019 `--sources-dir <path>`.
-              sources_dir: Option<String>,
-              /// Optional FR-020 `--template <name>`.
-              template: Option<String>,
-              /// `--no-local` — skip the local-file scanning phase.
-              no_local: bool,
-              /// `--no-specs` — skip the prior-spec cross-reference phase.
-              no_specs: bool,
-          },    /// `ragent research list` — list every item.
+    /// `ragent research create <name> <topic> [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]` — run a gathering session.
+    Create {
+        /// Validated research name (or raw string if validation hasn't run).
+        name: String,
+        /// Free-form topic description.
+        topic: String,
+        /// Optional FR-010 `--iterations N` override.
+        iterations: Option<u32>,
+        /// Optional FR-011 `--depth shallow|standard|deep`.
+        depth: Option<String>,
+        /// Optional FR-012 `--format <artifact>`.
+        format: Option<String>,
+        /// Optional FR-019 `--sources-dir <path>`.
+        sources_dir: Option<String>,
+        /// Optional FR-020 `--template <name>`.
+        template: Option<String>,
+        /// `--use-local` — enable the local-file scanning phase.
+        use_local: bool,
+        /// `--use-specs` — enable the prior-spec cross-reference phase.
+        use_specs: bool,
+    },
+    /// `ragent research continue <name> [message]` — resume an in-progress item (T-012).
+    Continue {
+        /// Research name.
+        name: String,
+        /// Optional follow-up requirement to add to the plan (T-014).
+        message: Option<String>,
+    },
+    /// `ragent research list` — list every item.
     List {
         /// `--all` includes archived items.
         all: bool,
@@ -75,6 +89,7 @@ impl ResearchCliCommand {
         match sub {
             "help" | "-h" | "--help" => Self::Help,
             "create" => Self::parse_create(&rest),
+            "continue" => Self::parse_continue(&rest),
             "list" | "ls" => {
                 let all = rest.contains(&"--all");
                 Self::List { all }
@@ -90,84 +105,132 @@ impl ResearchCliCommand {
                 name: rest.join(" "),
             },
             other => {
-                              // Treat as `create <name> <topic…>` if it looks like a name.
-                              let name = other.to_string();
-                              let topic = rest.join(" ");
-                              if topic.is_empty() {
-                                  Self::Unknown(name)
-                              } else {
-                                  Self::Create {
-                                      name,
-                                      topic,
-                                      sources_dir: None,
-                                      template: None,
-                                      no_local: false,
-                                      no_specs: false,
-                                  }
-                              }
-                          }        }
-    }
-
-    fn parse_create(rest: &[&str]) -> Self {
-              // Parse: ragent research create <name> <topic> [--sources-dir <path>]
-              //        [--template <name>] [--no-local] [--no-specs]
-            let mut i = 0;
-            let mut name: Option<String> = None;
-            let mut topic_words: Vec<&str> = Vec::new();
-            let mut sources_dir: Option<String> = None;
-            let mut template: Option<String> = None;
-            let mut no_local = false;
-            let mut no_specs = false;
-            while i < rest.len() {
-                let arg = rest[i];
-                match arg {
-                    "--sources-dir" => {
-                        if let Some(v) = rest.get(i + 1) {
-                            sources_dir = Some((*v).to_string());
-                            i += 2;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                    "--template" => {
-                        if let Some(v) = rest.get(i + 1) {
-                            template = Some((*v).to_string());
-                            i += 2;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                    "--no-local" => {
-                        no_local = true;
-                        i += 1;
-                    }
-                    "--no-specs" => {
-                        no_specs = true;
-                        i += 1;
-                    }
-                    _ => {
-                        if name.is_none() {
-                            name = Some(arg.to_string());
-                        } else {
-                            topic_words.push(arg);
-                        }
-                        i += 1;
+                // Treat as `create <name> <topic…>` if it looks like a name.
+                let name = other.to_string();
+                let topic = rest.join(" ");
+                if topic.is_empty() {
+                    Self::Unknown(name)
+                } else {
+                    Self::Create {
+                        name,
+                        topic,
+                        iterations: None,
+                        depth: None,
+                        format: None,
+                        sources_dir: None,
+                        template: None,
+                        use_local: false,
+                        use_specs: false,
                     }
                 }
             }
-            let Some(name) = name else {
-                return Self::Unknown("create".to_string());
-            };
-            let topic = topic_words.join(" ");
-            Self::Create {
-                name,
-                topic,
-                sources_dir,
-                template,
-                no_local,
-                no_specs,
+        }
+    }
+
+    fn parse_create(rest: &[&str]) -> Self {
+        // Parse: ragent research create <name> <topic> [--iterations N]
+        //        [--depth shallow|standard|deep] [--format <artifact>]
+        //        [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]
+        let mut i = 0;
+        let mut name: Option<String> = None;
+        let mut topic_words: Vec<&str> = Vec::new();
+        let mut iterations: Option<u32> = None;
+        let mut depth: Option<String> = None;
+        let mut format: Option<String> = None;
+        let mut sources_dir: Option<String> = None;
+        let mut template: Option<String> = None;
+        let mut use_local = false;
+        let mut use_specs = false;
+        while i < rest.len() {
+            let arg = rest[i];
+            match arg {
+                "--iterations" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        iterations = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--depth" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        depth = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--format" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        format = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--sources-dir" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        sources_dir = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--template" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        template = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--use-local" => {
+                    use_local = true;
+                    i += 1;
+                }
+                "--use-specs" => {
+                    use_specs = true;
+                    i += 1;
+                }
+                _ => {
+                    if name.is_none() {
+                        name = Some(arg.to_string());
+                    } else {
+                        topic_words.push(arg);
+                    }
+                    i += 1;
+                }
             }
         }
+        let Some(name) = name else {
+            return Self::Unknown("create".to_string());
+        };
+        let topic = topic_words.join(" ");
+        Self::Create {
+            name,
+            topic,
+            iterations,
+            depth,
+            format,
+            sources_dir,
+            template,
+            use_local,
+            use_specs,
+        }
+    }
+
+    fn parse_continue(rest: &[&str]) -> Self {
+        let name = rest.first().map(|s| s.to_string()).unwrap_or_default();
+        if name.is_empty() {
+            return Self::Unknown("continue".to_string());
+        }
+        let message = if rest.len() > 1 {
+            Some(rest[1..].join(" "))
+        } else {
+            None
+        };
+        Self::Continue { name, message }
+    }
     fn parse_open(rest: &[&str]) -> Self {
         let name = rest
             .iter()
@@ -211,29 +274,33 @@ impl ResearchCliCommand {
     /// Build the static help message shown by `ragent research help`.
     pub fn build_help_message() -> &'static str {
         "ragent research — manage research items under research/\n\
-         \n\
-         USAGE:\n\
-           ragent research <SUBCOMMAND> [ARGS]\n\
-         \n\
-         SUBCOMMANDS:\n\
-                      create <name> <topic> [--sources-dir <path>] [--template <name>]\n\
-                            [--no-local] [--no-specs]\n\
-                            Run an information-gathering session and write RESEARCH.md.\n\
-                            --no-local  Skip local-file scanning (in-project + extras).\n\
-                            --no-specs  Skip prior-spec cross-referencing.\n\
-             list [--all]                  List every research item.\n\
-           open <name>                   Print the absolute path of RESEARCH.md.\n\
-           search <query>                Full-text search across all RESEARCH.md.\n\
-           show <name>                   Print metadata for a single item.\n\
-           delete <name> [--yes]         Remove a research item (prompts unless --yes).\n\
-           archive <name>                Mark a research item as archived.\n\
-           help                          Show this message.\n\
-         \n\
-         Output: by default `ragent research` emits machine-readable JSON lines\n\
-         prefixed with `ragent-research:` so callers can pipe the output\n\
-         through `jq` or other tools."
+               \n\
+               USAGE:\n\
+                 ragent research <SUBCOMMAND> [ARGS]\n\
+               \n\
+               SUBCOMMANDS:\n\
+                                create <name> <topic> [--iterations N] [--depth shallow|standard|deep]\n\
+                                      [--format report|executive-summary|comparison-table|source-bibliography]\n\
+                                      [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]\n\
+                                      Run an information-gathering session and write RESEARCH.md.\n\
+                                      --iterations  Override the default maximum number of iterations.\n\
+                                      --depth       Choose a preset: shallow, standard, or deep.\n\
+                                      --format      Select the output artifact format.\n\
+                                      --use-local   Enable local-file scanning (in-project + extras).\n\
+                                      --use-specs   Enable prior-spec cross-referencing.\n\
+                   continue <name> [message] Resume an in-progress research item.\n\
+                   list [--all]                  List every research item.\n\
+                 open <name>                   Print the absolute path of RESEARCH.md.\n\
+                 search <query>                Full-text search across all RESEARCH.md.\n\
+                 show <name>                   Print metadata for a single item.\n\
+                 delete <name> [--yes]         Remove a research item (prompts unless --yes).\n\
+                 archive <name>                Mark a research item as archived.\n\
+                 help                          Show this message.\n\
+               \n\
+               Output: by default `ragent research` emits machine-readable JSON lines\n\
+               prefixed with `ragent-research:` so callers can pipe the output\n\
+               through `jq` or other tools."
     }
-
     /// `true` if this is a usage-error variant (i.e. parse succeeded but the
     /// caller passed wrong args).
     pub fn is_usage_error(&self) -> bool {
@@ -248,6 +315,9 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
     use crate::session::SessionEvent;
     let (kind, payload) = match event {
         SessionEvent::Phase { phase } => ("phase", serde_json::json!({ "phase": phase.as_str() })),
+        SessionEvent::QueriesDecomposed { queries } => {
+            ("queries", serde_json::json!({ "queries": queries }))
+        }
         SessionEvent::WebCaptured { url, title } => {
             ("web", serde_json::json!({ "url": url, "title": title }))
         }
@@ -257,6 +327,53 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
         SessionEvent::SpecCaptured { spec_id } => {
             ("spec", serde_json::json!({ "spec_id": spec_id }))
         }
+        SessionEvent::WebSearchFailed { error } => {
+            ("web_error", serde_json::json!({ "error": error }))
+        }
+        SessionEvent::WebFetchFailed { url, error } => (
+            "web_fetch_error",
+            serde_json::json!({ "url": url, "error": error }),
+        ),
+        SessionEvent::PlanUpdated { sub_questions } => (
+            "plan_updated",
+            serde_json::json!({ "sub_questions": sub_questions }),
+        ),
+        SessionEvent::SubQuestionStatusChanged { id, status } => (
+            "sub_question_status_changed",
+            serde_json::json!({ "id": id, "status": status }),
+        ),
+        SessionEvent::SourceFailed { source, error } => (
+            "source_failed",
+            serde_json::json!({
+                "source": source,
+                "error": error,
+            }),
+        ),
+        SessionEvent::CriticResult { score, gaps } => (
+            "critic",
+            serde_json::json!({
+                "score": score,
+                "gaps": gaps,
+            }),
+        ),
+        SessionEvent::VerificationResult { passed, issues } => (
+            "verification",
+            serde_json::json!({
+                "passed": passed,
+                "issues": issues,
+            }),
+        ),
+        SessionEvent::IterationCompleted { iteration, score } => (
+            "iteration_completed",
+            serde_json::json!({
+                "iteration": iteration,
+                "score": score,
+            }),
+        ),
+        SessionEvent::FollowUpQueries { queries } => (
+            "follow_up_queries",
+            serde_json::json!({ "queries": queries }),
+        ),
         SessionEvent::SynthesizeResult { outcome, detail } => (
             "synthesize",
             serde_json::json!({
@@ -352,259 +469,6 @@ pub fn render_search_output(hits: &[(String, String, String)]) -> String {
 /// Convenience: map a [`ResearchNameError`] to a user-facing message.
 pub fn explain_name_error(err: &ResearchNameError) -> String {
     err.to_string()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_help() {
-        assert_eq!(ResearchCliCommand::parse("help"), ResearchCliCommand::Help);
-        assert_eq!(ResearchCliCommand::parse(""), ResearchCliCommand::Help);
-    }
-
-    #[test]
-          fn parse_create_with_topic() {
-              let cmd = ResearchCliCommand::parse("create rust-async async/await idioms in stable Rust");
-              match cmd {
-                  ResearchCliCommand::Create {
-                      name,
-                      topic,
-                      sources_dir,
-                      template,
-                      no_local,
-                      no_specs,
-                  } => {
-                      assert_eq!(name, "rust-async");
-                      assert_eq!(topic, "async/await idioms in stable Rust");
-                      assert!(sources_dir.is_none());
-                      assert!(template.is_none());
-                      assert!(!no_local);
-                      assert!(!no_specs);
-                  }
-                  other => panic!("unexpected variant: {other:?}"),
-              }
-          }
-
-          #[test]
-          fn parse_create_with_sources_dir_and_template() {
-              let cmd = ResearchCliCommand::parse(
-                  "create foo topic words --sources-dir /tmp/notes --template deepdive",
-              );
-              match cmd {
-                  ResearchCliCommand::Create {
-                      name,
-                      topic,
-                      sources_dir,
-                      template,
-                      no_local,
-                      no_specs,
-                  } => {
-                      assert_eq!(name, "foo");
-                      assert_eq!(topic, "topic words");
-                      assert_eq!(sources_dir.as_deref(), Some("/tmp/notes"));
-                      assert_eq!(template.as_deref(), Some("deepdive"));
-                      assert!(!no_local);
-                      assert!(!no_specs);
-                  }
-                  other => panic!("unexpected variant: {other:?}"),
-              }
-          }
-
-          #[test]
-          fn parse_create_with_no_local_flag() {
-              let cmd = ResearchCliCommand::parse("create foo a topic --no-local");
-              match cmd {
-                  ResearchCliCommand::Create {
-                      name,
-                      topic,
-                      no_local,
-                      no_specs,
-                      ..
-                  } => {
-                      assert_eq!(name, "foo");
-                      assert_eq!(topic, "a topic");
-                      assert!(no_local);
-                      assert!(!no_specs);
-                  }
-                  other => panic!("unexpected variant: {other:?}"),
-              }
-          }
-
-          #[test]
-          fn parse_create_with_no_specs_flag() {
-              let cmd = ResearchCliCommand::parse("create foo a topic --no-specs");
-              match cmd {
-                  ResearchCliCommand::Create {
-                      name,
-                      topic,
-                      no_local,
-                      no_specs,
-                      ..
-                  } => {
-                      assert_eq!(name, "foo");
-                      assert_eq!(topic, "a topic");
-                      assert!(!no_local);
-                      assert!(no_specs);
-                  }
-                  other => panic!("unexpected variant: {other:?}"),
-              }
-          }
-
-          #[test]
-          fn parse_create_with_both_no_flags() {
-              let cmd = ResearchCliCommand::parse(
-                  "create foo a topic --no-local --no-specs --sources-dir /tmp/x",
-              );
-            match cmd {
-                ResearchCliCommand::Create {
-                    name,
-                    topic,
-                    sources_dir,
-                    no_local,
-                    no_specs,
-                    ..
-                } => {
-                    assert_eq!(name, "foo");
-                    assert_eq!(topic, "a topic");
-                    assert_eq!(sources_dir.as_deref(), Some("/tmp/x"));
-                    assert!(no_local);
-                    assert!(no_specs);
-                }
-                other => panic!("unexpected variant: {other:?}"),
-            }
-        }
-    #[test]
-    fn parse_list_all() {
-        let cmd = ResearchCliCommand::parse("list --all");
-        assert!(matches!(cmd, ResearchCliCommand::List { all: true }));
-    }
-
-    #[test]
-    fn parse_list_default() {
-        let cmd = ResearchCliCommand::parse("list");
-        assert!(matches!(cmd, ResearchCliCommand::List { all: false }));
-    }
-
-    #[test]
-    fn parse_open() {
-        let cmd = ResearchCliCommand::parse("open rust-async");
-        assert!(matches!(cmd, ResearchCliCommand::Open { ref name } if name == "rust-async"));
-    }
-
-    #[test]
-    fn parse_search() {
-        let cmd = ResearchCliCommand::parse("search async patterns");
-        assert!(
-            matches!(cmd, ResearchCliCommand::Search { ref query } if query == "async patterns")
-        );
-    }
-
-    #[test]
-    fn parse_show() {
-        let cmd = ResearchCliCommand::parse("show foo");
-        assert!(matches!(cmd, ResearchCliCommand::Show { ref name } if name == "foo"));
-    }
-
-    #[test]
-    fn parse_delete_with_yes() {
-        let cmd = ResearchCliCommand::parse("delete foo --yes");
-        assert!(matches!(cmd, ResearchCliCommand::Delete { ref name, yes: true } if name == "foo"));
-    }
-
-    #[test]
-    fn parse_archive() {
-        let cmd = ResearchCliCommand::parse("archive foo");
-        assert!(matches!(cmd, ResearchCliCommand::Archive { ref name } if name == "foo"));
-    }
-
-    #[test]
-          fn parse_implicit_create_when_unknown_subcommand() {
-              let cmd = ResearchCliCommand::parse("foo bar baz");
-              match cmd {
-                  ResearchCliCommand::Create {
-                      name,
-                      topic,
-                      no_local,
-                      no_specs,
-                      ..
-                  } => {
-                      assert_eq!(name, "foo");
-                      assert_eq!(topic, "bar baz");
-                      assert!(!no_local);
-                      assert!(!no_specs);
-                  }
-                  other => panic!("unexpected variant: {other:?}"),
-              }
-          }
-    #[test]
-    fn help_message_contains_documented_subcommands() {
-        let h = ResearchCliCommand::build_help_message();
-        for sub in [
-            "create", "list", "open", "search", "show", "delete", "archive",
-        ] {
-            assert!(h.contains(sub), "help missing `{sub}`");
-        }
-    }
-
-    #[test]
-    fn render_session_event_json_for_phase() {
-        let event = crate::session::SessionEvent::Phase {
-            phase: crate::session::SessionPhase::Web,
-        };
-        let line = render_session_event_json(&event);
-        assert!(line.starts_with("ragent-research:"));
-        assert!(line.contains("\"web\""));
-    }
-
-    #[test]
-    fn render_session_event_json_for_done() {
-        let event = crate::session::SessionEvent::Done { total_sources: 7 };
-        let line = render_session_event_json(&event);
-        assert!(line.contains("\"done\""));
-        assert!(line.contains("\"total_sources\":7"));
-    }
-
-    #[test]
-    fn render_show_output_includes_metadata() {
-        let out = render_show_output(
-            "rust-async",
-            "Rust Async",
-            "async/await idioms",
-            "complete",
-            "2024-01-15T10:30:00Z",
-            "2024-01-15T10:31:00Z",
-            &[(
-                "web".into(),
-                "https://example.com".into(),
-                "Example".into(),
-                "2024-01-15T10:31:00Z".into(),
-            )],
-        );
-        assert!(out.contains("rust-async"));
-        assert!(out.contains("Rust Async"));
-        assert!(out.contains("https://example.com"));
-    }
-
-    #[test]
-    fn render_list_output_handles_empty() {
-        let out = render_list_output(&[]);
-        assert!(out.contains("NAME"));
-    }
-
-    #[test]
-    fn truncate_short_string_passes_through() {
-        assert_eq!(truncate("abc", 5), "abc");
-    }
-
-    #[test]
-    fn truncate_long_string_ellipsises() {
-        let s = "a".repeat(20);
-        let t = truncate(&s, 5);
-        assert_eq!(t.chars().count(), 5);
-        assert!(t.ends_with('…'));
-    }
 }
 
 // ── Filesystem-backed LocalTool for the CLI ───────────────────────────────
@@ -762,12 +626,342 @@ async fn walk(root: &Path, dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> any
                 .next()
                 .map(|e| e == ext)
                 .unwrap_or(false);
-            if matches_ext {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    out.push(rel.to_path_buf());
-                }
+            if matches_ext
+                && let Ok(rel) = path.strip_prefix(root)
+            {
+                out.push(rel.to_path_buf());
             }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_help() {
+        assert_eq!(ResearchCliCommand::parse("help"), ResearchCliCommand::Help);
+        assert_eq!(ResearchCliCommand::parse(""), ResearchCliCommand::Help);
+    }
+
+    #[test]
+    fn parse_create_with_topic() {
+        let cmd = ResearchCliCommand::parse("create rust-async async/await idioms in stable Rust");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                sources_dir,
+                template,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "rust-async");
+                assert_eq!(topic, "async/await idioms in stable Rust");
+                assert!(sources_dir.is_none());
+                assert!(template.is_none());
+                assert!(!use_local);
+                assert!(!use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_sources_dir_and_template() {
+        let cmd = ResearchCliCommand::parse(
+            "create foo topic words --sources-dir /tmp/notes --template deepdive",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                sources_dir,
+                template,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "topic words");
+                assert_eq!(sources_dir.as_deref(), Some("/tmp/notes"));
+                assert_eq!(template.as_deref(), Some("deepdive"));
+                assert!(!use_local);
+                assert!(!use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_use_local_flag() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --use-local");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert!(use_local);
+                assert!(!use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_use_specs_flag() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --use-specs");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert!(!use_local);
+                assert!(use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_both_no_flags() {
+        let cmd = ResearchCliCommand::parse(
+            "create foo a topic --use-local --use-specs --sources-dir /tmp/x",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                sources_dir,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert_eq!(sources_dir.as_deref(), Some("/tmp/x"));
+                assert!(use_local);
+                assert!(use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_list_all() {
+        let cmd = ResearchCliCommand::parse("list --all");
+        assert!(matches!(cmd, ResearchCliCommand::List { all: true }));
+    }
+
+    #[test]
+    fn parse_list_default() {
+        let cmd = ResearchCliCommand::parse("list");
+        assert!(matches!(cmd, ResearchCliCommand::List { all: false }));
+    }
+
+    #[test]
+    fn parse_open() {
+        let cmd = ResearchCliCommand::parse("open rust-async");
+        assert!(matches!(cmd, ResearchCliCommand::Open { ref name } if name == "rust-async"));
+    }
+
+    #[test]
+    fn parse_search() {
+        let cmd = ResearchCliCommand::parse("search async patterns");
+        assert!(
+            matches!(cmd, ResearchCliCommand::Search { ref query } if query == "async patterns")
+        );
+    }
+
+    #[test]
+    fn parse_show() {
+        let cmd = ResearchCliCommand::parse("show foo");
+        assert!(matches!(cmd, ResearchCliCommand::Show { ref name } if name == "foo"));
+    }
+
+    #[test]
+    fn parse_delete_with_yes() {
+        let cmd = ResearchCliCommand::parse("delete foo --yes");
+        assert!(matches!(cmd, ResearchCliCommand::Delete { ref name, yes: true } if name == "foo"));
+    }
+
+    #[test]
+    fn parse_create_with_iterations_depth_format() {
+        let cmd = ResearchCliCommand::parse(
+            "create foo topic words --iterations 5 --depth deep --format executive-summary",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                iterations,
+                depth,
+                format,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "topic words");
+                assert_eq!(iterations, Some(5));
+                assert_eq!(depth.as_deref(), Some("deep"));
+                assert_eq!(format.as_deref(), Some("executive-summary"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_continue_with_message() {
+        let cmd = ResearchCliCommand::parse("continue rust-async focus on async-std");
+        match cmd {
+            ResearchCliCommand::Continue { name, message } => {
+                assert_eq!(name, "rust-async");
+                assert_eq!(message.as_deref(), Some("focus on async-std"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_continue_without_message() {
+        let cmd = ResearchCliCommand::parse("continue foo");
+        assert!(
+            matches!(cmd, ResearchCliCommand::Continue { ref name, message: None } if name == "foo")
+        );
+    }
+
+    #[test]
+    fn parse_archive() {
+        let cmd = ResearchCliCommand::parse("archive foo");
+        assert!(matches!(cmd, ResearchCliCommand::Archive { ref name } if name == "foo"));
+    }
+
+    #[test]
+    fn parse_implicit_create_when_unknown_subcommand() {
+        let cmd = ResearchCliCommand::parse("foo bar baz");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                use_local,
+                use_specs,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "bar baz");
+                assert!(!use_local);
+                assert!(!use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn help_message_contains_documented_subcommands() {
+        let h = ResearchCliCommand::build_help_message();
+        for sub in [
+            "create", "continue", "list", "open", "search", "show", "delete", "archive",
+        ] {
+            assert!(h.contains(sub), "help missing `{sub}`");
+        }
+    }
+
+    #[test]
+    fn render_session_event_json_for_phase() {
+        let event = crate::session::SessionEvent::Phase {
+            phase: crate::session::SessionPhase::Web,
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.starts_with("ragent-research:"));
+        assert!(line.contains("\"web\""));
+    }
+
+    #[test]
+    fn render_session_event_json_for_plan_updated() {
+        let event = crate::session::SessionEvent::PlanUpdated {
+            sub_questions: vec!["q1".into(), "q2".into()],
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"plan_updated\""));
+        assert!(line.contains("\"q1\""));
+    }
+
+    #[test]
+    fn render_session_event_json_for_source_failed() {
+        let event = crate::session::SessionEvent::SourceFailed {
+            source: Some("https://example.com".into()),
+            error: "timeout".into(),
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"source_failed\""));
+        assert!(line.contains("\"timeout\""));
+    }
+
+    #[test]
+    fn render_session_event_json_for_critic_and_verification() {
+        let event = crate::session::SessionEvent::CriticResult {
+            score: Some(72),
+            gaps: vec!["missing citation".into()],
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"critic\""));
+        assert!(line.contains("72"));
+
+        let event = crate::session::SessionEvent::VerificationResult {
+            passed: false,
+            issues: vec!["claim X unsupported".into()],
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"verification\""));
+        assert!(line.contains("false"));
+    }
+
+    #[test]
+    fn render_show_output_includes_metadata() {
+        let out = render_show_output(
+            "rust-async",
+            "Rust Async",
+            "async/await idioms",
+            "complete",
+            "2024-01-15T10:30:00Z",
+            "2024-01-15T10:31:00Z",
+            &[(
+                "web".into(),
+                "https://example.com".into(),
+                "Example".into(),
+                "2024-01-15T10:31:00Z".into(),
+            )],
+        );
+        assert!(out.contains("rust-async"));
+        assert!(out.contains("Rust Async"));
+        assert!(out.contains("https://example.com"));
+    }
+
+    #[test]
+    fn render_list_output_handles_empty() {
+        let out = render_list_output(&[]);
+        assert!(out.contains("NAME"));
+    }
+
+    #[test]
+    fn truncate_short_string_passes_through() {
+        assert_eq!(truncate("abc", 5), "abc");
+    }
+
+    #[test]
+    fn truncate_long_string_ellipsises() {
+        let s = "a".repeat(20);
+        let t = truncate(&s, 5);
+        assert_eq!(t.chars().count(), 5);
+        assert!(t.ends_with('…'));
+    }
 }

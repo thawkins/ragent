@@ -191,7 +191,7 @@ fn test_task_tool_family_guidance_constant_present() {
 
 #[tokio::test]
 async fn test_task_complete_rejects_task_id_and_result_inputs() {
-    use ragent_agent::tool::{Tool, ToolContext};
+    use ragent_agent::tool::ToolContext;
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -222,6 +222,7 @@ async fn test_task_complete_rejects_task_id_and_result_inputs() {
         active_spec_id: None,
         config: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(
@@ -237,7 +238,7 @@ async fn test_task_complete_rejects_task_id_and_result_inputs() {
 
 #[tokio::test]
 async fn test_task_complete_accepts_summary_input() {
-    use ragent_agent::tool::{Tool, ToolContext};
+    use ragent_agent::tool::ToolContext;
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -265,6 +266,7 @@ async fn test_task_complete_accepts_summary_input() {
         active_spec_id: None,
         config: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(

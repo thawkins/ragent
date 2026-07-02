@@ -1,9 +1,66 @@
 # Changelog
 
+## Version: 0.1.0-alpha.126
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.126`.
+- **Compression pipeline fixes** — Addressed issues in the context
+  compression pipeline (`/compress`) so it behaves correctly under the
+  updated agent loop.
+- **Test updates** — Refreshed and repaired tests across multiple crates
+  to track API and behaviour changes from the compression work and
+  related refactors.
+- **Warning fixes** — Resolved compiler/clippy warnings surfaced by the
+  latest tool and config changes.
+
 ## Version: 0.1.0-alpha.125
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.125`.
+
+### Added — Edit Tool Renewal (editrenewal spec)
+- **Renewed `edit` tool** — The single-file `edit` tool now aligns with Claude
+  Code's `Edit` semantics. It uses strict exact-match replacement (FR-004),
+  canonical parameter names `file_path`/`old_string`/`new_string` (FR-001),
+  create/update/delete operations via empty `old_string`/`new_string`
+  (FR-006), no-change rejection (FR-007), stale-file detection when a read
+  timestamp has been recorded (FR-003), and returns a line-numbered result
+  snippet with ≥4 lines of context (FR-008). Legacy parameter names
+  (`path`/`old_str`/`new_str`) are still accepted and emit a
+  `deprecation_warning` in the output metadata.
+- **`multi_edit` tool** — The atomic batch edit tool formerly known as
+  `multiedit` is now registered as `multi_edit` (FR-009). Each edit in the
+  `edits` array uses `file_path`/`old_string`/`new_string` and is validated
+  with the strict exact-match matcher. Overlap detection and atomic rollback
+  are preserved. Stale-file detection is applied per file in the batch
+  (FR-003/FR-009).
+- **Legacy `multiedit` alias** — The old `multiedit` tool name remains
+  registered as a deprecated alias that forwards to `multi_edit`, normalises
+  legacy parameter names, and emits a `deprecation_warning` (FR-012).
+- **Read-timestamp tracking** — `ToolContext` now carries a shared
+  `read_timestamps` map (FR-003). The `read` tool records each file's mtime;
+  `edit` and `multi_edit` consult it to reject stale-file edits. Plumbed
+  through `SessionProcessor` and all tool-context construction sites.
+- **Migration guide** — `docs/editrenewal-migration.md` documents the new
+  tools, the strict matching semantics, and the migration path from legacy
+  parameter names.
+
+### Tests
+- `crates/ragent-tools-core/tests/test_edit_integration.rs` — 17 tests
+  covering exact match, strict rejection of whitespace mismatches, multiple
+  matches, NotFound, create/delete operations, no-change rejection,
+  stale-file detection, snippet generation, canonical vs legacy params, and
+  read-then-edit integration.
+- `crates/ragent-tools-core/tests/test_multiedit.rs` — 18 tests covering
+  cross-file batches, overlap rejection, atomic rollback, JSON-order
+  independence, strict-match acceptance/rejection, stale-file rejection in
+  batches, and canonical/legacy parameter names.
+- `crates/ragent-tools-core/tests/test_read_tool.rs` — 2 new tests for
+  read-timestamp recording.
+- `crates/ragent-agent/tests/test_editrenewal_aliases.rs` — 6 tests
+  verifying the registry exposes `edit`, `multi_edit`, and the `multiedit`
+  alias, and that descriptions/schemas carry the canonical parameter names
+  and deprecation signalling.
 
 ## Version: 0.1.0-alpha.124
 

@@ -41,7 +41,7 @@ pub mod think;
 pub mod calculator;
 pub mod get_env;
 
-mod file_lock;
+pub mod file_lock;
 
 use anyhow::Result;
 use ragent_types::event::EventBus;
@@ -106,6 +106,10 @@ pub struct ToolContext {
     pub working_dir: PathBuf,
     /// Event bus used to publish tool-side UI/runtime events.
     pub event_bus: Arc<EventBus>,
+    /// Read timestamps (mtime in milliseconds since UNIX epoch) for files that
+    /// have been read by this session. Used by edit tools to detect stale-file
+    /// edits (editrenewal FR-003).
+    pub read_timestamps: Arc<RwLock<HashMap<PathBuf, u64>>>,
 }
 
 /// A tool that an agent can invoke to perform actions.

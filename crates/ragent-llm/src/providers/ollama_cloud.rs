@@ -624,16 +624,27 @@ impl LlmClient for OllamaCloudClient {
                         if let Some(thinking) = message.get("thinking").and_then(|v| v.as_str())
                             && !thinking.is_empty()
                         {
-                            tracing::debug!(model=%model_name, chars=thinking.len(), "Ollama Cloud: thinking content");
+                            yield StreamEvent::ReasoningStart;
+                            yield StreamEvent::ReasoningDelta {
+                                text: thinking.to_string(),
+                            };
+                            yield StreamEvent::ReasoningEnd;
                         }
+
+                        let has_tool_calls = message
+                            .get("tool_calls")
+                            .and_then(|v| v.as_array())
+                            .is_some_and(|a| !a.is_empty());
 
                         if let Some(content) = message.get("content").and_then(|v| v.as_str())
                             && !content.is_empty()
+                            && !has_tool_calls
                         {
                             yield StreamEvent::TextDelta { text: content.to_string() };
                         }
 
-                        if let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array())
+                        if has_tool_calls
+                            && let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array())
                         {
                             for (idx, tool_call) in tool_calls.iter().enumerate() {
                                 let tool_call_id = tool_call

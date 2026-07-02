@@ -17,7 +17,6 @@ fn small_history_does_not_trigger_compression() {
     // This test exists as a regression guard: if someone removes the
     // `!compressed_this_turn` short-circuit in `process_user_message`
     // this test should fail by the next refactor.
-    use ragent_agent::config::CompressionConfig as _;
     let _cfg = ragent_agent::config::StreamConfig::default();
 }
 

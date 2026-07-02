@@ -229,6 +229,7 @@ mod tests {
             active_spec_id: None,
             config: None,
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+            read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
     #[tokio::test]

@@ -46,6 +46,9 @@ fn test_state(token: &str) -> AppState {
             std::collections::HashMap::new(),
         )),
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     });
     AppState {
         event_bus,

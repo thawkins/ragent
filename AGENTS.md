@@ -120,6 +120,11 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - Organize related tests together.
 - Follow the naming convention: `test_<component>_<scenario>` (e.g. `test_jog_x_positive`).
 - For each project crate, migrate related tests into suitable subfolders within that crate's `tests/` directory. Review both inline and external tests for migration candidates, and relocate inline tests from `.rs` files into separate files under the appropriate `tests/` subfolder where practical.
+- **Migration strategies** (see `docs/reports/testconsolidate-completion.md` for the full migration report):
+  - **Public-API tests**: use `use ragent_<crate>::module::Item;` — no source changes needed.
+  - **Private-item tests**: widen the tested items to `pub(crate)` (FR-007) and re-import the source module via `#[path = "../src/<module>.rs"] mod <module>;` (FR-008). Provide shims for `super::` and `crate::` references at the test file root.
+  - **Complex cases** (`//!` doc comments + `crate::` cross-module deps): use `#[cfg(test)] #[path = "../../tests/test_<module>.rs"] mod test_<module>;` in the source file to compile the external test within the crate's module tree.
+- **Do not add new inline `#[cfg(test)]` modules** to library source files. All new tests go in `tests/`.
 
 
 ## Lint & Format Commands

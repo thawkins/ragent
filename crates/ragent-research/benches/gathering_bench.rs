@@ -6,9 +6,9 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::{
-    GrepMatch, LocalGatherer, LocalTool, NoopAnalysisEngine, ResearchManager, ResearchSession,
-    SessionConfig, SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer,
-    WebSearchHit, WebSearchTool,
+    GrepMatch, LocalGatherer, LocalTool, ResearchManager, ResearchSession, SessionConfig,
+    SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
+    WebSearchTool,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

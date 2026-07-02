@@ -1,6 +1,19 @@
 # Release
 
-## Current Version: 0.1.0-alpha.125
+## Current Version: 0.1.0-alpha.126
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.126`.
+- **Compression pipeline fixes** — Addressed issues in the context
+  compression pipeline (`/compress`) so it behaves correctly under the
+  updated agent loop.
+- **Test updates** — Refreshed and repaired tests across multiple crates
+  to track API and behaviour changes from the compression work and
+  related refactors.
+- **Warning fixes** — Resolved compiler/clippy warnings surfaced by the
+  latest tool and config changes.
+
+## Previous Version: 0.1.0-alpha.125
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.125`.

@@ -17,6 +17,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         session_id: "test".to_string(),
         working_dir: working_dir.to_path_buf(),
         event_bus: Arc::new(ragent_types::event::EventBus::new(64)),
+        read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     }
 }
 
@@ -161,17 +162,56 @@ async fn test_json_order_independence() {
     );
 }
 
-// ── Whitespace-tolerant batch edits ───────────────────────────────────────────
+// ── Strict exact-match batch edits (editrenewal FR-004 / FR-009) ──────────────
 
+/// With the strict matcher, a batch edit whose `old_string` does not match
+/// the file byte-for-byte (here: the file has trailing spaces and CRLF that
+/// the needle omits) must be rejected, and no files may be modified.
 #[tokio::test]
-async fn test_whitespace_tolerant_batch_edits() {
+async fn test_strict_match_rejects_whitespace_mismatch() {
     let tmp = TempDir::new().unwrap();
     // File has trailing spaces the needle omits, and uses CRLF for one line.
+    let path = write_file(tmp.path(), "a.rs", "fn a() {  \r\n    bar  \n}\n");
+    let original = std::fs::read_to_string(&path).unwrap();
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "fn a() {\n    bar\n}\n", "new_string": "fn a() {\n    baz\n}\n" }
+        ]
+    });
+
+    let err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("strict matcher must reject whitespace-mismatched edit");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("Edit 0"),
+        "error should name the edit index: {msg}"
+    );
+    assert!(
+        msg.contains("not found"),
+        "error should say the string was not found: {msg}"
+    );
+
+    // Atomicity: no file should have been modified.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original,
+        "file must be unchanged when the batch is rejected"
+    );
+}
+
+/// A batch edit whose `old_string` matches the file exactly (including
+/// trailing spaces and CRLF) must succeed under the strict matcher.
+#[tokio::test]
+async fn test_strict_match_accepts_exact_batch_edit() {
+    let tmp = TempDir::new().unwrap();
     let path = write_file(tmp.path(), "a.rs", "fn a() {  \r\n    bar  \n}\n");
 
     let input = json!({
         "edits": [
-            { "path": "a.rs", "old_str": "fn a() {\n    bar\n}\n", "new_str": "fn a() {\n    baz\n}\n" }
+            { "file_path": "a.rs", "old_string": "fn a() {  \r\n    bar  \n}\n", "new_string": "fn a() {  \r\n    baz  \n}\n" }
         ]
     });
 
@@ -183,7 +223,7 @@ async fn test_whitespace_tolerant_batch_edits() {
     let result = std::fs::read_to_string(&path).unwrap();
     assert!(
         result.contains("baz"),
-        "replacement should apply via trailing-WS pass: {result}"
+        "exact-match replacement should apply: {result}"
     );
 }
 
@@ -198,8 +238,8 @@ async fn test_adjacent_touching_edits_allowed() {
     // They touch but do not overlap.
     let input = json!({
         "edits": [
-            { "path": "a.rs", "old_str": "AA", "new_str": "XX" },
-            { "path": "a.rs", "old_str": "BB", "new_str": "YY" }
+            { "file_path": "a.rs", "old_string": "AA", "new_string": "XX" },
+            { "file_path": "a.rs", "old_string": "BB", "new_string": "YY" }
         ]
     });
 
@@ -211,23 +251,23 @@ async fn test_adjacent_touching_edits_allowed() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "XXYY\n");
 }
 
-// ── NotFound surfaces pass + closest line ─────────────────────────────────────
+// ── NotFound surfaces edit index + path (editrenewal FR-004) ───────────────────
 
 #[tokio::test]
-async fn test_not_found_error_includes_pass() {
+async fn test_not_found_error_names_edit_and_path() {
     let tmp = TempDir::new().unwrap();
     write_file(tmp.path(), "a.rs", "fn a() { 1 }\n");
 
     let input = json!({
         "edits": [
-            { "path": "a.rs", "old_str": "nonexistent code here", "new_str": "x" }
+            { "file_path": "a.rs", "old_string": "nonexistent code here", "new_string": "x" }
         ]
     });
 
     let err = MultiEditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("missing old_str must error");
+        .expect_err("missing old_string must error");
 
     let msg = format!("{err}");
     assert!(
@@ -235,7 +275,285 @@ async fn test_not_found_error_includes_pass() {
         "error should name the edit index: {msg}"
     );
     assert!(
-        msg.contains("matching pass"),
-        "error should mention the matching pass: {msg}"
+        msg.contains("not found"),
+        "error should say the string was not found: {msg}"
     );
+    assert!(msg.contains("a.rs"), "error should name the file: {msg}");
+}
+
+/// When `old_string` occurs multiple times, the strict matcher must reject
+/// the batch and report the match count (editrenewal FR-004).
+#[tokio::test]
+async fn test_multiple_matches_error_reports_count() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "dup\nmid\ndup\n");
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "dup", "new_string": "DUP" }
+        ]
+    });
+
+    let err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("non-unique old_string must error");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("Edit 0"),
+        "error should name the edit index: {msg}"
+    );
+    assert!(
+        msg.contains("2 times"),
+        "error should report the match count: {msg}"
+    );
+    assert!(
+        msg.contains("exactly once") || msg.contains("unique"),
+        "error should guide the caller toward uniqueness: {msg}"
+    );
+}
+
+// ── editrenewal T-010: rename/alias multiedit → multi_edit (FR-009) ───────────
+
+/// The tool's canonical name must be `multi_edit` (not the legacy `multiedit`).
+#[tokio::test]
+async fn test_multi_edit_canonical_name() {
+    let tool = MultiEditTool;
+    assert_eq!(tool.name(), "multi_edit");
+}
+
+/// The canonical parameter names `file_path` / `old_string` / `new_string`
+/// must be accepted by the multi_edit tool.
+#[tokio::test]
+async fn test_multi_edit_canonical_param_names() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn a() { 1 }\n");
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "fn a() { 1 }", "new_string": "fn a() { 10 }" }
+        ]
+    });
+
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    assert_eq!(out.content, "Applied 1 edit across 1 file");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn a() { 10 }\n");
+}
+
+/// The legacy parameter names `path` / `old_str` / `new_str` must still be
+/// accepted for backward compatibility during the deprecation window.
+#[tokio::test]
+async fn test_multi_edit_legacy_param_names_accepted() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn a() { 1 }\n");
+
+    let input = json!({
+        "edits": [
+            { "path": "a.rs", "old_str": "fn a() { 1 }", "new_str": "fn a() { 10 }" }
+        ]
+    });
+
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    assert_eq!(out.content, "Applied 1 edit across 1 file");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn a() { 10 }\n");
+}
+
+/// Mixing canonical and legacy parameter names across edits in the same
+/// batch must work.
+#[tokio::test]
+async fn test_multi_edit_mixed_param_names_across_edits() {
+    let tmp = TempDir::new().unwrap();
+    let p1 = write_file(tmp.path(), "a.rs", "alpha\n");
+    let p2 = write_file(tmp.path(), "b.rs", "beta\n");
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "path": "b.rs", "old_str": "beta", "new_str": "BETA" }
+        ]
+    });
+
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    assert_eq!(out.content, "Applied 2 edits across 2 files");
+    assert_eq!(std::fs::read_to_string(&p1).unwrap(), "ALPHA\n");
+    assert_eq!(std::fs::read_to_string(&p2).unwrap(), "BETA\n");
+}
+
+/// The parameters schema must declare the canonical `file_path` /
+/// `old_string` / `new_string` property names.
+#[test]
+fn test_multi_edit_schema_declares_canonical_params() {
+    let tool = MultiEditTool;
+    let schema = tool.parameters_schema().to_string();
+    assert!(
+        schema.contains("file_path"),
+        "schema should list file_path: {schema}"
+    );
+    assert!(
+        schema.contains("old_string"),
+        "schema should list old_string: {schema}"
+    );
+    assert!(
+        schema.contains("new_string"),
+        "schema should list new_string: {schema}"
+    );
+}
+// ── Atomic rollback (editrenewal FR-009, FR-013) ──────────────────────────────
+
+/// When one edit in a batch fails validation (here: old_string not found in
+/// the second file), NO files may be modified — including the first file whose
+/// edit would have succeeded on its own.
+#[tokio::test]
+async fn test_atomic_rollback_on_validation_failure() {
+    let tmp = TempDir::new().unwrap();
+    let p1 = write_file(tmp.path(), "a.rs", "alpha\n");
+    let p2 = write_file(tmp.path(), "b.rs", "beta\n");
+    let original_a = std::fs::read_to_string(&p1).unwrap();
+    let original_b = std::fs::read_to_string(&p2).unwrap();
+
+    // Edit 0 would succeed; edit 1 fails (old_string not in b.rs).
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "b.rs", "old_string": "nonexistent", "new_string": "BETA" }
+        ]
+    });
+
+    let err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("batch with a failing edit must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("Edit 1"),
+        "error should name the failing edit index: {msg}"
+    );
+
+    // Atomic rollback: neither file was modified.
+    assert_eq!(
+        std::fs::read_to_string(&p1).unwrap(),
+        original_a,
+        "file a.rs must be unchanged (atomic rollback)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&p2).unwrap(),
+        original_b,
+        "file b.rs must be unchanged (atomic rollback)"
+    );
+}
+
+/// When two edits in the same file overlap, the batch is rejected and the
+/// file must remain unchanged (FR-009).
+#[tokio::test]
+async fn test_overlap_rejection_leaves_file_unchanged() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { let x = 1; let y = 2; }\n");
+    let original = std::fs::read_to_string(&path).unwrap();
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "let x = 1;", "new_string": "let x = 10;" },
+            { "file_path": "a.rs", "old_string": "fn foo() { let x = 1; let y = 2; }", "new_string": "fn foo() { let x = 10; let y = 20; }" }
+        ]
+    });
+
+    let err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("overlapping edits must be rejected");
+    let msg = format!("{err}");
+    assert!(msg.contains("overlap"), "error should mention overlap: {msg}");
+    assert!(
+        msg.contains("Edits 0 and 1") || msg.contains("Edits 1 and 0"),
+        "error should name the overlapping indices: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        original,
+        "file must be unchanged when overlap is rejected"
+    );
+}
+
+/// A cross-file batch where all edits succeed must modify every target file
+/// (FR-009 happy path).
+#[tokio::test]
+async fn test_cross_file_batch_all_succeed() {
+    let tmp = TempDir::new().unwrap();
+    let p1 = write_file(tmp.path(), "a.rs", "alpha\n");
+    let p2 = write_file(tmp.path(), "b.rs", "beta\n");
+    let p3 = write_file(tmp.path(), "c.rs", "gamma\n");
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "b.rs", "old_string": "beta", "new_string": "BETA" },
+            { "file_path": "c.rs", "old_string": "gamma", "new_string": "GAMMA" }
+        ]
+    });
+
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .unwrap();
+    assert_eq!(out.content, "Applied 3 edits across 3 files");
+    assert_eq!(std::fs::read_to_string(&p1).unwrap(), "ALPHA\n");
+    assert_eq!(std::fs::read_to_string(&p2).unwrap(), "BETA\n");
+    assert_eq!(std::fs::read_to_string(&p3).unwrap(), "GAMMA\n");
+}
+
+/// Stale-file detection applies to batch edits: if one file in the batch was
+/// modified after it was read, the whole batch is rejected and no files are
+/// modified (editrenewal FR-003 / FR-009).
+#[tokio::test]
+async fn test_batch_stale_file_rejected() {
+    let tmp = TempDir::new().unwrap();
+    let p1 = write_file(tmp.path(), "a.rs", "alpha\n");
+    let p2 = write_file(tmp.path(), "b.rs", "beta\n");
+    let original_a = std::fs::read_to_string(&p1).unwrap();
+    let original_b = std::fs::read_to_string(&p2).unwrap();
+
+    let c = ctx(tmp.path());
+    // Record a stale (old) read timestamp for p2 only.
+    {
+        let mut map = c.read_timestamps.write().unwrap();
+        let old_millis = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 5_000;
+        map.insert(p2.clone(), old_millis);
+    }
+    // Bump p2's mtime into the future.
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+    let _ = filetime::set_file_mtime(&p2, filetime::FileTime::from_system_time(future));
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "b.rs", "old_string": "beta", "new_string": "BETA" }
+        ]
+    });
+
+    let err = MultiEditTool
+        .execute(input, &c)
+        .await
+        .expect_err("stale file in batch must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("modified after") || msg.contains("stale"),
+        "error should report stale file: {msg}"
+    );
+    // Atomic rollback: neither file modified.
+    assert_eq!(std::fs::read_to_string(&p1).unwrap(), original_a);
+    assert_eq!(std::fs::read_to_string(&p2).unwrap(), original_b);
 }

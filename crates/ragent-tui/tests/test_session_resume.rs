@@ -49,6 +49,9 @@ fn make_app_with_manager() -> (App, Arc<SessionManager>) {
         )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

@@ -160,6 +160,9 @@ impl Tool for ReadTool {
 
         let content = cached_read(&path).await?;
 
+        // Record read timestamp for stale-write detection by edit tools.
+        record_read_timestamp(&path, ctx);
+
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
         let mut end_line = input["end_line"].as_u64().map(|n| n as usize);
         let num_lines = input["num_lines"].as_u64().map(|n| n as usize);
@@ -302,7 +305,22 @@ impl Tool for ReadTool {
     }
 }
 
-/// Format a slice of lines with 1-based line numbers starting at `first_num`.
+/// Record the file's last-modified time (mtime in milliseconds since the UNIX
+/// epoch) in the session read-timestamp map. This is used by edit tools to
+/// reject edits when the file has been modified since it was read.
+fn record_read_timestamp(path: &Path, ctx: &ToolContext) {
+    if let Ok(meta) = std::fs::metadata(path)
+        && let Ok(mtime) = meta.modified()
+    {
+        let millis = mtime
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if let Ok(mut map) = ctx.read_timestamps.write() {
+            map.insert(path.to_path_buf(), millis);
+        }
+    }
+}
 fn format_lines(lines: &[&str], first_num: usize) -> String {
     lines
         .iter()

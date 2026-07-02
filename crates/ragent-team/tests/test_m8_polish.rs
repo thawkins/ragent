@@ -73,7 +73,7 @@ fn test_team_context_cache_entry_past_ttl_is_stale() {
     // the 5 s TTL. `Instant::now() - Duration::from_secs(60)` is reliable on
     // platforms where `Instant` supports subtraction.
     let past = std::time::Instant::now()
-        .checked_sub(std::time::Duration::from_secs(60))
+        .checked_sub(std::time::Duration::from_mins(1))
         .expect("Instant supports subtraction");
     cache.write().insert(
         session_id.clone(),

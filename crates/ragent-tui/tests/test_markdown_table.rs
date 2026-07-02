@@ -41,6 +41,9 @@ fn make_app() -> App {
         )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -198,5 +201,24 @@ fn test_render_markdown_list() {
     assert!(
         output.contains("Item three"),
         "list items should survive: {output}"
+    );
+}
+
+#[test]
+fn test_render_markdown_html2text_panic_fallback() {
+    let mut app = make_app();
+    // Construct HTML that triggers the html2text overflow in text_renderer.rs:509.
+    // A deeply nested preformatted block with a width smaller than its internal
+    // line accounting can cause `self.width - self.line.len` to underflow.
+    let input = "From: /test\n\n```\n".to_string() + &"a ".repeat(500) + "\n```";
+    let output = app.render_markdown_to_ascii(&input);
+    // If html2text panics, the catch_unwind fallback returns the original text.
+    assert!(
+        output.contains("From: /test"),
+        "fallback should preserve original text: {output}"
+    );
+    assert!(
+        output.contains("a a"),
+        "fallback should preserve content: {output}"
     );
 }

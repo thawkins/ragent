@@ -6,10 +6,6 @@
 //! - M6-T3: idempotent completion (same agent no-op, different agent rejected).
 //! - M6-T5: mailbox corruption recovery moves the file aside.
 
-use std::sync::Arc;
-
-use ragent_agent::event::EventBus;
-use ragent_agent::tool::{Tool, ToolContext};
 use ragent_team::team::{
     Mailbox, MailboxMessage, MemberStatus, MessageType, Task, TaskStatus, TaskStore, TeamMember,
     TeamStore,
@@ -39,7 +35,6 @@ fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberS
 #[tokio::test]
 async fn test_watchdog_marks_teammate_failed_after_timeout() {
     use ragent_team::team::config::MemberStatus;
-    use ragent_team::team::manager::TeamManager;
 
     let (_tmp, dir) = setup_workspace();
     let mut store = TeamStore::create("wd-team", "lead-sess", &dir, true).expect("create team");

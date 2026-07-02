@@ -190,7 +190,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "edit" | "patch" => {
-            let path = get_relative_path(&["path"]);
+            // The edit tool's canonical parameter is `file_path`, with `path` as a
+            // deprecated legacy alias. Check both so the file name always shows
+            // in the message window header regardless of which name the model used.
+            let path = get_relative_path(&["file_path", "path"]);
             if path.is_empty() {
                 String::new()
             } else {
@@ -205,7 +208,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 format!("📄 {}", path)
             }
         }
-        "multiedit" => {
+        "multiedit" | "multi_edit" => {
             let count = input
                 .get("edits")
                 .and_then(|v| v.as_array())
@@ -1118,7 +1121,7 @@ pub(crate) fn tool_inline_diff(
                 }
             }
         }
-        "multiedit" | "patch" => {
+        "multiedit" | "multi_edit" | "patch" => {
             let added = out.get("lines_added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let removed = out
                 .get("lines_removed")
@@ -1202,9 +1205,13 @@ pub fn tool_result_summary(
             ))
         }
         "edit" => {
+            // The edit tool writes the resolved path into its output metadata
+            // (`path`), so prefer that. Fall back to the input field, checking
+            // both the canonical `file_path` and the legacy `path` alias.
             let path = out
                 .get("path")
                 .and_then(|v| v.as_str())
+                .or_else(|| input.get("file_path").and_then(|v| v.as_str()))
                 .or_else(|| input.get("path").and_then(|v| v.as_str()))
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
@@ -1215,7 +1222,7 @@ pub fn tool_result_summary(
                 path, old_lines, new_lines
             ))
         }
-        "multiedit" => {
+        "multiedit" | "multi_edit" => {
             // Return a brief top-level summary; per-file detail rows are rendered separately.
             let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let files = out.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -2506,7 +2513,7 @@ impl<'a> MessageWidget<'a> {
                                     )));
                                 }
                             }
-                        } else if tool == "multiedit" {
+                        } else if tool == "multiedit" || tool == "multi_edit" {
                             // Render per-file edit stats as a tabular list
                             if let Some(file_stats) = state
                                 .output

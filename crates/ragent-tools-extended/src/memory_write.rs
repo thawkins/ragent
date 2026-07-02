@@ -601,7 +601,6 @@ fn legacy_read(scope: &str, filename: &str, working_dir: &std::path::Path) -> Re
 
 #[cfg(test)]
 mod replace_matcher_tests {
-    use super::*;
     use ragent_tools_core::replace::{FindError, find_replacement_range};
 
     /// Directly exercise the shared matcher against memory-block-style content

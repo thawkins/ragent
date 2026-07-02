@@ -96,7 +96,10 @@ impl Tool for PdfReadTool {
 }
 
 /// Read a PDF file and extract content based on the requested format.
-pub(crate) fn read_pdf(
+///
+/// Public so downstream crates (e.g. `ragent-agent`) can reuse the single
+/// source-of-truth implementation instead of duplicating it.
+pub fn read_pdf(
     path: &std::path::Path,
     start_page: Option<usize>,
     end_page: Option<usize>,

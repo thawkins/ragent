@@ -17,10 +17,41 @@ use crate::local_gatherer::{LocalGatherConfig, LocalGatherer, LocalTool};
 use crate::manager::{ResearchError, ResearchManager, Result};
 use crate::research_name::ResearchName;
 use crate::source::{LocalSourceKind, Source};
-use crate::web_gatherer::WebGatherer;
+use crate::web_gatherer::{DEFAULT_MAX_WEB_RESULTS, GatherEvent, GatherObserver, WebGatherer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::info;
+
+/// Forwards [`GatherEvent`]s from the [`WebGatherer`] into [`SessionEvent`]s
+/// so the TUI/CLI can display why web sources were not captured.
+struct GatherEventForwarder {
+    observer: Arc<dyn SessionObserver>,
+}
+
+impl GatherObserver for GatherEventForwarder {
+    fn on_event(&self, event: GatherEvent) {
+        match event {
+            GatherEvent::SearchFailed { error } => {
+                self.observer
+                    .on_event(SessionEvent::WebSearchFailed { error });
+            }
+            GatherEvent::FetchFailed { url, error } => {
+                self.observer
+                    .on_event(SessionEvent::WebFetchFailed { url, error });
+            }
+            GatherEvent::SearchReturnedNoHits => {
+                self.observer.on_event(SessionEvent::WebSearchFailed {
+                    error: "web search returned 0 hits".into(),
+                });
+            }
+            GatherEvent::QueriesDecomposed { .. } => {
+                // The session layer emits its own QueriesDecomposed event,
+                // so we ignore the gatherer-level duplicate to avoid confusing
+                // the progress log.
+            }
+        }
+    }
+}
 
 /// Inputs the caller supplies to [`ResearchSession::run`].
 #[derive(Debug, Clone)]
@@ -47,10 +78,10 @@ impl Default for SessionConfig {
             topic: String::new(),
             sources_dir: None,
             template: None,
-            max_web_results: 5,
+            max_web_results: DEFAULT_MAX_WEB_RESULTS,
             max_local_sources: 10,
-            disable_local: false,
-            disable_specs: false,
+            disable_local: true,
+            disable_specs: true,
         }
     }
 }
@@ -100,6 +131,12 @@ pub enum SessionEvent {
         /// The phase that just started.
         phase: SessionPhase,
     },
+    /// The web-gathering phase produced these focused sub-queries and will
+    /// run each one in parallel.
+    QueriesDecomposed {
+        /// Sub-queries issued to the search tool.
+        queries: Vec<String>,
+    },
     /// The web-gathering phase captured a single source.
     WebCaptured {
         /// URL of the captured page.
@@ -119,6 +156,19 @@ pub enum SessionEvent {
         /// Spec identifier.
         spec_id: String,
     },
+    /// The web-gathering phase failed as a whole (search error, missing
+    /// API key, network failure, etc.).
+    WebSearchFailed {
+        /// Human-readable error message.
+        error: String,
+    },
+    /// A single candidate page could not be fetched.
+    WebFetchFailed {
+        /// URL that failed.
+        url: String,
+        /// Human-readable error message.
+        error: String,
+    },
     /// The synthesis phase finished (or fell back). Surfaces whether the
     /// final summary/findings came from an LLM or from the mechanical
     /// fallback so the UI can be transparent about it.
@@ -128,6 +178,53 @@ pub enum SessionEvent {
         /// Optional human-readable detail (e.g. the LLM error message when
         /// the synthesis failed and the fallback was used).
         detail: Option<String>,
+    },
+    /// The research plan was updated with a new set of sub-questions.
+    PlanUpdated {
+        /// Sub-question texts in plan order.
+        sub_questions: Vec<String>,
+    },
+    /// A sub-question changed status (e.g. pending → in_progress → answered).
+    SubQuestionStatusChanged {
+        /// Sub-question id.
+        id: String,
+        /// New status label (see [`SubQuestionStatus::as_str`](crate::state::SubQuestionStatus::as_str)).
+        status: String,
+    },
+    /// A generic source fetch (web, local, or other) failed and was recorded
+    /// in session state.
+    SourceFailed {
+        /// Optional source identifier (URL, path, or label). `None` when the
+        /// failure is not tied to a single source.
+        source: Option<String>,
+        /// Human-readable error message.
+        error: String,
+    },
+    /// The critic/evaluator finished an iteration.
+    CriticResult {
+        /// Evaluation score, if the critic produced one.
+        score: Option<u32>,
+        /// Short descriptions of any new evidence gaps.
+        gaps: Vec<String>,
+    },
+    /// The verifier finished checking claims against sources.
+    VerificationResult {
+        /// `true` when every checked claim had source support.
+        passed: bool,
+        /// Human-readable issues for any failed checks.
+        issues: Vec<String>,
+    },
+    /// A single iteration of the research loop completed.
+    IterationCompleted {
+        /// 1-based iteration number.
+        iteration: u32,
+        /// Evaluation score after this iteration, if known.
+        score: Option<u32>,
+    },
+    /// Follow-up bridge queries were generated to close evidence gaps.
+    FollowUpQueries {
+        /// Queries to run in the next retrieval pass.
+        queries: Vec<String>,
     },
     /// The session has finished and a fully-populated document was written.
     Done {
@@ -297,10 +394,23 @@ impl ResearchSession {
             phase: SessionPhase::Web,
         });
         let mut sources = Vec::new();
+        let mut web_queries = Vec::new();
         if let Some(web) = &self.web {
-            match web.gather(&topic, config.max_web_results).await {
-                Ok(web_sources) => {
-                    for src in &web_sources {
+            let forwarder = GatherEventForwarder {
+                observer: observer.clone(),
+            };
+            match web
+                .gather_with_observer(&topic, config.max_web_results, Some(&forwarder))
+                .await
+            {
+                Ok(result) => {
+                    web_queries = result.queries;
+                    if !web_queries.is_empty() {
+                        observer.on_event(SessionEvent::QueriesDecomposed {
+                            queries: web_queries.clone(),
+                        });
+                    }
+                    for src in &result.sources {
                         if let Source::Web { url, title, .. } = src {
                             observer.on_event(SessionEvent::WebCaptured {
                                 url: url.clone(),
@@ -308,9 +418,12 @@ impl ResearchSession {
                             });
                         }
                     }
-                    sources.extend(web_sources);
+                    sources.extend(result.sources);
                 }
                 Err(e) => {
+                    observer.on_event(SessionEvent::WebSearchFailed {
+                        error: e.to_string(),
+                    });
                     tracing::warn!(error = %e, "research: web phase failed; continuing");
                 }
             }
@@ -439,6 +552,7 @@ impl ResearchSession {
             phase: SessionPhase::Assemble,
         });
         let mut item_with_sources = ResearchItem::new(name.clone(), title, &topic);
+        item_with_sources.set_queries(web_queries.clone());
         for s in &sources {
             item_with_sources.add_source(s.clone());
         }
@@ -476,6 +590,7 @@ impl ResearchSession {
                 analysis.open_questions
             },
             template_body,
+            decomposed_queries: web_queries.clone(),
         };
         let assembled = self.manager.write_document(&doc).await?;
         // ── Finalize ──────────────────────────────────────────────────────
@@ -497,6 +612,7 @@ impl ResearchSession {
             research_name: name.to_string(),
             sources,
             document: assembled,
+            web_queries,
         })
     }
 }
@@ -514,32 +630,38 @@ impl ResearchSession {
         // Fall back to reading the on-disk supporting file for items loaded
         // from disk that predate the body field.
         let research_root = self.manager.root().to_path_buf();
-        let bodies = build_source_bodies(sources, |src| -> Option<String> {
-            if let Some(inline) = src.body() {
-                if !inline.is_empty() {
+        let name = name.clone();
+        let sources = sources.to_vec();
+        let bodies = tokio::task::spawn_blocking(move || {
+            build_source_bodies(&sources, |src| -> Option<String> {
+                if let Some(inline) = src.body()
+                    && !inline.is_empty()
+                {
                     return Some(inline.to_string());
                 }
-            }
-            match src {
-                Source::Web { body_path, .. }
-                | Source::Local { body_path, .. }
-                | Source::Other { body_path, .. } => {
-                    let path = ResearchIo::item_dir(&research_root, name).join(body_path);
-                    match std::fs::read_to_string(&path) {
-                        Ok(body) => Some(body),
-                        Err(e) => {
-                            tracing::warn!(
-                                path = %path.display(),
-                                error = %e,
-                                "research: could not read supporting file for synthesis"
-                            );
-                            None
+                match src {
+                    Source::Web { body_path, .. }
+                    | Source::Local { body_path, .. }
+                    | Source::Other { body_path, .. } => {
+                        let path = ResearchIo::item_dir(&research_root, &name).join(body_path);
+                        match std::fs::read_to_string(&path) {
+                            Ok(body) => Some(body),
+                            Err(e) => {
+                                tracing::warn!(
+                                    path = %path.display(),
+                                    error = %e,
+                                    "research: could not read supporting file for synthesis"
+                                );
+                                None
+                            }
                         }
                     }
+                    Source::Spec { relevance, .. } => Some(relevance.clone()),
                 }
-                Source::Spec { relevance, .. } => Some(relevance.clone()),
-            }
-        });
+            })
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
         self.analysis.analyze(topic, &bodies).await
     }
 }
@@ -553,6 +675,9 @@ pub struct RunOutcome {
     pub sources: Vec<Source>,
     /// The fully assembled document that was written to disk.
     pub document: crate::document::AssembledDocument,
+    /// Sub-queries used by the web-gathering phase. Empty when web gathering
+    /// was disabled or no decomposer was configured.
+    pub web_queries: Vec<String>,
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────
@@ -684,7 +809,7 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
         .filter(|s| matches!(s, Source::Spec { .. }))
         .collect();
 
-    // Per-web-source bullets. The reader gets the title and a 240-char
+    // Per-web-source finding. The reader gets the title and a 240-char
     // excerpt so the finding stands on its own without opening the
     // supporting file.
     for (idx, src) in web.iter().enumerate() {
@@ -698,27 +823,37 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                 title.as_str()
             };
             let excerpt = body_excerpt(body, 240);
-            if excerpt.is_empty() {
-                out.push(format!(
-                    "{n}. **{label}** — web source captured from <{url}> (no body returned by fetch).",
+            let observation = if excerpt.is_empty() {
+                format!(
+                    "The web source **{label}** from <{url}> was captured, but no body text was returned by the fetch. [#{n}]",
                     n = idx + 1,
-                    label = label,
-                    url = url,
-                ));
+                )
             } else {
-                out.push(format!(
-                    "{n}. **{label}** — web source captured from <{url}>: {excerpt}",
+                format!(
+                    "The web source **{label}** from <{url}> states: \"{excerpt}\" [#{n}]",
                     n = idx + 1,
-                    label = label,
-                    url = url,
-                    excerpt = excerpt,
-                ));
-            }
+                )
+            };
+            let previous = if idx > 0 {
+                format!(
+                    "This finding follows and reinforces the web-source thread begun in Finding {}.",
+                    idx
+                )
+            } else {
+                "No direct dependencies.".to_string()
+            };
+            let finding = format!(
+                "{n}. **Observation:** {observation}\n\n**Analysis:** This evidence relates directly to the topic '{topic}', providing public context that can be compared against project-local material.\n\n**Cross-reference / Dependencies:** {previous}\n\n**Implication:** The source should be treated as background unless it is corroborated by an in-project reference or a later finding; if no corroboration exists, flag it as an open question.",
+                n = idx + 1,
+                observation = observation,
+                topic = topic,
+                previous = previous,
+            );
+            out.push(finding);
         }
     }
 
-    // Per-local-source bullets. We lead with the relevance note (which now
-    // names the matched keywords and a snippet) followed by an excerpt.
+    // Per-local-source findings.
     let local_offset = web.len();
     for (idx, src) in local.iter().enumerate() {
         if let Source::Local {
@@ -729,27 +864,46 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
         } = src
         {
             let excerpt = body_excerpt(body, 240);
-            if excerpt.is_empty() {
-                out.push(format!(
-                    "{n}. **`{path}`** — {relevance} (no excerpt captured).",
+            let observation = if excerpt.is_empty() {
+                format!(
+                    "The in-project file `{path}` was matched as relevant (`{relevance}`), but no excerpt was captured. [#{n}]",
                     n = local_offset + idx + 1,
-                    path = path,
-                    relevance = relevance,
-                ));
+                )
             } else {
-                out.push(format!(
-                    "{n}. **`{path}`** — {relevance}\n   > {excerpt}",
+                format!(
+                    "The in-project file `{path}` (relevance: `{relevance}`) contains the following excerpt: \"{excerpt}\" [#{n}]",
                     n = local_offset + idx + 1,
-                    path = path,
-                    relevance = relevance,
-                    excerpt = excerpt,
-                ));
-            }
+                )
+            };
+            let sibling_idx = if idx > 0 {
+                Some(local_offset + idx)
+            } else {
+                None
+            };
+            let web_idx = if !web.is_empty() { Some(1usize) } else { None };
+            let dependencies = match (sibling_idx, web_idx) {
+                (Some(s), Some(_)) => format!(
+                    "This finding is related to Finding {sibling} (the previous local match) and builds on Finding 1 (the first web source) by grounding public information in project code.",
+                    sibling = s,
+                ),
+                (Some(s), None) => format!(
+                    "This finding depends on Finding {sibling}, which established the first local match in this sequence.",
+                    sibling = s,
+                ),
+                                  (None, Some(_)) => "This finding is the first local match; it can be cross-checked against Finding 1 (the first web source).".to_string(),                (None, None) => "No direct dependencies.".to_string(),
+            };
+            let finding = format!(
+                "{n}. **Observation:** {observation}\n\n**Analysis:** This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance.\n\n**Cross-reference / Dependencies:** {dependencies}\n\n**Implication:** The referenced path is a concrete place to start implementation or further investigation; consider opening it as a cross-reference and verifying the excerpt against the latest source.",
+                n = local_offset + idx + 1,
+                observation = observation,
+                topic = topic,
+                dependencies = dependencies,
+            );
+            out.push(finding);
         }
     }
 
-    // Per-spec bullets. We give the spec id and its relevance note (which
-    // usually contains the title).
+    // Per-spec findings.
     let spec_offset = web.len() + local.len();
     for (idx, src) in specs.iter().enumerate() {
         if let Source::Spec {
@@ -761,19 +915,39 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             } else {
                 relevance.clone()
             };
-            out.push(format!(
-                "{n}. **`{spec_id}`** — {note}.",
+            let first_local = if local_offset > 0 {
+                Some(local_offset + 1)
+            } else {
+                None
+            };
+            let first_web = if !web.is_empty() { Some(1usize) } else { None };
+            let dependencies = match (first_local, first_web) {
+                (Some(l), Some(_)) => format!(
+                    "This finding connects the prior specification to the in-project evidence in Finding {l} and the web background in Finding 1; treat it as the bridge between design intent and current code.",
+                    l = l,
+                ),
+                (Some(l), None) => format!(
+                    "This finding depends on Finding {l}, which identified the in-project material that implements (or should implement) this spec.",
+                    l = l,
+                ),
+                (None, Some(_)) => "This finding is related to Finding 1 (web background) but no local implementation has been matched yet.".to_string(),
+                (None, None) => "No direct dependencies.".to_string(),
+            };
+            let finding = format!(
+                "{n}. **Observation:** Prior spec `{spec_id}` is relevant to '{topic}' ({note}) [#{n}].\n\n**Analysis:** This specification establishes requirements or decisions that pre-date the current research, and should constrain or guide any conclusions drawn from newer sources.\n\n**Cross-reference / Dependencies:** {dependencies}\n\n**Implication:** Before acting on later findings, verify that the project still honours this spec; conflicts between this spec and newer evidence should be escalated as an open question.",
                 n = spec_offset + idx + 1,
                 spec_id = spec_id,
+                topic = topic,
                 note = note,
-            ));
+                dependencies = dependencies,
+            );
+            out.push(finding);
         }
     }
 
     if sources.is_empty() {
         out.push(format!(
-            "No sources were captured for '{topic}'. Consider re-running with a more specific topic, or run inside a project with relevant files and specs so gathering has something to work with."
-        ));
+                            "1. **Observation:** No sources were captured for '{topic}'.\n\n**Analysis:** Without captured web pages, local files, or prior specs, the research cannot yet support a substantive conclusion.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** Consider re-running with a more specific topic, or run inside a project with relevant files and specs so gathering has something to work with."        ));
     }
     out
 }
@@ -786,9 +960,7 @@ fn body_excerpt(body: &str, max_chars: usize) -> String {
     // gatherer prepends so we don't double-print it in the Findings section.
     let stripped = body
         .strip_prefix("Excerpt —")
-        .map(|rest| {
-            rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n')
-        })
+        .map(|rest| rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n'))
         .unwrap_or(body);
     // Collapse whitespace so the excerpt fits on one logical line.
     let collapsed: String = stripped
@@ -875,7 +1047,9 @@ fn format_with_kind(relevance: &str, kind: LocalSourceKind) -> String {
 mod tests {
     use super::*;
     use crate::local_gatherer::{GrepMatch, LocalTool};
-    use crate::web_gatherer::{WebFetchTool, WebFetchedPage, WebSearchHit, WebSearchTool};
+    use crate::web_gatherer::{
+        HeuristicQueryDecomposer, WebFetchTool, WebFetchedPage, WebSearchHit, WebSearchTool,
+    };
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -1007,7 +1181,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.research_name, "rust-async");
-        assert!(outcome.sources.len() >= 1);
+        assert_eq!(outcome.web_queries, vec!["Rust async".to_string()]);
+        assert!(!outcome.sources.is_empty());
         // Document should exist on disk.
         let p = research_root.join("rust-async/RESEARCH.md");
         assert!(p.is_file());
@@ -1023,6 +1198,65 @@ mod tests {
                 phase: SessionPhase::Web
             }
         )));
+    }
+
+    #[tokio::test]
+    async fn session_forwards_web_search_errors_to_observer() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct AlwaysFailSearch;
+        #[async_trait]
+        impl crate::web_gatherer::WebSearchTool for AlwaysFailSearch {
+            async fn search(
+                &self,
+                _: &str,
+                _: usize,
+            ) -> anyhow::Result<Vec<crate::web_gatherer::WebSearchHit>> {
+                anyhow::bail!("api key missing")
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl crate::web_gatherer::WebFetchTool for OkFetch {
+            async fn fetch(&self, _: &str) -> anyhow::Result<crate::web_gatherer::WebFetchedPage> {
+                Ok(crate::web_gatherer::WebFetchedPage {
+                    url: "u".into(),
+                    title: "t".into(),
+                    body: "b".into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web =
+            crate::web_gatherer::WebGatherer::new(Arc::new(AlwaysFailSearch), Arc::new(OkFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: "topic".into(),
+            ..SessionConfig::default()
+        };
+        let observer = Arc::new(CollectObserver::default());
+        let outcome = session
+            .run("err", "Error", &cfg, observer.clone())
+            .await
+            .unwrap();
+        assert_eq!(outcome.sources.len(), 0);
+        let events = observer.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SessionEvent::WebSearchFailed { error } if error.contains("api key missing")
+            )),
+            "expected WebSearchFailed event, got {:?}",
+            *events
+        );
     }
 
     #[tokio::test]
@@ -1046,195 +1280,252 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.sources.len(), 0);
+        assert!(outcome.web_queries.is_empty(), "no web gatherer configured");
+    }
+    #[tokio::test]
+    async fn session_persists_decomposed_queries_in_research_md() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct RecordingSearch;
+        #[async_trait]
+        impl WebSearchTool for RecordingSearch {
+            async fn search(
+                &self,
+                _query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(vec![WebSearchHit {
+                    url: "https://example.com".into(),
+                    title: "Example".into(),
+                    snippet: "".into(),
+                }])
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    url: url.to_string(),
+                    title: "Example".into(),
+                    body: "body".into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(RecordingSearch), Arc::new(OkFetch))
+            .with_decomposer(Arc::new(HeuristicQueryDecomposer));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: "Rust async and Tokio runtime".into(),
+            max_web_results: 5,
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("decomp-test", "Decomp Test", &cfg, Arc::new(NoopObserver))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            outcome.web_queries,
+            vec![
+                "Rust async",
+                "Tokio runtime",
+                "Rust async and Tokio runtime"
+            ]
+        );
+
+        let body = tokio::fs::read_to_string(research_root.join("decomp-test/RESEARCH.md"))
+            .await
+            .unwrap();
+        assert!(body.contains("## Search Queries"));
+        assert!(body.contains("- Rust async"));
+        assert!(body.contains("- Tokio runtime"));
+        assert!(body.contains("queries:"));
     }
 
     #[tokio::test]
-          async fn session_rejects_invalid_name() {
-              let tmp = TempDir::new().unwrap();
-              let manager = ResearchManager::new(tmp.path());
-              let session = ResearchSession::new(
-                  manager,
-                  None,
-                  None,
-                  Arc::new(crate::analysis::NoopAnalysisEngine),
-              );
-              let cfg = SessionConfig::default();
-              let err = session
-                  .run("AB", "t", &cfg, Arc::new(NoopObserver))
-                  .await
-                  .unwrap_err();
-              assert!(matches!(err, ResearchError::InvalidName(_)));
-          }
+    async fn session_rejects_invalid_name() {
+        let tmp = TempDir::new().unwrap();
+        let manager = ResearchManager::new(tmp.path());
+        let session = ResearchSession::new(
+            manager,
+            None,
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig::default();
+        let err = session
+            .run("AB", "t", &cfg, Arc::new(NoopObserver))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ResearchError::InvalidName(_)));
+    }
 
-          #[tokio::test]
-          async fn session_skips_local_phase_when_disable_local_is_true() {
-              use crate::local_gatherer::{LocalGatherer, LocalTool};
-              use std::path::PathBuf;
-              use std::sync::Arc;
+    #[tokio::test]
+    async fn session_skips_local_phase_when_disable_local_is_true() {
+        use crate::local_gatherer::{LocalGatherer, LocalTool};
+        use std::path::PathBuf;
+        use std::sync::Arc;
 
-              /// Minimal `LocalTool` that would otherwise emit one local source.
-              #[derive(Default)]
-              struct SingleLocalTool;
-              #[async_trait::async_trait]
-              impl LocalTool for SingleLocalTool {
-                  async fn glob(
-                      &self,
-                      _root: &Path,
-                      _pattern: &str,
-                  ) -> anyhow::Result<Vec<PathBuf>> {
-                      Ok(Vec::new())
-                  }
-                  async fn grep(
-                      &self,
-                      _path: &Path,
-                      _terms: &[String],
-                  ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
-                      Ok(Vec::new())
-                  }
-                  async fn read(&self, _path: &Path) -> anyhow::Result<String> {
-                      Ok(String::new())
-                  }
-                  async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
-                      Ok(Vec::new())
-                  }
-                  async fn spec_title(
-                      &self,
-                      _root: &Path,
-                      _spec_id: &str,
-                  ) -> anyhow::Result<String> {
-                      Ok(String::new())
-                  }
-              }
+        /// Minimal `LocalTool` that would otherwise emit one local source.
+        #[derive(Default)]
+        struct SingleLocalTool;
+        #[async_trait::async_trait]
+        impl LocalTool for SingleLocalTool {
+            async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+                Ok(Vec::new())
+            }
+            async fn grep(
+                &self,
+                _path: &Path,
+                _terms: &[String],
+            ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
+                Ok(Vec::new())
+            }
+            async fn read(&self, _path: &Path) -> anyhow::Result<String> {
+                Ok(String::new())
+            }
+            async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+                Ok(Vec::new())
+            }
+            async fn spec_title(&self, _root: &Path, _spec_id: &str) -> anyhow::Result<String> {
+                Ok(String::new())
+            }
+        }
 
-              let tmp = TempDir::new().unwrap();
-              let research_root = tmp.path().join("research");
-              tokio::fs::create_dir_all(&research_root).await.unwrap();
-              let manager = ResearchManager::new(&research_root);
-              let local = LocalGatherer::new(Arc::new(SingleLocalTool));
-              let session = ResearchSession::new(
-                  manager,
-                  None,
-                  Some(local),
-                  Arc::new(crate::analysis::NoopAnalysisEngine),
-              );
-              let observer = Arc::new(CollectObserver::default());
-              let cfg = SessionConfig {
-                  topic: "anything".into(),
-                  disable_local: true,
-                  ..SessionConfig::default()
-              };
-              let outcome = session
-                  .run("rust-async", "Rust Async", &cfg, observer.clone())
-                  .await
-                  .unwrap();
-              let local_count = outcome
-                  .sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Local { .. }))
-                  .count();
-              assert_eq!(local_count, 0, "--no-local must produce zero local sources");
-              let spec_count = outcome
-                  .sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Spec { .. }))
-                  .count();
-              assert_eq!(spec_count, 0, "spec sources must not appear when --no-local is set");
-              // The Local phase event should still have been emitted so the
-              // progress log makes the skip observable.
-              let events = observer.events.lock().unwrap();
-              assert!(
-                  events.iter().any(|e| matches!(
-                      e,
-                      SessionEvent::Phase {
-                          phase: SessionPhase::Local
-                      }
-                  )),
-                  "Local phase event should fire even when skipped"
-              );
-          }
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+        let manager = ResearchManager::new(&research_root);
+        let local = LocalGatherer::new(Arc::new(SingleLocalTool));
+        let session = ResearchSession::new(
+            manager,
+            None,
+            Some(local),
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let observer = Arc::new(CollectObserver::default());
+        let cfg = SessionConfig {
+            topic: "anything".into(),
+            disable_local: true,
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("rust-async", "Rust Async", &cfg, observer.clone())
+            .await
+            .unwrap();
+        let local_count = outcome
+            .sources
+            .iter()
+            .filter(|s| matches!(s, Source::Local { .. }))
+            .count();
+        assert_eq!(local_count, 0, "--no-local must produce zero local sources");
+        let spec_count = outcome
+            .sources
+            .iter()
+            .filter(|s| matches!(s, Source::Spec { .. }))
+            .count();
+        assert_eq!(
+            spec_count, 0,
+            "spec sources must not appear when --no-local is set"
+        );
+        // The Local phase event should still have been emitted so the
+        // progress log makes the skip observable.
+        let events = observer.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SessionEvent::Phase {
+                    phase: SessionPhase::Local
+                }
+            )),
+            "Local phase event should fire even when skipped"
+        );
+    }
 
-          #[tokio::test]
-          async fn session_skips_spec_phase_when_disable_specs_is_true() {
-              use crate::local_gatherer::{LocalGatherer, LocalTool};
-              use std::path::PathBuf;
-              use std::sync::Arc;
+    #[tokio::test]
+    async fn session_skips_spec_phase_when_disable_specs_is_true() {
+        use crate::local_gatherer::{LocalGatherer, LocalTool};
+        use std::path::PathBuf;
+        use std::sync::Arc;
 
-              /// LocalTool that emits one `Source::Spec` via list_specs/spec_title
-              /// but no regular local files. This is the only path through which
-              /// spec sources enter the session, so it exercises the disable_specs
-              /// gate at the gatherer boundary.
-              #[derive(Default)]
-              struct SpecOnlyTool;
-              #[async_trait::async_trait]
-              impl LocalTool for SpecOnlyTool {
-                  async fn glob(
-                      &self,
-                      _root: &Path,
-                      _pattern: &str,
-                  ) -> anyhow::Result<Vec<PathBuf>> {
-                      Ok(Vec::new())
-                  }
-                  async fn grep(
-                      &self,
-                      _path: &Path,
-                      _terms: &[String],
-                  ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
-                      Ok(Vec::new())
-                  }
-                  async fn read(&self, _path: &Path) -> anyhow::Result<String> {
-                      Ok(String::new())
-                  }
-                  async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
-                      Ok(vec!["some-spec".into()])
-                  }
-                  async fn spec_title(
-                      &self,
-                      _root: &Path,
-                      _spec_id: &str,
-                  ) -> anyhow::Result<String> {
-                      Ok("Some spec title".into())
-                  }
-              }
+        /// LocalTool that emits one `Source::Spec` via list_specs/spec_title
+        /// but no regular local files. This is the only path through which
+        /// spec sources enter the session, so it exercises the disable_specs
+        /// gate at the gatherer boundary.
+        #[derive(Default)]
+        struct SpecOnlyTool;
+        #[async_trait::async_trait]
+        impl LocalTool for SpecOnlyTool {
+            async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
+                Ok(Vec::new())
+            }
+            async fn grep(
+                &self,
+                _path: &Path,
+                _terms: &[String],
+            ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
+                Ok(Vec::new())
+            }
+            async fn read(&self, _path: &Path) -> anyhow::Result<String> {
+                Ok(String::new())
+            }
+            async fn list_specs(&self, _root: &Path) -> anyhow::Result<Vec<String>> {
+                Ok(vec!["some-spec".into()])
+            }
+            async fn spec_title(&self, _root: &Path, _spec_id: &str) -> anyhow::Result<String> {
+                Ok("Some spec title".into())
+            }
+        }
 
-              let tmp = TempDir::new().unwrap();
-              let research_root = tmp.path().join("research");
-              tokio::fs::create_dir_all(&research_root).await.unwrap();
-              let manager = ResearchManager::new(&research_root);
-              let local = LocalGatherer::new(Arc::new(SpecOnlyTool));
-              let session = ResearchSession::new(
-                  manager,
-                  None,
-                  Some(local),
-                  Arc::new(crate::analysis::NoopAnalysisEngine),
-              );
-              let observer = Arc::new(CollectObserver::default());
-              let cfg = SessionConfig {
-                  topic: "topic".into(),
-                  disable_specs: true,
-                  ..SessionConfig::default()
-              };
-              let outcome = session
-                  .run("rust-async", "Rust Async", &cfg, observer.clone())
-                  .await
-                  .unwrap();
-              let spec_count = outcome
-                  .sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Spec { .. }))
-                  .count();
-              assert_eq!(spec_count, 0, "--no-specs must suppress spec sources");
-              // The Specs phase event should still fire so the UI shows the skip.
-              let events = observer.events.lock().unwrap();
-              assert!(
-                  events.iter().any(|e| matches!(
-                      e,
-                      SessionEvent::Phase {
-                          phase: SessionPhase::Specs
-                      }
-                  )),
-                  "Specs phase event should fire even when skipped"
-              );
-          }
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+        let manager = ResearchManager::new(&research_root);
+        let local = LocalGatherer::new(Arc::new(SpecOnlyTool));
+        let session = ResearchSession::new(
+            manager,
+            None,
+            Some(local),
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let observer = Arc::new(CollectObserver::default());
+        let cfg = SessionConfig {
+            topic: "topic".into(),
+            disable_specs: true,
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("rust-async", "Rust Async", &cfg, observer.clone())
+            .await
+            .unwrap();
+        let spec_count = outcome
+            .sources
+            .iter()
+            .filter(|s| matches!(s, Source::Spec { .. }))
+            .count();
+        assert_eq!(spec_count, 0, "--no-specs must suppress spec sources");
+        // The Specs phase event should still fire so the UI shows the skip.
+        let events = observer.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SessionEvent::Phase {
+                    phase: SessionPhase::Specs
+                }
+            )),
+            "Specs phase event should fire even when skipped"
+        );
+    }
     #[test]
     fn default_summary_counts_each_source_type() {
         let s = vec![
@@ -1308,6 +1599,26 @@ mod tests {
         let out = default_findings(&[], "x");
         assert_eq!(out.len(), 1);
         assert!(out[0].contains("No sources"));
+        assert!(out[0].contains("**Observation:**"));
+        assert!(out[0].contains("No direct dependencies."));
+    }
+
+    #[test]
+    fn default_findings_include_source_citation_marker() {
+        let s = vec![Source::Web {
+            url: "https://a".into(),
+            title: "Article A".into(),
+            captured_at: chrono::Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
+        }];
+        let out = default_findings(&s, "topic");
+        assert_eq!(out.len(), 1);
+        assert!(
+            out[0].contains("[#1]"),
+            "mechanical finding should cite its source: {}",
+            out[0]
+        );
     }
 
     #[test]
@@ -1335,16 +1646,41 @@ mod tests {
             },
         ];
         let out = default_findings(&s, "topic");
-        // One bullet per source.
+        // One finding per source.
         assert_eq!(out.len(), 3, "expected 3 findings, got {:?}", out);
+        // Each finding uses the four-paragraph structure.
+        for f in &out {
+            assert!(
+                f.contains("**Observation:**"),
+                "missing Observation paragraph: {}",
+                f
+            );
+            assert!(
+                f.contains("**Analysis:**"),
+                "missing Analysis paragraph: {}",
+                f
+            );
+            assert!(
+                f.contains("**Cross-reference / Dependencies:**"),
+                "missing Cross-reference paragraph: {}",
+                f
+            );
+            assert!(
+                f.contains("**Implication:**"),
+                "missing Implication paragraph: {}",
+                f
+            );
+        }
         // Web finding carries the title and excerpt.
         assert!(out[0].contains("Article A"));
         assert!(out[0].contains("cargo workspaces"));
-        // Local finding carries the relevance note and excerpt.
+        // Local finding carries the relevance note and excerpt, and references the web finding.
         assert!(out[1].contains("src/lib.rs"));
         assert!(out[1].contains("anchor file"));
-        // Spec finding carries the id.
+        assert!(out[1].contains("Finding 1"));
+        // Spec finding carries the id and references the local finding.
         assert!(out[2].contains("foo"));
+        assert!(out[2].contains("Finding 2"));
     }
 
     #[test]
@@ -1359,7 +1695,9 @@ mod tests {
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);
         assert!(out[0].contains("Empty Page"));
-        assert!(out[0].contains("no body returned"));
+        assert!(out[0].contains("no body text was returned"));
+        assert!(out[0].contains("**Observation:**"));
+        assert!(out[0].contains("No direct dependencies."));
     }
 
     #[test]

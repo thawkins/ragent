@@ -13,43 +13,10 @@ pub use mcp_tool::McpToolWrapper;
 
 /// Alias tools that map commonly hallucinated tool names to canonical implementations.
 pub mod aliases;
-/// File append tool.
-pub mod append_file;
-/// Shell command execution tool.
-pub mod bash;
-/// Persistent shell state reset tool.
-pub mod bash_reset;
-/// Math expression calculator tool.
-pub mod calculator;
 /// Task cancellation tool.
 pub mod cancel_task;
-/// Codebase index dependency graph tool.
-pub mod codeindex_dependencies;
-/// Codebase index reference lookup tool.
-pub mod codeindex_references;
-/// Codebase index re-index trigger tool.
-pub mod codeindex_reindex;
-/// Codebase index full-text search tool.
-pub mod codeindex_search;
-/// Codebase index status tool.
-pub mod codeindex_status;
-/// Codebase index symbol query tool.
-pub mod codeindex_symbols;
-/// File copy tool.
-pub mod copy_file;
-/// File creation tool.
-pub mod create;
-/// File diff tool.
-pub mod diff;
-/// File editing tool.
-/// File metadata / info tool.
-pub mod file_info;
 /// Per-file locking for concurrent edit operations.
 mod file_lock;
-/// Concurrent file operations tool (batch read/write).
-pub mod file_ops_tool;
-/// Environment variable read tool.
-pub mod get_env;
 pub mod github_issues;
 pub mod github_prs;
 /// GitLab issue tools (list, get, create, comment, close).
@@ -58,42 +25,11 @@ pub mod gitlab_issues;
 pub mod gitlab_mrs;
 /// GitLab CI/CD pipeline and job tools.
 pub mod gitlab_pipelines;
-/// File globbing tool.
-pub mod glob;
-pub mod grep;
-/// Full HTTP client tool.
-pub mod http_request;
-pub mod libreoffice_common;
-pub mod libreoffice_info;
-pub mod libreoffice_read;
-pub mod libreoffice_write;
-pub mod list;
 pub mod list_tasks;
-/// Memory block migration tool.
-pub mod memory_migrate;
-/// Memory block replace tool.
-pub mod memory_replace;
-/// Semantic memory search tool (embeddings + FTS5).
-pub mod memory_search;
-pub mod memory_write;
-/// Directory creation tool.
-pub mod mkdir;
-/// File move / rename tool.
-pub mod move_file;
 pub mod new_task;
-pub mod office_common;
-pub mod office_info;
-pub mod office_read;
-pub mod office_write;
-pub mod patch;
-pub mod pdf_read;
-pub mod pdf_write;
 pub mod plan;
-pub mod read;
-pub mod rm;
 /// Structured memory store, recall, and forget tools.
 pub mod structured_memory;
-pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 ///
 /// These tool implementations live in `crates/ragent-team/src/tools/` and are
@@ -142,12 +78,7 @@ pub mod team_task_create;
 pub mod team_task_list;
 #[path = "../../../ragent-team/src/tools/team_wait.rs"]
 pub mod team_wait;
-pub mod think;
-pub mod todo;
 pub mod wait_tasks;
-pub mod webfetch;
-pub mod websearch;
-pub mod write;
 
 /// Spec management tools.
 pub mod spec_coverage;
@@ -156,16 +87,12 @@ pub mod spec_read;
 pub mod spec_search;
 pub mod spec_task_update;
 
-/// Content formatting utilities for standardized tool output.
-pub mod format;
 /// Metadata builder for consistent tool output metadata.
 pub mod metadata;
-/// Content truncation utilities for managing large tool outputs.
-pub mod truncate;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -366,6 +293,10 @@ pub struct ToolContext {
     /// Optional ragent configuration loaded from config files.
     /// Provides tools access to settings like API keys, permissions, etc.
     pub config: Option<Arc<ragent_config::Config>>,
+    /// Read timestamps (mtime in milliseconds since UNIX epoch) for files that
+    /// have been read by this session. Used by edit tools to detect stale-file
+    /// edits (editrenewal FR-003).
+    pub read_timestamps: Arc<std::sync::RwLock<std::collections::HashMap<PathBuf, u64>>>,
     /// PERF-019: cache for the most recently resolved team directory.
     ///
     /// Team tools call [`find_team_dir`] on every `execute()`, and that
@@ -416,7 +347,13 @@ pub trait Tool: Send + Sync {
 /// call: the long-lived part is the adapter-local bus + the forwarder
 /// tasks, while the routing target is swapped by passing the current
 /// `ctx.event_bus` into `execute`.
-struct ExtractedCoreToolAdapter {
+/// Adapter that wraps a `ragent_tools_core::Tool` and exposes it as an
+/// agent-local [`Tool`]. The runtime registry uses this to register the core
+/// tool implementations under the agent's `Tool` trait; it is also reused by
+/// `aliases.rs` to delegate alias calls (`update_file`→`write`, `run_code`→
+/// `bash`) to the single source-of-truth implementations in
+/// `ragent-tools-core` (see DCREMOVALPLAN M3).
+pub(crate) struct ExtractedCoreToolAdapter {
     inner: Arc<dyn ragent_tools_core::Tool>,
     /// PERF-030: lazily-created per-adapter event bus + forwarder handles.
     /// Stored as `OnceLock` so the first `execute()` call bootstraps them
@@ -434,7 +371,7 @@ struct ExtractedCoreBus {
 }
 
 impl ExtractedCoreToolAdapter {
-    fn new(inner: Arc<dyn ragent_tools_core::Tool>) -> Self {
+    pub(crate) fn new(inner: Arc<dyn ragent_tools_core::Tool>) -> Self {
         Self {
             inner,
             bus: std::sync::OnceLock::new(),
@@ -586,6 +523,7 @@ impl Tool for ExtractedCoreToolAdapter {
             session_id: ctx.session_id.clone(),
             working_dir: ctx.working_dir.clone(),
             event_bus: tool_bus,
+            read_timestamps: ctx.read_timestamps.clone(),
         };
 
         let result = self
@@ -604,12 +542,113 @@ impl Tool for ExtractedCoreToolAdapter {
     }
 }
 
+/// Legacy alias that exposes the core `multi_edit` tool under the old
+/// `multiedit` name (editrenewal FR-012).
+///
+/// Wraps an [`ExtractedCoreToolAdapter`] and overrides [`Tool::name`] to
+/// return `"multiedit"`. On [`Tool::execute`] it normalises legacy
+/// parameter names (`path`/`old_str`/`new_str` → `file_path`/`old_string`/
+/// `new_string`) inside each edit object before delegating to the inner
+/// adapter, so existing agent prompts continue to work during the
+/// deprecation window.
+struct LegacyMultiEditAlias {
+    inner: ExtractedCoreToolAdapter,
+}
+
+impl LegacyMultiEditAlias {
+    /// Wrap the core `multi_edit` tool (already wrapped in an
+    /// [`ExtractedCoreToolAdapter`]) so it can be registered under the
+    /// legacy `multiedit` name.
+    fn new(core_tool: Arc<dyn ragent_tools_core::Tool>) -> Self {
+        Self {
+            inner: ExtractedCoreToolAdapter::new(core_tool),
+        }
+    }
+
+    /// Normalise legacy parameter names inside each edit object of an
+    /// `edits` array. Canonical names (`file_path`/`old_string`/
+    /// `new_string`) are left untouched; legacy names (`path`/`old_str`/
+    /// `new_str`) are copied into their canonical slots when the canonical
+    /// slot is absent.
+    fn normalise_legacy_params(input: Value) -> Value {
+        let mut input = input;
+        let Some(edits) = input.get_mut("edits").and_then(|e| e.as_array_mut()) else {
+            return input;
+        };
+        for edit in edits {
+            if edit.get("file_path").is_none() {
+                if let Some(path) = edit.get("path").cloned() {
+                    edit["file_path"] = path;
+                }
+            }
+            if edit.get("old_string").is_none() {
+                if let Some(old) = edit.get("old_str").cloned() {
+                    edit["old_string"] = old;
+                }
+            }
+            if edit.get("new_string").is_none() {
+                if let Some(new) = edit.get("new_str").cloned() {
+                    edit["new_string"] = new;
+                }
+            }
+        }
+        input
+    }
+}
+
+#[async_trait::async_trait]
+impl Tool for LegacyMultiEditAlias {
+    fn name(&self) -> &'static str {
+        "multiedit"
+    }
+
+    fn description(&self) -> &'static str {
+        "Deprecated alias for 'multi_edit'. Apply multiple edits to one or more \
+           files atomically. Prefer 'multi_edit' with file_path/old_string/new_string; \
+           this alias also accepts the legacy path/old_str/new_str parameter names."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        self.inner.parameters_schema()
+    }
+
+    fn permission_category(&self) -> &str {
+        self.inner.permission_category()
+    }
+
+          async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+              let normalised = Self::normalise_legacy_params(input);
+              let mut output = self.inner.execute(normalised, ctx).await?;
+              // editrenewal FR-012: emit a deprecation warning whenever the legacy
+              // `multiedit` tool name is used, directing callers to `multi_edit`.
+              let metadata = output.metadata.get_or_insert_with(|| json!({}));
+              if let Some(obj) = metadata.as_object_mut() {
+                  obj.insert(
+                      "deprecation_warning".to_string(),
+                      json!(
+                          "The 'multiedit' tool name is deprecated. Use 'multi_edit' \
+                           with file_path/old_string/new_string parameters instead."
+                      ),
+                  );
+              }
+              Ok(output)
+          }}
+
 fn register_extracted_core_tools(registry: &ToolRegistry) {
     let extracted = ragent_tools_core::create_core_registry();
     for name in extracted.list() {
         if let Some(tool) = extracted.get(&name) {
             registry.register(Arc::new(ExtractedCoreToolAdapter::new(tool)));
         }
+    }
+    // editrenewal FR-012 — legacy `multiedit` alias for the renamed
+    // `multi_edit` tool. The alias forwards calls to the same core
+    // `MultiEditTool` (now registered as `multi_edit` above) and normalises
+    // legacy parameter names (path/old_str/new_str → file_path/old_string/
+    // new_string) so existing agent prompts keep working during the
+    // deprecation window.
+    if let Some(multi_edit) = extracted.get("multi_edit") {
+        registry.register(Arc::new(LegacyMultiEditAlias::new(multi_edit)));
     }
 }
 
@@ -942,6 +981,7 @@ impl Tool for ExtractedExtendedToolAdapter {
             storage: storage_adapter,
             code_index: ctx.code_index.clone(),
             config: ctx.config.clone(),
+            read_timestamps: ctx.read_timestamps.clone(),
         };
         let result = self
             .inner

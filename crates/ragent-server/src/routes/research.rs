@@ -10,7 +10,7 @@
 //! All endpoints are mounted under the auth-protected router in
 //! `routes/mod.rs`.
 
-use std::path::PathBuf;
+use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 
 use axum::{
@@ -24,10 +24,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::routes::AppState;
 
-use ragent_research::{
-    NoopAnalysisEngine, ResearchManager, ResearchSession, SearchHit, SessionConfig, SessionEvent,
-    SessionObserver,
-};
+use ragent_agent::research_adapter::build_research_session;
+
+use ragent_research::{ResearchManager, SearchHit, SessionConfig, SessionEvent, SessionObserver};
 
 /// Build the `/research` sub-router.
 pub fn research_routes() -> Router<AppState> {
@@ -100,13 +99,13 @@ struct CreateResearchRequest {
     sources_dir: Option<String>,
     template: Option<String>,
     #[serde(default)]
-    no_local: bool,
+    use_local: bool,
     #[serde(default)]
-    no_specs: bool,
+    use_specs: bool,
 }
 
 async fn create_research(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<CreateResearchRequest>,
 ) -> impl IntoResponse {
     let manager = ResearchManager::new(research_root());
@@ -114,8 +113,8 @@ async fn create_research(
         topic: req.topic.clone(),
         sources_dir: req.sources_dir.map(PathBuf::from),
         template: req.template,
-        disable_local: req.no_local,
-        disable_specs: req.no_specs,
+        disable_local: !req.use_local,
+        disable_specs: !req.use_specs,
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {
@@ -144,7 +143,25 @@ async fn create_research(
     let events = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let observer = Collector(events.clone());
 
-    let session = ResearchSession::new(manager.clone(), None, None, Arc::new(NoopAnalysisEngine));
+    // Wire the tool registry from the shared session processor so web and
+    // local gathering actually run. Without this the session had no gatherers
+    // and always reported zero sources.
+    let project_root = research_root()
+        .parent()
+        .unwrap_or_else(|| StdPath::new("."))
+        .to_path_buf();
+    let cfg = state.config.read().await.clone();
+    let session = build_research_session(
+        &state.session_processor.tool_registry,
+        manager.clone(),
+        req.name.clone(),
+        project_root,
+        state.event_bus.clone(),
+        Some(state.storage.clone()),
+        Some(Arc::new(cfg)),
+        Some(state.session_processor.provider_registry.clone()),
+        None,
+    );
     match session
         .run(&req.name, &title, &config, Arc::new(observer))
         .await
@@ -180,7 +197,6 @@ async fn create_research(
         }
     }
 }
-
 // ── GET /research/{name} ────────────────────────────────────────────────
 
 async fn show_research(

@@ -632,7 +632,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.push(message)
         })
         .await?
@@ -643,7 +643,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.peek_unread()
         })
         .await?
@@ -654,7 +654,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.drain_unread()
         })
         .await?
@@ -666,7 +666,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.mark_read(&message_id)
         })
         .await?
@@ -678,7 +678,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.mark_all_read(&message_ids)
         })
         .await?
@@ -689,7 +689,7 @@ impl Mailbox {
         let team_dir = self.team_dir.clone();
         let agent_id = self.agent_id.clone();
         tokio::task::spawn_blocking(move || {
-            let mbox = Mailbox::open(&team_dir, &agent_id)?;
+            let mbox = Self::open(&team_dir, &agent_id)?;
             mbox.read_all()
         })
         .await?

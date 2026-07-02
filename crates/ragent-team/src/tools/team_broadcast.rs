@@ -8,7 +8,7 @@
 //! recipient's mailbox is a separate file guarded by its own advisory
 //! `flock`, so there is no contention between recipients. Previously the
 //! tool pushed to each teammate sequentially (T sequential lock acquisitions
-//! + T full file rewrites). It now drives the per-recipient pushes through
+//! plus T full file rewrites). It now drives the per-recipient pushes through
 //! `futures::future::join_all`, reducing the wall-clock time from O(T)
 //! sequential to O(1) parallel (bounded by the blocking-pool size).
 

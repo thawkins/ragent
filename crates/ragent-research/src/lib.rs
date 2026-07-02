@@ -40,20 +40,28 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod adaptive;
 pub mod analysis;
 pub mod cli;
 pub mod document;
+pub mod engine;
 pub mod io;
 pub mod item;
 pub mod local_gatherer;
 pub mod manager;
 pub mod plan_dep;
+pub mod planner;
 pub mod research_name;
+pub mod run_config;
 pub mod session;
 pub mod source;
+pub mod source_registry;
+pub mod state;
 pub mod status;
+pub mod verify;
 pub mod web_gatherer;
 
+pub use adaptive::{AdaptiveStopper, StopDecision};
 pub use analysis::{
     AnalysisEngine, AnalysisResult, LlmAnalysisEngine, NoopAnalysisEngine, SourceBody,
     build_source_bodies,
@@ -66,6 +74,9 @@ pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
     assemble_document, fence_source_body, mark_complete, mark_in_progress, render_skeleton,
     render_supporting_file,
+};
+pub use engine::{
+    Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,
 };
 pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{ResearchItem, ResearchItemError};
@@ -82,13 +93,21 @@ pub use plan_dep::{
     ResearchDependency, ResearchDependencyError, parse_research_dependencies,
     parse_spec_frontmatter_research, research_dependency_names,
 };
+pub use planner::{HeuristicPlanner, LlmPlanner, Planner};
 pub use research_name::{MAX_LEN, MIN_LEN, ResearchName, ResearchNameError, is_path_traversal};
+pub use run_config::{Depth, OutputFormat};
 pub use session::{
     NoopObserver, ResearchSession, RunOutcome, SessionConfig, SessionEvent, SessionObserver,
-    SessionPhase,
+    SessionPhase, SynthesizeOutcome,
 };
 pub use source::{LocalSourceKind, Source};
+pub use source_registry::{BuiltinSourceRegistry, ResearchSourceKind, SourceRegistry};
+pub use state::{
+    EvidenceGap, ResearchPlan, ResearchState, StateCounts, SubQuestion, SubQuestionStatus,
+};
 pub use status::ResearchStatus;
+pub use verify::{KeywordVerifier, VerificationResult, Verifier};
 pub use web_gatherer::{
+    GatherEvent, GatherResult, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
     WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer, WebSearchHit, WebSearchTool,
 };

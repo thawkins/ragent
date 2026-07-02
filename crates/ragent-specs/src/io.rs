@@ -3,7 +3,8 @@
 //! Provides atomic writes, spec discovery, and safe directory creation.
 
 use crate::error::SpecError;
-use crate::spec::{Spec, SpecId, SpecStatus};
+use crate::spec::{Requirement, Spec, SpecId, SpecStatus};
+use crate::validate::{detect_ears_template, parse_requirements};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -93,8 +94,9 @@ impl SpecIo {
             let reviewers = Self::extract_reviewers(&spec_md);
             let mut spec = Spec::new(id, title);
             spec.status = status;
-            spec.spec_md = spec_md;
+            spec.spec_md = spec_md.clone();
             spec.tasks = Self::parse_tasks(&plan_md);
+            spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
             spec.plan_md = plan_md;
             spec.review_md = review_md;
             spec.reviewers = reviewers;
@@ -130,8 +132,9 @@ impl SpecIo {
         let reviewers = Self::extract_reviewers(&spec_md);
         let mut spec = Spec::new(id.clone(), title);
         spec.status = status;
-        spec.spec_md = spec_md;
+        spec.spec_md = spec_md.clone();
         spec.tasks = Self::parse_tasks(&plan_md);
+        spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
         spec.plan_md = plan_md;
         spec.review_md = review_md;
         spec.reviewers = reviewers;
@@ -316,6 +319,45 @@ impl SpecIo {
             }
         }
         tasks
+    }
+
+    /// Build the [`Requirement`] list for a spec from its SPEC.md content and parsed tasks.
+    ///
+    /// A requirement is marked as implemented when it has at least one linked task and
+    /// every linked task is completed.
+    fn build_requirements(spec_md: &str, tasks: &[crate::spec::Task]) -> Vec<Requirement> {
+        let parsed = parse_requirements(spec_md);
+        let mut req_to_tasks: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for task in tasks {
+            for req_id in &task.linked_requirements {
+                req_to_tasks
+                    .entry(req_id.clone())
+                    .or_default()
+                    .push(task.id.clone());
+            }
+        }
+
+        parsed
+            .into_iter()
+            .map(|pr| {
+                let linked_ids = req_to_tasks.get(&pr.id).cloned().unwrap_or_default();
+                let all_completed = !linked_ids.is_empty()
+                    && linked_ids.iter().all(|tid| {
+                        tasks
+                            .iter()
+                            .any(|t| t.id == *tid && t.status == crate::spec::TaskStatus::Completed)
+                    });
+                let template = detect_ears_template(&pr.ears_text)
+                    .unwrap_or(crate::spec::EarsTemplate::Ubiquitous);
+                Requirement {
+                    id: pr.id,
+                    text: pr.ears_text,
+                    template,
+                    implemented: all_completed,
+                }
+            })
+            .collect()
     }
 }
 

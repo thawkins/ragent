@@ -89,17 +89,40 @@ impl ResearchIo {
             .join(format!("{template_name}.md"))
     }
 
+    /// Compute the path of the per-item serialized state file (`state.json`).
+    pub fn state_json_path(research_root: &Path, name: &ResearchName) -> PathBuf {
+        Self::item_dir(research_root, name).join("state.json")
+    }
+
+    /// Write a `ResearchState` to the per-item `state.json` file atomically.
+    pub async fn write_state(
+        research_root: &Path,
+        name: &ResearchName,
+        state: &crate::state::ResearchState,
+    ) -> Result<()> {
+        let path = Self::state_json_path(research_root, name);
+        let json = serde_json::to_string_pretty(state).map_err(ResearchIoError::Serde)?;
+        Self::atomic_write(&path, &json).await
+    }
+
+    /// Read a `ResearchState` from the per-item `state.json` file.
+    pub async fn read_state(
+        research_root: &Path,
+        name: &ResearchName,
+    ) -> Result<crate::state::ResearchState> {
+        let path = Self::state_json_path(research_root, name);
+        let json = fs::read_to_string(&path)
+            .await
+            .map_err(ResearchIoError::Io)?;
+        serde_json::from_str(&json).map_err(ResearchIoError::Serde)
+    }
+
     /// Compute the path of the global index file.
     pub fn index_path(research_root: &Path) -> PathBuf {
         research_root.join("INDEX.md")
     }
 
     /// Write `content` to `path` atomically (write to `<path>.tmp`, then rename).
-    ///
-    /// This is the only sanctioned way to write research files. Readers that
-    /// open `path` mid-rename either see the previous contents (rename hasn't
-    /// started) or the new contents (rename finished), never a half-written
-    /// state.
     pub async fn atomic_write(path: impl AsRef<Path>, content: &str) -> Result<()> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -117,7 +140,6 @@ impl ResearchIo {
             }
         }
     }
-
     /// Read a file to a `String`.
     pub async fn read_file(path: impl AsRef<Path>) -> Result<String> {
         Ok(fs::read_to_string(path).await?)

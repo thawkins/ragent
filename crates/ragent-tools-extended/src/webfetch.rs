@@ -167,11 +167,18 @@ impl Tool for WebFetchTool {
 }
 
 /// Convert HTML to plain text using html2text.
+///
+/// `html2text` can panic on some real-world HTML documents, so we isolate it in
+/// `catch_unwind` and fall back to a simple tag stripper if it panics or errors.
 fn html_to_text(html: &str) -> String {
-    html2text::from_read(html.as_bytes(), TEXT_WIDTH).unwrap_or_else(|_| {
-        // Fallback: strip tags manually
-        strip_tags(html)
-    })
+    let result = std::panic::catch_unwind(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH));
+    match result {
+        Ok(Ok(text)) => text,
+        _ => {
+            // Fallback: strip tags manually when html2text fails or panics
+            strip_tags(html)
+        }
+    }
 }
 
 /// Minimal fallback tag stripper for when html2text fails.

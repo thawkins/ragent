@@ -19,7 +19,13 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use super::{Tool, ToolContext, ToolOutput};
-use super::{bash, write};
+// `bash` and `write` were agent-local dormant duplicates removed in
+// DCREMOVALPLAN M3. The canonical `BashTool`/`WriteTool` implementations live
+// in `ragent-tools-core` and implement that crate's `Tool` trait, so we bridge
+// them back to the agent-local `Tool` trait via `ExtractedCoreToolAdapter`
+// (the same adapter the runtime registry uses for every core tool).
+use super::ExtractedCoreToolAdapter;
+use ragent_tools_core::{bash, write};
 use crate::event::Event;
 
 // ---------------------------------------------------------------------------
@@ -104,7 +110,12 @@ impl Tool for UpdateFileTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        delegate(&write::WriteTool, input, ctx).await
+        delegate(
+            &ExtractedCoreToolAdapter::new(std::sync::Arc::new(write::WriteTool)),
+            input,
+            ctx,
+        )
+        .await
     }
 }
 
@@ -145,7 +156,12 @@ impl Tool for RunCodeTool {
         if extract_command(&mut input).is_none() {
             anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
         }
-        delegate(&bash::BashTool, input, ctx).await
+        delegate(
+            &ExtractedCoreToolAdapter::new(std::sync::Arc::new(bash::BashTool)),
+            input,
+            ctx,
+        )
+        .await
     }
 }
 

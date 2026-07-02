@@ -19,8 +19,7 @@ use ragent_core::{
 };
 use ragent_tui::app::{
     ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogEntry, LogLevel,
-    OutputViewState, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
-    ScreenMode,
+    OutputViewState, OutputViewTarget, ProviderSetupStep, ProviderSource, ScreenMode,
 };
 use ragent_tui::{App, layout};
 use ratatui::{Terminal, backend::TestBackend};
@@ -58,6 +57,9 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -2368,20 +2370,7 @@ fn test_slash_config_no_args_shows_usage() {
     );
 }
 
-fn render_terminal_to_string(terminal: &Terminal<TestBackend>) -> String {
-    let backend = terminal.backend();
-    let buffer = backend.buffer();
-    let mut text = String::new();
-    let area = buffer.area();
-    for y in 0..area.height {
-        for x in 0..area.width {
-            text.push_str(buffer[(x, y)].symbol());
-        }
-        text.push('\n');
-    }
-    text
-}
-
+// NOTE: render_terminal_to_string helper removed; re-add when needed.
 #[test]
 fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));

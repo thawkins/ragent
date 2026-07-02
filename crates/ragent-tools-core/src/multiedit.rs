@@ -1,8 +1,23 @@
-//! Batch text replacement tool for editing multiple files.
+//! Atomic batch text replacement tool for editing multiple files.
 //!
 //! Provides [`MultiEditTool`], which applies multiple search-and-replace
 //! operations across one or more files atomically. All edits are validated
 //! before any files are written — if any match fails, no files are modified.
+//!
+//! # Matching (editrenewal FR-004 / FR-009)
+//!
+//! Each edit uses the **strict exact-match** matcher
+//! ([`find_exact_replacement_range`]): `old_string` must occur exactly once
+//! in the target file, byte-for-byte including whitespace and indentation.
+//! Whitespace-tolerant matching is intentionally NOT applied so that batch
+//! edits behave identically to the renewed single-file `edit` tool.
+//!
+//! # Parameter names (editrenewal FR-009)
+//!
+//! Each edit object accepts the canonical parameter names `file_path`,
+//! `old_string`, and `new_string`. For backward compatibility during the
+//! deprecation window, the legacy names `path`, `old_str`, and `new_str` are
+//! still accepted and normalised to the canonical names before execution.
 //!
 //! # Ordering & overlap safety (WSPLAN Milestone 3)
 //!
@@ -17,18 +32,25 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
-use super::replace::{FindDiag, FindDiagKind, find_replacement_range_diag};
+use super::replace::{FindError, find_exact_replacement_range};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
 ///
 /// Each edit specifies a file path, an exact search string, and its replacement.
-/// All edits are validated first (each `old_str` must match exactly once in its
-/// target file). Only after all validations pass are the files written. If any
-/// edit fails validation, no files are modified.
+/// All edits are validated first (each `old_string` must match exactly once in
+/// its target file). Only after all validations pass are the files written. If
+/// any edit fails validation, no files are modified.
+#[allow(dead_code)]
 pub struct MultiEditTool;
-
+// `MultiEditTool` is constructed and registered via
+// `crates/ragent-tools-core/src/lib.rs`. The "never constructed" warning
+// appears only because the integration test target re-imports this source
+// file via `#[path]` and compiles a fresh copy that is not wired into a
+// registry.
+#[allow(dead_code)]
 /// A single edit operation parsed from the input JSON.
 struct EditOp {
     path: PathBuf,
@@ -39,6 +61,7 @@ struct EditOp {
 /// A resolved edit: the original input index, the byte range against the
 /// original file content, and the effective replacement text (which may have
 /// indentation re-applied by the shared matcher).
+#[allow(dead_code)]
 struct ResolvedEdit {
     /// Index of this edit in the original JSON `edits` array (for diagnostics).
     input_index: usize,
@@ -58,7 +81,7 @@ struct ResolvedEdit {
 #[async_trait::async_trait]
 impl Tool for MultiEditTool {
     fn name(&self) -> &'static str {
-        "multiedit"
+        "multi_edit"
     }
 
     /// # Errors
@@ -66,10 +89,11 @@ impl Tool for MultiEditTool {
     /// Returns an error if the `edits` array is missing, malformed, or empty.
     fn description(&self) -> &'static str {
         "Apply multiple edits to one or more files atomically. Each edit replaces \
-         exactly one occurrence of old_str with new_str. All edits are validated \
+         exactly one occurrence of old_string with new_string. All edits are validated \
          before any files are written — if any match fails, no files are modified. \
          Edits to the same file are overlap-checked and applied highest-offset-first \
-         so input order does not matter."
+         so input order does not matter. Each edit object uses file_path, old_string, \
+         and new_string (the legacy names path/old_str/new_str are also accepted)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -78,24 +102,36 @@ impl Tool for MultiEditTool {
             "properties": {
                 "edits": {
                     "type": "array",
-                    "description": "Array of edit operations to apply",
+                    "description": "Array of edit operations to apply. Each edit is a single-instance exact replacement.",
                     "items": {
                         "type": "object",
                         "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Absolute path to the file to edit"
+                            },
+                            "old_string": {
+                                "type": "string",
+                                "description": "Exact string to find (must match exactly once, including whitespace and indentation)"
+                            },
+                            "new_string": {
+                                "type": "string",
+                                "description": "Replacement string"
+                            },
                             "path": {
                                 "type": "string",
-                                "description": "Path to the file to edit"
+                                "description": "Legacy alias for file_path (deprecated)"
                             },
                             "old_str": {
                                 "type": "string",
-                                "description": "Exact string to find (must match exactly once)"
+                                "description": "Legacy alias for old_string (deprecated)"
                             },
                             "new_str": {
                                 "type": "string",
-                                "description": "Replacement string"
+                                "description": "Legacy alias for new_string (deprecated)"
                             }
                         },
-                        "required": ["path", "old_str", "new_str"]
+                        "required": ["file_path", "old_string", "new_string"]
                     }
                 }
             },
@@ -123,18 +159,24 @@ impl Tool for MultiEditTool {
             bail!("The 'edits' array is empty. Provide at least one edit operation.");
         }
 
-        // Parse all edit operations.
+        // Parse all edit operations. Accept the canonical parameter names
+        // (file_path, old_string, new_string) and the legacy names
+        // (path, old_str, new_str) for backward compatibility (editrenewal
+        // FR-009 / FR-012).
         let mut ops: Vec<EditOp> = Vec::with_capacity(edits_arr.len());
         for (i, edit) in edits_arr.iter().enumerate() {
-            let path_str = edit["path"]
+            let path_str = edit["file_path"]
                 .as_str()
-                .with_context(|| format!("Edit {i}: missing 'path'"))?;
-            let old_str = edit["old_str"]
+                .or_else(|| edit["path"].as_str())
+                .with_context(|| format!("Edit {i}: missing 'file_path' (or legacy 'path')"))?;
+            let old_str = edit["old_string"]
                 .as_str()
-                .with_context(|| format!("Edit {i}: missing 'old_str'"))?;
-            let new_str = edit["new_str"]
+                .or_else(|| edit["old_str"].as_str())
+                .with_context(|| format!("Edit {i}: missing 'old_string' (or legacy 'old_str')"))?;
+            let new_str = edit["new_string"]
                 .as_str()
-                .with_context(|| format!("Edit {i}: missing 'new_str'"))?;
+                .or_else(|| edit["new_str"].as_str())
+                .with_context(|| format!("Edit {i}: missing 'new_string' (or legacy 'new_str')"))?;
 
             ops.push(EditOp {
                 path: resolve_path(&ctx.working_dir, path_str),
@@ -154,18 +196,29 @@ impl Tool for MultiEditTool {
             _locks.push(super::file_lock::lock_file(path).await);
         }
 
-        // Phase 1: Read all target files once. Each edit is resolved against
-        // this ORIGINAL content so byte ranges are stable and comparable.
-        let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
-        for path in &unique_paths {
-            let content = tokio::fs::read_to_string(path)
-                .await
-                .with_context(|| format!("Failed to read file: {}", path.display()))?;
-            file_contents.insert(path.clone(), content);
-        }
+                  // Phase 1: Read all target files once. Each edit is resolved against
+                  // this ORIGINAL content so byte ranges are stable and comparable.
+                  let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
+                  for path in &unique_paths {
+                      let content = tokio::fs::read_to_string(path)
+                          .await
+                          .with_context(|| format!("Failed to read file: {}", path.display()))?;
+                      file_contents.insert(path.clone(), content);
+                  }
 
+                  // Phase 1b: Stale-file detection (editrenewal FR-003 / FR-009).
+                  // For every target file that the session has recorded a read
+                  // timestamp for, reject the batch if the file was modified after it
+                  // was read. Files with no recorded timestamp proceed (no baseline).
+                  for path in &unique_paths {
+                      if let Err(e) = check_stale_file(path, ctx) {
+                          bail!("{e}");
+                      }
+                  }
         // Phase 2: Resolve every edit against the original file content and
-        // group resolved edits by file path.
+        // group resolved edits by file path. Uses the strict exact-match
+        // matcher (editrenewal FR-004 / FR-009): old_string must occur
+        // exactly once, byte-for-byte.
         let mut resolved_by_file: HashMap<PathBuf, Vec<ResolvedEdit>> = HashMap::new();
         for (i, op) in ops.iter().enumerate() {
             let original = file_contents
@@ -173,9 +226,9 @@ impl Tool for MultiEditTool {
                 .expect("file content must exist for every op path");
 
             let (start, end, effective_new) =
-                match find_replacement_range_diag(original, &op.old_str, &op.new_str) {
+                match find_exact_replacement_range(original, &op.old_str, &op.new_str) {
                     Ok(range) => range,
-                    Err(diag) => bail!(format_diag_error(&diag, i, &op.path)),
+                    Err(err) => bail!(format_strict_error(&err, i, &op.path)),
                 };
 
             let old_lines = op.old_str.lines().count();
@@ -193,7 +246,6 @@ impl Tool for MultiEditTool {
                     new_lines,
                 });
         }
-
         // Phase 3: Overlap detection. For each file, verify no two resolved
         // edits' byte ranges (against the original content) intersect. Ranges
         // that merely touch (a.end == b.start) are allowed.
@@ -267,15 +319,18 @@ impl Tool for MultiEditTool {
             total_removed += removed;
         }
 
-        // Phase 5: Write all modified files.
-        for (path, content) in &file_contents {
-            if file_stats.contains_key(path) {
-                tokio::fs::write(path, content)
-                    .await
-                    .with_context(|| format!("Failed to write file: {}", path.display()))?;
-            }
-        }
-
+                  // Phase 5: Write all modified files.
+                  for (path, content) in &file_contents {
+                      if file_stats.contains_key(path) {
+                          tokio::fs::write(path, content)
+                              .await
+                              .with_context(|| format!("Failed to write file: {}", path.display()))?;
+                          // Refresh the read timestamp for this file so a follow-up
+                          // edit in the same session does not trip the stale-file
+                          // check on a file we just wrote (editrenewal FR-003).
+                          record_edit_timestamp(path, ctx);
+                      }
+                  }
         let file_count = file_stats.len();
 
         // Build per-file stats array sorted by path for stable display order.
@@ -315,40 +370,36 @@ impl Tool for MultiEditTool {
     }
 }
 
-/// Format a [`FindDiag`] into a human-readable, actionable error string that
-/// names the edit index, file path, the matching pass that failed, and — when
-/// known — the 0-based line number of the closest near-match attempt
-/// (WSPLAN M3-T4).
-fn format_diag_error(diag: &FindDiag, edit_index: usize, path: &Path) -> String {
-    let pass = diag.pass;
-    match diag.kind {
-        FindDiagKind::NotFound => {
-            let line_hint = diag
-                .closest_line
-                .map(|l| format!(" (closest near-match attempt at line {})", l + 1))
-                .unwrap_or_default();
-            format!(
-                "Edit {}: old_str not found in {} (last matching pass: `{}`). \
-                 Make sure it matches exactly.{}",
-                edit_index,
-                path.display(),
-                pass,
-                line_hint
-            )
-        }
-        FindDiagKind::MultipleMatches(n) => format!(
-            "Edit {}: old_str found {} times in {} (last matching pass: `{}`). \
-             It must match exactly once. Add more context to make it unique.",
+/// Format a [`FindError`] from the strict exact-match matcher into a
+/// human-readable, actionable error string that names the edit index and
+/// file path (editrenewal FR-004 / FR-009).
+///
+/// Strict matching has a single pass (exact substring search), so — unlike
+/// the legacy whitespace-tolerant matcher — there is no pass name or
+/// closest-line hint to report. The messages focus on what the caller can
+/// fix: make the string match exactly, or add context to make it unique.
+pub(crate) fn format_strict_error(err: &FindError, edit_index: usize, path: &Path) -> String {
+    match err {
+        FindError::NotFound => format!(
+            "Edit {}: old_string not found in {}. \
+             Strict exact match requires the string to occur verbatim, including \
+             whitespace and indentation. Re-read the file and copy the exact text.",
+            edit_index,
+            path.display()
+        ),
+        FindError::MultipleMatches(n) => format!(
+            "Edit {}: old_string found {} times in {}. \
+             It must match exactly once. Add more surrounding context to the \
+             old_string to make the match unique.",
             edit_index,
             n,
-            path.display(),
-            pass
+            path.display()
         ),
     }
 }
 
 /// Resolves a path relative to the working directory, or returns it as-is if absolute.
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
+pub(crate) fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
         p
@@ -357,40 +408,68 @@ fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     }
 }
 
-// ── Unit tests ───────────────────────────────────────────────────────────────
+/// Check whether the file was modified after the session last read it
+/// (editrenewal FR-003 / FR-009). When a read timestamp has been recorded for
+/// `path`, compare the current on-disk mtime against it and return an error if
+/// the file is newer. When no timestamp has been recorded, the check is a
+/// no-op (no baseline available).
+#[allow(dead_code)]
+fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
+    let recorded = ctx
+        .read_timestamps
+        .read()
+        .ok()
+        .and_then(|map| map.get(path).copied());
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    let Some(recorded_millis) = recorded else {
+        return Ok(());
+    };
 
-    #[test]
-    fn resolve_path_relative() {
-        let p = resolve_path(Path::new("/work"), "src/main.rs");
-        assert_eq!(p, PathBuf::from("/work/src/main.rs"));
+    let current_millis = std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|mtime| {
+            mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        });
+
+    let Some(current_millis) = current_millis else {
+        return Ok(());
+    };
+
+    // 1ms tolerance for filesystem mtime granularity.
+    if current_millis > recorded_millis.saturating_add(1) {
+        bail!(
+            "File '{}' was modified after it was last read by this session \
+             (read mtime {}ms, current mtime {}ms). Re-read the file before \
+             editing to avoid clobbering external changes.",
+            path.display(),
+            recorded_millis,
+            current_millis
+        );
     }
 
-    #[test]
-    fn resolve_path_absolute() {
-        let p = resolve_path(Path::new("/work"), "/etc/hosts");
-        assert_eq!(p, PathBuf::from("/etc/hosts"));
-    }
+    Ok(())
+}
 
-    #[test]
-    fn format_diag_error_not_found_includes_pass_and_line() {
-        let diag = FindDiag::not_found("collapsed", Some(4));
-        let msg = format_diag_error(&diag, 2, Path::new("/tmp/foo.rs"));
-        assert!(msg.contains("Edit 2"));
-        assert!(msg.contains("/tmp/foo.rs"));
-        assert!(msg.contains("`collapsed`"));
-        assert!(msg.contains("line 5"));
-    }
-
-    #[test]
-    fn format_diag_error_multiple_includes_count() {
-        let diag = FindDiag::multiple("exact", 3, None);
-        let msg = format_diag_error(&diag, 1, Path::new("/tmp/bar.rs"));
-        assert!(msg.contains("Edit 1"));
-        assert!(msg.contains("3 times"));
-        assert!(msg.contains("`exact`"));
+/// Record (or refresh) the edit timestamp for `path` so a follow-up edit in
+/// the same session does not trip the stale-file check on a file we just
+/// wrote.
+#[allow(dead_code)]
+fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
+    if let Ok(meta) = std::fs::metadata(path)
+        && let Ok(mtime) = meta.modified()
+    {
+        let millis = mtime
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        if let Ok(mut map) = ctx.read_timestamps.write() {
+            map.insert(path.to_path_buf(), millis);
+        }
     }
 }
+
+// ── Unit tests ───────────────────────────────────────────────────────────────

@@ -48,6 +48,7 @@ use crate::research_name::ResearchName;
 use crate::source::{LocalSourceKind, Source};
 use crate::status::ResearchStatus;
 use chrono::Utc;
+use regex::Regex;
 
 /// Maximum number of bytes allowed in a single untrusted source excerpt.
 /// Sources larger than this are truncated to avoid blowing up RESEARCH.md
@@ -57,6 +58,7 @@ pub const MAX_SOURCE_BODY_BYTES: usize = 256 * 1024;
 /// The 8 sections that appear in every `RESEARCH.md`, in order (FR-010).
 pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
+    "Search Queries",
     "Summary",
     "Findings",
     "In-Project Cross-References",
@@ -88,6 +90,9 @@ pub struct ResearchDocument {
     /// `{{title}}`, `{{topic}}`, `{{date}}` placeholders are substituted
     /// from the item's metadata before the standard sections are appended.
     pub template_body: Option<String>,
+    /// Sub-queries the web-gathering phase issued to the search tool. Empty
+    /// when web gathering was disabled or no decomposer was configured.
+    pub decomposed_queries: Vec<String>,
 }
 
 /// One in-project cross-reference row (FR-009).
@@ -144,6 +149,19 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     body.push_str(topic.trim());
     body.push_str("\n\n");
 
+    // ── Search Queries ──────────────────────────────────────────────────
+    body.push_str("## Search Queries\n\n");
+    if doc.decomposed_queries.is_empty() {
+        body.push_str(
+            "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
+        );
+    } else {
+        for q in &doc.decomposed_queries {
+            body.push_str(&format!("- {}\n", q.trim()));
+        }
+        body.push('\n');
+    }
+
     // ── Summary ──────────────────────────────────────────────────────────
     body.push_str("## Summary\n\n");
     if doc.summary.trim().is_empty() {
@@ -161,7 +179,19 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
             body.push_str(&format!("### Finding {}\n\n", idx + 1));
-            body.push_str(finding.trim());
+            // Findings contain at least the four required bold-labeled paragraphs.
+            // Ensure the required labels start on their own line and are separated
+            // by a blank line. Preserve any additional labeled paragraphs beyond
+            // the four required ones.
+            let mut normalized = normalize_finding_labels(finding.trim());
+            // Append a Sources list for any [#N] citations present in the finding.
+            // This makes the evidence backing each finding explicit without
+            // requiring the LLM to also emit a separate Sources paragraph.
+            if let Some(sources_list) = render_finding_sources(&normalized, &doc.item.sources) {
+                normalized.push_str("\n\n");
+                normalized.push_str(&sources_list);
+            }
+            body.push_str(&normalized);
             body.push_str("\n\n");
         }
     }
@@ -225,6 +255,7 @@ pub fn render_skeleton(name: &ResearchName, title: &str, topic: &str) -> String 
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
+        decomposed_queries: Vec::new(),
     };
     assemble_document(&doc).content
 }
@@ -252,7 +283,57 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
         .replace("{{name}}", "")
 }
 
-/// Escape `|` so the value doesn't break a markdown table row (NFR-005).
+/// Extract 1-based source indices from `[#N]` citations in a finding body.
+/// Returns a sorted, deduplicated list suitable for rendering a Sources list.
+fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
+    let re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
+    let mut indices: Vec<usize> = re
+        .captures_iter(finding)
+        .filter_map(|cap| cap[1].parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .collect();
+    indices.sort_unstable();
+    indices.dedup();
+    indices
+}
+
+/// Build a `**Sources:**` paragraph for a finding that cites one or more
+/// captured sources. Each bullet contains the citation number, source title,
+/// and path/URL so the reader can map the finding back to the References
+/// Index. Returns `None` when there are no citations or none of the cited
+/// indices map to a known source.
+fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
+    // If the finding already contains a Sources paragraph (e.g. produced by
+    // the LLM itself), don't append a duplicate list.
+    if finding.to_lowercase().contains("**sources:**") {
+        return None;
+    }
+
+    let indices = extract_cited_source_indices(finding);
+    if indices.is_empty() {
+        return None;
+    }
+
+    let mut out = String::from("**Sources:**\n");
+    let mut any = false;
+    for idx in indices {
+        if let Some(src) = sources.get(idx - 1) {
+            any = true;
+            out.push_str(&format!(
+                "- [{idx}] {title} — {path}\n",
+                idx = idx,
+                title = src.title(),
+                path = src.path_or_url()
+            ));
+        }
+    }
+    if !any {
+        return None;
+    }
+    // Trim trailing newline; the caller inserts blank lines.
+    out.truncate(out.trim_end().len());
+    Some(out)
+}
 fn escape_pipe(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
@@ -384,6 +465,118 @@ pub fn mark_complete(item: &mut ResearchItem) {
     item.set_status(ResearchStatus::Complete);
 }
 
+fn normalize_finding_labels(finding: &str) -> String {
+    let mut text = finding.trim().replace("\n\n\n", "\n\n");
+
+    // Strip stale "Paragraph N — " prefixes before any label.
+    let paragraph_prefix = Regex::new(r"Paragraph\s+\d+\s*—\s*").expect("valid regex");
+    text = paragraph_prefix.replace_all(&text, "").to_string();
+
+    // Match bold or italic labels ending in a colon, e.g. **Observation:** or
+    // *Analysis:*. The colon is required so we don't split random emphasis.
+    // Hyphens and slashes are allowed so labels like **Cross-reference / Dependencies:**
+    // are recognised correctly.
+    let label_re = Regex::new(r"(\*\*[-A-Za-z/\s]+:\*\*|\*[-A-Za-z/\s]+:\*)").expect("valid regex");
+
+    // Split into alternating non-label / label segments. The first segment is
+    // text before the first label (usually empty).
+    let mut labels: Vec<String> = Vec::new();
+    let mut bodies: Vec<String> = Vec::new();
+    let mut last_end = 0;
+    for mat in label_re.find_iter(&text) {
+        let preceding = text[last_end..mat.start()].trim().to_string();
+        if labels.is_empty() {
+            // Text before the first label is discarded unless it is non-empty,
+            // in which case it becomes a leading unlabeled paragraph.
+            if !preceding.is_empty() {
+                bodies.push(preceding);
+                labels.push(String::new());
+            }
+        } else {
+            bodies.push(preceding);
+        }
+        labels.push(mat.as_str().to_string());
+        last_end = mat.end();
+    }
+    // Trailing text after the last label.
+    if last_end < text.len() {
+        let trailing = text[last_end..].trim().to_string();
+        bodies.push(trailing);
+    } else {
+        bodies.push(String::new());
+    }
+
+    // Pair each label with its body. If labels and bodies are mismatched,
+    // fall back to the cleaned text unchanged.
+    if labels.len() != bodies.len() || labels.is_empty() {
+        return text.trim().to_string();
+    }
+
+    let mut out = String::new();
+    for (raw_label, body) in labels.iter().zip(bodies.iter()) {
+        // Normalize legacy italic labels (*Label:*) to bold (**Label:**).
+        let label = if raw_label.starts_with("**") {
+            raw_label.clone()
+        } else if raw_label.len() >= 2 && raw_label.starts_with('*') && raw_label.ends_with('*') {
+            format!("**{}**", &raw_label[1..raw_label.len() - 1])
+        } else {
+            raw_label.clone()
+        };
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        if label.is_empty() {
+            // First paragraph may be unlabeled leading text.
+            out.push_str(body);
+        } else {
+            // Put the label on its own line, then the body indented as the
+            // next paragraph so each labeled paragraph is clearly separated.
+            out.push_str(&label);
+            if !body.is_empty() {
+                out.push('\n');
+                out.push_str(body);
+            }
+        }
+    }
+    out.trim().to_string()
+}
+/// Render a standalone sources appendix / bibliography for the
+/// `--format source-bibliography` artifact (T-011).
+///
+/// The output is a markdown document listing every source with its type,
+/// title, path/URL, captured timestamp, and (when available) the first 240
+/// characters of its body.
+pub fn render_bibliography(sources: &[Source]) -> String {
+    if sources.is_empty() {
+        return "# Sources Bibliography\n\n_(no sources captured)_\n".to_string();
+    }
+    let mut out = String::from("# Sources Bibliography\n\n");
+    for (idx, source) in sources.iter().enumerate() {
+        let n = idx + 1;
+        let kind = source.type_str();
+        let path = source.path_or_url();
+        let title = source.title();
+        let captured = source.captured_at().to_rfc3339();
+        out.push_str(&format!(
+            "## [{n}] {title}\n\n- **Type:** {kind}\n- **Path/URL:** {path}\n- **Captured:** {captured}\n"
+        ));
+        if let Some(body) = source.body() {
+            let preview = if body.chars().count() > 240 {
+                format!("{}…", body.chars().take(240).collect::<String>())
+            } else {
+                body.to_string()
+            };
+            if !preview.is_empty() {
+                out.push_str("- **Preview:**\n\n  ```text\n  ");
+                out.push_str(&preview.replace('\n', "\n  "));
+                out.push_str("\n  ```\n");
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,16 +591,21 @@ mod tests {
         ResearchItem::new(sample_name(), "Rust Async Patterns", "async/await idioms")
     }
 
-    #[test]
-    fn assemble_document_includes_all_eight_sections() {
-        let doc = ResearchDocument {
-            item: sample_item(),
+    fn sample_doc(item: ResearchItem) -> ResearchDocument {
+        ResearchDocument {
+            item,
             summary: String::new(),
             findings: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,
-        };
+            decomposed_queries: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn assemble_document_includes_all_eight_sections() {
+        let doc = sample_doc(sample_item());
         let assembled = assemble_document(&doc);
         for section in REQUIRED_SECTIONS {
             assert!(
@@ -427,14 +625,7 @@ mod tests {
 
     #[test]
     fn assemble_document_starts_with_frontmatter_block() {
-        let doc = ResearchDocument {
-            item: sample_item(),
-            summary: String::new(),
-            findings: Vec::new(),
-            cross_references: Vec::new(),
-            open_questions: Vec::new(),
-            template_body: None,
-        };
+        let doc = sample_doc(sample_item());
         let assembled = assemble_document(&doc);
         assert!(assembled.content.starts_with("---\n"));
         assert!(assembled.content.contains("name: rust-async"));
@@ -442,33 +633,108 @@ mod tests {
     }
 
     #[test]
-    fn assemble_document_emits_one_finding_block_per_entry() {
-        let doc = ResearchDocument {
-            item: sample_item(),
-            summary: String::new(),
-            findings: vec!["first finding".into(), "second finding".into()],
-            cross_references: Vec::new(),
-            open_questions: Vec::new(),
-            template_body: None,
-        };
+    fn assemble_document_normalizes_paragraph_prefixes() {
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec![
+            "Paragraph 1 — **Observation:** observation text. *Paragraph 2 — Analysis:* analysis text. **Cross-reference / Dependencies:** deps. **Implication:** implication text. **Caveat:** caveat text.".into(),
+        ];
         let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("### Finding 1\n\nfirst finding"));
-        assert!(assembled.body.contains("### Finding 2\n\nsecond finding"));
+        let body = &assembled.body;
+        assert!(
+            !body.contains("Paragraph 1"),
+            "paragraph prefixes should be stripped: {}",
+            body
+        );
+        assert!(
+            body.contains("**Observation:**\nobservation text."),
+            "observation label should be on its own line: {}",
+            body
+        );
+        assert!(
+            body.contains("**Analysis:**\nanalysis text."),
+            "analysis label should be on its own line: {}",
+            body
+        );
+        assert!(
+            body.contains("**Cross-reference / Dependencies:**\ndeps."),
+            "cross-reference label should be on its own line: {}",
+            body
+        );
+        assert!(
+            body.contains("**Caveat:**\ncaveat text."),
+            "extra caveat label should be preserved and separated: {}",
+            body
+        );
+    }
+
+    #[test]
+    fn assemble_document_splits_run_on_finding_into_paragraphs() {
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec![
+            "**Observation:** obs **Analysis:** analysis **Cross-reference / Dependencies:** none **Implication:** impl **Caveat:** caveat".into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        // After "### Finding 1\n\n" the labels should be separated by blank lines.
+        assert!(
+            finding.contains("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
+            "labels should be separated by blank lines: {}",
+            finding
+        );
+        assert!(
+            finding.contains("**Implication:**\nimpl\n\n**Caveat:**\ncaveat"),
+            "caveat should be separated from implication: {}",
+            finding
+        );
+        assert!(
+            finding.contains("**Cross-reference / Dependencies:**\nnone\n\n**Implication:**\nimpl"),
+            "cross-reference label should be on its own line: {}",
+            finding
+        );
+        assert!(
+            finding
+                .trim_start()
+                .starts_with("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
+            "label and its body should be on separate lines: {}",
+            finding
+        );
+    }
+
+    #[test]
+    fn assemble_document_emits_one_finding_block_per_entry() {
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec![
+            "**Observation:** first observation\n\n**Analysis:** first analysis\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** first implication\n\n**Related work:** extra context for finding one.".into(),
+            "**Observation:** second observation\n\n**Analysis:** second analysis\n\n**Cross-reference / Dependencies:** Related to Finding 1.\n\n**Implication:** second implication".into(),
+        ];
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled
+                .body
+                .contains("### Finding 1\n\n**Observation:**\nfirst observation")
+        );
+        assert!(
+            assembled
+                .body
+                .contains("### Finding 2\n\n**Observation:**\nsecond observation")
+        );
+        assert!(assembled.body.contains("Related to Finding 1."));
+        assert!(
+            assembled
+                .body
+                .contains("**Related work:**\nextra context for finding one."),
+            "extra labeled paragraph beyond the four required ones should be preserved: {}",
+            assembled.body
+        );
     }
 
     #[test]
     fn assemble_document_renders_cross_reference_table() {
-        let doc = ResearchDocument {
-            item: sample_item(),
-            summary: String::new(),
-            findings: Vec::new(),
-            cross_references: vec![CrossReference {
-                path: "src/lib.rs".into(),
-                relevance: "Main library entry".into(),
-            }],
-            open_questions: Vec::new(),
-            template_body: None,
-        };
+        let mut doc = sample_doc(sample_item());
+        doc.cross_references = vec![CrossReference {
+            path: "src/lib.rs".into(),
+            relevance: "Main library entry".into(),
+        }];
         let assembled = assemble_document(&doc);
         assert!(assembled.body.contains("| Path | Relevance |"));
         assert!(
@@ -480,17 +746,11 @@ mod tests {
 
     #[test]
     fn assemble_document_escapes_pipes_in_cross_reference_relevance() {
-        let doc = ResearchDocument {
-            item: sample_item(),
-            summary: String::new(),
-            findings: Vec::new(),
-            cross_references: vec![CrossReference {
-                path: "src/lib.rs".into(),
-                relevance: "Has | pipes".into(),
-            }],
-            open_questions: Vec::new(),
-            template_body: None,
-        };
+        let mut doc = sample_doc(sample_item());
+        doc.cross_references = vec![CrossReference {
+            path: "src/lib.rs".into(),
+            relevance: "Has | pipes".into(),
+        }];
         let assembled = assemble_document(&doc);
         assert!(
             assembled.body.contains(r"Has \| pipes"),
@@ -501,14 +761,8 @@ mod tests {
 
     #[test]
     fn assemble_document_preserves_inline_citation_markers() {
-        let doc = ResearchDocument {
-            item: sample_item(),
-            summary: String::new(),
-            findings: vec!["Use Tokio [#1] for async runtimes.".into()],
-            cross_references: Vec::new(),
-            open_questions: Vec::new(),
-            template_body: None,
-        };
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec!["Use Tokio [#1] for async runtimes.".into()];
         let assembled = assemble_document(&doc);
         assert!(assembled.body.contains("[#1]"));
     }
@@ -622,6 +876,28 @@ mod tests {
     }
 
     #[test]
+    fn render_bibliography_empty_state() {
+        let out = render_bibliography(&[]);
+        assert!(out.contains("Sources Bibliography"));
+        assert!(out.contains("no sources captured"));
+    }
+
+    #[test]
+    fn render_bibliography_includes_source_preview() {
+        let source = Source::Web {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "page body content".into(),
+        };
+        let out = render_bibliography(&[source]);
+        assert!(out.contains("Example"));
+        assert!(out.contains("https://example.com"));
+        assert!(out.contains("page body content"));
+    }
+
+    #[test]
     fn mark_in_progress_only_when_not_archived() {
         let mut item = sample_item();
         mark_in_progress(&mut item);
@@ -640,4 +916,127 @@ mod tests {
         mark_complete(&mut item);
         assert_eq!(item.status, ResearchStatus::Complete);
     }
+
+    #[test]
+    fn assemble_document_appends_sources_list_for_citations() {
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            url: "https://example.com".into(),
+            title: "Example Article".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "body".into(),
+        });
+        let mut doc = sample_doc(item);
+        doc.findings = vec![
+            "**Observation:** Something important [#1].
+
+**Analysis:** Why it matters.
+
+**Cross-reference / Dependencies:** No direct dependencies.
+
+**Implication:** Do this."
+                .into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        assert!(
+            finding.contains("**Sources:**"),
+            "finding should contain Sources paragraph: {}",
+            finding
+        );
+        assert!(
+            finding.contains("- [1] Example Article — https://example.com"),
+            "Sources bullet should map citation to source title/URL: {}",
+            finding
+        );
+    }
+
+    #[test]
+    fn assemble_document_dedupes_and_sorts_citation_indices() {
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            url: "https://a".into(),
+            title: "A".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "body".into(),
+        });
+        item.add_source(Source::Web {
+            url: "https://b".into(),
+            title: "B".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-02.md"),
+            body: "body".into(),
+        });
+        let mut doc = sample_doc(item);
+        doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        // Sources should be in index order, not citation order, and deduped.
+        let sources_idx = finding.find("**Sources:**").unwrap();
+        let sources_block = &finding[sources_idx..];
+        let first = sources_block.find("- [1] A").unwrap();
+        let second = sources_block.find("- [2] B").unwrap();
+        assert!(
+            first < second,
+            "sources should be sorted by index: {}",
+            finding
+        );
+    }
+
+    #[test]
+    fn assemble_document_omits_sources_paragraph_without_citations() {
+        let doc = sample_doc(sample_item());
+        let assembled = assemble_document(&doc);
+        assert!(
+            !assembled.body.contains("**Sources:**"),
+            "no citations means no Sources paragraph: {}",
+            assembled.body
+        );
+    }
+    #[test]
+    fn assemble_document_skips_sources_list_when_finding_already_has_one() {
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            url: "https://example.com".into(),
+            title: "Example Article".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "body".into(),
+        });
+        let mut doc = sample_doc(item);
+        // The LLM already produced its own Sources paragraph.
+        doc.findings = vec![
+            "**Observation:** Something important [#1].
+
+**Sources:**
+- Article A — https://a"
+                .into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let count = finding.matches("**Sources:**").count();
+        assert_eq!(
+            count, 1,
+            "should not add a duplicate Sources paragraph: {}",
+            finding
+        );
+    }
+
+    #[test]
+    fn assemble_document_puts_cross_reference_label_on_own_line() {
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec![
+            "**Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        assert!(
+            finding.contains("**Cross-reference / Dependencies:**\nnone"),
+            "cross-reference label should stand on its own line: {}",
+            finding
+        );
+    }
 }
+

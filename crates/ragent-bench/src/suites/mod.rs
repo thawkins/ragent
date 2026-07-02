@@ -112,7 +112,7 @@ pub fn adapter_for_suite(suite_id: &str) -> Result<&'static dyn BenchSuiteAdapte
     }
 }
 
-pub(crate) use metrics::{
+pub use metrics::{
     accuracy_metric, average_metric, best_exact_or_similarity_sample, codebleu_score,
     count_passed_failed, edit_similarity, evaluate_exact_match_case, exact_match_count,
     first_sample_exact_match, pass_at_1, pass_at_k, resolution_rate, skipped_metric,

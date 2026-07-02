@@ -361,10 +361,14 @@ impl App {
         let mut html_buf = String::new();
         html::push_html(&mut html_buf, parser);
 
-        let rendered = html2text::from_read(html_buf.as_bytes(), 120).unwrap_or_else(|_| {
-            // Fallback to original text when markdown conversion fails.
-            text.to_string()
-        });
+        let rendered =
+            match std::panic::catch_unwind(|| html2text::from_read(html_buf.as_bytes(), 120)) {
+                Ok(Ok(text)) => text,
+                _ => {
+                    // Fallback to original text when markdown conversion panics or fails.
+                    text.to_string()
+                }
+            };
         let cleaned = rendered
             .lines()
             .map(|l| l.trim_end())
@@ -6485,6 +6489,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           active_spec_id: session_processor.active_spec.read().await.clone(),
                                                                                                                                                                                                                           config: Some(Arc::new(ragent_core::config::Config::load().unwrap_or_default())),
                                                                                             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
                                                                                                                                                                                                                       };                                                    let _ = tool.execute(input, &ctx).await;                                                }
                                             });
                                     });
@@ -7486,13 +7491,13 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     "show" => {
                         let allowlist = ragent_core::bash_lists::get_allowlist();
                         let denylist = ragent_core::bash_lists::get_denylist();
-                        let safe_commands = ragent_core::tool::bash::get_safe_commands();
+                        let safe_commands = ragent_tools_core::bash::get_safe_commands();
                         let (
                             builtin_banned,
                             builtin_denied_commands,
                             builtin_denied_cmd_patterns,
                             builtin_patterns,
-                        ) = ragent_core::tool::bash::get_builtin_lists();
+                        ) = ragent_tools_core::bash::get_builtin_lists();
 
                         let mut out = String::from("From: /bash show\n\n## Bash command lists\n\n");
 
@@ -12398,10 +12403,18 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 // to the dedicated progress log list instead of the generic
                 // agent-notice chat bubble.
                 if let Some(decoded) = crate::research_progress::decode_progress_event(message) {
+                    let level = if decoded.status == crate::research_progress::StepStatus::Error {
+                        LogLevel::Warn
+                    } else {
+                        LogLevel::Info
+                    };
                     self.push_log_no_agent(
-                        LogLevel::Info,
+                        level,
                         format!("research: {} — {}", decoded.phase.as_str(), decoded.detail),
                     );
+                    if decoded.status == crate::research_progress::StepStatus::Error {
+                        self.status = format!("⚠ research: {}", decoded.detail);
+                    }
                     let progress = self.research_progress.get_or_insert_with(|| {
                         crate::research_progress::ResearchProgress::new(
                             decoded.name.clone(),
@@ -13227,32 +13240,36 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         match cmd {
             ResearchCliCommand::Help => unreachable!(),
             ResearchCliCommand::Create {
-                              name,
-                              topic,
-                              sources_dir,
-                              template,
-                              no_local,
-                              no_specs,
-                          } => {
-                              self.status = format!("research: writing research/{name}/RESEARCH.md…");
-                              self.push_log_no_agent(
-                                  LogLevel::Info,
-                                  format!("research: create '{name}' for topic: {topic}"),
-                              );
-                              // Seed the live progress tracker so the message window shows
-                              // a log list of each phase as it runs.
-                              self.research_progress = Some(crate::research_progress::ResearchProgress::new(
-                                  &name, &topic,
-                              ));
-                              self.refresh_research_progress_message();
-                              let config = SessionConfig {
-                                  topic: topic.clone(),
-                                  sources_dir: sources_dir.map(std::path::PathBuf::from),
-                                  template,
-                                  disable_local: no_local,
-                                  disable_specs: no_specs,
-                                  ..SessionConfig::default()
-                              };                let title = topic
+                name,
+                topic,
+                iterations: _,
+                depth: _,
+                format: _,
+                sources_dir,
+                template,
+                use_local,
+                use_specs,
+            } => {
+                self.status = format!("research: writing research/{name}/RESEARCH.md…");
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("research: create '{name}' for topic: {topic}"),
+                );
+                // Seed the live progress tracker so the message window shows
+                // a log list of each phase as it runs.
+                self.research_progress = Some(crate::research_progress::ResearchProgress::new(
+                    &name, &topic,
+                ));
+                self.refresh_research_progress_message();
+                let config = SessionConfig {
+                    topic: topic.clone(),
+                    sources_dir: sources_dir.map(std::path::PathBuf::from),
+                    template,
+                    disable_local: !use_local,
+                    disable_specs: !use_specs,
+                    ..SessionConfig::default()
+                };
+                let title = topic
                     .split_whitespace()
                     .next()
                     .unwrap_or(&topic)
@@ -13505,6 +13522,15 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     }
                 });
+            }
+            ResearchCliCommand::Continue { name, message } => {
+                self.append_assistant_text(&format!(
+                    "From: /research continue\n\nResuming `{name}`{}",
+                    message
+                        .as_ref()
+                        .map(|m| format!(" with follow-up: {m}"))
+                        .unwrap_or_default()
+                ));
             }
             ResearchCliCommand::Unknown(sub) => {
                 self.append_assistant_text(&format!(
@@ -14733,6 +14759,9 @@ mod tests {
             cached_tool_names: parking_lot::RwLock::new(None),
             auto_approve: false,
             system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         });
         let agent_info =
             agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

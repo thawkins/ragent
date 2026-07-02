@@ -146,11 +146,38 @@ struct TavilyResult {
 }
 
 /// A single search result.
-#[derive(Debug, Clone)]
-struct SearchResult {
-    title: String,
-    url: String,
-    snippet: String,
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SearchResult {
+    /// The title of the search result.
+    pub title: String,
+    /// The URL of the search result.
+    pub url: String,
+    /// A short snippet/summary from the search result.
+    pub snippet: String,
+}
+
+/// Extract structured search results from the JSON metadata emitted by
+/// [`WebSearchTool`].
+///
+/// The metadata is a JSON object with a `results` array, where each element
+/// has `title`, `url`, and `snippet` fields. Returns an empty vector if the
+/// metadata is missing the `results` key or if parsing fails.
+pub fn hits_from_metadata(metadata: &serde_json::Value) -> Vec<SearchResult> {
+    metadata
+        .get("results")
+        .and_then(|r| serde_json::from_value::<Vec<SearchResult>>(r.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// Truncate a search query to Tavily's maximum accepted length (400 chars),
+/// respecting UTF-8 character boundaries.
+pub(crate) fn truncate_query(query: &str) -> String {
+    const TAVILY_MAX_QUERY_CHARS: usize = 400;
+    if query.chars().count() <= TAVILY_MAX_QUERY_CHARS {
+        query.to_string()
+    } else {
+        query.chars().take(TAVILY_MAX_QUERY_CHARS).collect()
+    }
 }
 
 async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<Vec<SearchResult>> {
@@ -160,8 +187,11 @@ async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<V
         .build()
         .context("Failed to build HTTP client")?;
 
+    // Tavily rejects queries longer than 400 characters; truncate first so
+    // long prompts still get a response instead of an HTTP error.
+    let safe_query = truncate_query(query);
     let request_body = TavilyRequest {
-        query,
+        query: &safe_query,
         max_results,
         include_answer: false,
     };

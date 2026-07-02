@@ -33,7 +33,9 @@ dirs = { workspace = true }
 html2text = { workspace = true }
 base64 = { workspace = true }
 
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["cookies"] }
+regex = { workspace = true }
+percent-encoding = "2"
 docx-rust = { workspace = true }
 calamine = { workspace = true }
 rust_xlsxwriter = { workspace = true }
@@ -47,6 +49,7 @@ lopdf = { workspace = true }
 url = { workspace = true }
 [dev-dependencies]
 tempfile = "3.14"
+axum = { workspace = true }
 
 [dependencies.ort]
 workspace = true

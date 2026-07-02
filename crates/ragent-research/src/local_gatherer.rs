@@ -449,10 +449,10 @@ pub fn build_local_excerpt(body: &str, matches: &[GrepMatch], max_lines: usize) 
         if !match_set.contains(&one_based) {
             continue;
         }
-        if let Some(prev) = last_emitted {
-            if one_based > prev + 1 {
-                out.push_str("…\n");
-            }
+        if let Some(prev) = last_emitted
+            && one_based > prev + 1
+        {
+            out.push_str("…\n");
         }
         let marker = if matches.iter().any(|m| m.line == one_based) {
             "▶"
@@ -838,66 +838,66 @@ mod tests {
     }
 
     #[tokio::test]
-          async fn gather_includes_spec_sources_with_relevance_notes() {
-              let mut fs = FakeFs::default();
-              fs.specs
-                  .insert("auth-refactor".into(), "Auth refactor plan".into());
-              fs.specs
-                  .insert("model-router".into(), "Model router provider".into());
-              let (g, _) = gatherer_with_fs(fs);
-              let cfg = LocalGatherConfig {
-                  terms: vec!["auth".into()],
-                  max_local_sources: 5,
-                  ..LocalGatherConfig::default()
-              };
-              let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
-              let spec_sources: Vec<&Source> = sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Spec { .. }))
-                  .collect();
-              assert_eq!(spec_sources.len(), 2);
-              if let Source::Spec { relevance, .. } = spec_sources[0] {
-                  assert!(
-                      relevance.contains("Auth refactor plan") || relevance.contains("Model router"),
-                      "relevance should include the spec title: {relevance}"
-                  );
-              }
-          }
+    async fn gather_includes_spec_sources_with_relevance_notes() {
+        let mut fs = FakeFs::default();
+        fs.specs
+            .insert("auth-refactor".into(), "Auth refactor plan".into());
+        fs.specs
+            .insert("model-router".into(), "Model router provider".into());
+        let (g, _) = gatherer_with_fs(fs);
+        let cfg = LocalGatherConfig {
+            terms: vec!["auth".into()],
+            max_local_sources: 5,
+            ..LocalGatherConfig::default()
+        };
+        let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
+        let spec_sources: Vec<&Source> = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Spec { .. }))
+            .collect();
+        assert_eq!(spec_sources.len(), 2);
+        if let Source::Spec { relevance, .. } = spec_sources[0] {
+            assert!(
+                relevance.contains("Auth refactor plan") || relevance.contains("Model router"),
+                "relevance should include the spec title: {relevance}"
+            );
+        }
+    }
 
-          #[tokio::test]
-          async fn gather_skips_spec_sources_when_skip_specs_is_true() {
-              let mut fs = FakeFs::default();
-              fs.specs
-                  .insert("auth-refactor".into(), "Auth refactor plan".into());
-              fs.specs
-                  .insert("model-router".into(), "Model router provider".into());
-              fs.files.insert(
-                  root().join("README.md"),
-                  "authentication notes here\n".into(),
-              );
-              let (g, _) = gatherer_with_fs(fs);
-              let cfg = LocalGatherConfig {
-                  terms: vec!["auth".into()],
-                  max_local_sources: 5,
-                  skip_specs: true,
-                  ..LocalGatherConfig::default()
-              };
-              let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
-              let spec_count = sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Spec { .. }))
-                  .count();
-              assert_eq!(
-                  spec_count, 0,
-                  "spec sources should be omitted when skip_specs=true"
-              );
-              // Local sources should still be present.
-              let local_count = sources
-                  .iter()
-                  .filter(|s| matches!(s, Source::Local { .. }))
-                  .count();
-              assert!(local_count >= 1);
-          }
+    #[tokio::test]
+    async fn gather_skips_spec_sources_when_skip_specs_is_true() {
+        let mut fs = FakeFs::default();
+        fs.specs
+            .insert("auth-refactor".into(), "Auth refactor plan".into());
+        fs.specs
+            .insert("model-router".into(), "Model router provider".into());
+        fs.files.insert(
+            root().join("README.md"),
+            "authentication notes here\n".into(),
+        );
+        let (g, _) = gatherer_with_fs(fs);
+        let cfg = LocalGatherConfig {
+            terms: vec!["auth".into()],
+            max_local_sources: 5,
+            skip_specs: true,
+            ..LocalGatherConfig::default()
+        };
+        let sources = g.gather(&root(), "auth", None, &cfg).await.unwrap();
+        let spec_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Spec { .. }))
+            .count();
+        assert_eq!(
+            spec_count, 0,
+            "spec sources should be omitted when skip_specs=true"
+        );
+        // Local sources should still be present.
+        let local_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Local { .. }))
+            .count();
+        assert!(local_count >= 1);
+    }
     #[tokio::test]
     async fn gather_returns_empty_when_no_files_match() {
         let mut fs = FakeFs::default();

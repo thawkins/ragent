@@ -2939,8 +2939,7 @@ fn messages_to_lines<'a>(
                                     )));
                                 }
                             }
-                        } else if tool == "multiedit" {
-                            if let Some(file_stats) = state
+                                                  } else if tool == "multiedit" || tool == "multi_edit" {                            if let Some(file_stats) = state
                                 .output
                                 .as_ref()
                                 .and_then(|out| out.get("file_stats"))

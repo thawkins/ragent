@@ -196,7 +196,7 @@ impl ExtractionEngine {
         }
 
         // 3. Extract patterns from file edits.
-        if success && matches!(tool_name, "edit" | "write" | "create" | "multiedit") {
+        if success && matches!(tool_name, "edit" | "write" | "create" | "multiedit" | "multi_edit") {
             if let Some(candidate) =
                 Self::extract_pattern_from_edit(tool_name, input, result_content, working_dir)
             {
@@ -562,9 +562,15 @@ impl ExtractionEngine {
                     // Track edited files.
                     if matches!(
                         tc.tool_name.as_str(),
-                        "edit" | "write" | "create" | "multiedit"
+                        "edit" | "write" | "create" | "multiedit" | "multi_edit"
                     ) {
-                        if let Some(path) = tc.input.get("path").and_then(|v| v.as_str()) {
+                        // Accept both canonical (file_path) and legacy (path) param names.
+                        if let Some(path) = tc
+                            .input
+                            .get("file_path")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| tc.input.get("path").and_then(|v| v.as_str()))
+                        {
                             let rel = Path::new(path)
                                 .strip_prefix(working_dir)
                                 .unwrap_or(Path::new(path))

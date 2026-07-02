@@ -48,6 +48,9 @@ fn test_processor() -> SessionProcessor {
         stream_config: ragent_agent::config::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     }
 }
 

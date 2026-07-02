@@ -409,7 +409,14 @@ impl OllamaClient {
                 })
                 .collect();
             body["tools"] = json!(tool_defs);
+            // Explicitly tell Ollama-compatible models they may use tools.
+            // Some models (e.g. Ornith) narrate their reasoning as text
+            // unless tool_choice is set.
+            body["tool_choice"] = json!("auto");
         }
+
+        // Request usage in the final stream frame like OpenAI.
+        body["stream_options"] = json!({ "include_usage": true });
 
         if let Some(think) = think_flag_from_request(request) {
             body["think"] = json!(think);
@@ -550,15 +557,39 @@ impl LlmClient for OllamaClient {
                     for choice in choices {
                         let delta = &choice["delta"];
 
+                        // Detect whether this delta also carries tool calls.
+                        // Some Ollama models (e.g. Ornith) narrate the invocation
+                        // as text/code in `content` while emitting the real tool
+                        // call in `tool_calls`.  Suppress that duplicate narration
+                        // so the TUI only renders the executed tool, not the raw
+                        // `tool_name(args)` text.
+                        let has_tool_calls = delta["tool_calls"]
+                            .as_array()
+                            .is_some_and(|a| !a.is_empty());
+
                         // Text content
-                        if let Some(content) = delta["content"].as_str()
+                        if !has_tool_calls
+                            && let Some(content) = delta["content"].as_str()
                             && !content.is_empty()
                         {
                             yield StreamEvent::TextDelta { text: content.to_string() };
                         }
 
+                        // Reasoning / thinking content (Ollama emits this in the
+                        // OpenAI-compatible stream under `delta.reasoning`).
+                        // We treat it as reasoning so it does not pollute the
+                        // assistant text buffer and the model's subsequent
+                        // tool_calls are still parsed and executed.
+                        if let Some(reasoning) = delta["reasoning"].as_str() {
+                            yield StreamEvent::ReasoningDelta {
+                                text: reasoning.to_string(),
+                            };
+                        }
+
                         // Tool calls
-                        if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                        if has_tool_calls
+                            && let Some(tool_calls) = delta["tool_calls"].as_array()
+                        {
                             for tc in tool_calls {
                                 let index = tc["index"].as_u64().unwrap_or(0);
 
@@ -568,7 +599,8 @@ impl LlmClient for OllamaClient {
 
                                 if let Some(function) = tc.get("function") {
                                     if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids.get(&index)
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
                                             .cloned()
                                             .unwrap_or_else(|| format!("tc_{index}"));
                                         tool_call_names.insert(index, name.to_string());
@@ -581,7 +613,8 @@ impl LlmClient for OllamaClient {
                                     if let Some(args) = function["arguments"].as_str()
                                         && !args.is_empty()
                                     {
-                                        let tc_id = tool_call_ids.get(&index)
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
                                             .cloned()
                                             .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {

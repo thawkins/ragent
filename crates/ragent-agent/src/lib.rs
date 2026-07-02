@@ -39,6 +39,10 @@ pub mod team;
 pub mod tool;
 pub mod updater;
 
+/// Shared adapter that wires the agent tool registry into the research
+/// system's web/local gatherers.
+pub mod research_adapter;
+
 pub use ragent_config::config::StreamConfig;
 pub use ragent_config::{
     AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, GitLabIntegrationConfig,

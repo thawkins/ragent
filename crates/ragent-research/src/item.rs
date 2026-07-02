@@ -66,6 +66,10 @@ pub struct ResearchItem {
     pub modified_at: DateTime<Utc>,
     /// Sources backing the References Index block in `RESEARCH.md`.
     pub sources: Vec<Source>,
+    /// Sub-queries used by the web-gathering phase. Persisted in frontmatter so
+    /// the `RESEARCH.md` Search Queries section survives reloads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<String>,
 }
 
 impl ResearchItem {
@@ -85,7 +89,15 @@ impl ResearchItem {
             created_at: now,
             modified_at: now,
             sources: Vec::new(),
+            queries: Vec::new(),
         }
+    }
+
+    /// Replace the stored sub-queries and bump `modified_at`.
+    pub fn set_queries(&mut self, queries: Vec<String>) -> &mut Self {
+        self.queries = queries;
+        self.touch();
+        self
     }
 
     /// Update the lifecycle status and bump `modified_at`.
@@ -133,41 +145,68 @@ impl ResearchItem {
         self.modified_at = Utc::now();
     }
 
-    /// Render the YAML frontmatter block (with leading `---` fence).
+    /// Render the `RESEARCH.md` frontmatter block as clean YAML.
     ///
-    /// The output matches the shape defined at the top of this module and
-    /// round-trips through [`ResearchItem::from_frontmatter`].
+    /// The block uses standard YAML key/value syntax so it parses correctly
+    /// in any Markdown/YAML previewer:
     ///
     /// ```text
     /// ---
     /// name: rust-async
-    /// title: Rust Async Patterns
-    /// ...
-    /// sources: []
+    /// title: "Rust Async Patterns"
+    /// topic: "async/await idioms"
+    /// status: draft
+    /// created: 2024-01-15T10:30:00Z
+    /// modified: 2024-01-15T10:30:00Z
+    /// sources: 0 # see sources/ subdirectory
+    /// queries: []
     /// ---
     /// ```
+    ///
+    /// Strings are wrapped in double quotes and internal double quotes are
+    /// escaped so titles and topics containing colons or quotes still parse.
+    /// The output still round-trips through [`ResearchItem::from_frontmatter`].
     pub fn render_frontmatter(&self) -> String {
-        // Hand-rolled YAML to avoid pulling in serde_yaml as a hard
-        // dependency for what amounts to a five-line block. The shape
-        // matches what serde would emit for the public fields.
         let mut out = String::from("---\n");
         out.push_str(&format!("name: {}\n", self.name.as_str()));
-        out.push_str(&format!("title: {}\n", yaml_scalar(&self.title)));
-        out.push_str(&format!("topic: {}\n", yaml_scalar(&self.topic)));
+        out.push_str(&format!(
+            "title: \"{}\"\n",
+            self.title
+                .replace(['\n', '\r'], " ")
+                .replace('\"', "\\\"")
+        ));
+        out.push_str(&format!(
+            "topic: \"{}\"\n",
+            self.topic
+                .replace(['\n', '\r'], " ")
+                .replace('\"', "\\\"")
+        ));
         out.push_str(&format!("status: {}\n", self.status));
         out.push_str(&format!("created: {}\n", self.created_at.to_rfc3339()));
         out.push_str(&format!("modified: {}\n", self.modified_at.to_rfc3339()));
         out.push_str(&format!("sources: {}\n", sources_count(&self.sources)));
-        out.push_str("---\n");
+        if self.queries.is_empty() {
+            out.push_str("queries: []\n");
+        } else {
+            out.push_str("queries:\n");
+            for q in &self.queries {
+                out.push_str(&format!(
+                    "  - \"{}\"\n",
+                    q.replace(['\n', '\r'], " ")
+                        .replace('\"', "\\\"")
+                ));
+            }
+        }
+        out.push_str("---\n\n");
         out
     }
 
     /// Build a `ResearchItem` from a raw frontmatter block string.
     ///
-    /// Accepts the output of [`ResearchItem::render_frontmatter`] (or any
-    /// YAML-shaped block that uses the same field names) and extracts the
-    /// fields. Unknown fields are tolerated; missing required fields
-    /// produce an error explaining which one was absent.
+    /// Accepts the output of [`ResearchItem::render_frontmatter`] and remains
+    /// backward compatible with the older plain YAML key/value format. Unknown
+    /// fields are tolerated; missing required fields produce an error
+    /// explaining which one was absent.
     ///
     /// `sources` is intentionally parsed as a count rather than a list —
     /// the full source list is loaded by the IO layer from
@@ -182,78 +221,126 @@ impl ResearchItem {
             .unwrap_or(trimmed);
         let inner = inner.trim();
 
-        let mut name: Option<String> = None;
-        let mut title: Option<String> = None;
-        let mut topic: Option<String> = None;
-        let mut status: Option<ResearchStatus> = None;
-        let mut created: Option<DateTime<Utc>> = None;
-        let mut modified: Option<DateTime<Utc>> = None;
+        let mut fields: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut queries: Vec<String> = Vec::new();
+        let mut current_key: Option<String> = None;
+        let mut current_value: Vec<String> = Vec::new();
+
+        fn commit_field(
+            key: &mut Option<String>,
+            value: &mut Vec<String>,
+            fields: &mut std::collections::HashMap<String, String>,
+            queries: &mut Vec<String>,
+        ) {
+            if let Some(k) = key.take() {
+                if k == "queries" {
+                    for v in value.drain(..) {
+                        let v = v.trim();
+                        if v == "[]" {
+                            queries.clear();
+                        } else if let Some(item) = v.strip_prefix("- ") {
+                            let item = item.trim();
+                            if !item.is_empty() {
+                                queries.push(unquote_yaml_scalar(item));
+                            }
+                        }
+                    }
+                } else {
+                    fields.insert(k, value.join(" ").trim().to_string());
+                    value.clear();
+                }
+            }
+        }
 
         for raw_line in inner.lines() {
             let line = raw_line.trim();
             if line.is_empty() || line.starts_with('#') {
+                commit_field(
+                    &mut current_key,
+                    &mut current_value,
+                    &mut fields,
+                    &mut queries,
+                );
                 continue;
             }
-            let Some((key, value)) = line.split_once(':') else {
-                continue;
-            };
-            let key = key.trim();
-            let value = value.trim();
-            match key {
-                "name" => name = Some(value.to_string()),
-                "title" => title = Some(unquote_yaml_scalar(value)),
-                "topic" => topic = Some(unquote_yaml_scalar(value)),
-                "status" => {
-                    status = Some(
-                        ResearchStatus::parse(value)
-                            .ok_or_else(|| ResearchItemError::InvalidStatus(value.to_string()))?,
-                    );
+
+            if let Some((key, inline_value)) = parse_frontmatter_label(line) {
+                commit_field(
+                    &mut current_key,
+                    &mut current_value,
+                    &mut fields,
+                    &mut queries,
+                );
+                current_key = Some(key.clone());
+                if key == "queries" {
+                    if inline_value == "[]" {
+                        queries.clear();
+                        current_key = None;
+                    }
+                    // Non-empty inline query values are not expected; list items follow.
+                } else {
+                    current_value.push(inline_value);
                 }
-                "created" => {
-                    created = Some(
-                        DateTime::parse_from_rfc3339(value)
-                            .map_err(|e| ResearchItemError::InvalidTimestamp {
-                                field: "created".to_string(),
-                                source: e.to_string(),
-                            })?
-                            .with_timezone(&Utc),
-                    );
-                }
-                "modified" => {
-                    modified = Some(
-                        DateTime::parse_from_rfc3339(value)
-                            .map_err(|e| ResearchItemError::InvalidTimestamp {
-                                field: "modified".to_string(),
-                                source: e.to_string(),
-                            })?
-                            .with_timezone(&Utc),
-                    );
-                }
-                "sources" => { /* count-only, sources are loaded separately */ }
-                _ => { /* ignore unknown fields */ }
+            } else if current_key.is_some() {
+                current_value.push(line.to_string());
             }
         }
+        commit_field(
+            &mut current_key,
+            &mut current_value,
+            &mut fields,
+            &mut queries,
+        );
 
-        let name = name.ok_or(ResearchItemError::MissingField("name".to_string()))?;
+        let name = fields
+            .remove("name")
+            .ok_or(ResearchItemError::MissingField("name".to_string()))?;
         let name = ResearchName::try_new(name).map_err(ResearchItemError::InvalidName)?;
-        let title = title.ok_or(ResearchItemError::MissingField("title".to_string()))?;
-        let topic = topic.unwrap_or_default();
-        let status = status.unwrap_or_default();
-        let created_at = created.unwrap_or_else(Utc::now);
-        let modified_at = modified.unwrap_or(created_at);
+        let title = fields
+            .remove("title")
+            .ok_or(ResearchItemError::MissingField("title".to_string()))?;
+        let topic = fields.remove("topic").unwrap_or_default();
+        let status = fields
+            .remove("status")
+            .map(|v| {
+                ResearchStatus::parse(&v).ok_or_else(|| ResearchItemError::InvalidStatus(v.clone()))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let created_at = match fields.remove("created") {
+            Some(v) => DateTime::parse_from_rfc3339(&v)
+                .map_err(|e| ResearchItemError::InvalidTimestamp {
+                    field: "created".to_string(),
+                    source: e.to_string(),
+                })?
+                .with_timezone(&Utc),
+            None => Utc::now(),
+        };
+        let modified_at = match fields.remove("modified") {
+            Some(v) => DateTime::parse_from_rfc3339(&v)
+                .map_err(|e| ResearchItemError::InvalidTimestamp {
+                    field: "modified".to_string(),
+                    source: e.to_string(),
+                })?
+                .with_timezone(&Utc),
+            None => created_at,
+        };
+        // `sources` is count-only; the IO layer loads the real list.
+        let _ = fields.remove("sources");
 
         Ok(Self {
             name,
-            title,
-            topic,
+            title: unquote_yaml_scalar(&title),
+            topic: unquote_yaml_scalar(&topic),
             status,
             created_at,
             modified_at,
             sources: Vec::new(),
+            queries,
         })
     }
 }
-
 /// Errors that can occur while parsing a `ResearchItem` from a frontmatter block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResearchItemError {
@@ -289,28 +376,47 @@ impl std::fmt::Display for ResearchItemError {
 
 impl std::error::Error for ResearchItemError {}
 
-/// Render a string as a YAML scalar: plain if it contains no special
-/// characters, double-quoted otherwise. This keeps the frontmatter
-/// human-editable while staying valid YAML for non-trivial titles.
-fn yaml_scalar(value: &str) -> String {
-    if value.is_empty() {
-        return "\"\"".to_string();
+/// Parse a single frontmatter label line.
+///
+/// Supports the current markdown style (`**label:** value`), the legacy
+/// italic style (`*label:* value`), and the older plain YAML style
+/// (`label: value`). Returns the lowercase label and the inline value
+/// (which may be empty for list-valued fields such as `queries`).
+fn parse_frontmatter_label(line: &str) -> Option<(String, String)> {
+    let line = line.trim();
+
+    // Bold markdown label: **label:** rest
+    if let Some(rest) = line.strip_prefix("**")
+        && let Some((label, value)) = rest.split_once(":**")
+    {
+        return Some((label.trim().to_lowercase(), value.trim().to_string()));
     }
-    let needs_quote = value
-        .chars()
-        .any(|c| matches!(c, ':' | '#' | '"' | '\n' | '\r' | '\t'))
-        || value.starts_with(' ')
-        || value.ends_with(' ');
-    if needs_quote {
-        let escaped = value.replace('\\', r"\\").replace('"', r#"\""#);
-        format!("\"{escaped}\"")
-    } else {
-        value.to_string()
+
+    // Italic markdown label: *label:* rest
+    if let Some(rest) = line.strip_prefix("*")
+        && let Some((label, value)) = rest.split_once(":*")
+    {
+        return Some((label.trim().to_lowercase(), value.trim().to_string()));
     }
+
+    // Plain YAML-style key: value.
+    if let Some((key, value)) = line.split_once(':') {
+        let key = key.trim();
+        let value = value.trim();
+        if !key.is_empty()
+            && key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '/')
+        {
+            return Some((key.to_lowercase(), value.to_string()));
+        }
+    }
+
+    None
 }
 
-/// Reverse of [`yaml_scalar`] for the frontmatter parser. Strips surrounding
-/// double quotes (and unescapes `\\` and `\"`) if present.
+/// Reverse of the legacy [`yaml_scalar`] for the frontmatter parser. Strips
+/// surrounding double quotes (and unescapes `\\` and `\"`) if present.
 fn unquote_yaml_scalar(value: &str) -> String {
     let trimmed = value.trim();
     if let Some(inner) = trimmed.strip_prefix('"')
@@ -416,26 +522,41 @@ mod tests {
         let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
         let fm = item.render_frontmatter();
         assert!(fm.starts_with("---\n"));
-        assert!(fm.ends_with("---\n"));
+        assert!(fm.ends_with("---\n\n"));
         assert!(fm.contains("name: rust-async"));
-        assert!(fm.contains("title: Rust Async"));
-        assert!(fm.contains("topic: topic"));
+        assert!(fm.contains("title: \"Rust Async\""));
+        assert!(fm.contains("topic: \"topic\""));
         assert!(fm.contains("status: draft"));
         assert!(fm.contains("created: "));
         assert!(fm.contains("modified: "));
         assert!(fm.contains("sources: 0"));
+        assert!(fm.contains("queries: []"));
     }
 
     #[test]
-    fn render_frontmatter_quotes_titles_with_special_chars() {
-        let mut item = ResearchItem::new(sample_name(), "t", "topic");
-        item.set_title("Async: a deep dive");
+    fn render_frontmatter_uses_plain_yaml_lines() {
+        let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
         let fm = item.render_frontmatter();
-        assert!(fm.contains("title: \"Async: a deep dive\""));
+        assert!(
+            !fm.contains("**name:**"),
+            "frontmatter should not use markdown bold labels"
+        );
+        assert!(
+            fm.contains("name: rust-async\ntitle:"),
+            "fields should be plain YAML key: value"
+        );
     }
 
     #[test]
-    fn frontmatter_round_trips_through_parse() {
+    fn render_frontmatter_escapes_quotes_in_title_and_topic() {
+        let item = ResearchItem::new(sample_name(), "Has \"quotes\"", "also \"quoted\"");
+        let fm = item.render_frontmatter();
+        assert!(fm.contains("title: \"Has \\\"quotes\\\"\""));
+        assert!(fm.contains("topic: \"also \\\"quoted\\\"\""));
+    }
+
+    #[test]
+    fn render_frontmatter_round_trips_through_parse() {
         let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
         let fm = item.render_frontmatter();
         let parsed = ResearchItem::from_frontmatter(&fm).expect("frontmatter must parse");
@@ -449,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_round_trips_with_quoted_title() {
+    fn render_frontmatter_round_trips_with_special_chars_in_title() {
         let mut item = ResearchItem::new(sample_name(), "t", "topic");
         item.set_title("Has: colon");
         let fm = item.render_frontmatter();
@@ -458,36 +579,75 @@ mod tests {
     }
 
     #[test]
+    fn render_frontmatter_round_trips_with_queries() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.set_queries(vec!["first query".into(), "second query".into()]);
+        let fm = item.render_frontmatter();
+        let parsed = ResearchItem::from_frontmatter(&fm).expect("frontmatter must parse");
+        assert_eq!(parsed.queries, vec!["first query", "second query"]);
+    }
+
+    #[test]
+    fn render_frontmatter_round_trips_with_quote_in_query() {
+        let mut item = ResearchItem::new(sample_name(), "t", "topic");
+        item.set_queries(vec!["query with \"quotes\"".into()]);
+        let fm = item.render_frontmatter();
+        let parsed = ResearchItem::from_frontmatter(&fm).expect("frontmatter must parse");
+        assert_eq!(parsed.queries, vec!["query with \"quotes\""]);
+    }
+
+    #[test]
+    fn from_frontmatter_parses_bold_labeled_format() {
+        let block = "---\n\n**name:** rust-async\n\n**title:** Rust Async\n\n**topic:** async/await\n\n**status:** draft\n\n---\n\n";
+        let item = ResearchItem::from_frontmatter(block).unwrap();
+        assert_eq!(item.name.as_str(), "rust-async");
+        assert_eq!(item.title, "Rust Async");
+        assert_eq!(item.topic, "async/await");
+        assert_eq!(item.status, ResearchStatus::Draft);
+    }
+
+    #[test]
+    fn from_frontmatter_still_parses_legacy_plain_yaml() {
+        let block =
+            "---\nname: rust-async\ntitle: Rust Async\ntopic: async/await\nstatus: draft\n---\n";
+        let item = ResearchItem::from_frontmatter(block).unwrap();
+        assert_eq!(item.name.as_str(), "rust-async");
+        assert_eq!(item.title, "Rust Async");
+        assert_eq!(item.topic, "async/await");
+        assert_eq!(item.status, ResearchStatus::Draft);
+    }
+    #[test]
     fn from_frontmatter_fails_on_missing_name() {
-        let block = "---\ntitle: foo\n---\n";
+        let block = "---\n\n**title:** foo\n\n---\n\n";
         let err = ResearchItem::from_frontmatter(block).unwrap_err();
         assert!(matches!(err, ResearchItemError::MissingField(_)));
     }
 
     #[test]
     fn from_frontmatter_fails_on_invalid_name() {
-        let block = "---\nname: ..\ntitle: foo\n---\n";
+        let block = "---\n\n**name:** ..\n\n**title:** foo\n\n---\n\n";
         let err = ResearchItem::from_frontmatter(block).unwrap_err();
         assert!(matches!(err, ResearchItemError::InvalidName(_)));
     }
 
     #[test]
     fn from_frontmatter_fails_on_invalid_status() {
-        let block = "---\nname: rust-async\ntitle: foo\nstatus: nope\n---\n";
+        let block = "---\n\n**name:** rust-async\n\n**title:** foo\n\n**status:** nope\n\n---\n\n";
         let err = ResearchItem::from_frontmatter(block).unwrap_err();
         assert!(matches!(err, ResearchItemError::InvalidStatus(_)));
     }
 
     #[test]
     fn from_frontmatter_fails_on_invalid_timestamp() {
-        let block = "---\nname: rust-async\ntitle: foo\ncreated: not-a-date\n---\n";
+        let block =
+            "---\n\n**name:** rust-async\n\n**title:** foo\n\n**created:** not-a-date\n\n---\n\n";
         let err = ResearchItem::from_frontmatter(block).unwrap_err();
         assert!(matches!(err, ResearchItemError::InvalidTimestamp { .. }));
     }
 
     #[test]
     fn from_frontmatter_defaults_optional_fields() {
-        let block = "---\nname: rust-async\ntitle: foo\n---\n";
+        let block = "---\n\n**name:** rust-async\n\n**title:** foo\n\n---\n\n";
         let item = ResearchItem::from_frontmatter(block).unwrap();
         assert_eq!(item.status, ResearchStatus::Draft);
         assert!(item.topic.is_empty());
@@ -495,7 +655,7 @@ mod tests {
 
     #[test]
     fn from_frontmatter_tolerates_unknown_fields() {
-        let block = "---\nname: rust-async\ntitle: foo\nextra: stuff\nanother: 42\n---\n";
+        let block = "---\n\n**name:** rust-async\n\n**title:** foo\n\n**extra:** stuff\n\n**another:** 42\n\n---\n\n";
         let item = ResearchItem::from_frontmatter(block).expect("unknown fields must not error");
         assert_eq!(item.title, "foo");
     }

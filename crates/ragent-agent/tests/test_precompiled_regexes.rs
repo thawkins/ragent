@@ -9,6 +9,8 @@
 //! and that the accessor functions return the same `&'static` reference
 //! across calls (so callers always use a pre-compiled instance).
 
+#![allow(unused_imports)]
+
 #[test]
 fn stall_pattern_set_is_static() {
     use std::sync::OnceLock;

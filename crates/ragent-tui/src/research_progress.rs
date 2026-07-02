@@ -30,6 +30,8 @@ pub enum StepStatus {
     /// The phase captured one or more sources (or finished for non-capturing
     /// phases like setup/assemble/finalize).
     Done,
+    /// The phase reported an error but the session continues gracefully.
+    Error,
 }
 
 impl StepStatus {
@@ -38,6 +40,7 @@ impl StepStatus {
         match self {
             Self::Started => "▶",
             Self::Done => "✓",
+            Self::Error => "⚠",
         }
     }
 }
@@ -114,12 +117,22 @@ impl ResearchProgress {
         out.push_str(&format!("Topic: {}\n", self.topic));
         out.push('\n');
         for step in &self.steps {
-            out.push_str(&format!(
-                "  {} {:<8} — {}\n",
-                step.status.icon(),
-                step.phase,
-                step.detail
-            ));
+            let prefix = format!("  {} {:<8} — ", step.status.icon(), step.phase);
+            let lines: Vec<&str> = step.detail.lines().collect();
+            if lines.is_empty() {
+                out.push_str(&prefix);
+                out.push('\n');
+                continue;
+            }
+            out.push_str(&prefix);
+            out.push_str(lines[0]);
+            out.push('\n');
+            let continuation = " ".repeat(prefix.chars().count());
+            for line in lines.iter().skip(1) {
+                out.push_str(&continuation);
+                out.push_str(line);
+                out.push('\n');
+            }
         }
         if self.done
             && let Some(total) = self.total_sources
@@ -153,6 +166,31 @@ struct ProgressPayload {
 pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> String {
     let (phase, status, detail, total_sources) = match event {
         SessionEvent::Phase { phase } => (*phase, "started", phase_description(*phase), None),
+        SessionEvent::QueriesDecomposed { queries } => {
+            let detail = if queries.is_empty() {
+                "no decomposition".to_string()
+            } else {
+                format!(
+                    "decomposed into {} quer{}:\n  - {}",
+                    queries.len(),
+                    if queries.len() == 1 { "y" } else { "ies" },
+                    queries.join("\n  - ")
+                )
+            };
+            (SessionPhase::Web, "queries", detail, None)
+        }
+        SessionEvent::WebSearchFailed { error } => (
+            SessionPhase::Web,
+            "error",
+            format!("web search failed: {error}"),
+            None,
+        ),
+        SessionEvent::WebFetchFailed { url, error } => (
+            SessionPhase::Web,
+            "error",
+            format!("fetch failed for {url}: {error}"),
+            None,
+        ),
         SessionEvent::WebCaptured { url, title } => (
             SessionPhase::Web,
             "captured",
@@ -195,6 +233,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
             "marked complete".to_string(),
             Some(*total_sources),
         ),
+        _ => (SessionPhase::Setup, "event", format!("{event:?}"), None),
     };
     let payload = ProgressPayload {
         name: name.to_string(),
@@ -247,7 +286,8 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
     let phase = parse_phase(&payload.phase)?;
     let status = match payload.status.as_str() {
         "started" => StepStatus::Started,
-        "captured" | "done" => StepStatus::Done,
+        "captured" | "done" | "queries" => StepStatus::Done,
+        "error" => StepStatus::Error,
         _ => return None,
     };
     Some(DecodedProgress {
@@ -277,6 +317,36 @@ fn parse_phase(s: &str) -> Option<SessionPhase> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encode_decode_roundtrip_queries_decomposed() {
+        let queries = vec![
+            "async rust ecosystem overview".into(),
+            "tokio vs async-std comparison".into(),
+        ];
+        let encoded = encode_progress_event(
+            "foo",
+            "bar",
+            &SessionEvent::QueriesDecomposed {
+                queries: queries.clone(),
+            },
+        );
+        let decoded = decode_progress_event(&encoded).expect("decode");
+        assert_eq!(decoded.phase, SessionPhase::Web);
+        assert_eq!(decoded.status, StepStatus::Done);
+        assert!(
+            decoded.detail.contains("decomposed into 2 queries"),
+            "detail should report actual count: {}",
+            decoded.detail
+        );
+        for q in &queries {
+            assert!(
+                decoded.detail.contains(q),
+                "detail should list each query: {}",
+                decoded.detail
+            );
+        }
+    }
 
     #[test]
     fn test_encode_decode_roundtrip_phase() {
@@ -409,5 +479,31 @@ mod tests {
         assert!(rendered.contains("✓ web"));
         assert!(rendered.contains("✅ Complete — 3 source(s)"));
         assert!(rendered.contains("/research open rust-async"));
+    }
+
+    #[test]
+    fn test_progress_render_indents_multiline_detail() {
+        let mut p = ResearchProgress::new("rust-async", "async rust");
+        p.apply(
+            SessionPhase::Web,
+            StepStatus::Done,
+            "decomposed into 3 queries:\n  - query one\n  - query two\n  - query three",
+        );
+        let rendered = p.render();
+        assert!(rendered.contains("decomposed into 3 queries:"));
+        assert!(rendered.contains("  - query one"));
+        assert!(rendered.contains("  - query two"));
+        assert!(rendered.contains("  - query three"));
+        // Continuation lines should be indented to align with the first detail column.
+        let lines: Vec<&str> = rendered.lines().collect();
+        let first_idx = lines
+            .iter()
+            .position(|l| l.contains("decomposed into 3 queries"))
+            .expect("first detail line");
+        assert!(
+            lines[first_idx + 1].starts_with("              "),
+            "continuation line should be indented: {}",
+            lines[first_idx + 1]
+        );
     }
 }

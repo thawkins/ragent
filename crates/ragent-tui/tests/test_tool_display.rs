@@ -83,6 +83,39 @@ fn test_input_summary_edit_tool() {
 }
 
 #[test]
+fn test_input_summary_edit_tool_canonical_file_path() {
+    // The edit tool's canonical parameter is `file_path` (with `path` as a
+    // legacy alias). The message window header must show the file name when
+    // the model uses the canonical parameter name.
+    let input = json!({
+        "file_path": "src/main.rs",
+        "old_string": "old",
+        "new_string": "new"
+    });
+    let summary = tool_input_summary("edit", &input, "/home/user/project");
+    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        summary.contains("src/main.rs"),
+        "Should contain the relative path from file_path; got: {summary}"
+    );
+}
+
+#[test]
+fn test_input_summary_patch_tool_canonical_file_path() {
+    // patch shares the edit tool's canonical `file_path` parameter name.
+    let input = json!({
+        "file_path": "docs/README.md",
+        "patch": "--- a\n+++ b\n"
+    });
+    let summary = tool_input_summary("patch", &input, "/home/user/project");
+    assert!(summary.contains("📄"), "Should have file emoji");
+    assert!(
+        summary.contains("docs/README.md"),
+        "Should contain the relative path from file_path; got: {summary}"
+    );
+}
+
+#[test]
 fn test_input_summary_webfetch_tool() {
     let input = json!({"url": "https://example.com"});
     let summary = tool_input_summary("webfetch", &input, "/home/user/project");

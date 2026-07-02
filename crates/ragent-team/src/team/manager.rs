@@ -200,7 +200,12 @@ Prefer peer messaging when:
     )
 }
 
-fn apply_teammate_model_override(
+/// Resolve which model a teammate should run with.
+///
+/// Priority order: an explicit per-teammate model override, then the lead's
+/// active model, and finally whatever model is already set on the agent
+/// definition (which is left untouched when both override inputs are `None`).
+pub fn apply_teammate_model_override(
     agent: &mut AgentInfo,
     teammate_model: Option<&crate::agent::ModelRef>,
     lead_model: Option<&crate::agent::ModelRef>,
@@ -1661,65 +1666,4 @@ fn publish_message_event(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::apply_teammate_model_override;
-    use crate::agent::{AgentInfo, ModelRef};
 
-    #[test]
-    fn test_teammate_model_takes_priority_over_lead() {
-        let mut agent = AgentInfo::new("explore", "test");
-        agent.model = Some(ModelRef {
-            provider_id: "anthropic".to_string(),
-            model_id: "claude-3-5-haiku-latest".to_string(),
-        });
-
-        let teammate = ModelRef {
-            provider_id: "openai".to_string(),
-            model_id: "gpt-4o".to_string(),
-        };
-        let lead = ModelRef {
-            provider_id: "copilot".to_string(),
-            model_id: "claude-sonnet-4.6".to_string(),
-        };
-        apply_teammate_model_override(&mut agent, Some(&teammate), Some(&lead));
-
-        let model = agent.model.expect("model set");
-        assert_eq!(model.provider_id, "openai");
-        assert_eq!(model.model_id, "gpt-4o");
-    }
-
-    #[test]
-    fn test_lead_model_used_when_no_teammate_model() {
-        let mut agent = AgentInfo::new("explore", "test");
-        agent.model = Some(ModelRef {
-            provider_id: "anthropic".to_string(),
-            model_id: "claude-3-5-haiku-latest".to_string(),
-        });
-
-        let lead = ModelRef {
-            provider_id: "copilot".to_string(),
-            model_id: "claude-sonnet-4.6".to_string(),
-        };
-        apply_teammate_model_override(&mut agent, None, Some(&lead));
-
-        let model = agent.model.expect("model set");
-        assert_eq!(model.provider_id, "copilot");
-        assert_eq!(model.model_id, "claude-sonnet-4.6");
-    }
-
-    #[test]
-    fn test_agent_default_preserved_when_no_overrides() {
-        let mut agent = AgentInfo::new("explore", "test");
-        agent.model = Some(ModelRef {
-            provider_id: "anthropic".to_string(),
-            model_id: "claude-3-5-haiku-latest".to_string(),
-        });
-
-        apply_teammate_model_override(&mut agent, None, None);
-
-        let model = agent.model.expect("model set");
-        assert_eq!(model.provider_id, "anthropic");
-        assert_eq!(model.model_id, "claude-3-5-haiku-latest");
-    }
-}

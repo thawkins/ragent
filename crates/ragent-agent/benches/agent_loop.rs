@@ -37,7 +37,7 @@ fn build_request(msg_count: usize, tool_count: usize) -> ChatRequest {
         temperature: Some(0.2),
         top_p: None,
         max_tokens: Some(1024),
-        system: Some("You are a helpful assistant.".to_string()),
+        system: Some(std::sync::Arc::from("You are a helpful assistant.")),
         options: Default::default(),
         session_id: Some("bench-session".to_string()),
         request_id: Some("bench-req".to_string()),

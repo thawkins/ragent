@@ -5,7 +5,9 @@
 //! until the model signals completion or the step limit is reached.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
@@ -658,6 +660,11 @@ pub struct SessionProcessor {
     /// acceptable, the cache exists only to skip the work when inputs are
     /// unchanged.
     pub system_prompt_cache: parking_lot::RwLock<Option<Arc<SystemPromptCache>>>,
+    /// Read timestamps (mtime in milliseconds since UNIX epoch) for files
+    /// that have been read by this session. Shared with edit tools via
+    /// [`crate::tool::ToolContext`] so they can detect stale-file edits
+    /// (editrenewal FR-003).
+    pub read_timestamps: Arc<RwLock<HashMap<PathBuf, u64>>>,
 }
 
 impl SessionProcessor {
@@ -735,7 +742,7 @@ impl SessionProcessor {
         let defs = Arc::new(self.tool_registry.definitions());
         // PERF-003: also cache the tool-name list used by the `ToolsSent`
         // event so we don't allocate ~111 Strings on every loop step.
-        let names: Arc<[String]> = Arc::from_iter(defs.iter().map(|t| t.name.clone()));
+        let names: Arc<[String]> = defs.iter().map(|t| t.name.clone()).collect();
         {
             let mut guard = self.cached_tool_definitions.write();
             *guard = Some(defs.clone());
@@ -1869,10 +1876,31 @@ impl SessionProcessor {
                                 if attempt < max_retries
                                     && !is_permanent_llm_api_error(&error_message)
                                 {
-                                    self.event_bus.publish(Event::AgentNotice {
-                                        session_id: session_id.to_string(),
-                                        message: format!("{error_message} — will retry"),
-                                    });
+                                    #[cfg(feature = "compression")]
+                                    if session_config.compression.enabled
+                                        && is_token_overflow_error_message(&error_message)
+                                    {
+                                        emergency_compress_chat_messages(
+                                            &self.event_bus,
+                                            session_id,
+                                            &mut chat_messages,
+                                            context_window,
+                                            &session_config.compression,
+                                            &mut compressed_this_turn,
+                                            &mut last_reported_input_tokens,
+                                        );
+                                        self.event_bus.publish(Event::AgentNotice {
+                                                                                  session_id: session_id.to_string(),
+                                                                                  message: format!(
+                                                                                      "{error_message} — will emergency-compress and retry"
+                                                                                  ),
+                                                                              });
+                                    } else {
+                                        self.event_bus.publish(Event::AgentNotice {
+                                            session_id: session_id.to_string(),
+                                            message: format!("{error_message} — will retry"),
+                                        });
+                                    }
                                     continue 'retry;
                                 }
                                 self.event_bus.publish(Event::AgentError {
@@ -2079,7 +2107,37 @@ impl SessionProcessor {
                                             &reasoning_buffer,
                                             saw_completed_tool_call,
                                         );
-                                    if should_retry_stream_error(
+                                    let is_emergency_overflow: bool = {
+                                        #[cfg(feature = "compression")]
+                                        {
+                                            session_config.compression.enabled
+                                                && attempt < max_retries
+                                                && is_token_overflow_error_message(&message)
+                                        }
+                                        #[cfg(not(feature = "compression"))]
+                                        {
+                                            false
+                                        }
+                                    };
+                                    if is_emergency_overflow {
+                                        #[cfg(feature = "compression")]
+                                        emergency_compress_chat_messages(
+                                            &self.event_bus,
+                                            session_id,
+                                            &mut chat_messages,
+                                            context_window,
+                                            &session_config.compression,
+                                            &mut compressed_this_turn,
+                                            &mut last_reported_input_tokens,
+                                        );
+                                        self.event_bus.publish(Event::AgentNotice {
+                                            session_id: session_id.to_string(),
+                                            message: format!(
+                                                "{message} — will emergency-compress and retry"
+                                            ),
+                                        });
+                                        had_retryable_error = true;
+                                    } else if should_retry_stream_error(
                                         &message,
                                         attempt,
                                         max_retries,
@@ -2417,6 +2475,10 @@ impl SessionProcessor {
                         // PERF-019: start each turn with an empty team-dir
                         // cache; the first team tool to run populates it.
                         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                        // editrenewal FR-003: share the session-wide
+                        // read-timestamp map so edit tools can reject
+                        // stale-file edits.
+                        read_timestamps: self.read_timestamps.clone(),
                     };
                     let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
@@ -2533,7 +2595,10 @@ impl SessionProcessor {
                                     if tc_clone.name == "bash" {
                                         let sub_commands = split_bash_command(&resource);
                                         // Check if all commands are in the safe whitelist
-                                        use crate::tool::bash::is_safe_command;
+                                        // Source-of-truth is ragent-tools-core (agent-local
+                                        // crate::tool::bash is a dormant duplicate — see
+                                        // DCREMOVALPLAN.md M2.2 / M3).
+                                        use ragent_tools_core::bash::is_safe_command;
                                         let all_safe = sub_commands.iter().all(|cmd| {
                                             let cmd_name = extract_command_name(cmd);
                                             is_safe_command(&cmd_name)
@@ -2856,16 +2921,16 @@ impl SessionProcessor {
                     if let Some(ref spec_id_str) = active_spec_id {
                         if let Some(ref spec_mgr) = self.spec_manager.get() {
                             if tool_calls.iter().any(|tc| {
-                                matches!(
-                                    tc.name.as_str(),
-                                    "write"
-                                        | "edit"
-                                        | "multiedit"
-                                        | "patch"
-                                        | "create"
-                                        | "append_to_file"
-                                )
-                            }) {
+                                                                  matches!(
+                                                                      tc.name.as_str(),
+                                                                      "write"
+                                                                          | "edit"
+                                                                          | "multiedit"
+                                                                          | "multi_edit"
+                                                                          | "patch"
+                                                                          | "create"
+                                                                          | "append_to_file"
+                                                                  )                            }) {
                                 if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
                                     if let Ok(mut spec) = spec_mgr.read_spec(&id).await {
                                         let mut updated = false;
@@ -3727,6 +3792,55 @@ pub fn should_compress_with_reported(
     }
 }
 
+#[cfg(feature = "compression")]
+fn emergency_compress_chat_messages(
+    event_bus: &EventBus,
+    session_id: &str,
+    chat_messages: &mut Vec<ChatMessage>,
+    context_window: usize,
+    compression_config: &ragent_config::compression::CompressionConfig,
+    compressed_this_turn: &mut bool,
+    last_reported_input_tokens: &mut u64,
+) {
+    event_bus.publish(Event::CompressionStarted {
+        session_id: session_id.to_string(),
+    });
+    let result = crate::compression::pipeline::compress_chat_messages(
+        chat_messages,
+        context_window,
+        8192,
+        compression_config,
+    );
+    let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
+    if did_compress {
+        tracing::info!(
+            original_tokens = result.stats.original_tokens,
+            compressed_tokens = result.stats.compressed_tokens,
+            compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+            ccr_entries = result.stats.ccr_entries_stashed,
+            messages_compressed = result.stats.messages_compressed,
+            "Emergency compressed chat messages after token overflow"
+        );
+    } else {
+        tracing::warn!(
+            original_tokens = result.stats.original_tokens,
+            compressed_tokens = result.stats.compressed_tokens,
+            threshold = (context_window as f64 * compression_config.auto_threshold) as usize,
+            "Emergency compression did not reduce payload"
+        );
+    }
+    event_bus.publish(Event::CompressionFinished {
+        session_id: session_id.to_string(),
+        original_tokens: result.stats.original_tokens,
+        compressed_tokens: result.stats.compressed_tokens,
+        compression_ratio: result.stats.compression_ratio,
+        did_compress,
+    });
+    *chat_messages = result.chat_messages;
+    *compressed_this_turn = true;
+    *last_reported_input_tokens = 0;
+}
+
 fn extract_error_status_code(error_msg: &str) -> Option<u16> {
     for marker in ["HTTP ", "http ", "API error (", "api error (", "status "] {
         if let Some(rest) = error_msg.split(marker).nth(1) {
@@ -3947,9 +4061,9 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 mod tests {
     use super::*;
     use crate::permission::{PermissionAction, PermissionChecker};
+    use ragent_config::compression::CompressionConfig;
     use ragent_config::tool_family_names;
     use serde_json::json;
-
     #[tokio::test]
     async fn test_hardwired_team_tool_is_auto_approved() {
         let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
@@ -4337,5 +4451,53 @@ mod tests {
         let registry = crate::tool::ToolRegistry::new();
         let section = build_detailed_tool_reference_section(&registry);
         assert!(section.is_empty());
+    }
+
+    #[test]
+    fn test_is_token_overflow_error_message_detects_common_patterns() {
+        assert!(is_token_overflow_error_message(
+            "prompt token count exceeds maximum context length"
+        ));
+        assert!(is_token_overflow_error_message("context_length_exceeded"));
+        assert!(is_token_overflow_error_message(
+            "maximum context length exceeded"
+        ));
+        assert!(is_token_overflow_error_message("prompt is too long"));
+        assert!(is_token_overflow_error_message("input too large"));
+        assert!(!is_token_overflow_error_message("rate limit exceeded"));
+    }
+
+    #[test]
+    fn test_token_overflow_is_not_permanent_error() {
+        assert!(!is_permanent_llm_api_error(
+            "prompt token count exceeds maximum context length"
+        ));
+    }
+
+    #[cfg(feature = "compression")]
+    #[test]
+    fn test_emergency_compress_chat_messages_reduces_payload() {
+        let event_bus = Arc::new(EventBus::new(16));
+        let big_text = "x ".repeat(50_000);
+        let mut chat_messages = vec![ChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text(big_text),
+        }];
+        let mut compressed_this_turn = false;
+        let mut last_reported = 0u64;
+        let config = CompressionConfig::default();
+
+        emergency_compress_chat_messages(
+            &event_bus,
+            "test-session",
+            &mut chat_messages,
+            10_000,
+            &config,
+            &mut compressed_this_turn,
+            &mut last_reported,
+        );
+
+        assert!(compressed_this_turn);
+        assert_eq!(last_reported, 0);
     }
 }

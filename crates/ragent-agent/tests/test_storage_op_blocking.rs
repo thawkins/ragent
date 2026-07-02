@@ -18,12 +18,10 @@ use ragent_agent::event::EventBus;
 use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::permission::PermissionChecker;
 use ragent_agent::session::SessionManager;
-use ragent_agent::session::cache::SystemPromptCache;
 use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
 use ragent_agent::tool::ToolRegistry;
 use ragent_llm::provider::ProviderRegistry;
-use ragent_types::EventBus as _;
 
 fn test_processor() -> (SessionProcessor, Arc<Storage>) {
     let storage = Arc::new(Storage::open_in_memory().unwrap());
@@ -53,6 +51,9 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
         stream_config: ragent_agent::config::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     };
     (processor, storage)
 }

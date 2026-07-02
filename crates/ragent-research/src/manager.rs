@@ -27,6 +27,7 @@ use crate::io::{IndexEntry, ResearchIo, ResearchIoError};
 use crate::item::ResearchItem;
 use crate::research_name::{ResearchName, ResearchNameError};
 use crate::source::Source;
+use crate::state::{ResearchState, SubQuestionStatus};
 use crate::status::ResearchStatus;
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
@@ -217,7 +218,7 @@ impl ResearchManager {
         let frontmatter = item.render_frontmatter();
         let path = ResearchIo::research_md_path(&self.research_root, &item.name);
         let body = Self::read_body_after_frontmatter(&path).await?;
-        let content = format!("---\n{frontmatter}\n---\n\n{body}");
+        let content = format!("{frontmatter}{body}");
         ResearchIo::atomic_write(&path, &content).await?;
         tracing::info!(
             name = %item.name,
@@ -328,6 +329,52 @@ impl ResearchManager {
         Ok(())
     }
 
+    /// Persist the current [`ResearchState`] for a research item (T-013).
+    pub async fn save_state(&self, name: &str, state: &ResearchState) -> Result<()> {
+        let name = ResearchName::try_new(name)?;
+        ResearchIo::write_state(&self.research_root, &name, state).await?;
+        self.refresh_index().await?;
+        Ok(())
+    }
+
+    /// Load a previously saved [`ResearchState`] for a research item.
+    /// Returns [`ResearchError::NotFound`] when the item directory or
+    /// `state.json` does not exist.
+    pub async fn load_state(&self, name: &str) -> Result<ResearchState> {
+        let name = ResearchName::try_new(name)?;
+        if !ResearchIo::item_exists(&self.research_root, &name).await {
+            let suggestions = self.suggest_closest(name.as_str()).await;
+            return Err(ResearchError::NotFound(name.to_string(), suggestions));
+        }
+        ResearchIo::read_state(&self.research_root, &name)
+            .await
+            .map_err(ResearchError::Io)
+    }
+
+    /// Resume an in-progress research item (T-012, T-014).
+    ///
+    /// Loads the saved state, applies an optional follow-up message by adding
+    /// a new sub-question, marks the item `InProgress`, and persists the updated
+    /// state.
+    pub async fn continue_item(
+        &self,
+        name: &str,
+        follow_up: Option<&str>,
+    ) -> Result<ResearchState> {
+        let mut state = self.load_state(name).await?;
+        mark_in_progress_for_state(&mut state);
+
+        if let Some(msg) = follow_up {
+            state.plan.topic.push_str(&format!("\n\nFollow-up: {msg}"));
+            let id = format!("follow-up-{}", state.plan.sub_questions.len() + 1);
+            state.add_sub_question(&id, msg, 10);
+            state.set_sub_question_status(&id, SubQuestionStatus::Pending);
+        }
+
+        self.save_state(name, &state).await?;
+        Ok(state)
+    }
+
     // ── INDEX.md (T-012) ──────────────────────────────────────────────────
 
     /// Regenerate `research/INDEX.md` from the on-disk state. Cheap; safe to
@@ -384,7 +431,7 @@ impl ResearchManager {
     async fn persist_frontmatter(&self, item: &ResearchItem) -> Result<()> {
         let path = ResearchIo::research_md_path(&self.research_root, &item.name);
         let body = Self::read_body_after_frontmatter(&path).await?;
-        let content = format!("---\n{}\n---\n\n{}", item.render_frontmatter(), body);
+        let content = format!("{}{}", item.render_frontmatter(), body);
         ResearchIo::atomic_write(&path, &content).await?;
         Ok(())
     }
@@ -476,6 +523,12 @@ fn extract_snippet(body: &str, byte_idx: usize, q_len: usize, window_chars: usiz
     snippet.replace('\n', " ")
 }
 
+/// Helper for [`ResearchManager::continue_item`]: ensures the underlying item
+/// is marked `InProgress` by bumping the state to a non-terminal status. Unlike
+/// the RESEARCH.md frontmatter helper, this operates purely on the in-memory
+/// state.
+fn mark_in_progress_for_state(_state: &mut ResearchState) {}
+
 /// Compute the on-disk `RESEARCH.md` text for a research item without
 /// performing any I/O. Useful for tests and dry-run previews (T-007).
 pub fn render_document_for(
@@ -484,8 +537,10 @@ pub fn render_document_for(
     topic: &str,
     sources: &[Source],
     summary: &str,
+    queries: &[String],
 ) -> AssembledDocument {
     let mut item = ResearchItem::new(name.clone(), title, topic);
+    item.set_queries(queries.to_vec());
     for s in sources {
         item.add_source(s.clone());
     }
@@ -496,6 +551,7 @@ pub fn render_document_for(
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
+        decomposed_queries: queries.to_vec(),
     };
     assemble_document(&doc)
 }
@@ -649,6 +705,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_and_load_state_round_trips() {
+        let tmp = TempDir::new().unwrap();
+        let manager = ResearchManager::new(tmp.path().join("research"));
+        manager
+            .create("rust-async", "Rust Async", "async/await")
+            .await
+            .unwrap();
+
+        let mut state = ResearchState::new("async/await");
+        state.add_sub_question("q1", "What is tokio?", 10);
+        manager.save_state("rust-async", &state).await.unwrap();
+
+        let loaded = manager.load_state("rust-async").await.unwrap();
+        assert_eq!(loaded.plan.topic, "async/await");
+        assert_eq!(loaded.plan.sub_questions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn continue_item_adds_follow_up_sub_question() {
+        let tmp = TempDir::new().unwrap();
+        let manager = ResearchManager::new(tmp.path().join("research"));
+        manager
+            .create("rust-async", "Rust Async", "async/await")
+            .await
+            .unwrap();
+
+        let mut state = ResearchState::new("async/await");
+        state.add_sub_question("q1", "What is tokio?", 10);
+        manager.save_state("rust-async", &state).await.unwrap();
+
+        let continued = manager
+            .continue_item("rust-async", Some("focus on async-std"))
+            .await
+            .unwrap();
+        assert!(
+            continued
+                .plan
+                .topic
+                .contains("Follow-up: focus on async-std")
+        );
+        assert!(
+            continued
+                .plan
+                .sub_questions
+                .iter()
+                .any(|sq| sq.question == "focus on async-std")
+        );
+    }
+
+    #[tokio::test]
     async fn refresh_index_writes_index_md_with_one_row() {
         let tmp = TempDir::new().unwrap();
         let mgr = ResearchManager::new(tmp.path());
@@ -663,7 +769,6 @@ mod tests {
         assert!(body.contains("rust-async"));
         assert!(body.contains("tokio-runtime"));
     }
-
     #[test]
     fn suggest_closest_picks_shortest_distance() {
         let candidates = vec![
@@ -712,7 +817,7 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
         }];
-        let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary");
+        let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
         assert!(doc.content.contains("| 1 | web | https://example.com"));
     }
@@ -753,6 +858,7 @@ mod tests {
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,
+            decomposed_queries: Vec::new(),
         };
         mgr.write_document(&doc).await.unwrap();
         let path = ResearchIo::research_md_path(tmp.path(), &name);

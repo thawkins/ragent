@@ -143,6 +143,9 @@ fn make_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         working_dir: std::env::current_dir().unwrap(),
         code_index: None,
         config: None,
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     }
 }
 

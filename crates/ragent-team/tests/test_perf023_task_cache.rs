@@ -15,11 +15,9 @@
 //! only need `team_dir` (no session processor is required for the task
 //! cache path).
 
-use std::sync::Arc;
-
 use parking_lot::RwLock;
-use ragent_agent::event::EventBus;
-use ragent_team::team::{MemberStatus, Task, TaskList, TaskStatus, TeamMember, TeamStore};
+
+use ragent_team::team::{MemberStatus, Task, TaskList, TeamMember, TeamStore};
 
 /// A minimal `TeamManager`-like fixture exposing only the PERF-023 cache
 /// surface. We cannot easily construct a real `TeamManager` here (it needs a
@@ -192,7 +190,7 @@ fn test_cache_invalidates_on_external_mtime_change() {
     // differs between the cached snapshot and the external write.
     std::thread::sleep(std::time::Duration::from_millis(1100));
     {
-        let mut external = ragent_team::team::task::TaskStore::open(&team_dir).expect("open");
+        let external = ragent_team::team::task::TaskStore::open(&team_dir).expect("open");
         external
             .update_task("task-001", |t| {
                 t.title = "External".to_string();

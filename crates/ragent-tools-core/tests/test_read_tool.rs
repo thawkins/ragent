@@ -13,6 +13,7 @@ fn make_ctx() -> ToolContext {
         session_id: "test".to_string(),
         working_dir: std::env::current_dir().unwrap(),
         event_bus: Arc::new(EventBus::new(1024)),
+        read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     }
 }
 
@@ -251,4 +252,78 @@ async fn test_read_end_line_zero_is_error() {
     let result = ReadTool.execute(input, &make_ctx()).await;
 
     assert!(result.is_err());
+}
+
+// ── editrenewal T-002: read-timestamp tracking (FR-003) ───────────────────────
+
+/// Reading a file must record its last-modified time in the session
+/// `read_timestamps` map so that edit tools can detect stale-file edits.
+#[tokio::test]
+async fn test_read_records_timestamp() {
+    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    {
+        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        writeln!(f, "Line 1").unwrap();
+    }
+
+    let ctx = make_ctx();
+    assert!(
+        ctx.read_timestamps.read().unwrap().is_empty(),
+        "timestamp map should start empty"
+    );
+
+    let input = read_input(tmp.path().to_str().unwrap(), json!({}));
+    let _ = ReadTool.execute(input, &ctx).await.unwrap();
+
+    let map = ctx.read_timestamps.read().unwrap();
+    let canonical = tmp
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| tmp.path().to_path_buf());
+    let recorded = map.get(&canonical).or_else(|| {
+        // The read tool may store the unresolved path; check both.
+        map.iter().find(|(p, _)| *p == tmp.path()).map(|(_, v)| v)
+    });
+    assert!(
+        recorded.is_some(),
+        "timestamp should be recorded for the read file (map keys: {:?})",
+        map.keys().collect::<Vec<_>>()
+    );
+    let ts = recorded.unwrap();
+    assert!(
+        *ts > 0,
+        "recorded mtime must be a positive millisecond timestamp, got {ts}"
+    );
+}
+
+/// Reading a file twice must update (not lose) the timestamp entry, and
+/// reading two different files must record both.
+#[tokio::test]
+async fn test_read_timestamp_two_files() {
+    let tmp1 = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let tmp2 = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    {
+        let mut f = std::fs::File::create(tmp1.path()).unwrap();
+        writeln!(f, "alpha").unwrap();
+        let mut f = std::fs::File::create(tmp2.path()).unwrap();
+        writeln!(f, "beta").unwrap();
+    }
+
+    let ctx = make_ctx();
+    let _ = ReadTool
+        .execute(read_input(tmp1.path().to_str().unwrap(), json!({})), &ctx)
+        .await
+        .unwrap();
+    let _ = ReadTool
+        .execute(read_input(tmp2.path().to_str().unwrap(), json!({})), &ctx)
+        .await
+        .unwrap();
+
+    let map = ctx.read_timestamps.read().unwrap();
+    assert_eq!(
+        map.len(),
+        2,
+        "two distinct reads should produce two timestamp entries (keys: {:?})",
+        map.keys().collect::<Vec<_>>()
+    );
 }

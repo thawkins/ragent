@@ -17,8 +17,10 @@ fn default_agent_perf_config_matches_spec() {
 
 #[test]
 fn validate_rejects_too_short_step_budget() {
-    let mut cfg = AgentPerfConfig::default();
-    cfg.step_budget_secs = 1;
+    let cfg = AgentPerfConfig {
+        step_budget_secs: 1,
+        ..AgentPerfConfig::default()
+    };
     let problems = cfg.validate();
     assert!(!problems.is_empty());
     assert!(problems[0].contains("step_budget_secs"));
@@ -26,8 +28,10 @@ fn validate_rejects_too_short_step_budget() {
 
 #[test]
 fn validate_rejects_zero_concurrent_tools() {
-    let mut cfg = AgentPerfConfig::default();
-    cfg.max_concurrent_tools = 0;
+    let cfg = AgentPerfConfig {
+        max_concurrent_tools: 0,
+        ..AgentPerfConfig::default()
+    };
     let problems = cfg.validate();
     assert!(!problems.is_empty());
     assert!(problems[0].contains("max_concurrent_tools"));

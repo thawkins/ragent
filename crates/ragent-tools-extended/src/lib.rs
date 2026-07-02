@@ -164,6 +164,10 @@ pub struct ToolContext {
     /// Optional ragent configuration loaded from config files.
     /// Provides tools access to settings like API keys, permissions, etc.
     pub config: Option<Arc<ragent_config::Config>>,
+    /// Read timestamps (mtime in milliseconds since UNIX epoch) for files that
+    /// have been read by this session. Used by edit tools to detect stale-file
+    /// edits (editrenewal FR-003).
+    pub read_timestamps: Arc<std::sync::RwLock<std::collections::HashMap<PathBuf, u64>>>,
 }
 
 /// A tool that an agent can invoke to perform actions.

@@ -851,10 +851,16 @@ ragent run "Add input validation to the create_user endpoint"
 ### Research → Spec → Implement
 
 The `ragent research` workflow lets you gather information on a topic
-before turning it into a spec. Run any of these from the TUI prompt:
+before turning it into a spec. The new iterative engine decomposes the topic
+into sub-questions, gathers sources for each one in parallel, verifies claims,
+detects missing links, and stops adaptively.
+
+Run any of these from the TUI prompt:
 
 ```text
 /research rust-async async/await idioms in stable Rust
+/research create rust-async async/await idioms --depth deep --iterations 5
+/research continue rust-async focus on io_uring integration
 /spec create async-await Add async/await ergonomics --from-research rust-async
 ```
 
@@ -862,6 +868,8 @@ Or from the CLI:
 
 ```bash
 ragent research create rust-async "async/await idioms in stable Rust"
+ragent research create rust-async "async/await idioms" --depth deep --format executive-summary
+ragent research continue rust-async "focus on io_uring integration"
 ragent research list
 ragent research open rust-async
 ragent research search "async"

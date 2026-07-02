@@ -1315,16 +1315,44 @@ Every `RESEARCH.md` contains:
 
 | Command | Purpose |
 |---------|---------|
-| `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
-| `/research list` | List research items |
-| `/research open <name>` | Show the path to `RESEARCH.md` |
-| `/research show <name>` | Show metadata |
-| `/research search <query>` | Search across all `RESEARCH.md` files |
-| `/research delete <name>` | Delete a research item |
-| `/research archive <name>` | Archive a research item |
+  | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
+  | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
+  | `/research continue <name> [message]` | Resume an in-progress research item |
+  | `/research list` | List research items |
+  | `/research open <name>` | Show the path to `RESEARCH.md` |
+  | `/research show <name>` | Show metadata |
+  | `/research search <query>` | Search across all `RESEARCH.md` files |
+  | `/research delete <name>` | Delete a research item |
+  | `/research archive <name>` | Archive a research item |
+
+### 11.6 Iterative Research Loop (`researchext`)
+
+The research engine now supports an iterative, stateful loop:
+
+1. **Plan** — decompose the topic into focused sub-questions.
+2. **Gather** — capture sources for pending sub-questions in parallel.
+3. **Synthesize** — produce structured findings from evidence.
+4. **Verify** — ensure each claim traces back to a supporting source.
+5. **Critique** — score the result and detect missing-link gaps.
+6. **Iterate or stop** — continue until complete, out of budget, or no longer improving.
+
+State is persisted to `research/<name>/state.json` so sessions can be resumed with
+`/research continue`. The loop emits structured events for plan updates, sub-question
+status changes, source captures/failures, critic scores, verification results,
+follow-up queries, and iteration completion.
+
+### 11.7 Output Formats
+
+The `--format` flag selects the artifact produced at the end of a session:
+
+| Format | Description |
+|---|---|
+| `report` | Full multi-section `RESEARCH.md` (default). |
+| `executive-summary` | One-page summary. |
+| `comparison-table` | Comparison table across key entities. |
+| `source-bibliography` | Standalone bibliography of all captured sources. |
 
 ---
-
 # Part IV: Agent Customization & Extension
 
 ---

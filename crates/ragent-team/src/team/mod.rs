@@ -36,8 +36,8 @@ pub use config::{
 };
 pub use mailbox::{Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier};
 pub use manager::{
-    HookOutcome, TeamManager, build_team_prompt_addition, run_hook, run_team_hook,
-    teammate_retry_backoff,
+    HookOutcome, TeamManager, apply_teammate_model_override, build_team_prompt_addition,
+    run_hook, run_team_hook, teammate_retry_backoff,
 };
 pub use store::{TeamStore, find_project_teams_dir, find_team_dir, global_teams_dir};
 pub use swarm::{

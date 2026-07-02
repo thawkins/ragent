@@ -65,9 +65,11 @@ fn test_stream_config_validate_accepts_defaults() {
 
 #[test]
 fn test_stream_config_validate_rejects_initial_response_below_stall() {
-    let mut config = StreamConfig::default();
-    config.initial_response_timeout_secs = 10;
-    config.timeout_secs = 120;
+    let config = StreamConfig {
+        initial_response_timeout_secs: 10,
+        timeout_secs: 120,
+        ..StreamConfig::default()
+    };
     let problems = config.validate();
     assert!(
         problems
@@ -79,9 +81,11 @@ fn test_stream_config_validate_rejects_initial_response_below_stall() {
 
 #[test]
 fn test_stream_config_validate_rejects_too_small_values() {
-    let mut config = StreamConfig::default();
-    config.initial_response_timeout_secs = 1;
-    config.timeout_secs = 1;
+    let config = StreamConfig {
+        initial_response_timeout_secs: 1,
+        timeout_secs: 1,
+        ..StreamConfig::default()
+    };
     let problems = config.validate();
     assert_eq!(problems.len(), 2, "got {problems:?}");
 }

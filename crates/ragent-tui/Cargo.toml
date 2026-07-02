@@ -18,6 +18,9 @@ ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }
 ragent-storage = { path = "../ragent-storage" }
 ragent-codeindex = { path = "../ragent-codeindex" }
+# Direct dep for bash safe-command/builtin-list helpers (source-of-truth); the
+# agent-local crate::tool::bash copy is a dormant duplicate (DCREMOVALPLAN M2.3).
+ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-server = { path = "../ragent-server" }
 axum = { workspace = true }
 dirs = { workspace = true }

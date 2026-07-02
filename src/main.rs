@@ -183,18 +183,27 @@ enum ResearchCommands {
         /// Topic description (everything after the name)
         #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
         topic: Vec<String>,
+        /// Number of gathering iterations
+        #[arg(long)]
+        iterations: Option<u32>,
+        /// Research depth: shallow|standard|deep
+        #[arg(long)]
+        depth: Option<String>,
+        /// Output format: report|executive-summary|comparison-table|source-bibliography
+        #[arg(long)]
+        format: Option<String>,
         /// Optional extra sources directory (FR-019)
         #[arg(long)]
         sources_dir: Option<String>,
         /// Optional template name (FR-020)
         #[arg(long)]
         template: Option<String>,
-        /// Skip the local-file scanning phase
+        /// Include the local-file scanning phase
         #[arg(long)]
-        no_local: bool,
-        /// Skip the prior-spec cross-reference phase
+        use_local: bool,
+        /// Include the prior-spec cross-reference phase
         #[arg(long)]
-        no_specs: bool,
+        use_specs: bool,
     },
     /// List research items
     List {
@@ -505,6 +514,9 @@ async fn main() -> Result<()> {
         stream_config,
         auto_approve: cli.yes,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
 
@@ -1008,10 +1020,7 @@ async fn main() -> Result<()> {
 /// sources (T-035).
 async fn handle_research_command(command: ResearchCommands) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
-    use ragent_research::{
-        LocalGatherer, NoopAnalysisEngine, ResearchManager, ResearchSession, SessionConfig,
-        SessionEvent, SessionObserver,
-    };
+    use ragent_research::{ResearchManager, SessionConfig, SessionEvent, SessionObserver};
     use std::sync::Arc;
     let working_dir = std::env::current_dir()?;
     let research_root = working_dir.join("research");
@@ -1021,10 +1030,13 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
         ResearchCommands::Create {
             name,
             topic,
+            iterations,
+            depth,
+            format,
             sources_dir,
             template,
-            no_local,
-            no_specs,
+            use_local,
+            use_specs,
         } => {
             let topic = topic.join(" ");
             if topic.is_empty() {
@@ -1034,10 +1046,13 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             ResearchCliCommand::Create {
                 name,
                 topic,
+                iterations,
+                depth,
+                format,
                 sources_dir,
                 template,
-                no_local,
-                no_specs,
+                use_local,
+                use_specs,
             }
         }
         ResearchCommands::List { all } => ResearchCliCommand::List { all },
@@ -1129,10 +1144,13 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
         ResearchCliCommand::Create {
             name,
             topic,
+            iterations: _,
+            depth: _,
+            format: _,
             sources_dir,
             template,
-            no_local,
-            no_specs,
+            use_local,
+            use_specs,
         } => {
             // Wire the session through a streaming JSON observer so the
             // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
@@ -1146,8 +1164,8 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 topic: topic.clone(),
                 sources_dir: sources_dir.map(std::path::PathBuf::from),
                 template,
-                disable_local: no_local,
-                disable_specs: no_specs,
+                disable_local: !use_local,
+                disable_specs: !use_specs,
                 ..SessionConfig::default()
             };
             let title = topic
@@ -1155,17 +1173,24 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 .next()
                 .unwrap_or(&topic)
                 .to_string();
-            // Wire up the filesystem-backed local gatherer so the CLI can
-            // produce a useful RESEARCH.md without requiring API keys.
-            // Web search and LLM synthesis are intentionally omitted
-            // because they require external credentials that the CLI does
-            // not have access to without a configured provider.
-            let local = LocalGatherer::new(ragent_research::cli::FsLocalTool::new());
-            let session = ResearchSession::new(
+
+            // Build a full research session backed by the default tool
+            // registry so the CLI can capture web sources when a search API
+            // key is available, as well as local in-project sources.
+            let tool_registry = Arc::new(ragent_core::tool::create_default_registry());
+            let event_bus = Arc::new(EventBus::new(256));
+            let storage = Arc::new(Storage::open_in_memory()?);
+            let config_arc = Config::load().ok().map(Arc::new);
+            let session = ragent_core::research_adapter::build_research_session(
+                &tool_registry,
                 manager.clone(),
+                name.clone(),
+                working_dir.clone(),
+                event_bus,
+                Some(storage),
+                config_arc,
+                Some(Arc::new(ragent_core::provider::create_default_registry())),
                 None,
-                Some(local),
-                Arc::new(NoopAnalysisEngine),
             );
             match session
                 .run(&name, &title, &config, Arc::new(CliObserver))
@@ -1183,6 +1208,12 @@ async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        ResearchCliCommand::Continue { name, message } => {
+            eprintln!("ragent-research: continue is not yet supported from the CLI; use the TUI.");
+            let _ = name;
+            let _ = message;
+            std::process::exit(2);
         }
         ResearchCliCommand::Unknown(sub) => {
             eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");

@@ -2435,24 +2435,32 @@ fn build_system_prompt_with_storage_inner(
     prompt.push_str(
                                       "## File Reading Best Practices\n\n                                       When reading files with the `read` tool:\n                                       - **PREFERRED**: use `start_line` + `num_lines`.  `start_line` is the 1-based\n                                         absolute line number where reading begins, and `num_lines` is the COUNT of\n                                         lines to read from that start.  Example: `start_line=201, num_lines=100`\n                                         reads lines 201–300 (inclusive).  This pair expresses the same intent as\n                                         `start_line` + `end_line` but is much harder to get wrong.\n                                       - `end_line` is the absolute last line number to include (NOT a count).\n                                         It is still supported, but only use it when you specifically need an\n                                         absolute last-line boundary.  If you do, remember: `end_line` must be\n                                         ≥ `start_line` and is the ACTUAL last line number — e.g.\n                                         `start_line=200, end_line=300` reads lines 200–300 (101 lines total).\n                                       - Common mistake: writing `end_line=100` to mean \"100 lines\".  That is\n                                         wrong; `end_line` is absolute.  If you meant \"100 lines starting at 200\"\n                                         use `start_line=200, num_lines=100` (preferred) or `end_line=299`.\n                                       - The tool rejects `end_line < start_line` with a diagnostic that points\n                                         at the right fix; read the error message and retry with `num_lines`.\n                                       - For files > 100 lines, do not read the whole file in one call — read\n                                         in focused sections.  First call without a range returns the first 100\n                                         lines plus a section map; the response metadata always includes `total_lines`.\n                                       - Strategy:\n                                         1. Read the file without `start_line`/`num_lines` first — for large files\n                                            this returns the first 100 lines plus a section map with the total\n                                            line count.\n                                         2. Use `total_lines` from the response metadata to plan subsequent reads.\n                                         3. Then read specific sections with `start_line` + `num_lines`.\n                                         4. Never read an entire file > 100 lines in a single call.\n\n",
                                   ); // Guidance on using edit / multiedit tools
-    prompt.push_str(
-                  "\n## Editing Files\n\n\
-                   Use the `edit` tool for single surgical text replacements in one file.\n\
-                   Use the `multiedit` tool when applying multiple edits across one or more files atomically.\n\
-                   \n\
-                   When using the `edit` tool:\n\
-                   - You MUST always provide the `old_str` parameter containing the exact text to find\n\
-                   - You MUST always provide the `new_str` parameter containing the replacement text\n\
-                   - Calls to `edit` without `old_str` will fail with an error\n\
-                   - The `old_str` must match exactly one location in the file\n\
-                   - Read the relevant section of the file first to get the exact text for `old_str`\n\
-                                       \n\
-                                       When using the `multiedit` tool:\n\
-                                       - Provide an `edits` array, where each entry has `path`, `old_str`, and `new_str`\n\
-                                       - All edits are validated before any files are written\n\
-                                       - If any `old_str` match fails, no files are modified\n",
-                                   );
-
+          prompt.push_str(
+                        "\n## Editing Files\n\n\
+                         Use the `edit` tool for single surgical text replacements in one file.\n\
+                         Use the `multi_edit` tool when applying multiple edits across one or more files atomically.\n\
+                         \n\
+                         When using the `edit` tool:\n\
+                         - Prefer the canonical parameter names `file_path`, `old_string`, `new_string`.\n\
+                         - The legacy names `path`/`old_str`/`new_str` are still accepted but emit a deprecation warning.\n\
+                         - You MUST always provide `old_string` containing the exact text to find.\n\
+                         - You MUST always provide `new_string` containing the replacement text.\n\
+                         - `old_string` must match exactly once, byte-for-byte (including whitespace and indentation).\n\
+                         - Read the relevant section of the file first to get the exact text for `old_string`.\n\
+                         - Include 3–5 lines of context around the change point so the match is unique.\n\
+                         - Use an empty `old_string` with a non-existent `file_path` to create a new file.\n\
+                         - Use an empty `new_string` to delete the matched text.\n\
+                         - If the file was modified after you read it, the edit is rejected with a stale-file error; re-read first.\n\
+                         \n\
+                         When using the `multi_edit` tool:\n\
+                         - Provide an `edits` array, where each entry has `file_path`, `old_string`, and `new_string`.\n\
+                         - The legacy `multiedit` tool name is deprecated; prefer `multi_edit`.\n\
+                         - All edits are validated before any files are written.\n\
+                         - If any `old_string` match fails, no files are modified (atomic rollback).\n\
+                         - Edits to the same file are overlap-checked; overlapping edits are rejected.\n\
+                         - Each edit enforces strict exact-match: `old_string` must occur exactly once.\n\
+                                         ",
+                                        );
     // -------------------------------------------------------------------
     // Task tool family — the difference between `task_complete` and
     // `team_task_complete` trips up many models, leading to the wrong
