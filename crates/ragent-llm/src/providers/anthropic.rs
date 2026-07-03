@@ -14,7 +14,7 @@ use super::thinking::{
     full_reasoning_levels, reasoning_levels_from_supported_efforts,
     request_uses_unsupported_anthropic_display,
 };
-use crate::event::FinishReason;
+use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};

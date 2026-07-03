@@ -1,8 +1,12 @@
 //! Permission checking and access-control primitives.
 //!
-//! Provides [`PermissionChecker`] which evaluates glob-based
+//! This module is the canonical home for ragent's permission system. It
+//! provides [`PermissionChecker`] which evaluates glob-based
 //! [`PermissionRule`]s to decide whether an operation should be allowed,
 //! denied, or require interactive confirmation ([`PermissionAction`]).
+//!
+//! `ragent-agent::permission` and other crates re-export the types defined
+//! here (see `REMPLAN.md` M1 / T1.2).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -190,38 +194,35 @@ pub struct PermissionRequest {
 }
 
 /// The user's response to a [`PermissionRequest`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionDecision {
-    /// Allow this single occurrence only.
-    Once,
-    /// Allow now and for all future matching requests.
-    Always,
-    /// Deny the request.
-    Deny,
-}
+///
+/// This type is defined in `ragent_types::permission` (because the
+/// `Event::PermissionReplied` variant in `ragent-types::event` references it)
+/// and re-exported here so `ragent-config` consumers can import it from
+/// either location.  See `REMPLAN.md` M1 / T1.2.
+pub use ragent_types::permission::PermissionDecision;
 
 /// Evaluates permission rules against a requested permission and resource path.
 ///
 /// Rules are evaluated last-match-wins. Permanent grants recorded via
 /// [`record_always`](Self::record_always) take precedence over ruleset entries.
+/// The ruleset is pre-compiled and indexed by [`Permission`] type on
+/// construction so [`check`](Self::check) is O(rules_for_permission) rather
+/// than O(total_rules).
 pub struct PermissionChecker {
-    ruleset: PermissionRuleset,
+    /// Indexed rules by permission type for efficient lookup.
+    rules_by_permission: HashMap<Permission, Vec<(globset::GlobMatcher, PermissionAction)>>,
+    /// Wildcard rules (`Permission::Custom("*")`) that apply to all permissions.
+    wildcard_rules: Vec<(globset::GlobMatcher, PermissionAction)>,
+    /// Permanent "always allow" grants recorded at runtime.
     always_grants: HashMap<Permission, Vec<globset::GlobMatcher>>,
 }
 
 impl PermissionChecker {
-    fn permission_candidates(permission: &str) -> Vec<Permission> {
-        let normalized = Permission::from(permission);
-        let exact = Permission::Custom(permission.to_string());
-        if normalized == exact {
-            vec![normalized]
-        } else {
-            vec![exact, normalized]
-        }
-    }
-
     /// Creates a new checker with the given static ruleset.
+    ///
+    /// The ruleset is pre-compiled into glob matchers and indexed by
+    /// permission type. Rules with no pattern or an invalid glob are silently
+    /// dropped.
     ///
     /// # Examples
     ///
@@ -238,8 +239,35 @@ impl PermissionChecker {
     /// ```
     #[must_use]
     pub fn new(ruleset: PermissionRuleset) -> Self {
+        let mut rules_by_permission: HashMap<
+            Permission,
+            Vec<(globset::GlobMatcher, PermissionAction)>,
+        > = HashMap::new();
+        let mut wildcard_rules: Vec<(globset::GlobMatcher, PermissionAction)> = Vec::new();
+
+        // Pre-compile and index rules by permission type
+        for rule in ruleset {
+            let Some(pattern) = &rule.pattern else {
+                continue;
+            };
+            let Ok(glob) = globset::Glob::new(pattern) else {
+                continue;
+            };
+            let matcher = glob.compile_matcher();
+
+            if matches!(rule.permission, Permission::Custom(ref s) if s == "*") {
+                wildcard_rules.push((matcher, rule.action));
+            } else {
+                rules_by_permission
+                    .entry(rule.permission.clone())
+                    .or_default()
+                    .push((matcher, rule.action));
+            }
+        }
+
         Self {
-            ruleset,
+            rules_by_permission,
+            wildcard_rules,
             always_grants: HashMap::new(),
         }
     }
@@ -250,6 +278,11 @@ impl PermissionChecker {
     /// Permanent grants (from [`record_always`](Self::record_always)) are
     /// checked first; then the static ruleset is evaluated last-match-wins.
     /// Returns [`PermissionAction::Ask`] if no rule matches.
+    ///
+    /// Both the exact (custom) and normalized forms of `permission` are
+    /// considered, so namespaced categories like `"file:read"` match rules
+    /// keyed on the normalized [`Permission::Read`] variant as well as rules
+    /// keyed on the literal custom string `"file:read"`.
     ///
     /// # Examples
     ///
@@ -267,10 +300,15 @@ impl PermissionChecker {
     /// ```
     #[must_use]
     pub fn check(&self, permission: &str, path: &str) -> PermissionAction {
-        let targets = Self::permission_candidates(permission);
-        let wildcard = Permission::Custom("*".to_string());
+        let normalized = Permission::from(permission);
+        let exact = Permission::Custom(permission.to_string());
+        let targets: [Permission; 2] = if normalized == exact {
+            [normalized.clone(), normalized]
+        } else {
+            [exact, normalized]
+        };
 
-        // Check "always" grants first
+        // Check "always" grants first (both exact and normalized forms).
         for target in &targets {
             if let Some(matchers) = self.always_grants.get(target) {
                 for matcher in matchers {
@@ -281,19 +319,27 @@ impl PermissionChecker {
             }
         }
 
-        // Evaluate ruleset (last matching rule wins, like CSS specificity)
+        // Evaluate ruleset using indexed lookup (last matching rule wins).
         let mut result = PermissionAction::Ask;
-        for rule in &self.ruleset {
-            if (targets.contains(&rule.permission) || rule.permission == wildcard)
-                && let Some(pattern) = &rule.pattern
-                && let Ok(glob) = globset::Glob::new(pattern)
-            {
-                let matcher = glob.compile_matcher();
-                if matcher.is_match(path) {
-                    result = rule.action.clone();
+
+        // Permission-specific rules: check both exact and normalized buckets.
+        for target in &targets {
+            if let Some(rules) = self.rules_by_permission.get(target) {
+                for (matcher, action) in rules {
+                    if matcher.is_match(path) {
+                        result = action.clone();
+                    }
                 }
             }
         }
+
+        // Wildcard rules apply to all permissions.
+        for (matcher, action) in &self.wildcard_rules {
+            if matcher.is_match(path) {
+                result = action.clone();
+            }
+        }
+
         result
     }
 
@@ -319,5 +365,3 @@ impl PermissionChecker {
         }
     }
 }
-
-

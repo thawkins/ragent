@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use ragent_core::{
+use ragent_agent::{
     agent,
     event::EventBus,
     permission::PermissionChecker,
@@ -31,7 +31,7 @@ fn make_app() -> App {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_core::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),

@@ -16,11 +16,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-/// Compatibility re-export for moved helpers that still reference `crate::config`.
-pub mod config {
-    pub use ragent_config::Config;
-}
-
 /// Storage adapter types for GitLab-backed VCS helpers.
 pub mod storage {
     use anyhow::Result;
@@ -37,6 +32,37 @@ pub mod storage {
 
     /// Compatibility alias for migrated code that still references `crate::storage::Storage`.
     pub type Storage = dyn StorageBackend;
+
+    /// Blanket adapter: `ragent_storage::Storage` already provides all the
+    /// methods `StorageBackend` requires, so this impl forwards directly.
+    /// Defining it here (in the crate that owns `StorageBackend`) avoids the
+    /// orphan-rule violation that previously forced `ragent-agent` to define
+    /// the impl on a foreign type (see `REMPLAN.md` M2 / T2.2).
+    impl StorageBackend for ragent_storage::Storage {
+        fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
+            self.get_provider_auth(provider_id)
+        }
+
+        fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> Result<()> {
+            self.set_provider_auth(provider_id, api_key)
+        }
+
+        fn delete_provider_auth(&self, provider_id: &str) -> Result<()> {
+            self.delete_provider_auth(provider_id)
+        }
+
+        fn get_setting(&self, key: &str) -> Result<Option<String>> {
+            self.get_setting(key)
+        }
+
+        fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+            self.set_setting(key, value)
+        }
+
+        fn delete_setting(&self, key: &str) -> Result<()> {
+            self.delete_setting(key)
+        }
+    }
 }
 
 /// The result of a tool execution, including optional structured metadata.

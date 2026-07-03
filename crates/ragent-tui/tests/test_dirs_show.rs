@@ -2,7 +2,7 @@
 
 #[test]
 fn test_get_builtin_lists_returns_expected_structure() {
-    let (builtin_allow, builtin_deny) = ragent_core::dir_lists::get_builtin_lists();
+    let (builtin_allow, builtin_deny) = ragent_agent::dir_lists::get_builtin_lists();
 
     // Verify return types are Vec<String>
     assert!(builtin_allow.is_empty() || !builtin_allow.is_empty());
@@ -24,7 +24,7 @@ fn test_get_builtin_lists_returns_expected_structure() {
 
 #[test]
 fn test_builtin_denylist_includes_critical_directories() {
-    let (_, builtin_deny) = ragent_core::dir_lists::get_builtin_lists();
+    let (_, builtin_deny) = ragent_agent::dir_lists::get_builtin_lists();
 
     // Unix/Linux critical directories
     assert!(builtin_deny.iter().any(|p| p.contains("/bin")));
@@ -43,7 +43,7 @@ fn test_builtin_denylist_includes_critical_directories() {
 
 #[test]
 fn test_builtin_allowlist_empty_by_default() {
-    let (builtin_allow, _) = ragent_core::dir_lists::get_builtin_lists();
+    let (builtin_allow, _) = ragent_agent::dir_lists::get_builtin_lists();
 
     // Currently the allowlist is empty by design
     assert!(

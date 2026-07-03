@@ -268,7 +268,7 @@ Quick flow:
 Docs and examples:
 
 - Guide: [`docs/teams.md`](docs/teams.md)
-- How-to manual: [`docs/howto_teams.md`](docs/howto_teams.md)
+- How-to manual: [`docs/howtos/howto_teams.md`](docs/howtos/howto_teams.md)
 - Example bundles: [`examples/teams/`](examples/teams/)
 
 ## Architecture
@@ -339,13 +339,15 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.88** — The core architecture, tool system (~111 tools), TUI, HTTP
+**v0.1.0-alpha.128** — The core architecture, tool system (~111 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+  - All 279 compiler warnings eliminated (build, tests, benches, examples)
   - Context compression pipeline added (`/compress` slash command)
-  - `read` tool instructions clarified (`end_line` is absolute line number)- Remote push prohibitions strengthened in `AGENTS.md`
+  - `read` tool instructions clarified (`end_line` is absolute line number)
+  - Remote push prohibitions strengthened in `AGENTS.md`
 - SPEC.md reorganized, audited, and brought up to date with actual implementation
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery

@@ -125,7 +125,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
             std::collections::HashMap::new(),
         )),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(

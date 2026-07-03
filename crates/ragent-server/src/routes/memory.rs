@@ -23,8 +23,7 @@ use axum::{
     http::StatusCode,
     routing::{delete, get},
 };
-use ragent_agent as ragent_core;
-use ragent_core::{
+use ragent_agent::{
     event::Event,
     memory::{BlockScope, BlockStorage, FileBlockStorage, load_all_blocks},
 };
@@ -179,7 +178,7 @@ fn parse_scope(s: &str) -> Result<BlockScope, (StatusCode, Json<serde_json::Valu
 /// Convert a `MemoryBlock` into a JSON-friendly response.
 fn block_to_response(
     scope: &BlockScope,
-    block: &ragent_core::memory::MemoryBlock,
+    block: &ragent_agent::memory::MemoryBlock,
 ) -> BlockResponse {
     BlockResponse {
         label: block.label.clone(),
@@ -198,7 +197,7 @@ fn block_to_response(
 
 /// Convert a `MemoryRow` and its tags into a JSON-friendly response.
 fn memory_row_to_response(
-    row: &ragent_core::storage::MemoryRow,
+    row: &ragent_agent::storage::MemoryRow,
     tags: Vec<String>,
 ) -> MemoryResponse {
     MemoryResponse {
@@ -276,7 +275,7 @@ pub async fn put_block(
     Json(body): Json<PutBlockRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // Validate label
-    if ragent_core::memory::MemoryBlock::validate_label(&label).is_err() {
+    if ragent_agent::memory::MemoryBlock::validate_label(&label).is_err() {
         return error_response(
             StatusCode::BAD_REQUEST,
             format!(
@@ -297,7 +296,7 @@ pub async fn put_block(
     // Load existing block to preserve metadata, or create new
     let mut block = match storage.load(&label, &scope, &wd) {
         Ok(Some(existing)) => existing,
-        _ => ragent_core::memory::MemoryBlock::new(&label, scope.clone()),
+        _ => ragent_agent::memory::MemoryBlock::new(&label, scope.clone()),
     };
 
     // Check read-only before modifying
@@ -579,7 +578,7 @@ pub async fn get_visualisation(
     let block_storage = FileBlockStorage::new();
     let working_dir = working_dir();
 
-    match ragent_core::memory::generate_visualisation(&state.storage, &block_storage, &working_dir)
+    match ragent_agent::memory::generate_visualisation(&state.storage, &block_storage, &working_dir)
     {
         Ok(data) => serialize_response(data, "visualisation"),
         Err(e) => error_response(
@@ -593,7 +592,7 @@ pub async fn get_visualisation(
 pub async fn get_visualisation_graph(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_core::memory::generate_graph(&state.storage) {
+    match ragent_agent::memory::generate_graph(&state.storage) {
         Ok(graph) => serialize_response(graph, "graph"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -606,7 +605,7 @@ pub async fn get_visualisation_graph(
 pub async fn get_visualisation_tags(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_core::memory::generate_tag_cloud(&state.storage) {
+    match ragent_agent::memory::generate_tag_cloud(&state.storage) {
         Ok(cloud) => serialize_response(cloud, "tag_cloud"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -619,7 +618,7 @@ pub async fn get_visualisation_tags(
 pub async fn get_visualisation_heatmap(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_core::memory::generate_heatmap(&state.storage) {
+    match ragent_agent::memory::generate_heatmap(&state.storage) {
         Ok(heatmap) => serialize_response(heatmap, "heatmap"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -24,9 +24,12 @@ pub mod thinking;
 pub use error::RagentError;
 pub use event::{Event, EventBus};
 pub use id::{MessageId, SessionId};
-pub use llm::{LlmProvider, LlmResponse, ModelInfo, ProviderConfig, ToolDefinition};
-pub use message::{Message, Role};
-pub use permission::{Permission, PermissionDecision, PermissionRequest};
+pub use llm::{
+    ChatContent, ChatMessage, ChatRequest, ContentPart, LlmFinishReason, StreamEvent,
+    ToolDefinition,
+};
+pub use message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+pub use permission::PermissionDecision;
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 // Re-export string utilities for convenient access
 pub use strutil::{truncate_bytes, truncate_chars};

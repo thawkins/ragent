@@ -33,7 +33,7 @@ use std::sync::Mutex;
 use super::thinking::{
     full_reasoning_levels, reasoning_effort_from_request, reasoning_levels_from_supported_efforts,
 };
-use crate::event::FinishReason;
+use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};

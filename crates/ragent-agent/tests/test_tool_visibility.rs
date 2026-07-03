@@ -1,6 +1,6 @@
 //! Tests for tool visibility configuration.
 
-use ragent_agent::config::{Config, ToolVisibilityConfig, tool_family_names};
+use ragent_agent::{Config, ToolVisibilityConfig, tool_family_names};
 
 #[test]
 fn test_default_tool_visibility_config() {

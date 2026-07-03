@@ -115,7 +115,7 @@ impl IncrementalSnapshot {
 ///
 /// ```rust,no_run
 /// use std::path::PathBuf;
-/// use ragent_core::snapshot::take_snapshot;
+/// use ragent_agent::snapshot::take_snapshot;
 ///
 /// let files = vec![PathBuf::from("/tmp/example.txt")];
 /// let snap = take_snapshot("session-1", "msg-1", &files).unwrap();
@@ -152,7 +152,7 @@ pub fn take_snapshot(session_id: &str, message_id: &str, files: &[PathBuf]) -> R
 ///
 /// ```rust,no_run
 /// use std::path::PathBuf;
-/// use ragent_core::snapshot::{take_snapshot, restore_snapshot};
+/// use ragent_agent::snapshot::{take_snapshot, restore_snapshot};
 ///
 /// let files = vec![PathBuf::from("/tmp/example.txt")];
 /// let snap = take_snapshot("session-1", "msg-1", &files).unwrap();
@@ -183,7 +183,7 @@ pub fn restore_snapshot(snapshot: &Snapshot) -> Result<()> {
 ///
 /// ```rust,no_run
 /// use std::path::PathBuf;
-/// use ragent_core::snapshot::{take_snapshot, incremental_save};
+/// use ragent_agent::snapshot::{take_snapshot, incremental_save};
 ///
 /// let files = vec![PathBuf::from("/tmp/example.txt")];
 /// let base = take_snapshot("session-1", "msg-1", &files).unwrap();

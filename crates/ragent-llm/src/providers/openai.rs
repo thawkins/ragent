@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::{openai_thinking_levels_for_model, reasoning_effort_from_request};
-use crate::event::FinishReason;
+use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};

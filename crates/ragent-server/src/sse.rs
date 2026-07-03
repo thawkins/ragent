@@ -1,6 +1,6 @@
 //! SSE event serialization.
 //!
-//! Converts [`ragent_core::event::Event`] variants into Axum SSE events with
+//! Converts [`ragent_agent::event::Event`] variants into Axum SSE events with
 //! typed event names and JSON payloads for streaming to HTTP clients.
 //!
 //! Payloads are serialized directly from borrowed typed structs via
@@ -8,9 +8,8 @@
 //! allocations that the `json!` macro would create.
 
 use axum::response::sse::Event as SseEvent;
-use ragent_agent as ragent_core;
-use ragent_core::event::{Event, FinishReason};
-use ragent_core::sanitize::redact_secrets;
+use ragent_agent::event::{Event, FinishReason};
+use ragent_agent::sanitize::redact_secrets;
 use serde::Serialize;
 
 // ── Payload structs ──────────────────────────────────────────────────────
@@ -924,7 +923,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
     };
     (name, data)
 }
-/// Convert a `ragent_core` [`Event`] into an Axum [`SseEvent`].
+/// Convert a `ragent_agent` [`Event`] into an Axum [`SseEvent`].
 ///
 /// Payloads are serialized directly from typed structs — no intermediate
 /// `serde_json::Value` is allocated.

@@ -1,5 +1,68 @@
 # Changelog
 
+## Version: 0.1.0-alpha.128
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.128`.
+- **Warning remediation** — Eliminated all 279 compiler warnings across the
+  workspace (build, tests, benches, and examples now compile with zero
+  warnings under `--all-features`). Fixes applied:
+  - Removed ~270 unused imports across `ragent-tui` app submodules (init,
+    compress, bench, swarm, research, models, slash, input_handler,
+    event_handler, session_ops) left over from the `app.rs` split (M5).
+  - Added `///` doc comments to 62 previously-undocumented `pub` /
+    `pub(crate)` methods and associated functions across `ragent-tui` app
+    submodules and `ragent-agent` `session/processor.rs` to satisfy
+    `-W missing-docs`.
+  - Gated the `is_token_overflow_error_message` import in
+    `session/loop_steps.rs` behind `#[cfg(feature = "compression")]` and
+    added `#[allow(unused_variables)]` / `#[allow(unused_mut)]` on
+    feature-conditional parameters in `build_turn_chat_messages`.
+  - Removed unused `std::sync::Arc` and `clap::Subcommand` imports from
+    `src/cli.rs`.
+  - Removed unused `ragent_prompt_opt::Completer` import from
+    `app/swarm.rs` and `tool::TeamManagerInterface` from
+    `app/input_handler.rs`.
+  - Deleted dead duplicate `#[cfg(test)]` test functions in
+    `app/models.rs` and `app/session_ops.rs` (the canonical `#[test]`
+    versions live in `app/tests.rs`).
+  - Deleted the dead `test_app` helper in `app/helpers.rs` (the canonical
+    copy lives in `app/tests.rs`) and its `#[cfg(test)]` import block.
+  - Removed redundant `use super::*;` from `app/tests.rs` and the
+    `router_modifiers` inline test file.
+
+## [Unreleased] — REMPLAN.md Structural Remediation (M1–M10)
+
+### Refactoring
+
+Completed a 10-milestone structural remediation plan that deduplicated types,
+eliminated source copies, broke dependency cycles, split overlarge files,
+removed dead code, migrated inline tests, and cleaned up repository hygiene.
+
+- **M1** — Foundation type consolidation: `Message`, `Permission*`, and LLM
+  primitive types each have exactly one canonical definition. Guard test added.
+- **M2** — Eliminate duplicate `Storage`: `ragent-storage` is the sole impl;
+  `ragent-agent` re-exports it via a 27-line shim.
+- **M3** — Break `ragent-agent`↔`ragent-team` `#[path]` cycle: Team sources
+  moved into `ragent-agent`; `ragent-team` is a thin re-export shim. 27
+  `#[path]` attributes eliminated.
+- **M4** — Retire the `ragent_core` alias: 470+ `ragent_core::` →
+  `ragent_agent::` references rewritten across 63 files.
+- **M5** — Split `ragent-tui/src/app.rs`: 15,332 → 28 lines; methods
+  distributed across 12+ submodules.
+- **M6** — Split `session/processor.rs`: 4,503 → 2,911 lines; 4 sibling
+  modules extracted; 22 inline tests moved to external test file.
+- **M7** — Remove dead code & compat shims: `predictive.rs` (454 lines) and
+  `message/pool.rs` (168 lines) deleted; 4 `pub mod config {}` shims
+  collapsed.
+- **M8** — Migrate inline tests to `tests/`: 373 tests moved to
+  `tests/inline/`; CI guard script added (baseline 109).
+- **M9** — Repository hygiene: Stray files and output dirs untracked;
+  `docs/howtoos/` → `docs/howtos/`; `src/main.rs` split (1,223 → 905 lines).
+- **M10** — Final verification & docs: All structural-defect checks pass.
+  Completion report at `docs/reports/remplan-completion.md`.
+
 ## Version: 0.1.0-alpha.127
 
 ### Changed

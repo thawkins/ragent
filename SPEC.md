@@ -1956,7 +1956,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 ### Added
 - COMMSPLAN team subsystem hardening (M1–M4)
   - M1: Advisory-lock-protected file stores (`*.json.lock` + UUID temp files) for `Mailbox`, `TaskStore`, and `TeamStore`
-  - M2: Single-source team implementation — `ragent-agent` source-includes team runtime and 20 team tools from `ragent-team` via `#[path]`; CI guard `scripts/check-team-duplication.sh`
+  - M2: Single-source team implementation — team runtime (7 modules) and 20 team tools are native to `ragent-agent`; `ragent-team` is a thin re-export shim. CI guard `scripts/check-team-duplication.sh`
   - M3: `team_wait` liveness fixes, `team_idle` publishes `TeammateIdle`, unified shutdown path with `immediate` parameter
   - M4: Mailbox peek/ack at-least-once semantics, `team_assign_task` notifications, `team_broadcast` per-recipient results, `team_message` recipient validation, `team_read_messages` snake_case schema
 - Unified whitespace-tolerant replacement matcher — `edit`, `multiedit`, and `memory_replace` now share `ragent_tools_core::replace`, tolerating CRLF, trailing/leading whitespace, collapsed whitespace, blank-line edges, and final-newline mismatches

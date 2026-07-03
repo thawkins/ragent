@@ -32,7 +32,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Capabilities, Cost};
+use ragent_config::{Capabilities, Cost};
 use crate::llm::LlmClient;
 
 /// Metadata describing an LLM model, including its cost, capabilities, and context limits.

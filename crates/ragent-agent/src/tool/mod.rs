@@ -36,45 +36,25 @@ pub mod structured_memory;
 /// truth for the team tools so fixes no longer have to be applied twice.
 /// See `docs/team-unification-decision.md` and
 /// `scripts/check-team-duplication.sh`.
-#[path = "../../../ragent-team/src/tools/team_approve_plan.rs"]
 pub mod team_approve_plan;
-#[path = "../../../ragent-team/src/tools/team_assign_task.rs"]
 pub mod team_assign_task;
-#[path = "../../../ragent-team/src/tools/team_broadcast.rs"]
 pub mod team_broadcast;
-#[path = "../../../ragent-team/src/tools/team_cleanup.rs"]
 pub mod team_cleanup;
-#[path = "../../../ragent-team/src/tools/team_create.rs"]
 pub mod team_create;
-#[path = "../../../ragent-team/src/tools/team_idle.rs"]
 pub mod team_idle;
-#[path = "../../../ragent-team/src/tools/team_memory_read.rs"]
 pub mod team_memory_read;
-#[path = "../../../ragent-team/src/tools/team_memory_write.rs"]
 pub mod team_memory_write;
-#[path = "../../../ragent-team/src/tools/team_message.rs"]
 pub mod team_message;
-#[path = "../../../ragent-team/src/tools/team_read_messages.rs"]
 pub mod team_read_messages;
-#[path = "../../../ragent-team/src/tools/team_shutdown_ack.rs"]
 pub mod team_shutdown_ack;
-#[path = "../../../ragent-team/src/tools/team_shutdown_teammate.rs"]
 pub mod team_shutdown_teammate;
-#[path = "../../../ragent-team/src/tools/team_spawn.rs"]
 pub mod team_spawn;
-#[path = "../../../ragent-team/src/tools/team_status.rs"]
 pub mod team_status;
-#[path = "../../../ragent-team/src/tools/team_submit_plan.rs"]
 pub mod team_submit_plan;
-#[path = "../../../ragent-team/src/tools/team_task_claim.rs"]
 pub mod team_task_claim;
-#[path = "../../../ragent-team/src/tools/team_task_complete.rs"]
 pub mod team_task_complete;
-#[path = "../../../ragent-team/src/tools/team_task_create.rs"]
 pub mod team_task_create;
-#[path = "../../../ragent-team/src/tools/team_task_list.rs"]
 pub mod team_task_list;
-#[path = "../../../ragent-team/src/tools/team_wait.rs"]
 pub mod team_wait;
 pub mod wait_tasks;
 
@@ -240,8 +220,8 @@ impl Default for ToolOutput {
 /// # Examples
 ///
 /// ```
-/// use ragent_core::tool::ToolContext;
-/// use ragent_core::event::EventBus;
+/// use ragent_agent::tool::ToolContext;
+/// use ragent_agent::event::EventBus;
 /// use std::sync::Arc;
 /// use std::path::PathBuf;
 ///
@@ -807,8 +787,19 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
         limit: usize,
         min_similarity: f32,
     ) -> anyhow::Result<Vec<ragent_tools_extended::storage::EmbeddingMatch>> {
+        // `Storage::search_memories_by_embedding` now lives in
+        // `ragent-storage` and takes a caller-supplied cosine-similarity
+        // closure so it does not need to depend on the embedding helpers
+        // (which live in `ragent-tools-extended`).
+        use ragent_tools_extended::memory::embedding::cosine_similarity as storage_cosine;
         self.inner
-            .search_memories_by_embedding(query_embedding, dimensions, limit, min_similarity)
+            .search_memories_by_embedding(
+                query_embedding,
+                dimensions,
+                limit,
+                min_similarity,
+                storage_cosine,
+            )
             .map(|rows| {
                 rows.into_iter()
                     .map(|row| ragent_tools_extended::storage::EmbeddingMatch {
@@ -1042,32 +1033,6 @@ impl ragent_tools_vcs::storage::StorageBackend for CoreVcsStorageAdapter {
     }
 }
 
-impl ragent_tools_vcs::storage::StorageBackend for crate::storage::Storage {
-    fn get_provider_auth(&self, provider_id: &str) -> anyhow::Result<Option<String>> {
-        self.get_provider_auth(provider_id)
-    }
-
-    fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> anyhow::Result<()> {
-        self.set_provider_auth(provider_id, api_key)
-    }
-
-    fn delete_provider_auth(&self, provider_id: &str) -> anyhow::Result<()> {
-        self.delete_provider_auth(provider_id)
-    }
-
-    fn get_setting(&self, key: &str) -> anyhow::Result<Option<String>> {
-        self.get_setting(key)
-    }
-
-    fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        self.set_setting(key, value)
-    }
-
-    fn delete_setting(&self, key: &str) -> anyhow::Result<()> {
-        self.delete_setting(key)
-    }
-}
-
 struct ExtractedVcsToolAdapter {
     inner: Arc<dyn ragent_tools_vcs::Tool>,
 }
@@ -1161,7 +1126,7 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::tool::ToolRegistry;
+    /// use ragent_agent::tool::ToolRegistry;
     ///
     /// let registry = ToolRegistry::new();
     /// assert!(registry.list().is_empty());
@@ -1217,7 +1182,7 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::tool::{ToolRegistry, read::ReadTool};
+    /// use ragent_agent::tool::{ToolRegistry, read::ReadTool};
     /// use std::sync::Arc;
     ///
     /// let registry = ToolRegistry::new();
@@ -1238,7 +1203,7 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::tool::create_default_registry;
+    /// use ragent_agent::tool::create_default_registry;
     ///
     /// let registry = create_default_registry();
     /// assert!(registry.get("read").is_some());
@@ -1254,7 +1219,7 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::tool::create_default_registry;
+    /// use ragent_agent::tool::create_default_registry;
     ///
     /// let registry = create_default_registry();
     /// let names = registry.list();
@@ -1273,7 +1238,7 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::tool::create_default_registry;
+    /// use ragent_agent::tool::create_default_registry;
     ///
     /// let registry = create_default_registry();
     /// let defs = registry.definitions();
@@ -1334,7 +1299,7 @@ impl Default for ToolRegistry {
 /// # Examples
 ///
 /// ```
-/// use ragent_core::tool::create_default_registry;
+/// use ragent_agent::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
 /// assert!(registry.list().contains(&"think".to_string()));

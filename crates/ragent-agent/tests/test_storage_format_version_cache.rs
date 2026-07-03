@@ -5,27 +5,15 @@
 //! column. PERF-004 caches that result in an `AtomicBool` populated during
 //! `migrate()`, so subsequent calls skip the SQLite round-trip.
 //!
-//! These tests assert the observable behaviour:
-//!   1. The cache starts as `true` after `open_in_memory()` (because migrate
-//!      creates the column on the fresh schema).
-//!   2. `get_session` and `list_sessions` still return correct rows after the
-//!      change (no functional regression).
+//! The `has_format_version` field is now private (it lives on
+//! `ragent_storage::Storage`, which is re-exported by `ragent_agent::storage`).
+//! These tests therefore assert the *observable* behaviour rather than the
+//! internal flag state:
+//!   1. `get_session` / `list_sessions` return correct rows after `open_in_memory`
+//!      (which runs `migrate` and populates the cache).
+//!   2. Repeated calls stay on the cached fast path and remain correct.
 
 use ragent_agent::storage::Storage;
-
-#[test]
-fn format_version_cache_is_true_after_migrate() {
-    // open_in_memory runs migrate(), which creates the sessions table with the
-    // format_version column from the initial CREATE TABLE. The PERF-004
-    // cache must therefore already be populated to `true`.
-    let storage = Storage::open_in_memory().expect("in-memory storage");
-    assert!(
-        storage
-            .has_format_version
-            .load(std::sync::atomic::Ordering::Relaxed),
-        "PERF-004: has_format_version flag should be true after migrate() creates the column"
-    );
-}
 
 #[test]
 fn get_session_works_with_cached_format_version() {
@@ -63,9 +51,11 @@ fn list_sessions_works_with_cached_format_version() {
 
 #[test]
 fn repeated_calls_stay_on_fast_path_without_re_querying_pragma() {
-    // This is a behavioural smoke test: repeated calls must not error and must
-    // return consistent results. The internal pragma-skip is verified by the
-    // AtomicBool state; here we just confirm correctness across many calls.
+    // Behavioural smoke test: repeated calls must not error and must return
+    // consistent results. The internal pragma-skip is verified by the
+    // canonical `ragent-storage::tests::test_format_version_cache` suite;
+    // here we confirm correctness across many calls through the agent
+    // re-export.
     let storage = Storage::open_in_memory().expect("in-memory storage");
     storage
         .create_session("sess-x", "/tmp/project-x")

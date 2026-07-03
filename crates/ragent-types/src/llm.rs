@@ -1,77 +1,252 @@
-//! LLM provider traits and types
+//! LLM request/response primitive types.
 //!
-//! This module defines the core abstractions for LLM providers.
+//! This module is the canonical home for the provider-agnostic LLM
+//! conversation types: [`ChatRequest`], [`ChatMessage`], [`ChatContent`],
+//! [`ContentPart`], [`StreamEvent`], and [`ToolDefinition`].
+//!
+//! The streaming client trait (`LlmClient`) and provider implementations
+//! live in `ragent-llm`; `ragent-llm::llm` re-exports the types defined here
+//! so existing `use ragent_llm::llm::{…}` sites continue to resolve (see
+//! `REMPLAN.md` M1 / T1.3 for the consolidation history).
+//!
+//! `ragent-types` owns these primitives because they are referenced by the
+//! tool crates (`ragent-tools-core`, `ragent-tools-extended`,
+//! `ragent-tools-vcs`) which depend on `ragent-types` but not on
+//! `ragent-llm`. Keeping `ToolDefinition` here avoids a reverse dependency
+//! from the tool crates to the provider crate.
 
-use crate::error::RagentError;
-use crate::message::Message;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
-/// Trait for LLM providers
-#[async_trait]
-pub trait LlmProvider: Send + Sync {
-    /// Provider name (e.g., "anthropic", "openai")
-    fn name(&self) -> &str;
+use crate::event::FinishReason;
 
-    /// Generate a response from the LLM
-    async fn generate(
-        &self,
-        messages: &[Message],
-        temperature: Option<f32>,
-        max_tokens: Option<u32>,
-        tools: Option<&[ToolDefinition]>,
-        stream: bool,
-    ) -> Result<LlmResponse, RagentError>;
+// Re-export FinishReason so LLM consumers can use it directly.
+pub use crate::event::FinishReason as LlmFinishReason;
 
-    /// List available models
-    async fn list_models(&self) -> Result<Vec<ModelInfo>, RagentError>;
-
-    /// Validate API credentials
-    async fn validate_credentials(&self) -> Result<(), RagentError>;
-}
-
-/// LLM response
+/// Events emitted by an LLM streaming response.
+///
+/// Each variant represents a discrete piece of the model's output as it is
+/// generated, enabling incremental rendering and tool-call handling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LlmResponse {
-    pub content: String,
-    pub tool_calls: Option<Vec<serde_json::Value>>,
-    pub finish_reason: Option<String>,
-    pub usage: Option<Usage>,
+pub enum StreamEvent {
+    /// The model began a reasoning/thinking block.
+    ReasoningStart,
+    /// An incremental chunk of reasoning text.
+    ReasoningDelta {
+        /// The reasoning text fragment.
+        text: String,
+    },
+    /// The model finished the reasoning block.
+    ReasoningEnd,
+    /// An incremental chunk of response text.
+    TextDelta {
+        /// The text fragment.
+        text: String,
+    },
+    /// The model started a tool invocation.
+    ToolCallStart {
+        /// Unique identifier for this tool call.
+        id: String,
+        /// Name of the tool being invoked.
+        name: String,
+    },
+    /// An incremental chunk of tool-call argument JSON.
+    ToolCallDelta {
+        /// Identifier of the tool call this delta belongs to.
+        id: String,
+        /// Partial JSON fragment of the tool arguments.
+        args_json: String,
+    },
+    /// The model finished building a tool call.
+    ToolCallEnd {
+        /// Identifier of the completed tool call.
+        id: String,
+    },
+    /// Token usage statistics for the request.
+    Usage {
+        /// Number of tokens in the prompt/input.
+        input_tokens: u64,
+        /// Number of tokens in the completion/output.
+        output_tokens: u64,
+    },
+    /// Rate-limit / quota information from response headers.
+    RateLimit {
+        /// Percentage of request quota consumed (0.0–100.0), if known.
+        requests_used_pct: Option<f32>,
+        /// Percentage of token quota consumed (0.0–100.0), if known.
+        tokens_used_pct: Option<f32>,
+    },
+    /// An error reported by the provider.
+    Error {
+        /// Human-readable error description.
+        message: String,
+    },
+    /// The stream has ended.
+    Finish {
+        /// Why the model stopped generating.
+        reason: FinishReason,
+    },
 }
 
-/// Token usage information
+/// A request to an LLM chat-completion endpoint.
+///
+/// Groups the model identifier, conversation history, available tools, and
+/// sampling parameters into a single payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
+pub struct ChatRequest {
+    /// Model identifier (e.g. `"claude-sonnet-4-20250514"`).
+    pub model: String,
+    /// Ordered conversation history.
+    pub messages: Arc<Vec<ChatMessage>>,
+    /// Tools the model is allowed to invoke.
+    #[serde(default)]
+    pub tools: Arc<Vec<ToolDefinition>>,
+    /// Sampling temperature (higher = more random).
+    pub temperature: Option<f32>,
+    /// Nucleus-sampling probability mass cutoff.
+    pub top_p: Option<f32>,
+    /// Maximum number of tokens to generate.
+    pub max_tokens: Option<u32>,
+    /// Optional system prompt prepended to the conversation.
+    ///
+    /// Held as `Arc<str>` (PERF-006) so the system prompt — which can run
+    /// 5,000–20,000 characters — is built once per `process_user_message`
+    /// and cheaply `Arc::clone`d on every step and every retry attempt
+    /// instead of being deep-cloned as a `String`.  The on-wire JSON
+    /// format is unchanged (still a plain string) thanks to
+    /// [`arc_str_serde`].
+    #[serde(default, with = "optional_arc_str_serde")]
+    pub system: Option<Arc<str>>,
+    /// Arbitrary key-value options forwarded to the provider (e.g. thinking control).
+    #[serde(default)]
+    pub options: HashMap<String, Value>,
+    /// Session ID for request tracing (used by providers like Copilot to avoid re-billing).
+    #[serde(skip)]
+    pub session_id: Option<String>,
+    /// Unique request ID for this specific API call (for provider-side request tracking).
+    #[serde(skip)]
+    pub request_id: Option<String>,
+    /// Stream timeout in seconds — how long to wait for data before considering
+    /// the stream stalled.  Set from `StreamConfig.timeout_secs`.
+    #[serde(skip)]
+    pub stream_timeout_secs: Option<u64>,
+    /// Thinking/reasoning configuration for this request.
+    /// Provider adapters use this to set provider-specific parameters
+    /// (e.g. Anthropic `thinking.*`, OpenAI `reasoning_effort`).
+    /// Falls back to legacy `options["thinking"]` if not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<crate::ThinkingConfig>,
 }
 
-/// Model information
+/// A single message in a chat conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelInfo {
-    pub id: String,
-    pub name: String,
-    pub context_window: u32,
-    pub max_output_tokens: Option<u32>,
-    pub capabilities: Vec<String>,
+pub struct ChatMessage {
+    /// The speaker role (e.g. `"user"`, `"assistant"`, `"tool"`).
+    pub role: String,
+    /// The message body.
+    pub content: ChatContent,
 }
 
-/// Tool definition for function calling
+/// The content payload of a [`ChatMessage`].
+///
+/// Can be either a plain text string or a sequence of structured
+/// [`ContentPart`]s (e.g. text interleaved with tool calls/results).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ChatContent {
+    /// Plain text content.
+    Text(String),
+    /// A sequence of structured content parts.
+    Parts(Vec<ContentPart>),
+}
+
+/// A typed content block within a [`ChatMessage`].
+///
+/// Variants cover plain text, tool invocations, tool results, and images.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    /// A plain-text content block.
+    Text {
+        /// The text content.
+        text: String,
+    },
+    /// A tool invocation issued by the model.
+    ToolUse {
+        /// Unique identifier for this tool call.
+        id: String,
+        /// Name of the tool to invoke.
+        name: String,
+        // TODO: Replace `Value` with a typed struct for tool-use input.
+        /// JSON input arguments for the tool.
+        input: Value,
+    },
+    /// The result returned from a tool execution.
+    ToolResult {
+        /// Identifier of the tool call this result answers.
+        tool_use_id: String,
+        /// The tool's output as a string.  Held as `Arc<str>` (FR-013)
+        /// to avoid the per-step `String::clone()` previously paid on
+        /// every tool call result.
+        #[serde(with = "arc_str_serde")]
+        content: Arc<str>,
+    },
+    /// An image specified as a URL or `data:` URI.
+    ImageUrl {
+        /// The image URL or `data:image/png;base64,...` data URI.
+        url: String,
+    },
+}
+
+/// Schema describing a tool that the LLM may invoke.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
+    /// The tool's unique name.
     pub name: String,
+    /// Human-readable description of what the tool does.
     pub description: String,
-    pub parameters: serde_json::Value,
+    // TODO: Replace `Value` with a typed JSON Schema struct.
+    /// JSON Schema describing the tool's accepted parameters.
+    pub parameters: Value,
 }
 
-/// Provider configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
-    pub name: String,
-    pub api_key: Option<String>,
-    pub api_base: Option<String>,
-    pub default_model: Option<String>,
-    pub extra: HashMap<String, serde_json::Value>,
+/// Serde adapter for `Arc<str>` so the JSON wire format is unchanged
+/// (still a plain string) but the in-memory representation is
+/// reference-counted and cheaply cloneable.
+mod arc_str_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<S: Serializer>(value: &Arc<str>, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(value)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Arc<str>, D::Error> {
+        let s = String::deserialize(de)?;
+        Ok(Arc::from(s))
+    }
+}
+
+/// Serde adapter for `Option<Arc<str>>` (PERF-006). On the wire this is a
+/// plain nullable string — `null` or a JSON string — identical to the
+/// legacy `Option<String>` representation. In memory the `Some` variant
+/// carries an `Arc<str>` so the system prompt can be shared across
+/// retry attempts without deep cloning.
+mod optional_arc_str_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    pub fn serialize<S: Serializer>(value: &Option<Arc<str>>, ser: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(arc) => ser.serialize_some(&**arc),
+            None => ser.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Arc<str>>, D::Error> {
+        let opt = Option::<String>::deserialize(de)?;
+        Ok(opt.map(Arc::from))
+    }
 }

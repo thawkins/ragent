@@ -2,7 +2,7 @@
 //!
 //! Provides a ratatui-based interactive TUI that displays agent messages,
 //! tool call status, permission dialogs, and a text input prompt. The TUI
-//! reacts to real-time events from the ragent [`EventBus`](ragent_core::event::EventBus).
+//! reacts to real-time events from the ragent [`EventBus`](ragent_agent::event::EventBus).
 
 pub mod app;
 pub mod input;
@@ -112,11 +112,11 @@ impl Drop for TerminalGuard {
     }
 }
 
-use ragent_core::agent::AgentInfo;
-use ragent_core::event::EventBus;
-use ragent_core::provider::ProviderRegistry;
-use ragent_core::session::processor::SessionProcessor;
-use ragent_core::storage::Storage;
+use ragent_agent::agent::AgentInfo;
+use ragent_agent::event::EventBus;
+use ragent_agent::provider::ProviderRegistry;
+use ragent_agent::session::processor::SessionProcessor;
+use ragent_agent::storage::Storage;
 
 use tracing_layer::TuiLogReceiver;
 
@@ -142,11 +142,11 @@ const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
 ///
 /// ```rust,no_run
 /// # use std::sync::Arc;
-/// # use ragent_core::event::EventBus;
-/// # use ragent_core::provider::ProviderRegistry;
-/// # use ragent_core::session::processor::SessionProcessor;
-/// # use ragent_core::storage::Storage;
-/// # use ragent_core::agent::AgentInfo;
+/// # use ragent_agent::event::EventBus;
+/// # use ragent_agent::provider::ProviderRegistry;
+/// # use ragent_agent::session::processor::SessionProcessor;
+/// # use ragent_agent::storage::Storage;
+/// # use ragent_agent::agent::AgentInfo;
 /// # async fn example(
 /// #     bus: Arc<EventBus>,
 /// #     storage: Arc<Storage>,
@@ -238,7 +238,7 @@ pub async fn run_tui(
     // streaming).  The mpsc channel is unbounded, so the TUI always receives
     // every event regardless of drain speed.
     let (event_tx, mut event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ragent_core::event::Event>();
+        tokio::sync::mpsc::unbounded_channel::<ragent_agent::event::Event>();
     {
         let mut bus_rx = event_bus.subscribe();
         tokio::spawn(async move {
@@ -308,7 +308,7 @@ pub async fn run_tui(
                 if !init_agent.model_pinned || init_agent.model.is_none() {
                     if let Some(ref model_str) = app.selected_model {
                         if let Some((p, m)) = model_str.split_once('/') {
-                            init_agent.model = Some(ragent_core::agent::ModelRef {
+                            init_agent.model = Some(ragent_agent::agent::ModelRef {
                                 provider_id: p.to_string(),
                                 model_id: m.to_string(),
                             });
@@ -352,7 +352,7 @@ pub async fn run_tui(
 
     let _code_index: Option<Arc<ragent_codeindex::CodeIndex>> = {
         let cwd = std::env::current_dir().unwrap_or_default();
-        match ragent_core::config::Config::load() {
+        match ragent_agent::Config::load() {
             Ok(config) => {
                 if config.code_index.enabled {
                     let index_config = ragent_codeindex::types::CodeIndexConfig {

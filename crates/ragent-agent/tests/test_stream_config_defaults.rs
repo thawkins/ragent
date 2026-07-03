@@ -1,6 +1,6 @@
 //! Integration tests for stream timeout defaults in the agent config mirror.
 
-use ragent_agent::config::StreamConfig;
+use ragent_agent::StreamConfig;
 
 #[test]
 fn test_stream_config_defaults_match_documented_timeout() {

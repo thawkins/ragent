@@ -27,7 +27,7 @@ use std::path::PathBuf;
 /// # Examples
 ///
 /// ```
-/// use ragent_core::skill::bundled::make_bundled_skill;
+/// use ragent_agent::skill::bundled::make_bundled_skill;
 ///
 /// let skill = make_bundled_skill(
 ///     "test",
@@ -86,7 +86,7 @@ pub fn make_bundled_skill(
 /// # Examples
 ///
 /// ```
-/// use ragent_core::skill::bundled::bundled_skills;
+/// use ragent_agent::skill::bundled::bundled_skills;
 ///
 /// let skills = bundled_skills();
 /// assert_eq!(skills.len(), 4);

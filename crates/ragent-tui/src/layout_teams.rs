@@ -216,7 +216,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         {
             let assistant_msgs = msgs
                 .iter()
-                .filter(|m| matches!(m.role, ragent_core::message::Role::Assistant))
+                .filter(|m| matches!(m.role, ragent_agent::message::Role::Assistant))
                 .count() as u64;
             steps = assistant_msgs.max(steps);
         }

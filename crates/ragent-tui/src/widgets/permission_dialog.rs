@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Widget},
 };
 
-use ragent_core::permission::PermissionRequest;
+use ragent_agent::permission::PermissionRequest;
 
 /// A centered popup widget that displays a permission request
 /// with [y]es / [a]lways / [n]o options.
@@ -25,7 +25,7 @@ impl<'a> PermissionDialog<'a> {
     /// # Examples
     ///
     /// ```rust,no_run
-    /// use ragent_core::permission::PermissionRequest;
+    /// use ragent_agent::permission::PermissionRequest;
     /// use ragent_tui::widgets::permission_dialog::PermissionDialog;
     ///
     /// # fn example(request: &PermissionRequest) {

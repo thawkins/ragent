@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex, OnceLock};
 
-use ragent_core::{
+use ragent_agent::{
     agent,
     event::EventBus,
     permission::PermissionChecker,
@@ -31,7 +31,7 @@ fn make_app() -> App {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_core::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -88,7 +88,7 @@ fn test_slash_tools_toggle_persists_and_updates_hidden_registry() {
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     assert!(
         app.session_processor
@@ -117,7 +117,7 @@ fn test_slash_tools_toggle_persists_and_updates_hidden_registry() {
             .any(|d| d.name == "codeindex_search")
     );
 
-    let cfg = ragent_core::config::Config::load().expect("load saved config");
+    let cfg = ragent_agent::Config::load().expect("load saved config");
     assert!(!cfg.tool_visibility.codeindex);
 }
 
@@ -154,7 +154,7 @@ fn test_slash_codeindex_off_updates_visibility_and_config() {
             .any(|d| d.name == "codeindex_search")
     );
 
-    let cfg = ragent_core::config::Config::load().expect("load saved config");
+    let cfg = ragent_agent::Config::load().expect("load saved config");
     assert!(!cfg.code_index.enabled);
     assert!(!cfg.tool_visibility.codeindex);
 }

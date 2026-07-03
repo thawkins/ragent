@@ -12,12 +12,11 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ragent_agent as ragent_core;
 use tracing_subscriber::EnvFilter;
 
-use ragent_core::{
+use ragent_agent::{
     agent,
-    config::Config,
+    Config,
     event::EventBus,
     memory::BlockStorage,
     permission::PermissionChecker,
@@ -27,50 +26,9 @@ use ragent_core::{
     tool,
 };
 
-/// small CLI demo for orchestration
-///
-/// # Errors
-///
-/// Returns an error if job execution fails.
-async fn run_orchestration_example() -> anyhow::Result<()> {
-    tracing::info!("Running orchestration example");
-    let registry = ragent_core::orchestrator::AgentRegistry::new();
+mod cli;
 
-    use futures::future::FutureExt;
-    use ragent_core::orchestrator::{Coordinator, JobDescriptor, Responder};
-    use std::sync::Arc;
-    use tokio::time::Duration;
-    use tokio::time::sleep;
 
-    let responder_a: Responder =
-        Arc::new(|payload: String| async move { format!("demo-a: {payload}") }.boxed());
-    let responder_b: Responder = Arc::new(|payload: String| {
-        async move {
-            sleep(Duration::from_millis(30)).await;
-            format!("demo-b: {payload}")
-        }
-        .boxed()
-    });
-
-    registry
-        .register("demo-a", vec!["demo".to_string()], Some(responder_a))
-        .await;
-    registry
-        .register("demo-b", vec!["demo".to_string()], Some(responder_b))
-        .await;
-
-    let coord = Coordinator::new(registry.clone());
-    let desc = JobDescriptor {
-        id: "demo-job".to_string(),
-        required_capabilities: vec!["demo".to_string()],
-        payload: "payload".to_string(),
-    };
-
-    let res = coord.start_job_sync(desc).await?;
-    println!("Orchestration sync result:\n{res}");
-
-    Ok(())
-}
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -168,79 +126,10 @@ enum Commands {
     /// Manage research items under `research/`
     Research {
         #[command(subcommand)]
-        command: ResearchCommands,
+        command: cli::ResearchCommands,
     },
 }
 
-/// Sub-commands for the `research` namespace.
-#[derive(Subcommand)]
-enum ResearchCommands {
-    /// Run a gathering session and create a research item.
-    Create {
-        /// Research name (URL-safe identifier)
-        #[arg(value_name = "NAME")]
-        name: String,
-        /// Topic description (everything after the name)
-        #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
-        topic: Vec<String>,
-        /// Number of gathering iterations
-        #[arg(long)]
-        iterations: Option<u32>,
-        /// Research depth: shallow|standard|deep
-        #[arg(long)]
-        depth: Option<String>,
-        /// Output format: report|executive-summary|comparison-table|source-bibliography
-        #[arg(long)]
-        format: Option<String>,
-        /// Optional extra sources directory (FR-019)
-        #[arg(long)]
-        sources_dir: Option<String>,
-        /// Optional template name (FR-020)
-        #[arg(long)]
-        template: Option<String>,
-        /// Include the local-file scanning phase
-        #[arg(long)]
-        use_local: bool,
-        /// Include the prior-spec cross-reference phase
-        #[arg(long)]
-        use_specs: bool,
-    },
-    /// List research items
-    List {
-        /// Include archived items
-        #[arg(long)]
-        all: bool,
-    },
-    /// Print the absolute path of a research item's RESEARCH.md
-    Open {
-        /// Research name
-        name: String,
-    },
-    /// Full-text search across all RESEARCH.md files
-    Search {
-        /// Search query
-        #[arg(value_name = "QUERY", trailing_var_arg = true)]
-        query: Vec<String>,
-    },
-    /// Show metadata for a single research item
-    Show {
-        /// Research name
-        name: String,
-    },
-    /// Delete a research item
-    Delete {
-        /// Research name
-        name: String,
-        /// Skip the confirmation prompt
-        #[arg(long, short = 'y')]
-        yes: bool,
-    },
-    /// Archive a research item
-    Archive {
-        /// Research name
-        name: String,
-    },
-}
 /// Sub-commands for the `session` namespace.
 #[derive(Subcommand)]
 enum SessionCommands {
@@ -311,10 +200,10 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.no_git_context {
-        ragent_core::agent::disable_git_prompt_context();
+        ragent_agent::agent::disable_git_prompt_context();
     }
     if cli.no_readme_context {
-        ragent_core::agent::disable_readme_prompt_context();
+        ragent_agent::agent::disable_readme_prompt_context();
     }
 
     // Initialize tracing.
@@ -410,7 +299,7 @@ async fn main() -> Result<()> {
         "OLLAMA_API_KEY",
     ] {
         if let Ok(val) = std::env::var(var) {
-            ragent_core::sanitize::register_secret(&val);
+            ragent_agent::sanitize::register_secret(&val);
         }
     }
     // Create event bus
@@ -521,13 +410,13 @@ async fn main() -> Result<()> {
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
 
     if auto_extract_config.enabled {
-        let extraction_engine = Arc::new(ragent_core::memory::ExtractionEngine::new(
+        let extraction_engine = Arc::new(ragent_agent::memory::ExtractionEngine::new(
             auto_extract_config,
         ));
         let _ = session_processor.extraction_engine.set(extraction_engine);
     }
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
-    let task_manager = Arc::new(ragent_core::task::TaskManager::new(
+    let task_manager = Arc::new(ragent_agent::task::TaskManager::new(
         event_bus.clone(),
         session_processor.clone(),
         max_background_agents,
@@ -539,7 +428,7 @@ async fn main() -> Result<()> {
     let mcp_server_count = config.read().await.mcp.len();
     if mcp_server_count > 0 {
         tracing::info!(mcp_servers = mcp_server_count, "Connecting MCP servers");
-        let mcp_configs: Vec<(String, ragent_core::config::McpServerConfig)> = config
+        let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = config
             .read()
             .await
             .mcp
@@ -547,7 +436,7 @@ async fn main() -> Result<()> {
             .map(|(id, cfg)| (id.clone(), cfg.clone()))
             .collect();
 
-        let mut mcp_client = ragent_core::mcp::McpClient::new();
+        let mut mcp_client = ragent_agent::mcp::McpClient::new();
         let mut mcp_connected = 0u32;
         for (id, cfg) in mcp_configs {
             if let Err(e) = mcp_client.connect(&id, cfg).await {
@@ -660,8 +549,8 @@ async fn main() -> Result<()> {
         Some(Commands::Serve { addr }) => {
             tracing::info!(address = %addr, "Starting HTTP server");
             let auth_token = uuid::Uuid::new_v4().to_string();
-            let orchestrator_registry = ragent_core::orchestrator::AgentRegistry::new();
-            let coordinator = ragent_core::orchestrator::Coordinator::new(orchestrator_registry);
+            let orchestrator_registry = ragent_agent::orchestrator::AgentRegistry::new();
+            let coordinator = ragent_agent::orchestrator::Coordinator::new(orchestrator_registry);
 
             let state = ragent_server::routes::AppState {
                 event_bus,
@@ -676,7 +565,7 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Orchestrate) => {
             tracing::info!("Starting orchestration example");
-            run_orchestration_example().await?;
+            cli::run_orchestration_example().await?;
         }
         Some(Commands::Session { command }) => match command {
             SessionCommands::List => {
@@ -725,7 +614,7 @@ async fn main() -> Result<()> {
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
-                let messages: Vec<ragent_core::message::Message> = serde_json::from_str(&content)?;
+                let messages: Vec<ragent_agent::message::Message> = serde_json::from_str(&content)?;
 
                 let dir = std::fs::canonicalize(".")?;
                 let session = session_manager.create_session(dir)?;
@@ -733,7 +622,7 @@ async fn main() -> Result<()> {
                 let mut imported = 0u64;
                 for msg in &messages {
                     // Re-parent each message into the new session with a fresh ID
-                    let imported_msg = ragent_core::message::Message {
+                    let imported_msg = ragent_agent::message::Message {
                         id: uuid::Uuid::new_v4().to_string(),
                         session_id: session.id.clone(),
                         role: msg.role.clone(),
@@ -776,7 +665,7 @@ async fn main() -> Result<()> {
                     })
                     .unwrap_or_default();
 
-                match ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
+                match ragent_agent::provider::ollama_cloud::list_ollama_cloud_models(
                     &api_key,
                     ollama_url.as_deref(),
                 )
@@ -803,7 +692,7 @@ async fn main() -> Result<()> {
                     }
                 }
             } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
-                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
+                match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
                 {
                     Ok(models) if models.is_empty() => {
                         writeln!(
@@ -860,11 +749,11 @@ async fn main() -> Result<()> {
         Some(Commands::Memory { command }) => {
             let working_dir =
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let block_storage = ragent_core::memory::FileBlockStorage::new();
+            let block_storage = ragent_agent::memory::FileBlockStorage::new();
             match command {
                 MemoryCommands::Export => {
                     let (export, result) =
-                        ragent_core::memory::export_all(&storage, &block_storage, &working_dir)?;
+                        ragent_agent::memory::export_all(&storage, &block_storage, &working_dir)?;
                     let json = serde_json::to_string_pretty(&export)?;
                     writeln!(std::io::stdout(), "{json}")?;
                     eprintln!(
@@ -888,7 +777,7 @@ async fn main() -> Result<()> {
                                     e
                                 )
                             })?;
-                            ragent_core::memory::import_ragent(
+                            ragent_agent::memory::import_ragent(
                                 &json_data,
                                 &storage,
                                 &block_storage,
@@ -896,13 +785,13 @@ async fn main() -> Result<()> {
                                 dry_run,
                             )?
                         }
-                        "cline" => ragent_core::memory::import_cline(
+                        "cline" => ragent_agent::memory::import_cline(
                             &path_buf,
                             &block_storage,
                             &working_dir,
                             dry_run,
                         )?,
-                        "claude-code" => ragent_core::memory::import_claude_code(
+                        "claude-code" => ragent_agent::memory::import_claude_code(
                             &path_buf,
                             &block_storage,
                             &working_dir,
@@ -939,7 +828,7 @@ async fn main() -> Result<()> {
                 }
                 MemoryCommands::List => {
                     let block_storage: &dyn BlockStorage =
-                        &ragent_core::memory::FileBlockStorage::new();
+                        &ragent_agent::memory::FileBlockStorage::new();
                     let mut stdout = std::io::stdout().lock();
 
                     // List structured memory stats.
@@ -948,7 +837,7 @@ async fn main() -> Result<()> {
 
                     // List project blocks.
                     let project_labels = block_storage
-                        .list(&ragent_core::memory::BlockScope::Project, &working_dir)
+                        .list(&ragent_agent::memory::BlockScope::Project, &working_dir)
                         .unwrap_or_default();
                     writeln!(stdout, "\nProject memory blocks:")?;
                     if project_labels.is_empty() {
@@ -957,7 +846,7 @@ async fn main() -> Result<()> {
                         for label in &project_labels {
                             if let Ok(Some(block)) = block_storage.load(
                                 label,
-                                &ragent_core::memory::BlockScope::Project,
+                                &ragent_agent::memory::BlockScope::Project,
                                 &working_dir,
                             ) {
                                 writeln!(
@@ -977,7 +866,7 @@ async fn main() -> Result<()> {
 
                     // List global blocks.
                     let global_labels = block_storage
-                        .list(&ragent_core::memory::BlockScope::Global, &working_dir)
+                        .list(&ragent_agent::memory::BlockScope::Global, &working_dir)
                         .unwrap_or_default();
                     writeln!(stdout, "\nGlobal memory blocks:")?;
                     if global_labels.is_empty() {
@@ -986,7 +875,7 @@ async fn main() -> Result<()> {
                         for label in &global_labels {
                             if let Ok(Some(block)) = block_storage.load(
                                 label,
-                                &ragent_core::memory::BlockScope::Global,
+                                &ragent_agent::memory::BlockScope::Global,
                                 &working_dir,
                             ) {
                                 writeln!(
@@ -1007,218 +896,10 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Research { command }) => {
-            handle_research_command(command).await?;
+            cli::handle_research_command(command).await?;
         }
     }
 
     Ok(())
 }
 
-/// Dispatch `ragent research …` sub-commands to the `ragent-research`
-/// crate. Emits a `ragent-research:` JSON line for each event so the
-/// output is machine-parseable even when the session produces many
-/// sources (T-035).
-async fn handle_research_command(command: ResearchCommands) -> Result<()> {
-    use ragent_research::cli::ResearchCliCommand;
-    use ragent_research::{ResearchManager, SessionConfig, SessionEvent, SessionObserver};
-    use std::sync::Arc;
-    let working_dir = std::env::current_dir()?;
-    let research_root = working_dir.join("research");
-    let manager = ResearchManager::new(&research_root);
-
-    let cli_cmd = match command {
-        ResearchCommands::Create {
-            name,
-            topic,
-            iterations,
-            depth,
-            format,
-            sources_dir,
-            template,
-            use_local,
-            use_specs,
-        } => {
-            let topic = topic.join(" ");
-            if topic.is_empty() {
-                eprintln!("ragent-research: usage: ragent research create <name> <topic...>");
-                std::process::exit(2);
-            }
-            ResearchCliCommand::Create {
-                name,
-                topic,
-                iterations,
-                depth,
-                format,
-                sources_dir,
-                template,
-                use_local,
-                use_specs,
-            }
-        }
-        ResearchCommands::List { all } => ResearchCliCommand::List { all },
-        ResearchCommands::Open { name } => ResearchCliCommand::Open { name },
-        ResearchCommands::Search { query } => ResearchCliCommand::Search {
-            query: query.join(" "),
-        },
-        ResearchCommands::Show { name } => ResearchCliCommand::Show { name },
-        ResearchCommands::Delete { name, yes } => ResearchCliCommand::Delete { name, yes },
-        ResearchCommands::Archive { name } => ResearchCliCommand::Archive { name },
-    };
-    match cli_cmd {
-        ResearchCliCommand::Help => {
-            println!("{}", ResearchCliCommand::build_help_message());
-        }
-        ResearchCliCommand::List { all } => {
-            let items = manager.list(all).await?;
-            let rows: Vec<(String, String, String, String, String)> = items
-                .into_iter()
-                .map(|i| {
-                    (
-                        i.name.to_string(),
-                        i.title,
-                        i.status.as_str().to_string(),
-                        i.created_at.to_rfc3339(),
-                        i.modified_at.to_rfc3339(),
-                    )
-                })
-                .collect();
-            print!("{}", ragent_research::render_list_output(&rows));
-        }
-        ResearchCliCommand::Open { name } => {
-            let item = manager.show(&name).await?;
-            let path = ragent_research::ResearchIo::research_md_path(manager.root(), &item.name);
-            println!("{}", path.display());
-        }
-        ResearchCliCommand::Search { query } => {
-            let hits = manager.search(&query, 25).await?;
-            let rows: Vec<(String, String, String)> = hits
-                .into_iter()
-                .map(|h| (h.name, h.title, h.snippet))
-                .collect();
-            print!("{}", ragent_research::render_search_output(&rows));
-        }
-        ResearchCliCommand::Show { name } => {
-            let item = manager.show(&name).await?;
-            let sources: Vec<(String, String, String, String)> = item
-                .sources
-                .iter()
-                .map(|s| {
-                    (
-                        s.type_str().to_string(),
-                        s.path_or_url().to_string(),
-                        s.title().to_string(),
-                        s.captured_at().to_rfc3339(),
-                    )
-                })
-                .collect();
-            print!(
-                "{}",
-                ragent_research::render_show_output(
-                    item.name.as_ref(),
-                    &item.title,
-                    &item.topic,
-                    item.status.as_str(),
-                    &item.created_at.to_rfc3339(),
-                    &item.modified_at.to_rfc3339(),
-                    &sources,
-                )
-            );
-        }
-        ResearchCliCommand::Delete { name, yes } => {
-            if !yes {
-                eprint!("Are you sure you want to delete research/{name}? [y/N] ");
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-                    println!("ragent-research: cancelled");
-                    return Ok(());
-                }
-            }
-            manager.delete(&name).await?;
-            println!("ragent-research: deleted research/{name}");
-        }
-        ResearchCliCommand::Archive { name } => {
-            manager.archive(&name).await?;
-            println!("ragent-research: archived research/{name}");
-        }
-        ResearchCliCommand::Create {
-            name,
-            topic,
-            iterations: _,
-            depth: _,
-            format: _,
-            sources_dir,
-            template,
-            use_local,
-            use_specs,
-        } => {
-            // Wire the session through a streaming JSON observer so the
-            // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
-            struct CliObserver;
-            impl SessionObserver for CliObserver {
-                fn on_event(&self, event: SessionEvent) {
-                    println!("{}", ragent_research::render_session_event_json(&event));
-                }
-            }
-            let config = SessionConfig {
-                topic: topic.clone(),
-                sources_dir: sources_dir.map(std::path::PathBuf::from),
-                template,
-                disable_local: !use_local,
-                disable_specs: !use_specs,
-                ..SessionConfig::default()
-            };
-            let title = topic
-                .split_whitespace()
-                .next()
-                .unwrap_or(&topic)
-                .to_string();
-
-            // Build a full research session backed by the default tool
-            // registry so the CLI can capture web sources when a search API
-            // key is available, as well as local in-project sources.
-            let tool_registry = Arc::new(ragent_core::tool::create_default_registry());
-            let event_bus = Arc::new(EventBus::new(256));
-            let storage = Arc::new(Storage::open_in_memory()?);
-            let config_arc = Config::load().ok().map(Arc::new);
-            let session = ragent_core::research_adapter::build_research_session(
-                &tool_registry,
-                manager.clone(),
-                name.clone(),
-                working_dir.clone(),
-                event_bus,
-                Some(storage),
-                config_arc,
-                Some(Arc::new(ragent_core::provider::create_default_registry())),
-                None,
-            );
-            match session
-                .run(&name, &title, &config, Arc::new(CliObserver))
-                .await
-            {
-                Ok(outcome) => {
-                    println!(
-                        "ragent-research: created research/{} ({} sources)",
-                        outcome.research_name,
-                        outcome.sources.len()
-                    );
-                }
-                Err(e) => {
-                    eprintln!("ragent-research: {e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        ResearchCliCommand::Continue { name, message } => {
-            eprintln!("ragent-research: continue is not yet supported from the CLI; use the TUI.");
-            let _ = name;
-            let _ = message;
-            std::process::exit(2);
-        }
-        ResearchCliCommand::Unknown(sub) => {
-            eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");
-            std::process::exit(2);
-        }
-    }
-    Ok(())
-}

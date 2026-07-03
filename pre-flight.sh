@@ -94,6 +94,10 @@ else
     print_failure "Cargo check failed"
 fi
 
+# Inline test guard (M8/T8.5)
+print_step "Inline test guard..."
+bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
+
 # =============================================================================
 # 3. Clippy
 # =============================================================================

@@ -43,7 +43,7 @@ use super::thinking::{
     anthropic_thinking_levels_for_model, anthropic_thinking_payload_from_request,
     request_uses_unsupported_anthropic_display,
 };
-use crate::event::FinishReason;
+use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};

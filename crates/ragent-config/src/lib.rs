@@ -23,4 +23,7 @@ pub use config::{
     CrossProjectConfig, GitLabIntegrationConfig, McpServerConfig, McpTransport, MemoryConfig,
     ModelConfig, ProviderConfig, ToolVisibilityConfig, tool_family_names,
 };
-pub use permission::{Permission, PermissionAction, PermissionChecker, PermissionRule};
+pub use permission::{
+    Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,
+    PermissionRule,
+};

@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use ragent_core::storage::Storage;
+use ragent_agent::storage::Storage;
 use ragent_tui::App;
 use ragent_tui::app::ProviderSource;
 

@@ -23,19 +23,18 @@ use axum::{
     routing::{get, post},
 };
 use futures::stream::StreamExt;
-use ragent_agent as ragent_core;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
 
-use ragent_core::{
+use ragent_agent::{
     agent::{self, AgentInfo},
-    config::Config,
     event::{Event, EventBus},
     sanitize::redact_secrets,
     session::processor::SessionProcessor,
     storage::{SessionRow, Storage},
     task::TaskManager,
+    Config,
 };
 
 use crate::sse::event_to_sse;
@@ -59,7 +58,7 @@ pub struct AppState {
     /// Entries older than 120 seconds are evicted on access.
     pub rate_limiter: Arc<tokio::sync::Mutex<HashMap<String, (u32, Instant)>>>,
     /// Optional in-process coordinator for orchestration features.
-    pub coordinator: Option<ragent_core::orchestrator::Coordinator>,
+    pub coordinator: Option<ragent_agent::orchestrator::Coordinator>,
 }
 
 /// Bind to `addr` and serve the ragent HTTP/SSE API.
@@ -484,9 +483,9 @@ async fn reply_permission(
 ) -> impl IntoResponse {
     let allowed = body.decision != PermissionReplyDecision::Deny;
     let decision = match body.decision {
-        PermissionReplyDecision::Allow => ragent_core::permission::PermissionDecision::Once,
-        PermissionReplyDecision::Always => ragent_core::permission::PermissionDecision::Always,
-        PermissionReplyDecision::Deny => ragent_core::permission::PermissionDecision::Deny,
+        PermissionReplyDecision::Allow => ragent_agent::permission::PermissionDecision::Once,
+        PermissionReplyDecision::Always => ragent_agent::permission::PermissionDecision::Always,
+        PermissionReplyDecision::Deny => ragent_agent::permission::PermissionDecision::Deny,
     };
     state.event_bus.publish(Event::PermissionReplied {
         session_id: id,
@@ -540,7 +539,7 @@ async fn orch_start(
     };
 
     let job_id = body.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let desc = ragent_core::orchestrator::JobDescriptor {
+    let desc = ragent_agent::orchestrator::JobDescriptor {
         id: job_id.clone(),
         required_capabilities: body.required_capabilities,
         payload: body.payload,
@@ -776,7 +775,7 @@ struct PromptOptResponse {
 
 /// Implements [`Completer`] for the HTTP server by constructing an LLM client
 /// from the [`AppState`]'s storage (for the API key) and a fresh
-/// [`ragent_core::provider::ProviderRegistry`].
+/// [`ragent_agent::provider::ProviderRegistry`].
 struct ServerCompleter {
     storage: Arc<Storage>,
     provider_id: String,
@@ -788,7 +787,7 @@ impl Completer for ServerCompleter {
     async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
         use anyhow::Context as _;
         use futures::StreamExt as _;
-        use ragent_core::{
+        use ragent_agent::{
             llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent},
             provider::ProviderRegistry,
         };
@@ -955,7 +954,7 @@ async fn verify_session_exists(
 }
 
 /// Helper to convert a task entry to a `TaskResponse`.
-fn task_entry_to_response(entry: ragent_core::task::TaskEntry, background: bool) -> TaskResponse {
+fn task_entry_to_response(entry: ragent_agent::task::TaskEntry, background: bool) -> TaskResponse {
     TaskResponse {
         id: entry.id.clone(),
         parent_session_id: entry.parent_session_id,

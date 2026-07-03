@@ -21,7 +21,7 @@ reqwest.workspace = true
 flate2 = "1"
 
 # Internal crates
-ragent-core = { package = "ragent-agent", path = "../ragent-agent" }
+ragent-agent = { path = "../ragent-agent" }
 ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-types = { path = "../ragent-types" }
 

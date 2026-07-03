@@ -12,8 +12,8 @@ use ratatui::widgets::{
     Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use ragent_core::memory::{BlockScope, FileBlockStorage, MemoryBlock, load_all_blocks};
-use ragent_core::storage::Storage;
+use ragent_agent::memory::{BlockScope, FileBlockStorage, MemoryBlock, load_all_blocks};
+use ragent_agent::storage::Storage;
 
 use crate::app::App;
 use crate::utils::centered_rect;

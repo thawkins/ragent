@@ -59,7 +59,7 @@ static SECRET_REGISTRY: LazyLock<RwLock<HashSet<String>>> =
 /// # Examples
 ///
 /// ```rust
-/// use ragent_core::sanitize::{register_secret, redact_secrets};
+/// use ragent_agent::sanitize::{register_secret, redact_secrets};
 ///
 /// register_secret("my-custom-secret-value");
 /// let cleaned = redact_secrets("token is my-custom-secret-value here");
@@ -79,7 +79,7 @@ pub fn register_secret(secret: &str) {
 /// # Examples
 ///
 /// ```rust
-/// use ragent_core::sanitize::{register_secret, unregister_secret, redact_secrets};
+/// use ragent_agent::sanitize::{register_secret, unregister_secret, redact_secrets};
 ///
 /// register_secret("temp-secret");
 /// unregister_secret("temp-secret");
@@ -125,7 +125,7 @@ pub fn seed_secrets(secrets: impl IntoIterator<Item = String>) {
 /// # Examples
 ///
 /// ```rust
-/// use ragent_core::sanitize::redact_secrets;
+/// use ragent_agent::sanitize::redact_secrets;
 ///
 /// let input = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz";
 /// let cleaned = redact_secrets(input);

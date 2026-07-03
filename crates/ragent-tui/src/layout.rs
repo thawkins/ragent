@@ -25,7 +25,7 @@ use crate::layout_active_agents::render_active_agents_subpanel;
 use crate::theme;
 use crate::utils::{ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size};
 
-use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
+use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
@@ -2099,7 +2099,7 @@ fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let snapshot = ragent_core::session::profiler::agent_loop_profiler().snapshot();
+    let snapshot = ragent_agent::session::profiler::agent_loop_profiler().snapshot();
     if !snapshot.enabled {
         app.profile_max_scroll = 0;
         app.profile_content_lines = vec!["Profiler is disabled".to_string()];
@@ -3336,7 +3336,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         )));
     } else {
         // Load current config once so we can flag already-enabled servers.
-        let enabled_ids: std::collections::HashSet<String> = ragent_core::config::Config::load()
+        let enabled_ids: std::collections::HashSet<String> = ragent_agent::Config::load()
             .map(|c| c.mcp.into_keys().collect())
             .unwrap_or_default();
 
@@ -3357,9 +3357,9 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
             let num = format!("{}", i + 1);
             let name = ragent_types::truncate_bytes(&srv.name, 37);
             let source = match &srv.source {
-                ragent_core::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
-                ragent_core::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),
-                ragent_core::mcp::McpDiscoverySource::McpRegistry { .. } => {
+                ragent_agent::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
+                ragent_agent::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),
+                ragent_agent::mcp::McpDiscoverySource::McpRegistry { .. } => {
                     "MCP registry".to_string()
                 }
             };
@@ -3533,7 +3533,7 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::messages_to_lines;
-    use ragent_core::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+    use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
     use serde_json::json;
     use std::collections::HashMap;
 

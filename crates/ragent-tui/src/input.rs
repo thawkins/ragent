@@ -216,7 +216,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             .cloned()
                             .unwrap_or_default();
                         app.event_bus
-                            .publish(ragent_core::event::Event::QuestionAnswered {
+                            .publish(ragent_agent::event::Event::QuestionAnswered {
                                 session_id: req.session_id.clone(),
                                 request_id: req.id.clone(),
                                 response,
@@ -229,7 +229,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 KeyCode::Esc => {
                     if let Some(req) = app.question_queue.front().cloned() {
                         app.event_bus
-                            .publish(ragent_core::event::Event::QuestionAnswered {
+                            .publish(ragent_agent::event::Event::QuestionAnswered {
                                 session_id: req.session_id.clone(),
                                 request_id: req.id.clone(),
                                 response: "[User dismissed question]".to_string(),
@@ -250,7 +250,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                     let response = app.pending_question_input.trim().to_string();
                     if !response.is_empty() {
                         app.event_bus
-                            .publish(ragent_core::event::Event::QuestionAnswered {
+                            .publish(ragent_agent::event::Event::QuestionAnswered {
                                 session_id: req.session_id.clone(),
                                 request_id: req.id.clone(),
                                 response,
@@ -264,7 +264,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Esc => {
                 if let Some(req) = app.question_queue.front().cloned() {
                     app.event_bus
-                        .publish(ragent_core::event::Event::QuestionAnswered {
+                        .publish(ragent_agent::event::Event::QuestionAnswered {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             response: "[User dismissed question]".to_string(),
@@ -298,11 +298,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                         "User pressed 'y' to grant permission"
                     );
                     app.event_bus
-                        .publish(ragent_core::event::Event::PermissionReplied {
+                        .publish(ragent_agent::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: true,
-                            decision: ragent_core::permission::PermissionDecision::Once,
+                            decision: ragent_agent::permission::PermissionDecision::Once,
                         });
                 }
                 None
@@ -315,11 +315,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                         "User pressed 'a' to grant permission (always)"
                     );
                     app.event_bus
-                        .publish(ragent_core::event::Event::PermissionReplied {
+                        .publish(ragent_agent::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: true,
-                            decision: ragent_core::permission::PermissionDecision::Always,
+                            decision: ragent_agent::permission::PermissionDecision::Always,
                         });
                 }
                 None
@@ -332,11 +332,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                         "User pressed 'n' to deny permission"
                     );
                     app.event_bus
-                        .publish(ragent_core::event::Event::PermissionReplied {
+                        .publish(ragent_agent::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: false,
-                            decision: ragent_core::permission::PermissionDecision::Deny,
+                            decision: ragent_agent::permission::PermissionDecision::Deny,
                         });
                 }
                 None
@@ -776,7 +776,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     if pid == "azure_resource" {
                         app.refresh_provider();
                         let provider =
-                            ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                            ragent_agent::provider::azure_resource::AzureResourceProvider::new();
                         let entries = provider.entries();
                         if entries.is_empty() {
                             app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
@@ -845,7 +845,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             .flatten()
                             .filter(|k| !k.is_empty())
                     };
-                    let token = ragent_core::provider::copilot::resolve_copilot_github_token(Some(
+                    let token = ragent_agent::provider::copilot::resolve_copilot_github_token(Some(
                         &db_lookup,
                     ));
                     if let Some(ref tk) = token {
@@ -854,7 +854,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             let tk_clone = tk.clone();
                             let exchange_ok = tokio::task::block_in_place(|| {
                                 handle.block_on(
-                                    ragent_core::provider::copilot::resolve_copilot_auth(
+                                    ragent_agent::provider::copilot::resolve_copilot_auth(
                                         &tk_clone, None,
                                     ),
                                 )
@@ -880,7 +880,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 } else if pid == "azure_resource" {
                     // Azure Resource: load entries from azureresources.json
                     let provider =
-                        ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                        ragent_agent::provider::azure_resource::AzureResourceProvider::new();
                     let entries = provider.entries();
                     if entries.is_empty() {
                         app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
@@ -968,7 +968,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         error: Some("API key cannot be empty.".to_string()),
                     });
                 } else if provider_id == "copilot"
-                    && ragent_core::provider::copilot::is_pat_token(&trimmed)
+                    && ragent_agent::provider::copilot::is_pat_token(&trimmed)
                 {
                     app.provider_setup = Some(ProviderSetupStep::EnterKey {
                           provider_id,
@@ -1696,7 +1696,7 @@ fn start_copilot_device_flow_setup(app: &mut App) {
 
     // Initiate the device flow (blocking briefly)
     let start = tokio::task::block_in_place(|| {
-        handle.block_on(ragent_core::provider::copilot::start_copilot_device_flow())
+        handle.block_on(ragent_agent::provider::copilot::start_copilot_device_flow())
     });
 
     let flow = match start {
@@ -1738,19 +1738,19 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(interval).await;
-            match ragent_core::provider::copilot::poll_copilot_device_flow(&device_code).await {
+            match ragent_agent::provider::copilot::poll_copilot_device_flow(&device_code).await {
                 Ok(Some(token)) => {
                     // Discover the plan API base.
                     // The device flow token may lack scope for copilot_internal/user,
                     // so also try the gh CLI token which has broader scope.
                     let api_base = {
                         let mut base =
-                            ragent_core::provider::copilot::discover_copilot_api_base(&token).await;
+                            ragent_agent::provider::copilot::discover_copilot_api_base(&token).await;
                         if base.is_none() {
                             if let Some(gh_token) =
-                                ragent_core::provider::copilot::find_gh_cli_token()
+                                ragent_agent::provider::copilot::find_gh_cli_token()
                             {
-                                base = ragent_core::provider::copilot::discover_copilot_api_base(
+                                base = ragent_agent::provider::copilot::discover_copilot_api_base(
                                     &gh_token,
                                 )
                                 .await;
@@ -1758,7 +1758,7 @@ fn start_copilot_device_flow_setup(app: &mut App) {
                         }
                         base.unwrap_or_else(|| "https://api.githubcopilot.com".to_string())
                     };
-                    event_bus.publish(ragent_core::event::Event::CopilotDeviceFlowComplete {
+                    event_bus.publish(ragent_agent::event::Event::CopilotDeviceFlowComplete {
                         token,
                         api_base,
                     });
@@ -1802,22 +1802,22 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
     };
 
     handle.spawn(async move {
-        match ragent_core::gitlab::auth::validate_token(&instance_url, &token).await {
+        match ragent_agent::gitlab::auth::validate_token(&instance_url, &token).await {
             Ok(username) => {
                 // Save token (encrypted) and config to database
-                let cfg = ragent_core::gitlab::auth::GitLabConfig {
+                let cfg = ragent_agent::gitlab::auth::GitLabConfig {
                     instance_url: instance_url.clone(),
                     username: username.clone(),
                 };
                 let mut errors = Vec::new();
-                if let Err(e) = ragent_core::gitlab::auth::save_token(storage.as_ref(), &token) {
+                if let Err(e) = ragent_agent::gitlab::auth::save_token(storage.as_ref(), &token) {
                     errors.push(format!("token save: {e}"));
                 }
-                if let Err(e) = ragent_core::gitlab::auth::save_config(storage.as_ref(), &cfg) {
+                if let Err(e) = ragent_agent::gitlab::auth::save_config(storage.as_ref(), &cfg) {
                     errors.push(format!("config save: {e}"));
                 }
                 if errors.is_empty() {
-                    event_bus.publish(ragent_core::event::Event::AgentError {
+                    event_bus.publish(ragent_agent::event::Event::AgentError {
                         session_id: sid,
                         error: format!(
                             "✅ GitLab configured successfully!\n\n\
@@ -1827,7 +1827,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                         ),
                     });
                 } else {
-                    event_bus.publish(ragent_core::event::Event::AgentError {
+                    event_bus.publish(ragent_agent::event::Event::AgentError {
                         session_id: sid,
                         error: format!(
                             "⚠️ GitLab authenticated as {username} but failed to save: {}",
@@ -1836,7 +1836,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                     });
                 }
                 // Signal the TUI to close the dialog
-                event_bus.publish(ragent_core::event::Event::GitLabSetupComplete {
+                event_bus.publish(ragent_agent::event::Event::GitLabSetupComplete {
                     success: errors.is_empty(),
                     error: if errors.is_empty() {
                         None
@@ -1846,7 +1846,7 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                 });
             }
             Err(e) => {
-                event_bus.publish(ragent_core::event::Event::GitLabSetupComplete {
+                event_bus.publish(ragent_agent::event::Event::GitLabSetupComplete {
                     success: false,
                     error: Some(format!("{e}")),
                 });

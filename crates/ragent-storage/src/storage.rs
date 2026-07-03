@@ -205,6 +205,14 @@ pub fn deobfuscate_key(encoded: &str) -> String {
 /// SQLite-backed storage for sessions, messages, and provider credentials.
 pub struct Storage {
     conn: Mutex<Connection>,
+    /// PERF-004: cached result of the `format_version` column-existence
+    /// pragma query.  Populated once during [`Storage::migrate`] (or lazily
+    /// on the first session read if the storage was constructed without
+    /// running migrations) and reused by [`Storage::get_session`] and
+    /// [`Storage::list_sessions`] to skip one SQLite round-trip per call.
+    /// An `AtomicBool` is sufficient because the schema never loses the
+    /// column once it has been added.
+    has_format_version: std::sync::atomic::AtomicBool,
 }
 
 /// Acquires the database connection lock, mapping a poisoned mutex to an anyhow error.
@@ -218,6 +226,34 @@ macro_rules! lock_conn {
 }
 
 impl Storage {
+    /// PERF-004: return whether the `sessions.format_version` column
+    /// exists, using the cached `AtomicBool` when it has already been
+    /// populated (by [`migrate`](Self::migrate) or a prior call).
+    ///
+    /// On the first call after construction — when the flag is still
+    /// `false` — this runs the `pragma_table_info` query once and records
+    /// the result so every subsequent `get_session` / `list_sessions`
+    /// call skips the SQLite round-trip.  The schema never loses the
+    /// column after it has been added, so caching is safe.
+    fn has_format_version_cached(&self, conn: &rusqlite::Connection) -> Result<bool> {
+        if self
+            .has_format_version
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(true);
+        }
+        let has: bool = conn
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
+            )?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        self.has_format_version
+            .store(has, std::sync::atomic::Ordering::Relaxed);
+        Ok(has)
+    }
+
     /// Opens (or creates) a `SQLite` database at the given filesystem path and
     /// runs migrations to ensure the schema is up to date.
     ///
@@ -242,6 +278,7 @@ impl Storage {
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
         let storage = Self {
             conn: Mutex::new(conn),
+            has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
@@ -265,6 +302,7 @@ impl Storage {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
             conn: Mutex::new(conn),
+            has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
@@ -440,6 +478,13 @@ impl Storage {
                     &format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col)
                 };
                 conn.execute_batch(sql)?;
+            } else if *table == "sessions" && *col == "format_version" {
+                // PERF-004: cache the column existence so get_session /
+                // list_sessions can skip the pragma round-trip on every
+                // call. `migrate` runs exactly once per Storage handle, so
+                // recording the result here is safe.
+                self.has_format_version
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
 
@@ -490,15 +535,12 @@ impl Storage {
     /// ```
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
         let conn = lock_conn!(self)?;
-        // Check if format_version column exists (for backward compatibility)
-        let has_format_version: bool = conn
-            .prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
-            )?
-            .query_row([], |r| r.get::<_, i64>(0))
-            .unwrap_or(0)
-            > 0;
-
+        // PERF-004: skip the pragma_table_info round-trip when we already
+        // know from `migrate()` whether the `format_version` column exists.
+        // On the rare miss (storage constructed without migrate, or the
+        // flag was never set), fall back to the pragma query and cache the
+        // result so subsequent calls stay on the fast path.
+        let has_format_version = self.has_format_version_cached(&conn)?;
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
              created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
@@ -565,15 +607,9 @@ impl Storage {
     /// ```
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let conn = lock_conn!(self)?;
-        // Check if format_version column exists (for backward compatibility)
-        let has_format_version: bool = conn
-            .prepare(
-                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
-            )?
-            .query_row([], |r| r.get::<_, i64>(0))
-            .unwrap_or(0)
-            > 0;
-
+        // PERF-004: use the cached `format_version` existence flag so we
+        // skip the pragma round-trip on every `list_sessions` call.
+        let has_format_version = self.has_format_version_cached(&conn)?;
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
              created_at, updated_at, archived_at, summary \
@@ -1686,49 +1722,6 @@ impl Storage {
         Ok(())
     }
 
-    // FIXME(M5): Restore when memory module extracted
-    // /// Delete memories using a [`ForgetFilter`](crate::memory::store::ForgetFilter).
-    // ///
-    // /// Handles both the `Id` variant (single delete) and `Filter` variant
-    // /// (criteria-based delete).
-    // ///
-    // /// # Arguments
-    // ///
-    // /// * `filter` - The filter specifying which memories to delete.
-    // /// * `session_id` - Session ID for auditing (unused in core delete, but required for API consistency).
-    // ///
-    // /// # Returns
-    // ///
-    // /// Number of deleted memories.
-    // ///
-    // /// # Errors
-    // ///
-    // /// Returns an error if the delete fails.
-    //     pub fn delete_memories(
-    //         &self,
-    //         filter: crate::memory::store::ForgetFilter,
-    //         _session_id: &str,
-    //     ) -> Result<usize> {
-    //         match filter {
-    //             crate::memory::store::ForgetFilter::Id(id) => {
-    //                 let deleted = self.delete_memory(id)?;
-    //                 Ok(if deleted { 1 } else { 0 })
-    //             }
-    //             crate::memory::store::ForgetFilter::Filter {
-    //                 older_than_days,
-    //                 max_confidence,
-    //                 category,
-    //                 tags,
-    //             } => self.delete_memories_by_filter(
-    //                 older_than_days,
-    //                 max_confidence,
-    //                 category.as_deref(),
-    //                 tags.as_deref(),
-    //             ),
-    //         }
-    //     }
-    // ── Embedding storage and search ─────────────────────────────────
-
     /// Stores an embedding vector for a structured memory.
     ///
     /// The embedding is serialised as a little-endian f32 blob and stored in
@@ -1764,49 +1757,90 @@ impl Storage {
         Ok(rows)
     }
 
-    // FIXME(M5): Restore when memory module extracted
-    // /// Search structured memories by cosine similarity against a query embedding.
-    // ///
-    // /// Loads all stored memory embeddings and computes brute-force cosine
-    // /// similarity. Returns results ranked by similarity (highest first).
-    // ///
-    // /// This approach is acceptable for up to ~10K memories. For larger datasets,
-    // /// consider using `sqlite-vec` for ANN search.
-    // ///
-    // /// # Errors
-    // ///
-    // /// Returns an error if the query fails.
-    //     pub fn search_memories_by_embedding(
-    //         &self,
-    //         query_embedding: &[f32],
-    //         dimensions: usize,
-    //         limit: usize,
-    //         min_similarity: f32,
-    //     ) -> Result<Vec<crate::memory::embedding::SimilarityResult>> {
-    //         let embeddings = self.list_memory_embeddings()?;
-    //         let mut results: Vec<crate::memory::embedding::SimilarityResult> = Vec::new();
-    //
-    //         for (row_id, blob) in &embeddings {
-    //             if let Ok(stored) = crate::memory::embedding::deserialise_embedding(blob, dimensions) {
-    //                 let score = crate::memory::embedding::cosine_similarity(query_embedding, &stored);
-    //                 if score >= min_similarity {
-    //                     results.push(crate::memory::embedding::SimilarityResult {
-    //                         row_id: *row_id,
-    //                         score,
-    //                     });
-    //                 }
-    //             }
-    //         }
-    //
-    // Sort by similarity descending.
-    //         results.sort_by(|a, b| {
-    //             b.score
-    //                 .partial_cmp(&a.score)
-    //                 .unwrap_or(std::cmp::Ordering::Equal)
-    //         });
-    //         results.truncate(limit);
-    //         Ok(results)
-    //     }
+    /// Decode an embedding blob into a `Vec<f32>` of the expected dimensionality.
+    ///
+    /// Embeddings are stored as little-endian `f32` arrays (4 bytes per
+    /// dimension).  Returns an error if the blob length does not match
+    /// `dimensions * 4`.  This is the storage-local equivalent of
+    /// `ragent_tools_extended::memory::embedding::deserialise_embedding`;
+    /// it lives here so `search_memories_by_embedding` can decode blobs
+    /// without depending on the tools-extended embedding helpers.
+    fn deserialise_embedding_owned(blob: &[u8], dimensions: usize) -> Result<Vec<f32>> {
+        if blob.len() != dimensions * 4 {
+            anyhow::bail!(
+                "Embedding blob length {} does not match expected {} bytes ({} dims × 4)",
+                blob.len(),
+                dimensions * 4,
+                dimensions
+            );
+        }
+        let mut vec = Vec::with_capacity(dimensions);
+        for chunk in blob.chunks_exact(4) {
+            let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+            vec.push(val);
+        }
+        Ok(vec)
+    }
+
+    /// Search structured memories by cosine similarity against a query embedding.
+    ///
+    /// Loads all stored memory embeddings and computes brute-force cosine
+    /// similarity against `query_embedding`. Returns results ranked by
+    /// similarity (highest first), filtered to those with `score >=
+    /// min_similarity`, and truncated to `limit` rows.
+    ///
+    /// This approach is acceptable for up to ~10K memories. For larger
+    /// datasets, consider using `sqlite-vec` for ANN search.
+    ///
+    /// The cosine-similarity computation is delegated to the caller-supplied
+    /// `similarity` closure so that `ragent-storage` does not need to depend
+    /// on the embedding helpers that live in `ragent-agent`/`ragent-tools-extended`.
+    /// Callers typically pass `ragent_tools_extended::memory::embedding::cosine_similarity`
+    /// (or the agent's local equivalent).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the embedding-list query fails.
+    pub fn search_memories_by_embedding<F>(
+        &self,
+        query_embedding: &[f32],
+        dimensions: usize,
+        limit: usize,
+        min_similarity: f32,
+        similarity: F,
+    ) -> Result<Vec<EmbeddingMatch>>
+    where
+        F: Fn(&[f32], &[f32]) -> f32,
+    {
+        let embeddings = self.list_memory_embeddings()?;
+        let mut results: Vec<EmbeddingMatch> = Vec::new();
+
+        for (row_id, blob) in &embeddings {
+            // Attempt to deserialise the blob into a `dimensions`-length
+            // `f32` slice.  Blobs that fail to deserialise or have the wrong
+            // dimensionality are silently skipped — they correspond to
+            // memories embedded with a different model/dimensionality and
+            // cannot be compared against this query.
+            if let Ok(stored) = Self::deserialise_embedding_owned(blob, dimensions) {
+                let score = similarity(query_embedding, &stored);
+                if score >= min_similarity {
+                    results.push(EmbeddingMatch {
+                        row_id: *row_id,
+                        score,
+                    });
+                }
+            }
+        }
+
+        // Sort by similarity descending.
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+        Ok(results)
+    }
 
     // ── Knowledge Graph CRUD ────────────────────────────────────────────
 
@@ -1885,136 +1919,167 @@ impl Storage {
         Ok(conn.last_insert_rowid())
     }
 
-    // FIXME(M5): Restore when memory module extracted
-    // /// List all knowledge graph entities.
-    // ///
-    // /// # Errors
-    // ///
-    // /// Returns an error if the query fails.
-    //     pub fn list_entities(&self) -> Result<Vec<crate::memory::knowledge_graph::Entity>> {
-    //         let conn = lock_conn!(self)?;
-    //         let mut stmt = conn.prepare(
-    //                     "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities ORDER BY mention_count DESC",
-    //                 )?;
-    //         let entities = stmt
-    //             .query_map([], |row| {
-    //                 Ok(crate::memory::knowledge_graph::Entity {
-    //                     id: row.get(0)?,
-    //                     name: row.get(1)?,
-    //                     entity_type: row.get(2)?,
-    //                     mention_count: row.get(3)?,
-    //                     created_at: row.get(4)?,
-    //                     updated_at: row.get(5)?,
-    //                 })
-    //             })?
-    //             .collect::<rusqlite::Result<Vec<_>>>()?;
-    //         Ok(entities)
-    //     }
+    /// List all knowledge graph entities, ordered by descending mention count.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_entities(&self) -> Result<Vec<KgEntityRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities ORDER BY mention_count DESC",
+        )?;
+        let entities = stmt
+            .query_map([], |row| {
+                Ok(KgEntityRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    entity_type: row.get(2)?,
+                    mention_count: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(entities)
+    }
 
-    // List all knowledge graph relationships.
-    //
-    // # Errors
-    //
-    // Returns an error if the query fails.
-    // FIXME(M5): Restore when memory module extracted
-    //     pub fn list_relationships(&self) -> Result<Vec<crate::memory::knowledge_graph::Relationship>> {
-    //         let conn = lock_conn!(self)?;
-    //         let mut stmt = conn.prepare(
-    //                     "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at FROM kg_relationships ORDER BY confidence DESC",
-    //                 )?;
-    //         let relationships = stmt
-    //             .query_map([], |row| {
-    //                 Ok(crate::memory::knowledge_graph::Relationship {
-    //                     id: row.get(0)?,
-    //                     source_id: row.get(1)?,
-    //                     target_id: row.get(2)?,
-    //                     relation_type: row.get(3)?,
-    //                     confidence: row.get(4)?,
-    //                     source_memory_id: row.get(5)?,
-    //                     created_at: row.get(6)?,
-    //                 })
-    //             })?
-    //             .collect::<rusqlite::Result<Vec<_>>>()?;
-    //         Ok(relationships)
-    //     }
+    /// List all knowledge graph relationships, ordered by descending confidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_relationships(&self) -> Result<Vec<KgRelationshipRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at FROM kg_relationships ORDER BY confidence DESC",
+        )?;
+        let relationships = stmt
+            .query_map([], |row| {
+                Ok(KgRelationshipRow {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    target_id: row.get(2)?,
+                    relation_type: row.get(3)?,
+                    confidence: row.get(4)?,
+                    source_memory_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(relationships)
+    }
 
-    // Execute a knowledge graph query: find all entities and relationships
-    // connected to a given entity (1-hop neighbours).
-    //
-    // # Errors
-    //
-    // Returns an error if the query fails.
-    // FIXME(M5): Restore when memory module extracted
-    //     pub fn query_entity_neighbours(
-    //         &self,
-    //         entity_id: i64,
-    //     ) -> Result<(
-    //         Vec<crate::memory::knowledge_graph::Entity>,
-    //         Vec<crate::memory::knowledge_graph::Relationship>,
-    //     )> {
-    //         let conn = lock_conn!(self)?;
-    //
-    // Find all relationships where this entity is source or target.
-    //         let mut rel_stmt = conn.prepare(
-    //                     "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at
-    //                      FROM kg_relationships WHERE source_id = ?1 OR target_id = ?1",
-    //                 )?;
-    //         let relationships: Vec<crate::memory::knowledge_graph::Relationship> = rel_stmt
-    //             .query_map(params![entity_id], |row| {
-    //                 Ok(crate::memory::knowledge_graph::Relationship {
-    //                     id: row.get(0)?,
-    //                     source_id: row.get(1)?,
-    //                     target_id: row.get(2)?,
-    //                     relation_type: row.get(3)?,
-    //                     confidence: row.get(4)?,
-    //                     source_memory_id: row.get(5)?,
-    //                     created_at: row.get(6)?,
-    //                 })
-    //             })?
-    //             .collect::<rusqlite::Result<Vec<_>>>()?;
-    //
-    // Collect all unique entity IDs from relationships.
-    //         let mut entity_ids = std::collections::HashSet::new();
-    //         entity_ids.insert(entity_id);
-    //         for rel in &relationships {
-    //             entity_ids.insert(rel.source_id);
-    //             entity_ids.insert(rel.target_id);
-    //         }
-    //
-    // Fetch all neighbour entities.
-    //         let ids: Vec<i64> = entity_ids.into_iter().collect();
-    //         let placeholders: Vec<String> = ids
-    //             .iter()
-    //             .enumerate()
-    //             .map(|(i, _)| format!("?{}", i + 1))
-    //             .collect::<Vec<_>>();
-    //         let sql = format!(
-    //             "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities WHERE id IN ({})",
-    //             placeholders.join(",")
-    //         );
-    //         let mut entity_stmt = conn.prepare(&sql)?;
-    //         let params: Vec<&dyn rusqlite::types::ToSql> = ids
-    //             .iter()
-    //             .map(|id| id as &dyn rusqlite::types::ToSql)
-    //             .collect();
-    //         let entities: Vec<crate::memory::knowledge_graph::Entity> = entity_stmt
-    //             .query_map(params.as_slice(), |row| {
-    //                 Ok(crate::memory::knowledge_graph::Entity {
-    //                     id: row.get(0)?,
-    //                     name: row.get(1)?,
-    //                     entity_type: row.get(2)?,
-    //                     mention_count: row.get(3)?,
-    //                     created_at: row.get(4)?,
-    //                     updated_at: row.get(5)?,
-    //                 })
-    //             })?
-    //             .collect::<rusqlite::Result<Vec<_>>>()?;
-    //
-    //         Ok((entities, relationships))
-    //     }
+    /// Execute a knowledge graph query: find all entities and relationships
+    /// connected to a given entity (1-hop neighbours).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn query_entity_neighbours(
+        &self,
+        entity_id: i64,
+    ) -> Result<(Vec<KgEntityRow>, Vec<KgRelationshipRow>)> {
+        let conn = lock_conn!(self)?;
 
-    /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.    ///
-    /// All `rusqlite` operations are synchronous. Call this from async code to    /// avoid stalling the async executor during writes. The closure receives a
+        // Find all relationships where this entity is source or target.
+        let mut rel_stmt = conn.prepare(
+            "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at
+             FROM kg_relationships WHERE source_id = ?1 OR target_id = ?1",
+        )?;
+        let relationships: Vec<KgRelationshipRow> = rel_stmt
+            .query_map(params![entity_id], |row| {
+                Ok(KgRelationshipRow {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    target_id: row.get(2)?,
+                    relation_type: row.get(3)?,
+                    confidence: row.get(4)?,
+                    source_memory_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Collect all unique entity IDs from relationships.
+        let mut entity_ids = std::collections::HashSet::new();
+        entity_ids.insert(entity_id);
+        for rel in &relationships {
+            entity_ids.insert(rel.source_id);
+            entity_ids.insert(rel.target_id);
+        }
+
+        // Fetch all neighbour entities.
+        let ids: Vec<i64> = entity_ids.into_iter().collect();
+        let placeholders: Vec<String> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>();
+        let sql = format!(
+            "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let mut entity_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let entities: Vec<KgEntityRow> = entity_stmt
+            .query_map(params.as_slice(), |row| {
+                Ok(KgEntityRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    entity_type: row.get(2)?,
+                    mention_count: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok((entities, relationships))
+    }
+
+    /// Returns `true` if the session has at least one assistant message.
+    ///
+    /// Used to skip re-running init exchanges on sessions that already have
+    /// an assistant turn.  This is a storage-level query (no `Message`
+    /// hydration) so it is cheap.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// assert!(!storage.has_assistant_messages("sess-1").unwrap());
+    /// let msg = Message::assistant_text("sess-1", "Hi");
+    /// storage.create_message(&msg).unwrap();
+    /// assert!(storage.has_assistant_messages("sess-1").unwrap());
+    /// ```
+    pub fn has_assistant_messages(&self, session_id: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let exists: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM messages WHERE session_id = ?1 AND role = 'assistant' LIMIT 1",
+                params![session_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        Ok(exists.is_some())
+    }
+
+    /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.
+    ///
+    /// All `rusqlite` operations are synchronous. Call this from async code to
+    /// avoid stalling the async executor during writes. The closure receives a
     /// reference to the storage and returns any `Result<T>`.
     ///
     /// # Errors
@@ -2118,6 +2183,64 @@ pub struct MemoryRow {
     pub access_count: i64,
     /// ISO-8601 timestamp of last access.
     pub last_accessed: Option<String>,
+}
+
+/// Row representation of a knowledge-graph entity.
+///
+/// Mirrors the `kg_entities` table.  The agent crate maps this into its
+/// `ragent_agent::memory::knowledge_graph::Entity` type (which carries the
+/// same fields) so that `ragent-storage` does not need to depend on the
+/// agent's memory module.
+#[derive(Debug, Clone)]
+pub struct KgEntityRow {
+    /// Unique row ID.
+    pub id: i64,
+    /// Entity name (e.g. `"Rust"`, `"Docker"`).
+    pub name: String,
+    /// Entity type (`project`/`tool`/`language`/`pattern`/`person`/`concept`).
+    pub entity_type: String,
+    /// Number of memories mentioning this entity.
+    pub mention_count: i64,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
+    pub updated_at: String,
+}
+
+/// Row representation of a knowledge-graph relationship.
+///
+/// Mirrors the `kg_relationships` table.  The agent crate maps this into its
+/// `ragent_agent::memory::knowledge_graph::Relationship` type.
+#[derive(Debug, Clone)]
+pub struct KgRelationshipRow {
+    /// Unique row ID.
+    pub id: i64,
+    /// Source entity ID.
+    pub source_id: i64,
+    /// Target entity ID.
+    pub target_id: i64,
+    /// Relationship type (`uses`/`prefers`/`depends_on`/`avoids`/`related_to`).
+    pub relation_type: String,
+    /// Confidence in this relationship (0.0–1.0).
+    pub confidence: f64,
+    /// The memory ID that established this relationship, if any.
+    pub source_memory_id: Option<i64>,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+}
+
+/// A scored search result from embedding-based memory search.
+///
+/// Pairs a memory row ID with its cosine-similarity score against the query
+/// embedding.  The agent and tools-extended crates map this into their own
+/// `SimilarityResult` / `EmbeddingMatch` types respectively, so
+/// `ragent-storage` does not need to depend on either.
+#[derive(Debug, Clone)]
+pub struct EmbeddingMatch {
+    /// Row ID of the matching memory.
+    pub row_id: i64,
+    /// Cosine similarity score in `[-1.0, 1.0]`.  Higher = more similar.
+    pub score: f32,
 }
 
 

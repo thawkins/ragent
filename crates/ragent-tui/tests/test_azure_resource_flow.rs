@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use ragent_core::storage::Storage;
+use ragent_agent::storage::Storage;
 
 fn mem_storage() -> Arc<Storage> {
     Arc::new(Storage::open_in_memory().expect("in-memory storage"))
@@ -93,8 +93,8 @@ fn test_azure_resource_stale_selection_cleanup() {
 
 #[test]
 fn test_azure_resource_entry_conversion_to_model_info() {
-    use ragent_core::provider::Provider;
-    use ragent_core::provider::azure_resource::AzureResourceProvider;
+    use ragent_agent::provider::Provider;
+    use ragent_agent::provider::azure_resource::AzureResourceProvider;
 
     let json = r#"{
         "version": "1",
@@ -125,8 +125,8 @@ fn test_azure_resource_entry_conversion_to_model_info() {
 
 #[test]
 fn test_azure_resource_foundry_backend_resolution() {
-    use ragent_core::provider::Provider;
-    use ragent_core::provider::azure_resource::AzureResourceProvider;
+    use ragent_agent::provider::Provider;
+    use ragent_agent::provider::azure_resource::AzureResourceProvider;
 
     let json = r#"{
         "version": "1",

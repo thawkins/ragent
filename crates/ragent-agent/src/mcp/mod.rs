@@ -195,7 +195,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::mcp::McpClient;
+    /// use ragent_agent::mcp::McpClient;
     ///
     /// let client = McpClient::new();
     /// assert!(client.servers().is_empty());
@@ -228,8 +228,8 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
-    /// # use ragent_core::config::McpServerConfig;
+    /// # use ragent_agent::mcp::McpClient;
+    /// # use ragent_agent::McpServerConfig;
     /// # async fn example() -> anyhow::Result<()> {
     /// let mut client = McpClient::new();
     /// let config = McpServerConfig::default();
@@ -382,7 +382,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::mcp::McpClient;
+    /// use ragent_agent::mcp::McpClient;
     ///
     /// let client = McpClient::new();
     /// let tools = client.list_tools();
@@ -409,7 +409,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::mcp::McpClient;
+    /// use ragent_agent::mcp::McpClient;
     ///
     /// let client = McpClient::new();
     /// let tools = client.list_tools_for_server("my-server");
@@ -439,7 +439,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let mut client = McpClient::new();
     /// client.refresh_tools().await?;
@@ -508,7 +508,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let mut client = McpClient::new();
     /// let tools = client.refresh_tools_for_server("my-server").await?;
@@ -570,7 +570,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = McpClient::new();
     /// let input = serde_json::json!({"query": "test"});
@@ -641,7 +641,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let client = McpClient::new();
     /// let input = serde_json::json!({"query": "test"});
@@ -685,7 +685,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::mcp::McpClient;
+    /// use ragent_agent::mcp::McpClient;
     ///
     /// let client = McpClient::new();
     /// assert!(client.servers().is_empty());
@@ -710,7 +710,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let mut client = McpClient::new();
     /// client.disconnect("my-server").await?;
@@ -749,7 +749,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() -> anyhow::Result<()> {
     /// let mut client = McpClient::new();
     /// client.disconnect_all().await?;
@@ -778,7 +778,7 @@ impl McpClient {
     /// # Examples
     ///
     /// ```no_run
-    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_agent::mcp::McpClient;
     /// # async fn example() {
     /// let servers = McpClient::discover().await;
     /// for server in servers {

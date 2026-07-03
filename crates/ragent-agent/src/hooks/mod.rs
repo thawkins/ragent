@@ -146,7 +146,7 @@ pub enum PreToolUseResult {
 /// # Examples
 ///
 /// ```
-/// use ragent_core::hooks::{run_pre_tool_use_hooks, HookConfig, HookTrigger};
+/// use ragent_agent::hooks::{run_pre_tool_use_hooks, HookConfig, HookTrigger};
 /// use std::path::Path;
 ///
 /// let hooks = vec![];

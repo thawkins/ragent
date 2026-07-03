@@ -5,8 +5,13 @@
 //! backed by persistent [`Storage`] and emits lifecycle events via [`EventBus`].
 
 pub mod cache;
+pub mod history;
+pub mod loop_steps;
+pub mod permissions;
 pub mod processor;
 pub mod profiler;
+pub mod prompt_builders;
+pub mod stream_buffer;
 
 // Re-export compression types when the feature is enabled.
 #[cfg(feature = "compression")]
@@ -88,9 +93,9 @@ impl SessionManager {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -135,9 +140,9 @@ impl SessionManager {
     ///
     /// ```
     /// use std::sync::Arc;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -161,9 +166,9 @@ impl SessionManager {
     /// ```
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -212,9 +217,9 @@ impl SessionManager {
     /// ```
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -239,9 +244,9 @@ impl SessionManager {
     /// ```
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -267,9 +272,9 @@ impl SessionManager {
     /// ```
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));
@@ -298,10 +303,10 @@ impl SessionManager {
     /// ```
     /// use std::sync::Arc;
     /// use std::path::PathBuf;
-    /// use ragent_core::storage::Storage;
-    /// use ragent_core::event::EventBus;
-    /// use ragent_core::message::Message;
-    /// use ragent_core::session::SessionManager;
+    /// use ragent_storage::Storage;
+    /// use ragent_agent::event::EventBus;
+    /// use ragent_types::message::Message;
+    /// use ragent_agent::session::SessionManager;
     ///
     /// let storage = Arc::new(Storage::open_in_memory().unwrap());
     /// let event_bus = Arc::new(EventBus::new(128));

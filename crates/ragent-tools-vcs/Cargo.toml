@@ -10,6 +10,7 @@ repository = "https://github.com/thawkins/ragent"
 [dependencies]
 ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }
+ragent-storage = { path = "../ragent-storage" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }

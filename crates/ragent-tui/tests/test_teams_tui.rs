@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use ragent_core::{
+use ragent_agent::{
     agent,
     event::{Event, EventBus},
     permission::PermissionChecker,
@@ -50,7 +50,7 @@ fn make_app() -> App {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_core::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -1153,10 +1153,10 @@ fn test_teams_panel_uses_session_message_fallback_for_steps() {
         .create_session("tm-session-2", "/tmp")
         .expect("create teammate session");
     app.storage
-        .create_message(&ragent_core::message::Message::new(
+        .create_message(&ragent_agent::message::Message::new(
             "tm-session-2",
-            ragent_core::message::Role::Assistant,
-            vec![ragent_core::message::MessagePart::Text {
+            ragent_agent::message::Role::Assistant,
+            vec![ragent_agent::message::MessagePart::Text {
                 text: "step one".to_string(),
             }],
         ))
@@ -1228,14 +1228,14 @@ fn test_buttons_render_with_active_blue_state() {
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
     app.active_team = Some(TeamConfig::new("alpha", "lead-session-1"));
-    app.active_tasks.push(ragent_core::task::TaskEntry {
+    app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-1".to_string(),
         parent_session_id: "lead-session-1".to_string(),
         child_session_id: "child-1".to_string(),
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
-        status: ragent_core::task::TaskStatus::Running,
+        status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,
         created_at: chrono::Utc::now(),
@@ -1282,14 +1282,14 @@ fn test_agents_popup_renders_tidy_table_columns() {
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
     app.show_agents_window = true;
-    app.active_tasks.push(ragent_core::task::TaskEntry {
+    app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-a1".to_string(),
         parent_session_id: "lead-session-1".to_string(),
         child_session_id: "child-a1".to_string(),
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
-        status: ragent_core::task::TaskStatus::Running,
+        status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,
         created_at: chrono::Utc::now(),

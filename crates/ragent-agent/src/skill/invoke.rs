@@ -94,7 +94,7 @@ pub struct SkillInvocation {
 ///
 /// ```no_run
 /// # async fn example() -> anyhow::Result<()> {
-/// use ragent_core::skill::{SkillInfo, invoke::invoke_skill};
+/// use ragent_agent::skill::{SkillInfo, invoke::invoke_skill};
 /// use std::path::Path;
 ///
 /// let mut skill = SkillInfo::new("deploy", "Deploy $ARGUMENTS to production");
@@ -147,7 +147,7 @@ pub async fn invoke_skill(
 /// # Examples
 ///
 /// ```
-/// use ragent_core::skill::invoke::{SkillInvocation, format_skill_message};
+/// use ragent_agent::skill::invoke::{SkillInvocation, format_skill_message};
 ///
 /// let invocation = SkillInvocation {
 ///     skill_name: "deploy".to_string(),
@@ -296,7 +296,7 @@ pub fn resolve_forked_skill_agent(
 /// # Examples
 ///
 /// ```
-/// use ragent_core::skill::invoke::{ForkedSkillResult, format_forked_result};
+/// use ragent_agent::skill::invoke::{ForkedSkillResult, format_forked_result};
 ///
 /// let result = ForkedSkillResult {
 ///     skill_name: "review".to_string(),

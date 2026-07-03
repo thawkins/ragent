@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Paragraph, Widget, Wrap},
 };
 
-use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
+use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::theme;
 
@@ -2242,7 +2242,7 @@ impl<'a> MessageWidget<'a> {
     ///
     /// ```rust
     /// use std::collections::HashMap;
-    /// use ragent_core::message::{Message, MessagePart, Role};
+    /// use ragent_agent::message::{Message, MessagePart, Role};
     /// use ragent_tui::widgets::message_widget::MessageWidget;
     ///
     /// let msg = Message::new(
@@ -2686,7 +2686,7 @@ mod tests {
 #[cfg(test)]
 mod duration_tests {
     use super::*;
-    use ragent_core::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+    use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
     use serde_json::json;
 
     /// Test that duration_ms is displayed for completed tool calls.

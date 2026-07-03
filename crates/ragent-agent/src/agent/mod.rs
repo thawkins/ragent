@@ -482,7 +482,7 @@ impl AgentInfo {
     /// # Examples
     ///
     /// ```
-    /// use ragent_core::agent::AgentInfo;
+    /// use ragent_agent::agent::AgentInfo;
     ///
     /// let agent = AgentInfo::new("my-agent", "A custom coding assistant");
     /// assert_eq!(agent.name, "my-agent");
@@ -537,7 +537,7 @@ static BUILTIN_AGENTS: OnceLock<Vec<AgentInfo>> = OnceLock::new();
 /// # Examples
 ///
 /// ```
-/// use ragent_core::agent::create_builtin_agents;
+/// use ragent_agent::agent::create_builtin_agents;
 ///
 /// let agents = create_builtin_agents();
 /// assert!(!agents.is_empty());
@@ -1092,19 +1092,12 @@ fn rule(
     }
 }
 
-fn config_permission_rule_to_runtime(
-    rule: &ragent_config::permission::PermissionRule,
-) -> PermissionRule {
-    PermissionRule {
-        permission: Permission::from(rule.permission.to_string().as_str()),
-        pattern: rule.pattern.clone(),
-        action: match rule.action {
-            ragent_config::permission::PermissionAction::Allow => PermissionAction::Allow,
-            ragent_config::permission::PermissionAction::Deny => PermissionAction::Deny,
-            ragent_config::permission::PermissionAction::Ask => PermissionAction::Ask,
-        },
-    }
-}
+// Note: the previous `config_permission_rule_to_runtime` helper converted
+// `ragent_config::permission::PermissionRule` into the agent crate's parallel
+// `PermissionRule` type via hand-written `From` impls.  As of REMPLAN.md M1 /
+// T1.2 the agent crate re-exports the canonical `ragent_config::permission`
+// types, so the two `PermissionRule`s are the *same* type and the conversion
+// is a no-op.  Call sites now clone the config rules directly.
 
 /// Returns the default permission ruleset applied when a custom agent does not
 /// specify its own `permissions` array.
@@ -1288,8 +1281,8 @@ pub fn resolve_agent_with_customs_and_model(
 /// # Examples
 ///
 /// ```
-/// use ragent_core::agent::resolve_agent;
-/// use ragent_core::config::Config;
+/// use ragent_agent::agent::resolve_agent;
+/// use ragent_agent::Config;
 ///
 /// let config = Config::default();
 /// let agent = resolve_agent("general", &config).unwrap();
@@ -1331,11 +1324,7 @@ pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<Agent
             agent.max_steps = Some(max_steps);
         }
         if !agent_config.permission.is_empty() {
-            agent.permission = agent_config
-                .permission
-                .iter()
-                .map(config_permission_rule_to_runtime)
-                .collect();
+            agent.permission = agent_config.permission.clone();
         }
         agent.hidden = agent_config.hidden;
         if !agent_config.skills.is_empty() {
@@ -1360,8 +1349,8 @@ pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<Agent
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use ragent_core::agent::resolve_agent_with_customs;
-/// use ragent_core::config::Config;
+/// use ragent_agent::agent::resolve_agent_with_customs;
+/// use ragent_agent::Config;
 ///
 /// let config = Config::default();
 /// let agent = resolve_agent_with_customs("my-custom-agent", &config, Path::new(".")).unwrap();
@@ -1394,7 +1383,7 @@ pub fn resolve_agent_with_customs(
 ///
 /// ```no_run
 /// use std::path::Path;
-/// use ragent_core::agent::load_all_agents;
+/// use ragent_agent::agent::load_all_agents;
 ///
 /// let (agents, warnings) = load_all_agents(Path::new("."));
 /// println!("{} agents loaded, {} warnings", agents.len(), warnings.len());
@@ -1447,7 +1436,7 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
 ///
 /// ```
 /// use std::path::Path;
-/// use ragent_core::agent::{AgentInfo, build_system_prompt};
+/// use ragent_agent::agent::{AgentInfo, build_system_prompt};
 ///
 /// let mut agent = AgentInfo::new("helper", "A helpful agent");
 /// agent.prompt = Some("You are a helpful assistant.".to_string());

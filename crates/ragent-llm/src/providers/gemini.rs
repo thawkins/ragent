@@ -13,7 +13,7 @@ use std::pin::Pin;
 use super::thinking::{
     full_reasoning_levels, gemini_thinking_config_from_request, gemini_thinking_levels_for_model,
 };
-use crate::event::FinishReason;
+use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};

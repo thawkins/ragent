@@ -13,7 +13,7 @@ use crate::theme::colors;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use ragent_core::task::{TaskEntry, TaskStatus};
+use ragent_agent::task::{TaskEntry, TaskStatus};
 
 use crate::app::App;
 
@@ -42,7 +42,7 @@ fn build_task_rows_with_buttons<'a>(
     parent_sid: &str,
     depth: usize,
     last_stack: &[bool],
-    event_bus: &ragent_core::event::EventBus,
+    event_bus: &ragent_agent::event::EventBus,
     custom_names: &std::collections::HashSet<String>,
     teammate_ids: &std::collections::HashSet<String>,
     out: &mut Vec<Line<'a>>,

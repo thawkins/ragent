@@ -5,8 +5,7 @@
 //! 2. Valid JSON payload with expected fields.
 //! 3. No panics during serialization.
 
-use ragent_agent as ragent_core;
-use ragent_core::event::{Event, FinishReason};
+use ragent_agent::event::{Event, FinishReason};
 use ragent_server::sse::event_to_parts;
 use serde_json::Value;
 
@@ -219,7 +218,7 @@ fn test_permission_replied() {
         session_id: "s1".into(),
         request_id: "r1".into(),
         allowed: true,
-        decision: ragent_core::permission::PermissionDecision::Once,
+        decision: ragent_agent::permission::PermissionDecision::Once,
     });
     assert_eq!(name, "permission_replied");
     assert_eq!(v["allowed"], true);

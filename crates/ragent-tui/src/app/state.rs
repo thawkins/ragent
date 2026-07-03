@@ -12,15 +12,15 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
-use ragent_core::agent::{AgentInfo, CustomAgentDef};
-use ragent_core::config::ToolVisibilityConfig;
-use ragent_core::event::EventBus;
-use ragent_core::mcp::{McpServer, discovery::DiscoveredMcpServer};
-use ragent_core::message::Message;
-use ragent_core::permission::PermissionRequest;
-use ragent_core::provider::ProviderRegistry;
-use ragent_core::session::processor::SessionProcessor;
-use ragent_core::storage::Storage;
+use ragent_agent::agent::{AgentInfo, CustomAgentDef};
+use ragent_agent::ToolVisibilityConfig;
+use ragent_agent::event::EventBus;
+use ragent_agent::mcp::{McpServer, discovery::DiscoveredMcpServer};
+use ragent_agent::message::Message;
+use ragent_agent::permission::PermissionRequest;
+use ragent_agent::provider::ProviderRegistry;
+use ragent_agent::session::processor::SessionProcessor;
+use ragent_agent::storage::Storage;
 use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
@@ -369,7 +369,7 @@ pub enum ProviderSetupStep {
     /// Choosing an Azure deployment from the user's azureresources.json file.
     SelectAzureResource {
         /// Parsed entries from the file.
-        entries: Vec<ragent_core::provider::azure_resource::AzureResourceEntry>,
+        entries: Vec<ragent_agent::provider::azure_resource::AzureResourceEntry>,
         /// Index of the highlighted entry.
         selected: usize,
         /// Optional error message (e.g. file not found).
@@ -1207,7 +1207,7 @@ pub struct App {
     /// Counter for auto-allocating "ag[nnn]" display names.
     pub next_agent_index: u32,
     /// Active background sub-agent tasks (F14).
-    pub active_tasks: Vec<ragent_core::task::TaskEntry>,
+    pub active_tasks: Vec<ragent_agent::task::TaskEntry>,
     /// Whether the keybindings help panel is currently visible.
     pub show_shortcuts: bool,
     /// Whether Ctrl+C has armed a guarded keyboard exit sequence.

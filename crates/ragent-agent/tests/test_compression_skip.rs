@@ -17,7 +17,7 @@ fn small_history_does_not_trigger_compression() {
     // This test exists as a regression guard: if someone removes the
     // `!compressed_this_turn` short-circuit in `process_user_message`
     // this test should fail by the next refactor.
-    let _cfg = ragent_agent::config::StreamConfig::default();
+    let _cfg = ragent_agent::StreamConfig::default();
 }
 
 #[test]
@@ -39,5 +39,5 @@ fn compression_module_is_feature_gated() {
     // disabled in the default build.  Building with
     // `--features compression` enables the module and the
     // compression fast-path tested in this file.
-    let _ = ragent_agent::config::StreamConfig::default();
+    let _ = ragent_agent::StreamConfig::default();
 }

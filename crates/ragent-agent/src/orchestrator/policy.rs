@@ -12,8 +12,8 @@
 //! Use [`crate::orchestrator::Coordinator::with_policy`] to attach a policy:
 //!
 //! ```rust,ignore
-//! use ragent_core::orchestrator::{Coordinator, AgentRegistry};
-//! use ragent_core::orchestrator::policy::{ConflictPolicy, ConflictResolver};
+//! use ragent_agent::orchestrator::{Coordinator, AgentRegistry};
+//! use ragent_agent::orchestrator::policy::{ConflictPolicy, ConflictResolver};
 //!
 //! let coord = Coordinator::new(registry)
 //!     .with_policy(ConflictResolver::new(ConflictPolicy::Consensus { threshold: 2 }));

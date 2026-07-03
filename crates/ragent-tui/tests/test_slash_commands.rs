@@ -8,7 +8,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ragent_core::{
+use ragent_agent::{
     agent,
     event::EventBus,
     permission::PermissionChecker,
@@ -47,7 +47,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_core::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -185,9 +185,9 @@ fn test_slash_clear_empties_messages() {
     let mut app = make_app();
     // Add some dummy messages
     app.messages
-        .push(ragent_core::message::Message::user_text("s1", "hello"));
+        .push(ragent_agent::message::Message::user_text("s1", "hello"));
     app.messages
-        .push(ragent_core::message::Message::user_text("s1", "world"));
+        .push(ragent_agent::message::Message::user_text("s1", "world"));
     assert_eq!(app.messages.len(), 2);
 
     app.execute_slash_command("/clear");
@@ -1604,7 +1604,7 @@ fn test_slash_system_preserves_argument_whitespace() {
 fn test_slash_tools_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools");
 
@@ -1627,7 +1627,7 @@ fn test_slash_tools_lists_visibility_switches() {
 fn test_slash_tools_shows_single_switch_state() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools office");
 
@@ -1639,7 +1639,7 @@ fn test_slash_tools_shows_single_switch_state() {
 fn test_slash_tools_help_shows_usage() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools help");
 
@@ -1653,7 +1653,7 @@ fn test_slash_tools_help_shows_usage() {
 fn test_slash_tools_show_alias_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools show");
 
@@ -1679,9 +1679,9 @@ fn test_slash_tools_office_on_shows_office_tools() {
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    let hidden = ragent_core::config::tool_family_names("office")
+    let hidden = ragent_agent::tool_family_names("office")
         .expect("office family")
         .iter()
         .map(|name| (*name).to_string())
@@ -1719,9 +1719,9 @@ fn test_slash_tools_teams_on_shows_team_tools() {
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    let hidden = ragent_core::config::tool_family_names("teams")
+    let hidden = ragent_agent::tool_family_names("teams")
         .expect("teams family")
         .iter()
         .map(|name| (*name).to_string())
@@ -1760,9 +1760,9 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    let hidden = ragent_core::config::tool_family_names("agents")
+    let hidden = ragent_agent::tool_family_names("agents")
         .expect("agents family")
         .iter()
         .map(|name| (*name).to_string())
@@ -1801,9 +1801,9 @@ fn test_slash_tools_plan_on_shows_plan_tools() {
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+    app.tool_visibility = ragent_agent::ToolVisibilityConfig::default();
 
-    let hidden = ragent_core::config::tool_family_names("plan")
+    let hidden = ragent_agent::tool_family_names("plan")
         .expect("plan family")
         .iter()
         .map(|name| (*name).to_string())

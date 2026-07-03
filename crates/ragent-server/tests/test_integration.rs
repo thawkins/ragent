@@ -8,15 +8,14 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use ragent_agent as ragent_core;
-use ragent_core::config::Config;
-use ragent_core::event::{Event, EventBus};
-use ragent_core::permission::PermissionChecker;
-use ragent_core::provider::ProviderRegistry;
-use ragent_core::session::SessionManager;
-use ragent_core::session::processor::SessionProcessor;
-use ragent_core::storage::Storage;
-use ragent_core::tool::ToolRegistry;
+use ragent_agent::Config;
+use ragent_agent::event::{Event, EventBus};
+use ragent_agent::permission::PermissionChecker;
+use ragent_agent::provider::ProviderRegistry;
+use ragent_agent::session::SessionManager;
+use ragent_agent::session::processor::SessionProcessor;
+use ragent_agent::storage::Storage;
+use ragent_agent::tool::ToolRegistry;
 use ragent_server::routes::{AppState, router};
 use tower::ServiceExt;
 

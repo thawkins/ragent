@@ -1,68 +1,26 @@
-//! Permission types
+//! Permission types used by the event system.
 //!
-//! Core permission types used by the event system.
-//! Full permission checking logic is in ragent-config.
+//! The full permission checking system (`Permission`, `PermissionAction`,
+//! `PermissionRule`, `PermissionRequest`, `PermissionChecker`) lives in
+//! `ragent-config::permission` — see `REMPLAN.md` M1 / T1.2 for the
+//! consolidation history.  Only [`PermissionDecision`] remains here because
+//! the `Event::PermissionReplied` variant (defined in
+//! [`crate::event::Event`]) references it, and `ragent-types` must not depend
+//! on `ragent-config`.
 
 use serde::{Deserialize, Serialize};
 
-/// Permission request structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PermissionRequest {
-    pub permission: Permission,
-    pub resource: String,
-    pub description: String,
-    pub agent_id: Option<String>,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default = "default_timeout")]
-    pub timeout_secs: u64,
-}
-
-fn default_timeout() -> u64 {
-    120
-}
-
-/// Permission decision from user
+/// The user's response to a permission request.
+///
+/// Re-exported by `ragent-config::permission` and `ragent-agent::permission`
+/// so all crates share a single definition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PermissionDecision {
+    /// Allow this single occurrence only.
     Once,
+    /// Allow now and for all future matching requests.
     Always,
+    /// Deny the request.
     Deny,
-}
-
-/// Permission types
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Permission {
-    FileRead,
-    FileWrite,
-    FileEdit,
-    BashExecute,
-    WebFetch,
-    WebSearch,
-    PlanEnter,
-    AgentSpawn,
-    ConfigWrite,
-    MemoryWrite,
-    TodoWrite,
-    Custom(String),
-}
-
-impl std::fmt::Display for Permission {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Permission::FileRead => write!(f, "file:read"),
-            Permission::FileWrite => write!(f, "file:write"),
-            Permission::FileEdit => write!(f, "file:edit"),
-            Permission::BashExecute => write!(f, "bash:execute"),
-            Permission::WebFetch => write!(f, "web:fetch"),
-            Permission::WebSearch => write!(f, "web:search"),
-            Permission::PlanEnter => write!(f, "plan:enter"),
-            Permission::AgentSpawn => write!(f, "agent:spawn"),
-            Permission::ConfigWrite => write!(f, "config:write"),
-            Permission::MemoryWrite => write!(f, "memory:write"),
-            Permission::TodoWrite => write!(f, "todo:write"),
-            Permission::Custom(s) => write!(f, "{}", s),
-        }
-    }
 }

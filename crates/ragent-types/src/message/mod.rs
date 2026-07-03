@@ -100,6 +100,19 @@ pub struct ToolCallState {
     pub duration_ms: Option<u64>,
 }
 
+/// Image attachment data.
+///
+/// Stores MIME type and file path for an image attachment.
+/// Wrapped in a `Box` when stored in [`MessagePart::Image`] to reduce
+/// memory usage (the `Image` variant is the largest `MessagePart` variant).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageData {
+    /// MIME type, e.g. `"image/png"`.
+    pub mime_type: String,
+    /// Absolute path to the image file on disk.
+    pub path: std::path::PathBuf,
+}
+
 /// A discrete content block within a [`Message`].
 ///
 /// Messages are composed of one or more parts, allowing text, tool calls,
@@ -131,12 +144,10 @@ pub enum MessagePart {
     /// The image data is read from `path` at send time and base64-encoded for
     /// the LLM API. Storing the path rather than raw bytes keeps the session
     /// database small.
-    Image {
-        /// MIME type, e.g. `"image/png"`.
-        mime_type: String,
-        /// Absolute path to the image file on disk.
-        path: std::path::PathBuf,
-    },
+    ///
+    /// Note: `Box`ed to reduce memory usage (this is the largest `MessagePart`
+    /// variant).
+    Image(Box<ImageData>),
 }
 
 /// A single message in a conversation session.
@@ -202,6 +213,15 @@ impl Message {
         Self::new(
             session_id,
             Role::User,
+            vec![MessagePart::Text { text: text.into() }],
+        )
+    }
+
+    /// Convenience constructor for a single-text assistant message.
+    pub fn assistant_text(session_id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self::new(
+            session_id,
+            Role::Assistant,
             vec![MessagePart::Text { text: text.into() }],
         )
     }

@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use ragent_core::{
+use ragent_agent::{
     agent,
-    config::StreamConfig,
+StreamConfig,
     event::{Event, EventBus},
     permission::PermissionChecker,
     provider,

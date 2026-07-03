@@ -21,14 +21,4 @@ pub use providers::{
     ollama::OllamaProvider, ollama_cloud::OllamaCloudProvider, openai::OpenAiProvider,
 };
 
-/// Compatibility shim for provider modules that still refer to `crate::config`.
-pub mod config {
-    pub use ragent_config::{Capabilities, Cost};
-}
-
-/// Compatibility shim for provider modules that still refer to `crate::event`.
-pub mod event {
-    pub use ragent_types::event::FinishReason;
-}
-
 pub use shared_request::SharedChatRequest;

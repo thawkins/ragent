@@ -10,7 +10,7 @@
 //! 3. The `tokio::time::timeout` helper that the agent loop uses
 //!    fires when the supplied future takes longer than the budget.
 
-use ragent_agent::config::StreamConfig;
+use ragent_agent::StreamConfig;
 use std::time::Duration;
 
 #[test]

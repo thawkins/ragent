@@ -5,9 +5,9 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 
-use ragent_core::{
+use ragent_agent::{
     agent,
-    config::StreamConfig,
+StreamConfig,
     event::Event,
     event::EventBus,
     permission::PermissionChecker,

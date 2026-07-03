@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```
-//! use ragent_core::tool::metadata::MetadataBuilder;
+//! use ragent_agent::tool::metadata::MetadataBuilder;
 //!
 //! let metadata = MetadataBuilder::new()
 //!     .path("/path/to/file.txt")

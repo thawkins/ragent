@@ -8,7 +8,7 @@
 //! Creating a new random identifier:
 //!
 //! ```
-//! use ragent_core::id::SessionId;
+//! use ragent_agent::id::SessionId;
 //!
 //! let id = SessionId::new();
 //! assert!(!id.as_str().is_empty());
@@ -17,7 +17,7 @@
 //! Converting from a known string:
 //!
 //! ```
-//! use ragent_core::id::MessageId;
+//! use ragent_agent::id::MessageId;
 //!
 //! let id = MessageId::from("msg-42");
 //! assert_eq!(id.as_str(), "msg-42");

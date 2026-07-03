@@ -22,4 +22,3 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1.42", features = ["full"] }
 tempfile = "3"
-ragent-research = { path = "../ragent-research" }

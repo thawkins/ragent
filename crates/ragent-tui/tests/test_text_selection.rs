@@ -11,7 +11,7 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::{Terminal, backend::TestBackend};
 
-use ragent_core::{
+use ragent_agent::{
     agent,
     event::EventBus,
     message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus},
@@ -46,7 +46,7 @@ fn make_app() -> App {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_core::config::StreamConfig::default(),
+        stream_config: ragent_agent::StreamConfig::default(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -201,14 +201,14 @@ fn test_clicking_active_agents_row_opens_output_view() {
     app.session_id = Some("lead-s1".to_string());
     app.show_agents_window = true;
     app.active_agents_area = Rect::new(0, 10, 80, 8);
-    app.active_tasks.push(ragent_core::task::TaskEntry {
+    app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-12345678".to_string(),
         parent_session_id: "lead-s1".to_string(),
         child_session_id: "child-s1".to_string(),
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
-        status: ragent_core::task::TaskStatus::Running,
+        status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,
         created_at: chrono::Utc::now(),
@@ -257,14 +257,14 @@ fn test_click_outside_output_view_closes_overlay() {
 #[test]
 fn test_clicking_agents_button_toggles_agents_window() {
     let mut app = make_app();
-    app.active_tasks.push(ragent_core::task::TaskEntry {
+    app.active_tasks.push(ragent_agent::task::TaskEntry {
         id: "task-1".to_string(),
         parent_session_id: "lead-s1".to_string(),
         child_session_id: "child-s1".to_string(),
         agent_name: "explore".to_string(),
         task_prompt: "x".to_string(),
         background: true,
-        status: ragent_core::task::TaskStatus::Running,
+        status: ragent_agent::task::TaskStatus::Running,
         result: None,
         error: None,
         created_at: chrono::Utc::now(),
@@ -331,7 +331,7 @@ fn test_output_view_can_load_messages_for_non_current_session() {
         .create_session("child-s1", "/tmp")
         .expect("create child session");
     app.storage
-        .create_message(&ragent_core::message::Message::user_text(
+        .create_message(&ragent_agent::message::Message::user_text(
             "child-s1",
             "hello from child",
         ))
@@ -354,7 +354,7 @@ fn test_output_view_overlay_renders_non_current_session_message() {
         .create_session("child-s1", "/tmp")
         .expect("create child session");
     app.storage
-        .create_message(&ragent_core::message::Message::user_text(
+        .create_message(&ragent_agent::message::Message::user_text(
             "child-s1",
             "hello from child",
         ))

@@ -53,11 +53,6 @@ pub mod event {
     pub use ragent_types::event::{Event, EventBus};
 }
 
-/// Compatibility re-export for moved helpers that still reference `crate::config`.
-pub mod config {
-    pub use ragent_config::CrossProjectConfig;
-}
-
 /// Storage adapter types for the extracted tools.
 pub mod storage {
     use anyhow::Result;

@@ -166,6 +166,35 @@ pub struct Relationship {
     pub created_at: String,
 }
 
+impl From<crate::storage::KgEntityRow> for Entity {
+    /// Map a storage-row entity into the agent's [`Entity`] type.
+    fn from(row: crate::storage::KgEntityRow) -> Self {
+        Self {
+            id: row.id,
+            name: row.name,
+            entity_type: row.entity_type,
+            mention_count: row.mention_count,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }
+    }
+}
+
+impl From<crate::storage::KgRelationshipRow> for Relationship {
+    /// Map a storage-row relationship into the agent's [`Relationship`] type.
+    fn from(row: crate::storage::KgRelationshipRow) -> Self {
+        Self {
+            id: row.id,
+            source_id: row.source_id,
+            target_id: row.target_id,
+            relation_type: row.relation_type,
+            confidence: row.confidence,
+            source_memory_id: row.source_memory_id,
+            created_at: row.created_at,
+        }
+    }
+}
+
 /// Result of extracting entities from a memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtractionResult {
@@ -493,8 +522,20 @@ pub fn store_extraction(
 ///
 /// Returns all entities and relationships for visualisation or retrieval.
 pub fn get_knowledge_graph(storage: &Storage) -> Result<KnowledgeGraph> {
-    let entities = storage.list_entities()?;
-    let relationships = storage.list_relationships()?;
+    // `ragent-storage` returns storage-row types (`KgEntityRow` /
+    // `KgRelationshipRow`) so it does not need to depend on the agent's
+    // memory module; map them into the agent's `Entity` / `Relationship`
+    // types here (the field shapes are identical).
+    let entities = storage
+        .list_entities()?
+        .into_iter()
+        .map(Entity::from)
+        .collect();
+    let relationships = storage
+        .list_relationships()?
+        .into_iter()
+        .map(Relationship::from)
+        .collect();
     Ok(KnowledgeGraph {
         entities,
         relationships,

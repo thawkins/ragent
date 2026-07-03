@@ -1,9 +1,10 @@
 //! Team module — Agent Team Coordination for ragent.
 //!
-//! This module is a thin source-level re-export of the implementation that
-//! lives in [`ragent_team::team`].  The source files are included via
-//! `#[path]` so that both crates share a single source-of-truth without
-//! introducing a Cargo dependency cycle (see `docs/team-unification-decision.md`).
+//! This module owns the team runtime (config, task, mailbox, store, manager,
+//! swarm, classify) natively in `ragent-agent`.  Previously these sources
+//! lived in `ragent-team` and were compiled into `ragent-agent` via
+//! `#[path]` attributes; they have been moved here to eliminate the
+//! `#[path]` cycle workaround (see `REMPLAN.md` M3 / T3.3).
 //!
 //! A team consists of a lead session and one or more named *teammate*
 //! sessions that coordinate via a shared task list and per-agent mailboxes
@@ -21,20 +22,13 @@
 //! | [`manager`]| `TeamManager` runtime for spawning/polling teammates |
 //! | [`swarm`]  | LLM decomposition of a goal into parallel subtasks |
 
-#[path = "../../../ragent-team/src/team/classify.rs"]
 pub mod classify;
-#[path = "../../../ragent-team/src/team/config.rs"]
 pub mod config;
-#[path = "../../../ragent-team/src/team/mailbox.rs"]
 pub mod mailbox;
-#[path = "../../../ragent-team/src/team/manager.rs"]
 pub mod manager;
-#[path = "../../../ragent-team/src/team/store.rs"]
 pub mod store;
 /// Swarm — fleet-style auto-decomposition into parallel subtasks.
-#[path = "../../../ragent-team/src/team/swarm.rs"]
 pub mod swarm;
-#[path = "../../../ragent-team/src/team/task.rs"]
 pub mod task;
 
 // ── Re-exports ─────────────────────────────────────────────────────────────────

@@ -467,7 +467,7 @@ Use `team_spawn` with a role-specific prompt:
 For full details and advanced workflows (plan approval, hooks, graceful shutdown), see:
 
 - [`docs/teams.md`](docs/teams.md)
-- [`docs/howto_teams.md`](docs/howto_teams.md)
+- [`docs/howtos/howto_teams.md`](docs/howtos/howto_teams.md)
 - [`examples/teams/`](examples/teams/)
 
 ---
