@@ -1,5 +1,37 @@
 # Changelog
 
+## Version: 0.1.0-alpha.129
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.129`.
+- **Compression made permanent** — Removed the `compression` and
+  `compression-ml` Cargo feature flags across the workspace.
+  `headroom-core` is now an unconditional dependency of `ragent-agent`,
+  and the context-compression pipeline is always compiled in. Specific
+  changes:
+    - `Cargo.toml` (workspace root): removed `compression` and
+      `compression-ml` features; `default` is now empty.
+    - `crates/ragent-agent/Cargo.toml`: removed `compression` and
+      `compression-ml` feature definitions; `headroom-core` is no longer
+      `optional`.
+    - `crates/ragent-tui/Cargo.toml`: removed the `compression` feature
+      passthrough.
+    - `crates/ragent-agent/src/compression/mod.rs`: dropped all
+      `#[cfg(feature = "compression")]` gates; `is_available()` now
+      always returns `true`.
+    - `crates/ragent-agent/src/lib.rs`,
+      `crates/ragent-agent/src/session/{mod,history,loop_steps,processor}.rs`:
+      removed every `#[cfg(feature = "compression")]` /
+      `#[cfg(not(feature = "compression"))]` guard and the dead-code
+      markers that existed only to silence the disabled-feature build.
+    - `crates/ragent-agent/tests/test_compression_pipeline.rs` and
+      `crates/ragent-agent/benches/agent_loop.rs`: removed the
+      feature-gated `#[cfg(...)]` attributes on tests and benchmarks.
+    - `crates/ragent-config/src/compression.rs`: updated doc comment for
+      `CompressorConfig.prose` (no longer references the
+      `compression-ml` feature).
+
 ## Version: 0.1.0-alpha.128
 
 ### Changed

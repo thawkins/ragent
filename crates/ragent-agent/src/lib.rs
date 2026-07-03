@@ -5,7 +5,6 @@
 //! primitives that the moved modules still reference through `crate::*`.
 
 pub mod agent;
-#[cfg(feature = "compression")]
 pub mod compression;
 pub mod error;
 pub mod event;

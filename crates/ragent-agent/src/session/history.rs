@@ -18,7 +18,6 @@ use base64::Engine as _;
 use serde_json::Value;
 use tracing::warn;
 
-#[cfg(feature = "compression")]
 use crate::event::{Event, EventBus};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
@@ -381,7 +380,6 @@ pub fn is_token_overflow_error_message(error_msg: &str) -> bool {
 /// * `last_reported_input_tokens` — the `input_tokens` value from the most
 ///   recent LLM response, or `0` if no prior call has been made in this
 ///   turn (or the provider did not report usage).
-#[cfg(feature = "compression")]
 pub fn should_compress_with_reported(
     chat_messages: &[ChatMessage],
     context_window: usize,
@@ -403,7 +401,6 @@ pub fn should_compress_with_reported(
 /// Run the emergency compression pipeline on `chat_messages` after a
 /// token-overflow error, publishing `CompressionStarted`/`CompressionFinished`
 /// events and resetting the per-turn hysteresis flags.
-#[cfg(feature = "compression")]
 pub fn emergency_compress_chat_messages(
     event_bus: &EventBus,
     session_id: &str,
@@ -679,17 +676,4 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 
     // Incomplete if user asked for file creation but no write tool was used.
     !has_write_tool
-}
-
-// Silence unused-import warnings for helpers only used under feature gates.
-#[cfg(not(feature = "compression"))]
-#[allow(dead_code)]
-fn _unused_finish_reason_marker() -> crate::event::FinishReason {
-    crate::event::FinishReason::Stop
-}
-
-#[cfg(not(feature = "compression"))]
-#[allow(dead_code)]
-fn _unused_json_marker() -> Value {
-    Value::Null
 }

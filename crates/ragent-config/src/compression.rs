@@ -130,8 +130,7 @@ pub struct CompressorConfig {
     pub search: bool,
     /// CodeCompressor for AST-based compression. Default: `false` (experimental).
     pub code: bool,
-    /// Prose compression via Kompress-base ML model. Default: `false` (requires
-    /// `compression-ml` feature).
+    /// Prose compression via Kompress-base ML model. Default: `false`.
     pub prose: bool,
 }
 

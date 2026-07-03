@@ -34,7 +34,6 @@ use crate::provider::ProviderRegistry;
 use crate::session::SessionManager;
 use crate::session::cache::SystemPromptCache;
 use crate::session::history::PendingToolCall;
-#[cfg(feature = "compression")]
 use crate::session::history::should_compress_with_reported as _should_compress_with_reported;
 use crate::session::permissions::{
     check_permission_with_prompt as _check_permission, extract_command_name,
@@ -53,9 +52,7 @@ pub use crate::session::history::{
 };
 pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
-#[cfg(feature = "compression")]
 pub use crate::session::history::emergency_compress_chat_messages;
-#[cfg(feature = "compression")]
 pub use crate::session::history::should_compress_with_reported;
 
 /// Drives the agentic conversation loop for a single session.///
@@ -419,9 +416,7 @@ impl SessionProcessor {
         let mut last_interim_hash: Option<u64> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
-        #[cfg_attr(not(feature = "compression"), allow(unused_mut))]
         let mut compressed_this_turn = compressed_this_turn;
-        #[cfg_attr(not(feature = "compression"), allow(unused_mut))]
         let mut last_reported_input_tokens = last_reported_input_tokens;
 
         let assistant_msg_id = {
@@ -433,7 +428,6 @@ impl SessionProcessor {
             id
         };
 
-        #[cfg(feature = "compression")]
         let context_window = self
             .provider_registry
             .get(&turn.model_ref.provider_id)
@@ -511,7 +505,6 @@ impl SessionProcessor {
             let _backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
 
-            #[cfg(feature = "compression")]
             let should_run_compression = turn.session_config.compression.enabled
                 && !compressed_this_turn
                 && _should_compress_with_reported(
@@ -520,9 +513,6 @@ impl SessionProcessor {
                     turn.session_config.compression.auto_threshold,
                     last_reported_input_tokens,
                 );
-            #[cfg(not(feature = "compression"))]
-            let _should_run_compression = false;
-            #[cfg(feature = "compression")]
             if should_run_compression {
                 let _scope = profiler.scope("history.compress");
                 self.event_bus.publish(Event::CompressionStarted {
@@ -587,7 +577,6 @@ impl SessionProcessor {
                     &tool_definitions,
                     &system_prompt,
                     &cancel_flag,
-                    #[cfg(feature = "compression")]
                     context_window,
                     llm_request_start,
                     &profiler,
@@ -597,7 +586,6 @@ impl SessionProcessor {
             compressed_this_turn = loop_state.compressed_this_turn;
             last_reported_input_tokens = loop_state.last_reported_input_tokens;
 
-            #[cfg(feature = "compression")]
             if llm_result.last_input_tokens > 0 {
                 last_reported_input_tokens = llm_result.last_input_tokens;
             }

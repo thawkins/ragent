@@ -339,7 +339,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.128** — The core architecture, tool system (~111 tools), TUI, HTTP
+**v0.1.0-alpha.129** — The core architecture, tool system (~111 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 

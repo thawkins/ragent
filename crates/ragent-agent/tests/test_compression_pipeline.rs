@@ -65,9 +65,8 @@ fn test_compression_config_all_compressors_disabled() {
     assert!(!config.compressors.prose);
 }
 
-// ── Compression feature-gated tests ─────────────────────────────────────────
+// ── Compression tests ─────────────────────────────────────────────────────
 
-#[cfg(feature = "compression")]
 mod compression_feature_tests {
     use ragent_agent::compression::{
         CompressionMode, compress_help, compress_history, compress_history_with_mode, count_tokens,

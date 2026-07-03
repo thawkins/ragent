@@ -41,12 +41,9 @@ use crate::session::processor::SessionProcessor;
 use crate::session::history::{
     PendingToolCall, chat_request_payload_bytes, detect_incomplete_file_task,
     history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
-    should_retry_stream_error,
+    is_token_overflow_error_message, should_retry_stream_error,
     stream_has_meaningful_partial_output,
 };
-#[cfg(feature = "compression")]
-use crate::session::history::is_token_overflow_error_message;
-#[cfg(feature = "compression")]
 use crate::session::history::emergency_compress_chat_messages as _emergency_compress;
 use crate::session::prompt_builders::{
     TOOL_CALLING_GUIDANCE, build_codeindex_guidance_section_active,
@@ -567,8 +564,8 @@ impl SessionProcessor {
         &self,
         session_id: &str,
         agent: &AgentInfo,
-        #[allow(unused_variables)] model_ref: &crate::agent::ModelRef,
-        #[allow(unused_variables)] session_config: &ragent_config::Config,
+        model_ref: &crate::agent::ModelRef,
+        session_config: &ragent_config::Config,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<(Vec<ChatMessage>, bool, u64)> {
         let history = {
@@ -576,11 +573,9 @@ impl SessionProcessor {
             self.session_manager.get_messages(session_id)?
         };
 
-        #[allow(unused_mut)]
         let mut compressed_this_turn = false;
         let last_reported_input_tokens: u64 = 0;
 
-        #[cfg(feature = "compression")]
         let context_window = self
             .provider_registry
             .get(&model_ref.provider_id)
@@ -592,7 +587,6 @@ impl SessionProcessor {
             .map(|m| m.context_window)
             .unwrap_or(128_000);
 
-        #[cfg(feature = "compression")]
         let history = {
             let compression_config = &session_config.compression;
             if compression_config.enabled
@@ -764,7 +758,7 @@ impl SessionProcessor {
         tool_definitions: &Arc<Vec<ToolDefinition>>,
         system_prompt: &Arc<str>,
         cancel_flag: &Arc<AtomicBool>,
-        #[cfg(feature = "compression")] context_window: usize,
+        context_window: usize,
         llm_request_start: Instant,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<LlmStepResult> {
@@ -840,7 +834,6 @@ impl SessionProcessor {
                         if attempt < max_retries
                             && !is_permanent_llm_api_error(&error_message)
                         {
-                            #[cfg(feature = "compression")]
                             if turn.session_config.compression.enabled
                                 && is_token_overflow_error_message(&error_message)
                             {
@@ -1044,19 +1037,11 @@ impl SessionProcessor {
                                     saw_completed_tool_call,
                                 );
                             let is_emergency_overflow: bool = {
-                                #[cfg(feature = "compression")]
-                                {
-                                    turn.session_config.compression.enabled
-                                        && attempt < max_retries
-                                        && is_token_overflow_error_message(&message)
-                                }
-                                #[cfg(not(feature = "compression"))]
-                                {
-                                    false
-                                }
+                                turn.session_config.compression.enabled
+                                    && attempt < max_retries
+                                    && is_token_overflow_error_message(&message)
                             };
                             if is_emergency_overflow {
-                                #[cfg(feature = "compression")]
                                 _emergency_compress(
                                     &self.event_bus,
                                     session_id,
@@ -1143,7 +1128,6 @@ impl SessionProcessor {
 
         // Capture the LLM-reported input token count for the next
         // iteration's threshold check.
-        #[cfg(feature = "compression")]
         if last_input_tokens > 0 {
             loop_state.last_reported_input_tokens = last_input_tokens;
         }

@@ -93,7 +93,6 @@ fn bench_chat_request_payload_bytes(c: &mut Criterion) {
     });
 }
 
-#[cfg(feature = "compression")]
 fn bench_compress_history(c: &mut Criterion) {
     use ragent_agent::compression::compress_history;
     use ragent_agent::message::{Message, MessagePart, Role};
@@ -154,8 +153,6 @@ fn bench_compress_history(c: &mut Criterion) {
         })
     });
 }
-#[cfg(not(feature = "compression"))]
-fn bench_compress_history(_c: &mut Criterion) {}
 
 fn bench_compiled_dir_lists(c: &mut Criterion) {
     use globset::GlobSet;

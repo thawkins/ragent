@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.128"
+version = "0.1.0-alpha.129"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -238,9 +238,7 @@ name = "ragent"
 path = "src/main.rs"
 
 [features]
-default = ["compression"]
-compression = ["ragent-agent/compression", "ragent-tui/compression"]
-compression-ml = ["ragent-agent/compression-ml"]
+default = []
 
 
 

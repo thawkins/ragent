@@ -169,141 +169,78 @@ impl App {
 
         // /compress help — show subcommand help and current config
         if subcmd == "help" {
-            #[cfg(feature = "compression")]
-            {
-                let config = ragent_agent::Config::load().unwrap_or_default();
-                let help = ragent_agent::compression::compress_help(&config.compression);
-                self.append_assistant_text(&help);
-                self.status = "compress help".to_string();
-            }
-            #[cfg(not(feature = "compression"))]
-            {
-                self.append_assistant_text(
-                                "From: /compress help\n\n\
-                                 Compression subcommands:\n\n\
-                                 | Subcommand | Description |\n\
-                                 |---|---|\n\
-                                 | `/compress` | Run the default compression pipeline (all enabled compressors) |\n\
-                                 | `/compress aggressive` | Maximum compression with relevance filtering |\n\
-                                 | `/compress conservative` | Only apply lossless compressors |\n\
-                                 | `/compress help` | Display this help text |\n\
-                                 | `/compress stats` | Show compression statistics for the current session |\n\n\
-                                 ⚠ The `compression` feature is not compiled in. \
-                                 Rebuild with `--features compression` to enable content-aware compression.",
-                            );
-                self.status = "compress help (unavailable)".to_string();
-            }
+            let config = ragent_agent::Config::load().unwrap_or_default();
+            let help = ragent_agent::compression::compress_help(&config.compression);
+            self.append_assistant_text(&help);
+            self.status = "compress help".to_string();
             return;
         }
 
         // /compress stats — show compression statistics for the current session
         if subcmd == "stats" {
-            #[cfg(feature = "compression")]
-            {
-                let msg_count = self.messages.len();
-                let total_chars: usize = self
-                    .messages
-                    .iter()
-                    .map(|m| {
-                        m.parts
-                            .iter()
-                            .map(|p| match p {
-                                MessagePart::Text { text } => text.len(),
-                                MessagePart::ToolCall { tool, state, .. } => {
-                                    tool.len()
-                                        + state
-                                            .output
-                                            .as_ref()
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.len())
-                                            .unwrap_or(0)
-                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                                }
-                                MessagePart::Image { .. } => 1000,
-                                MessagePart::Reasoning { text } => text.len(),
-                            })
-                            .sum::<usize>()
-                    })
-                    .sum();
-                let est_tokens = ragent_agent::compression::count_tokens(&self.messages);
-                let config = ragent_agent::Config::load().unwrap_or_default();
-                let compression_status = if config.compression.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                };
+            let msg_count = self.messages.len();
+            let total_chars: usize = self
+                .messages
+                .iter()
+                .map(|m| {
+                    m.parts
+                        .iter()
+                        .map(|p| match p {
+                            MessagePart::Text { text } => text.len(),
+                            MessagePart::ToolCall { tool, state, .. } => {
+                                tool.len()
+                                    + state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.len())
+                                        .unwrap_or(0)
+                                    + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                            }
+                            MessagePart::Image { .. } => 1000,
+                            MessagePart::Reasoning { text } => text.len(),
+                        })
+                        .sum::<usize>()
+                })
+                .sum();
+            let est_tokens = ragent_agent::compression::count_tokens(&self.messages);
+            let config = ragent_agent::Config::load().unwrap_or_default();
+            let compression_status = if config.compression.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            };
 
-                let mut out = String::from("From: /compress stats\n\n");
-                out.push_str(&format!("Messages: {}\n", msg_count));
-                out.push_str(&format!("Total characters: {}\n", total_chars));
-                out.push_str(&format!("Estimated tokens: {}\n", est_tokens));
-                out.push_str(&format!("Compression: {}\n", compression_status));
-                out.push_str(&format!(
-                    "Auto threshold: {:.0}%\n",
-                    config.compression.auto_threshold * 100.0
-                ));
-                out.push_str(&format!(
-                    "Compressors: json={}, diff={}, log={}, search={}, code={}, prose={}\n",
-                    config.compression.compressors.json,
-                    config.compression.compressors.diff,
-                    config.compression.compressors.log,
-                    config.compression.compressors.search,
-                    config.compression.compressors.code,
-                    config.compression.compressors.prose,
-                ));
-                out.push_str(&format!(
-                    "Relevance: {} (scorer={}, keep_top_k={})\n",
-                    if config.compression.relevance.enabled {
-                        "on"
-                    } else {
-                        "off"
-                    },
-                    config.compression.relevance.scorer,
-                    config.compression.relevance.keep_top_k,
-                ));
-                self.append_assistant_text(&out);
-                self.status = "compress stats".to_string();
-            }
-            #[cfg(not(feature = "compression"))]
-            {
-                let msg_count = self.messages.len();
-                let total_chars: usize = self
-                    .messages
-                    .iter()
-                    .map(|m| {
-                        m.parts
-                            .iter()
-                            .map(|p| match p {
-                                MessagePart::Text { text } => text.len(),
-                                MessagePart::ToolCall { tool, state, .. } => {
-                                    tool.len()
-                                        + state
-                                            .output
-                                            .as_ref()
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.len())
-                                            .unwrap_or(0)
-                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                                }
-                                MessagePart::Image { .. } => 1000,
-                                MessagePart::Reasoning { text } => text.len(),
-                            })
-                            .sum::<usize>()
-                    })
-                    .sum();
-                let est_tokens: usize = total_chars / 4 + 10 * msg_count;
-                self.append_assistant_text(&format!(
-                                "From: /compress stats\n\n\
-                                 Messages: {}\n\
-                                 Total characters: {}\n\
-                                 Estimated tokens: {} (chars/4 heuristic)\n\n\
-                                 ⚠ The `compression` feature is not compiled in. \
-                                 Token counting is approximate. Rebuild with `--features compression` \
-                                 for accurate token counting and content-aware compression.",
-                                msg_count, total_chars, est_tokens,
-                            ));
-                self.status = "compress stats (approximate)".to_string();
-            }
+            let mut out = String::from("From: /compress stats\n\n");
+            out.push_str(&format!("Messages: {}\n", msg_count));
+            out.push_str(&format!("Total characters: {}\n", total_chars));
+            out.push_str(&format!("Estimated tokens: {}\n", est_tokens));
+            out.push_str(&format!("Compression: {}\n", compression_status));
+            out.push_str(&format!(
+                "Auto threshold: {:.0}%\n",
+                config.compression.auto_threshold * 100.0
+            ));
+            out.push_str(&format!(
+                "Compressors: json={}, diff={}, log={}, search={}, code={}, prose={}\n",
+                config.compression.compressors.json,
+                config.compression.compressors.diff,
+                config.compression.compressors.log,
+                config.compression.compressors.search,
+                config.compression.compressors.code,
+                config.compression.compressors.prose,
+            ));
+            out.push_str(&format!(
+                "Relevance: {} (scorer={}, keep_top_k={})\n",
+                if config.compression.relevance.enabled {
+                    "on"
+                } else {
+                    "off"
+                },
+                config.compression.relevance.scorer,
+                config.compression.relevance.keep_top_k,
+            ));
+            self.append_assistant_text(&out);
+            self.status = "compress stats".to_string();
             return;
         }
 
@@ -320,7 +257,6 @@ impl App {
 
         let mode_str = if is_empty { "default" } else { &subcmd };
 
-        #[cfg(feature = "compression")]
         {
             use ragent_agent::compression::CompressionMode;
             let mode = match mode_str.parse::<CompressionMode>() {
@@ -430,19 +366,6 @@ impl App {
             self.compress_in_progress = false;
             self.append_assistant_text(&out);
             self.status = format!("compress {}", mode);
-        }
-
-        #[cfg(not(feature = "compression"))]
-        {
-            self.append_assistant_text(
-                "From: /compress\n\n\
-                             ⚠ The `compression` feature is not compiled in.\n\n\
-                             Content-aware compression is unavailable. Use /compact for \
-                             LLM-based summarisation, or rebuild ragent with:\n\n\
-                             cargo build --features compression\n",
-            );
-            self.status = "compress: feature unavailable".to_string();
-            let _ = mode_str;
         }
     }
 
