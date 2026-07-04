@@ -9,11 +9,8 @@ use lru::LruCache;
 use ratatui::layout::Rect;
 
 use ragent_agent::{
-    agent::AgentInfo,
-    event::EventBus,
-    provider::ProviderRegistry,
-    session::processor::SessionProcessor,
-    storage::Storage,
+    agent::AgentInfo, event::EventBus, provider::ProviderRegistry,
+    session::processor::SessionProcessor, storage::Storage,
 };
 
 use crate::tips;
@@ -21,9 +18,7 @@ use crate::tips;
 // Prompt optimization templates
 
 // State types from app/state.rs
-use crate::app::state::{
-    LogLevel, ScreenMode, App
-};
+use crate::app::state::{App, LogLevel, ScreenMode};
 
 // Helpers
 
@@ -177,15 +172,23 @@ impl App {
             history_draft: String::new(),
             show_log,
             show_profile: false,
+            show_todo: false,
+            show_memory: false,
             log_entries: Vec::new(),
             log_scroll_offset: 0,
             profile_scroll_offset: 0,
+            todo_scroll_offset: 0,
+            memory_scroll_offset: 0,
             message_area: Rect::default(),
             log_area: Rect::default(),
             profile_area: Rect::default(),
+            todo_area: Rect::default(),
+            memory_area: Rect::default(),
             message_max_scroll: 0,
             log_max_scroll: 0,
             profile_max_scroll: 0,
+            todo_max_scroll: 0,
+            memory_max_scroll: 0,
             active_agents_scroll_offset: 0,
             active_agents_max_scroll: 0,
             active_agents_area: Rect::default(),
@@ -198,6 +201,8 @@ impl App {
             message_content_lines: Vec::new(),
             log_content_lines: Vec::new(),
             profile_content_lines: Vec::new(),
+            todo_content_lines: Vec::new(),
+            memory_content_lines: Vec::new(),
             input_area: Rect::default(),
             teams_area: Rect::default(),
             output_view_area: Rect::default(),
@@ -324,5 +329,4 @@ impl App {
 
         app
     }
-
 }

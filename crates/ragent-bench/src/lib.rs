@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod data;
+pub mod mock;
 pub mod model;
 pub mod registry;
 pub mod runner;
@@ -19,6 +20,7 @@ pub use data::{
     init_suite_with_language, init_target, init_target_with_progress, load_manifest, verify_suite,
     verify_suite_with_language,
 };
+pub use mock::{MockLlmClient, MockLlmScript, mock_llm_client};
 pub use model::{
     BenchGeneratedSample, BenchGenerationResult, BenchModelRunner, LiveBenchModelRunner,
     MockBenchModelRunner, ResolvedModelSelection, resolve_model_context, resolve_selected_model,

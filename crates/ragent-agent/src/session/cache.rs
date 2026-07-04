@@ -122,6 +122,12 @@ pub struct SystemPromptCache {
     last_codeindex_active: Mutex<bool>,
     /// Last known team context hash
     last_team_hash: Mutex<u64>,
+    /// P-24: cached rendered active-spec section keyed by `(spec_id,
+    /// spec.modified_at)`. The spec content is stable across turns, so
+    /// re-reading and re-rendering it every turn is pure I/O + formatting.
+    /// Invalidated by [`invalidate_spec_cache`] (call after `/spec activate`
+    /// or any spec write).
+    cached_spec_section: Mutex<Option<(String, u64, String)>>,
 }
 
 impl Default for SystemPromptCache {
@@ -143,6 +149,7 @@ impl SystemPromptCache {
             last_tool_registry_version: Mutex::new(0),
             last_codeindex_active: Mutex::new(false),
             last_team_hash: Mutex::new(0),
+            cached_spec_section: Mutex::new(None),
         }
     }
 
@@ -366,6 +373,38 @@ impl SystemPromptCache {
         }
         if let Ok(mut hash) = self.last_team_hash.lock() {
             *hash = 0; // Force recompute
+        }
+    }
+
+    /// P-24: invalidate the cached rendered spec section. Call this after
+    /// `/spec activate` or any spec write so the next turn re-reads the spec.
+    pub fn invalidate_spec_cache(&self) {
+        if let Ok(mut cache) = self.cached_spec_section.lock() {
+            *cache = None;
+        }
+    }
+
+    /// P-24: return the cached rendered spec section when `(spec_id,
+    /// spec_modified_at)` matches the cached entry, or `None` otherwise.
+    #[must_use]
+    pub fn get_spec_section(&self, spec_id: &str, spec_modified_at: u64) -> Option<String> {
+        let cache = self.cached_spec_section.lock().ok()?;
+        match *cache {
+            Some((ref id, modified_at, ref section))
+                if id == spec_id && modified_at == spec_modified_at =>
+            {
+                Some(section.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// P-24: store the rendered spec section keyed by `(spec_id,
+    /// spec_modified_at)` so subsequent turns with the same spec can skip
+    /// the disk read and re-render.
+    pub fn store_spec_section(&self, spec_id: String, spec_modified_at: u64, section: String) {
+        if let Ok(mut cache) = self.cached_spec_section.lock() {
+            *cache = Some((spec_id, spec_modified_at, section));
         }
     }
 

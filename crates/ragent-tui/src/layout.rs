@@ -1692,14 +1692,19 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     }
 
     // Split the middle area horizontally when an auxiliary side panel is visible.
-    // Use responsive split based on terminal width.
-    if app.show_log || app.show_profile {
+    // Use responsive split based on terminal width. Only one side panel is
+    // visible at a time (mutual exclusion enforced in the toggle handlers), but
+    // the `show_log && show_profile` branch is kept for the legacy stacked mode
+    // reachable via the `/log` + `/profile` slash commands. The TODO panel is a
+    // third sibling (FR-004, FR-012) and is rendered alone in the side column
+    // when `show_todo` is true.
+    if app.show_log || app.show_profile || app.show_todo || app.show_memory {
         let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(msg_pct), // messages (responsive)
-                Constraint::Percentage(log_pct), // log (responsive)
+                Constraint::Percentage(log_pct), // side panel (responsive)
             ])
             .split(chunks[2]);
 
@@ -1707,39 +1712,74 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_messages(frame, app, h_chunks[0]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, h_chunks[0]);
 
-        match (app.show_log, app.show_profile) {
-            (true, true) => {
-                let side_chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
-                    .split(h_chunks[1]);
-                app.log_area = side_chunks[0];
-                app.profile_area = side_chunks[1];
-                render_log_panel(frame, app, side_chunks[0]);
-                apply_selection_highlight(frame, app, SelectionPane::Log, side_chunks[0]);
-                render_profile_panel(frame, app, side_chunks[1]);
-                apply_selection_highlight(frame, app, SelectionPane::Profile, side_chunks[1]);
+        // The TODO panel is mutually exclusive with log/profile/memory
+        // (FR-012), so it gets its own branch that renders alone in the side
+        // column.
+        if app.show_todo {
+            app.log_area = Rect::default();
+            app.profile_area = Rect::default();
+            app.active_agents_area = Rect::default();
+            app.teams_area = Rect::default();
+            app.memory_area = Rect::default();
+            app.todo_area = h_chunks[1];
+            render_todo_panel(frame, app, h_chunks[1]);
+            apply_selection_highlight(frame, app, SelectionPane::Todo, h_chunks[1]);
+        } else if app.show_memory {
+            // The Memory panel is mutually exclusive with log/profile/todo
+            // (FR-004), so it gets its own branch that renders alone in the
+            // side column. Clearing the other side-panel areas ensures mouse
+            // hit-testing and scrollbar drag dispatch never target a panel
+            // that is not actually visible.
+            app.log_area = Rect::default();
+            app.profile_area = Rect::default();
+            app.active_agents_area = Rect::default();
+            app.teams_area = Rect::default();
+            app.todo_area = Rect::default();
+            app.memory_area = h_chunks[1];
+            render_memory_panel(frame, app, h_chunks[1]);
+            apply_selection_highlight(frame, app, SelectionPane::Memory, h_chunks[1]);
+        } else {
+            match (app.show_log, app.show_profile) {
+                (true, true) => {
+                    let side_chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                        .split(h_chunks[1]);
+                    app.log_area = side_chunks[0];
+                    app.profile_area = side_chunks[1];
+                    app.memory_area = Rect::default();
+                    render_log_panel(frame, app, side_chunks[0]);
+                    apply_selection_highlight(frame, app, SelectionPane::Log, side_chunks[0]);
+                    render_profile_panel(frame, app, side_chunks[1]);
+                    apply_selection_highlight(frame, app, SelectionPane::Profile, side_chunks[1]);
+                }
+                (true, false) => {
+                    app.log_area = h_chunks[1];
+                    app.profile_area = Rect::default();
+                    app.memory_area = Rect::default();
+                    render_log_panel(frame, app, h_chunks[1]);
+                    apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
+                }
+                (false, true) => {
+                    app.log_area = Rect::default();
+                    app.profile_area = h_chunks[1];
+                    app.active_agents_area = Rect::default();
+                    app.teams_area = Rect::default();
+                    app.memory_area = Rect::default();
+                    render_profile_panel(frame, app, h_chunks[1]);
+                    apply_selection_highlight(frame, app, SelectionPane::Profile, h_chunks[1]);
+                }
+                (false, false) => {
+                    app.memory_area = Rect::default();
+                }
             }
-            (true, false) => {
-                app.log_area = h_chunks[1];
-                app.profile_area = Rect::default();
-                render_log_panel(frame, app, h_chunks[1]);
-                apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
-            }
-            (false, true) => {
-                app.log_area = Rect::default();
-                app.profile_area = h_chunks[1];
-                app.active_agents_area = Rect::default();
-                app.teams_area = Rect::default();
-                render_profile_panel(frame, app, h_chunks[1]);
-                apply_selection_highlight(frame, app, SelectionPane::Profile, h_chunks[1]);
-            }
-            (false, false) => {}
         }
     } else {
         app.message_area = chunks[2];
         app.log_area = Rect::default();
         app.profile_area = Rect::default();
+        app.todo_area = Rect::default();
+        app.memory_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         render_messages(frame, app, chunks[2]);
@@ -2085,6 +2125,118 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+/// Render the TODO side panel.
+///
+/// Lists the TODO items belonging to the active session (`app.session_id`),
+/// re-queried from `Storage::get_todos` on each frame so edits made via the
+/// `todo_write` tool or `/todo` slash command are reflected without a toggle
+/// (FR-014). Each row is rendered as `[<STATUS>] <title>` with the status
+/// prefix coloured according to FR-007. When no rows are returned the panel
+/// shows a `No TODO items` placeholder in dark gray (FR-005); if the storage
+/// query fails the panel shows `Failed to load TODOs` in red and does not
+/// panic (NFR-005). A vertical scrollbar is rendered when the row count
+/// exceeds the visible height (FR-008).
+///
+/// # Arguments
+/// - `frame` — the ratatui frame to render into.
+/// - `app` — mutable `App` state; reads `session_id`, `todo_scroll_offset`,
+///   and `storage`; writes `todo_area`, `todo_max_scroll`, and
+///   `todo_content_lines`.
+/// - `area` — the rect allocated to the panel by the side-panel split.
+fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " TODO ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    app.todo_area = area;
+
+    // Resolve the session to display TODOs for. Fall back to the primary
+    // session id when no specific agent session is selected, mirroring the
+    // log panel's session-resolution logic.
+    let session_id = app
+        .selected_agent_session_id
+        .clone()
+        .or_else(|| app.session_id.clone());
+
+    let rows_result: anyhow::Result<Vec<ragent_storage::TodoRow>> = match &session_id {
+        Some(sid) => app
+            .storage
+            .get_todos(sid, None)
+            .map_err(|e| anyhow::anyhow!(e.to_string())),
+        None => Ok(Vec::new()),
+    };
+
+    let lines: Vec<Line> = match rows_result {
+        Ok(rows) if rows.is_empty() => {
+            app.todo_max_scroll = 0;
+            vec![Line::from(Span::styled(
+                "No TODO items",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        }
+        Ok(rows) => rows
+            .iter()
+            .map(|row| {
+                let status_upper = row.status.to_uppercase();
+                let status_color = match status_upper.as_str() {
+                    "PENDING" => Color::Yellow,
+                    "IN_PROGRESS" => Color::Cyan,
+                    "DONE" => Color::Green,
+                    "BLOCKED" => Color::Red,
+                    _ => Color::DarkGray,
+                };
+                Line::from(vec![
+                    Span::styled(
+                        format!("[{status_upper}] "),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(row.title.clone()),
+                ])
+            })
+            .collect(),
+        Err(_) => {
+            app.todo_max_scroll = 0;
+            vec![Line::from(Span::styled(
+                "Failed to load TODOs",
+                Style::default().fg(Color::Red),
+            ))]
+        }
+    };
+
+    // Cache plain-text content for text selection copy, matching the log
+    // panel's wrapping behaviour.
+    let todo_inner_width = inner.width as usize;
+    app.todo_content_lines = build_wrapped_content_lines(&lines, todo_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.todo_max_scroll = max_scroll;
+    let scroll = app.todo_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((scroll, 0));
+    frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows.
+    if total_lines > visible_height {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
+}
+
 fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -2163,6 +2315,225 @@ fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         let scroll_position = max_scroll.saturating_sub(scroll) as usize;
         let mut scrollbar_state =
             ScrollbarState::new(max_scroll as usize).position(scroll_position);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
+}
+
+/// Append a memory source section (header + body) to `lines`.
+///
+/// Used by [`render_memory_panel`] to render each of the three memory sources
+/// (project memory, project analysis, user memory) with a consistent property
+/// header line and either the file body or a `(no memory file)` placeholder.
+fn append_memory_source<'a>(
+    lines: &mut Vec<Line<'a>>,
+    title: &str,
+    path: &std::path::Path,
+    scope_label: &'a str,
+    default_scope: ragent_agent::memory::BlockScope,
+) {
+    use ragent_agent::memory::MemoryBlock;
+    use std::fs;
+
+    // Property header (FR-006).
+    let (exists, size, mtime, description, body_text) = match fs::read_to_string(path) {
+        Ok(text) => {
+            let block = MemoryBlock::from_markdown(&text, default_scope);
+            let size = text.len();
+            let mtime = fs::metadata(path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let desc = if block.description.is_empty() {
+                String::new()
+            } else {
+                block.description.clone()
+            };
+            (true, size, mtime, desc, block.content.clone())
+        }
+        Err(_) => (false, 0usize, "-".to_string(), String::new(), String::new()),
+    };
+
+    // Header line 1: title + path.
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{title} "),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("({})", path.display()),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    // Header line 2: properties (scope, size, mtime, description).
+    let desc_span = if description.is_empty() {
+        Span::raw("")
+    } else {
+        Span::styled(
+            format!("  desc: {description}"),
+            Style::default().fg(Color::DarkGray),
+        )
+    };
+    lines.push(Line::from(vec![
+        Span::styled("scope ", Style::default().fg(Color::DarkGray)),
+        Span::raw(scope_label),
+        Span::raw("  "),
+        Span::styled("size ", Style::default().fg(Color::DarkGray)),
+        Span::raw(format!("{size}B")),
+        Span::raw("  "),
+        Span::styled("mtime ", Style::default().fg(Color::DarkGray)),
+        Span::raw(mtime),
+        desc_span,
+    ]));
+    lines.push(Line::raw(""));
+
+    // Body (FR-015: placeholder for missing files).
+    if exists {
+        for raw in body_text.lines() {
+            lines.push(Line::raw(raw.to_string()));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            "(no memory file)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+    lines.push(Line::raw(""));
+}
+
+/// Render the Memory side panel (toggled via `Alt+M`).
+///
+/// Surfaces the same information as the `/memory show` slash command inside a
+/// live, scrollable side panel. Three memory sources are displayed, each with
+/// a property header line (path, scope, byte size, last-modified time, and
+/// description extracted from YAML frontmatter when present):
+///
+/// 1. **Project Memory** — `<working_dir>/.ragent/memory/MEMORY.md` (FR-001)
+/// 2. **Project Analysis** — `<working_dir>/.ragent/memory/PROJECT_ANALYSIS.md`
+///    (rendered only when the file exists)
+/// 3. **User Memory** — `~/.ragent/memory/MEMORY.md`
+///
+/// Missing or unreadable files render a `(no … memory)` placeholder instead of
+/// aborting the whole panel (FR-015). Files are re-read on every render so
+/// external edits are reflected without restarting the TUI (FR-010). A
+/// structured-memory count summary line is rendered at the top when the
+/// SQLite store is available (FR-007). Plain-text content is cached in
+/// `memory_content_lines` for text selection / copy (FR-013), and a vertical
+/// scrollbar is rendered when content overflows the visible height (FR-009).
+///
+/// # Arguments
+/// - `frame` — the ratatui frame to render into.
+/// - `app` — mutable `App` state; reads `memory_scroll_offset` and `storage`;
+///   writes `memory_area`, `memory_max_scroll`, and `memory_content_lines`.
+/// - `area` — the rect allocated to the panel by the side-panel split.
+fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Memory ",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    app.memory_area = area;
+
+    use ragent_agent::memory::BlockScope;
+    use std::path::PathBuf;
+
+    // Resolve the three memory source paths (FR-001).
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project_mem: PathBuf = cwd.join(".ragent").join("memory").join("MEMORY.md");
+    let project_analysis: PathBuf = cwd
+        .join(".ragent")
+        .join("memory")
+        .join("PROJECT_ANALYSIS.md");
+    let user_mem: Option<PathBuf> =
+        dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    // Optional structured-memory count summary line at the top of the panel
+    // (FR-007). Rendered only when the SQLite structured-memory store is
+    // available and reports a non-zero count, so the panel stays compact for
+    // projects that have not adopted structured memories yet.
+    if let Ok(count) = app.storage.count_memories() {
+        if count > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("Structured memories: {count}"),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+            lines.push(Line::raw(""));
+        }
+    }
+
+    // Project memory.
+    append_memory_source(
+        &mut lines,
+        "Project Memory",
+        &project_mem,
+        "project",
+        BlockScope::Project,
+    );
+
+    // Project analysis (only if the file exists — FR-001).
+    if project_analysis.exists() {
+        append_memory_source(
+            &mut lines,
+            "Project Analysis",
+            &project_analysis,
+            "project",
+            BlockScope::Project,
+        );
+    }
+
+    // User memory.
+    if let Some(path) = &user_mem {
+        append_memory_source(&mut lines, "User Memory", path, "user", BlockScope::Global);
+    } else {
+        lines.push(Line::from(Span::styled(
+            "User Memory (no home directory)",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled(
+            "(no user memory)",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::raw(""));
+    }
+
+    // Cache plain-text content for text selection copy (FR-013), matching the
+    // log / todo / profile panels' wrapping behaviour.
+    let memory_inner_width = inner.width as usize;
+    app.memory_content_lines = build_wrapped_content_lines(&lines, memory_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.memory_max_scroll = max_scroll;
+    let scroll = app.memory_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((scroll, 0));
+    frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows (FR-009).
+    if total_lines > visible_height {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
@@ -2644,7 +3015,8 @@ fn messages_to_lines<'a>(
                                     )));
                                 }
                             }
-                                                  } else if tool == "multiedit" || tool == "multi_edit" {                            if let Some(file_stats) = state
+                        } else if tool == "multiedit" || tool == "multi_edit" {
+                            if let Some(file_stats) = state
                                 .output
                                 .as_ref()
                                 .and_then(|out| out.get("file_stats"))
@@ -2918,6 +3290,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+V", "Paste image from clipboard as attachment"),
     ("Alt+L", "Toggle log panel visibility"),
     ("Alt+P", "Toggle profiler panel visibility"),
+    ("Alt+T", "Toggle TODO panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),

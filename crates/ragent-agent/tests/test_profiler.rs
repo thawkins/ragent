@@ -2,7 +2,8 @@
 
 #![allow(clippy::float_cmp)] // integer millisecond values are represented exactly
 
-use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex};
 
 use ragent_agent::session::profiler::AgentLoopProfiler;
 
@@ -91,4 +92,120 @@ fn test_profiler_computes_self_time_for_tool_totals() {
 
     assert_eq!(tool_total.total_ms, 20.0);
     assert_eq!(tool_total.self_total_ms, 1.0);
+}
+
+// ---- PERFPLAN Milestone A (P-25, P-26) -------------------------------------
+//
+// These tests verify that the profiler's `scope` and `scope_with` paths
+// short-circuit *before* allocating the label when profiling is disabled
+// (the default). P-25: `scope` must not call `to_string()` on the static
+// label when disabled. P-26: `scope_with` must not invoke the label closure
+// when disabled.
+
+#[test]
+fn test_scope_disabled_profiler_records_nothing() {
+    // P-25: `scope` with profiling disabled must produce no recorded samples.
+    // A disabled profiler should never touch the stats map.
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    assert!(!profiler.is_enabled());
+
+    {
+        let _scope = profiler.scope("unit.disabled");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    let snapshot = profiler.snapshot();
+    assert!(!snapshot.enabled);
+    assert_eq!(snapshot.total_samples, 0);
+    assert!(snapshot.operations.is_empty());
+}
+
+#[test]
+fn test_scope_with_skips_label_fn_when_disabled() {
+    // P-26: `scope_with` must not invoke the label closure when profiling
+    // is disabled. We track closure invocations with a shared counter; the
+    // test fails if the counter increments while the profiler is off.
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    assert!(!profiler.is_enabled());
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let call_count_clone = Arc::clone(&call_count);
+    {
+        let _scope = profiler.scope_with(move || {
+            call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "dynamic.label".to_string()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    // Closure must not have been invoked.
+    assert_eq!(
+        call_count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "scope_with invoked the label closure while profiling was disabled"
+    );
+
+    // And no sample should have been recorded.
+    let snapshot = profiler.snapshot();
+    assert_eq!(snapshot.total_samples, 0);
+    assert!(snapshot.operations.is_empty());
+}
+
+#[test]
+fn test_scope_with_invokes_label_fn_when_enabled() {
+    // P-26 companion: when profiling IS enabled, the label closure must run
+    // exactly once and the scope must be recorded.
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    profiler.set_enabled(true);
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let call_count_clone = Arc::clone(&call_count);
+    {
+        let _scope = profiler.scope_with(move || {
+            call_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            "dynamic.enabled".to_string()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    assert_eq!(
+        call_count.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "scope_with did not invoke the label closure while profiling was enabled"
+    );
+
+    let snapshot = profiler.snapshot();
+    assert!(snapshot.enabled);
+    let op = snapshot
+        .operations
+        .iter()
+        .find(|o| o.name == "dynamic.enabled")
+        .expect("dynamic.enabled scope was recorded");
+    assert_eq!(op.count, 1);
+}
+
+#[test]
+fn test_scope_disabled_then_enabled_records() {
+    // P-25: confirm `scope` records normally once profiling is enabled,
+    // so the early-return only fires on the disabled path.
+    let profiler = Arc::new(AgentLoopProfiler::new());
+    profiler.set_enabled(true);
+
+    {
+        let _scope = profiler.scope("unit.enabled");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    let snapshot = profiler.snapshot();
+    assert!(snapshot.enabled);
+    assert_eq!(snapshot.total_samples, 1);
+    assert_eq!(snapshot.operations[0].name, "unit.enabled");
+}
+
+// A small Mutex-based helper is kept here in case future tests need to
+// observe closure invocation order across threads; currently unused to
+// avoid dead-code warnings, so reference it once.
+#[allow(dead_code)]
+fn _unused_mutex_anchor() -> Mutex<usize> {
+    Mutex::new(0)
 }

@@ -98,6 +98,12 @@ fi
 print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
 
+# PERFPLAN F-5: agent-loop bench regression guard (skipped in --quick mode).
+if [[ "${QUICK_MODE}" != "true" ]]; then
+    print_step "Agent-loop bench regression guard..."
+    bash "$(dirname "$0")/scripts/check-bench-regression.sh" || print_failure "Agent-loop bench regression guard failed"
+fi
+
 # =============================================================================
 # 3. Clippy
 # =============================================================================

@@ -166,6 +166,12 @@ pub struct TaskManager {
     processor: Arc<SessionProcessor>,
     /// Maximum concurrent background tasks.
     max_background: usize,
+    /// P-11: flag set whenever a background task is spawned and cleared by
+    /// `drain_completed` when no completed tasks remain to report. The
+    /// agent loop checks this flag before calling `drain_completed` so the
+    /// common "no background tasks" path avoids acquiring the task-map lock
+    /// and scanning every entry on every loop step.
+    has_pending_background: AtomicBool,
 }
 
 impl TaskManager {
@@ -181,6 +187,7 @@ impl TaskManager {
             event_bus,
             processor,
             max_background,
+            has_pending_background: AtomicBool::new(false),
         }
     }
 
@@ -232,6 +239,9 @@ impl TaskManager {
             waiter_count: 0,
         };
         self.tasks.write().await.insert(task_id.clone(), entry);
+        // P-11: spawn_sync tasks are not background (they block the caller),
+        // so they are never drained by `drain_completed`. We do not set the
+        // flag here — only `spawn_background` sets it.
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
@@ -385,6 +395,9 @@ impl TaskManager {
             .write()
             .await
             .insert(task_id.clone(), entry.clone());
+        // P-11: mark that there is at least one pending background task so
+        // the agent loop's `drain_completed` call is not skipped.
+        self.has_pending_background.store(true, Ordering::Relaxed);
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
@@ -692,6 +705,11 @@ impl TaskManager {
     /// actively waited on via wait_tasks tool and should not be redundantly
     /// injected into the conversation.
     pub async fn drain_completed(&self, parent_session_id: &str) -> Vec<TaskEntry> {
+        // P-11: fast path — if no background tasks have ever been spawned,
+        // skip the lock acquisition and map scan entirely.
+        if !self.has_pending_background.load(Ordering::Relaxed) {
+            return Vec::new();
+        }
         let mut tasks = self.tasks.write().await;
         let mut completed = Vec::new();
         for entry in tasks.values_mut() {
@@ -705,7 +723,28 @@ impl TaskManager {
                 completed.push(entry.clone());
             }
         }
+        // P-11: clear the flag when no unreported background tasks remain
+        // for this parent, so subsequent loop steps skip the lock+scan.
+        let still_pending = tasks.values().any(|e| {
+            e.parent_session_id == parent_session_id
+                && e.background
+                && !e.reported
+                && e.status != TaskStatus::Running
+                && e.waiter_count == 0
+        });
+        if !still_pending {
+            self.has_pending_background.store(false, Ordering::Relaxed);
+        }
         completed
+    }
+
+    /// P-11: returns `true` when at least one background task has been
+    /// spawned and not yet drained. The agent loop uses this to skip the
+    /// `drain_completed` call (and its lock acquisition + map scan) on the
+    /// common no-background-tasks path.
+    #[must_use]
+    pub fn has_pending_background(&self) -> bool {
+        self.has_pending_background.load(Ordering::Relaxed)
     }
 
     /// M7-T3: Increments the waiter count for a task **only if the task

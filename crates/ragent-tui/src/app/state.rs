@@ -12,8 +12,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
-use ragent_agent::agent::{AgentInfo, CustomAgentDef};
 use ragent_agent::ToolVisibilityConfig;
+use ragent_agent::agent::{AgentInfo, CustomAgentDef};
 use ragent_agent::event::EventBus;
 use ragent_agent::mcp::{McpServer, discovery::DiscoveredMcpServer};
 use ragent_agent::message::Message;
@@ -570,6 +570,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Toggle the agent-loop profiler panel (/profile on|off)",
     },
     SlashCommandDef {
+        trigger: "perf",
+        description: "Alias for /profile — toggle the agent-loop perf panel (/perf on|off)",
+    },
+    SlashCommandDef {
         trigger: "llmstats",
         description: "Show average LLM response time and token throughput",
     },
@@ -634,6 +638,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Show TODO items for the current session",
     },
     SlashCommandDef {
+        trigger: "todo",
+        description: "Toggle the TODO side panel (Alt+T alias); use `/todos` to list items",
+    },
+    SlashCommandDef {
         trigger: "team",
         description: "Team management (/team help|status|show [name]|create/open/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
     },
@@ -679,7 +687,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "memory",
-        description: "Memory browser: /memory | /memory show | /memory read <label> | /memory search <query>",
+        description: "Memory panel (Alt+M): /memory | /memory show | /memory read <label> | /memory search <query>",
     },
     SlashCommandDef {
         trigger: "github",
@@ -811,6 +819,10 @@ pub enum ScrollbarDragPane {
     Log,
     /// Dragging the profile pane scrollbar.
     Profile,
+    /// Dragging the TODO pane scrollbar.
+    Todo,
+    /// Dragging the Memory pane scrollbar.
+    Memory,
 }
 
 /// Identifies which pane a text selection lives in.
@@ -822,6 +834,10 @@ pub enum SelectionPane {
     Log,
     /// Selection in the profile pane.
     Profile,
+    /// Selection in the TODO pane.
+    Todo,
+    /// Selection in the Memory pane.
+    Memory,
     /// Selection in the chat-screen input widget.
     Input,
 }
@@ -1082,24 +1098,40 @@ pub struct App {
     pub show_log: bool,
     /// Whether the realtime profiling panel is visible.
     pub show_profile: bool,
+    /// Whether the TODO panel is visible.
+    pub show_todo: bool,
+    /// Whether the Memory panel is visible (toggled via Alt+M).
+    pub show_memory: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
     /// Scroll offset for the log panel (lines from bottom).
     pub log_scroll_offset: u16,
     /// Scroll offset for the profile panel (lines from bottom).
     pub profile_scroll_offset: u16,
+    /// Scroll offset for the TODO panel (lines from top).
+    pub todo_scroll_offset: u16,
+    /// Scroll offset for the Memory panel (lines from top).
+    pub memory_scroll_offset: u16,
     /// Cached area of the messages pane (set during render for mouse hit-testing).
     pub message_area: Rect,
     /// Cached area of the log panel (set during render for mouse hit-testing).
     pub log_area: Rect,
     /// Cached area of the profiler panel.
     pub profile_area: Rect,
+    /// Cached area of the TODO panel (set during render for mouse hit-testing).
+    pub todo_area: Rect,
+    /// Cached area of the Memory panel (set during render for mouse hit-testing).
+    pub memory_area: Rect,
     /// Maximum scroll value for the messages pane (set during render).
     pub message_max_scroll: u16,
     /// Maximum scroll value for the log pane (set during render).
     pub log_max_scroll: u16,
     /// Maximum scroll value for the profile pane (set during render).
     pub profile_max_scroll: u16,
+    /// Maximum scroll value for the TODO pane (set during render).
+    pub todo_max_scroll: u16,
+    /// Maximum scroll value for the Memory pane (set during render).
+    pub memory_max_scroll: u16,
     /// Scroll offset for the active-agents subpanel (lines from top).
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
@@ -1124,6 +1156,10 @@ pub struct App {
     pub log_content_lines: Vec<String>,
     /// Plain-text lines from the last profile pane render (for copy).
     pub profile_content_lines: Vec<String>,
+    /// Plain-text lines from the last TODO pane render (for copy).
+    pub todo_content_lines: Vec<String>,
+    /// Plain-text lines from the last Memory pane render (for copy).
+    pub memory_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
     /// Cached area of the teams subpanel.

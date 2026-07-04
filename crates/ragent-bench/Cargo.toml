@@ -19,9 +19,12 @@ rust_xlsxwriter.workspace = true
 futures.workspace = true
 reqwest.workspace = true
 flate2 = "1"
+async-trait = { workspace = true }
+rustc-hash = { workspace = true }
 
 # Internal crates
 ragent-agent = { path = "../ragent-agent" }
+ragent-llm = { path = "../ragent-llm" }
 ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-types = { path = "../ragent-types" }
 
@@ -31,3 +34,8 @@ workspace = true
 [dev-dependencies]
 tempfile = "3.5"
 calamine = { workspace = true }
+criterion = { workspace = true }
+
+[[bench]]
+name = "agent_loop"
+harness = false

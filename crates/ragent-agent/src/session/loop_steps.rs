@@ -44,7 +44,7 @@ use crate::session::history::{
     is_token_overflow_error_message, should_retry_stream_error,
     stream_has_meaningful_partial_output,
 };
-use crate::session::history::emergency_compress_chat_messages as _emergency_compress;
+use crate::session::history::emergency_compress_chat_messages;
 use crate::session::prompt_builders::{
     TOOL_CALLING_GUIDANCE, build_codeindex_guidance_section_active,
     build_codeindex_guidance_section_disabled,
@@ -75,7 +75,14 @@ pub(crate) struct TurnClient {
 /// Mutable state shared across loop iterations.
 pub(crate) struct LoopState {
     /// Provider-facing chat messages (mutated each step: assistant + tool results appended).
-    pub chat_messages: Vec<ChatMessage>,
+    ///
+    /// P-6: held as `Arc<Vec<ChatMessage>>` so the per-retry `ChatRequest`
+    /// can share the history by refcount bump instead of cloning the entire
+    /// `Vec` (including all tool-result `ContentPart`s) on every attempt.
+    /// Mutation is performed via `Arc::make_mut`, which clones only when
+    /// another `Arc` reference is still live — so an unchanged history is
+    /// shared for free.
+    pub chat_messages: Arc<Vec<ChatMessage>>,
     /// Accumulated assistant message parts for the final save (COW via `Arc`).
     pub assistant_parts: Arc<Vec<MessagePart>>,
     /// Set when a tool returns `agent_switch` / `agent_restore` metadata.
@@ -134,10 +141,13 @@ impl SessionProcessor {
             });
         };
 
-        // PERF-001: load the config once for the whole turn.
+        // PERF-001 / P-2: load the config once for the whole turn. The
+        // `load_config_cached` helper caches the resolved config keyed by
+        // the mtimes of every contributing file, so a session whose config
+        // has not changed pays zero disk I/O on subsequent turns.
         let cfg = {
             let _scope = profiler.scope("config.load");
-            crate::Config::load().unwrap_or_default()
+            self.load_config_cached()
         };
 
         let model_ref = {
@@ -315,8 +325,9 @@ impl SessionProcessor {
             }
         };
 
-        // PERF-009: wrap the per-turn Config in an Arc.
-        let session_config: Arc<ragent_config::Config> = Arc::new(cfg);
+        // PERF-009 / P-2: `load_config_cached` already returns an `Arc<Config>`,
+        // so we reuse it directly instead of re-wrapping.
+        let session_config: Arc<ragent_config::Config> = cfg;
         let parsed_hook_configs = crate::hooks::parse_hook_configs(&session_config.hooks);
 
         // Fire on_session_start hook when this is the first message.
@@ -516,34 +527,51 @@ impl SessionProcessor {
             && let Some(ref spec_mgr) = self.spec_manager.get()
             && let Some(spec_id) = ragent_specs::spec::SpecId::new(active_spec_id)
         {
+            // P-24: check the SystemPromptCache for a pre-rendered spec
+            // section keyed by (spec_id, spec.modified_at). A cache hit
+            // skips the disk read and the re-render of the requirements +
+            // tasks sections on every turn.
+            let cache = self.system_prompt_cache();
             match spec_mgr.read_spec(&spec_id).await {
                 Ok(spec) => {
-                    let mut spec_section = format!(
-                        "\n## Active Specification: {}\n\n\
-                         **Status:** {}\n\
-                         **Title:** {}\n\n\
-                         ### Requirements\n\n",
-                        spec.id, spec.status.as_str(), spec.title
-                    );
-                    for req in &spec.requirements {
-                        spec_section.push_str(&format!(
-                            "- `{}` ({:?}) — {}\n",
-                            req.id, req.template, req.text
-                        ));
+                    if let Some(cached) =
+                        cache.get_spec_section(active_spec_id, spec.modified_at)
+                    {
+                        system_prompt.push_str(&cached);
+                    } else {
+                        let mut spec_section = format!(
+                            "\n## Active Specification: {}\n\n\
+                             **Status:** {}\n\
+                             **Title:** {}\n\n\
+                             ### Requirements\n\n",
+                            spec.id, spec.status.as_str(), spec.title
+                        );
+                        for req in &spec.requirements {
+                            spec_section.push_str(&format!(
+                                "- `{}` ({:?}) — {}\n",
+                                req.id, req.template, req.text
+                            ));
+                        }
+                        spec_section.push_str("\n### Tasks\n\n");
+                        for task in &spec.tasks {
+                            spec_section.push_str(&format!(
+                                "- `{}` — {} ({})\n",
+                                task.id,
+                                task.title,
+                                task.status.as_str()
+                            ));
+                        }
+                        spec_section.push_str(
+                            "\nWhen implementing this spec, use the spec_task_update tool to mark tasks as completed.\n",
+                        );
+                        // P-24: cache the rendered section for subsequent turns.
+                        cache.store_spec_section(
+                            active_spec_id.clone(),
+                            spec.modified_at,
+                            spec_section.clone(),
+                        );
+                        system_prompt.push_str(&spec_section);
                     }
-                    spec_section.push_str("\n### Tasks\n\n");
-                    for task in &spec.tasks {
-                        spec_section.push_str(&format!(
-                            "- `{}` — {} ({})\n",
-                            task.id,
-                            task.title,
-                            task.status.as_str()
-                        ));
-                    }
-                    spec_section.push_str(
-                        "\nWhen implementing this spec, use the spec_task_update tool to mark tasks as completed.\n",
-                    );
-                    system_prompt.push_str(&spec_section);
                     tracing::info!(spec_id = %active_spec_id, "Injected active spec into system prompt");
                 }
                 Err(e) => {
@@ -567,10 +595,14 @@ impl SessionProcessor {
         model_ref: &crate::agent::ModelRef,
         session_config: &ragent_config::Config,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
-    ) -> Result<(Vec<ChatMessage>, bool, u64)> {
+    ) -> Result<(Vec<ChatMessage>, bool, u64, usize)> {
         let history = {
             let _scope = profiler.scope("history.load");
-            self.session_manager.get_messages(session_id)?
+            // P-1: route `get_messages` through `storage_op` so the SQLite
+            // read runs on a dedicated blocking thread instead of stalling
+            // the async runtime.
+            let sid = session_id.to_string();
+            self.storage_op(move |s| s.get_messages(&sid)).await?
         };
 
         let mut compressed_this_turn = false;
@@ -650,7 +682,9 @@ impl SessionProcessor {
 
         let _ = agent; // currently unused but kept for future per-agent history shaping
 
-        Ok((chat_messages, compressed_this_turn, last_reported_input_tokens))
+        // P-3: return `context_window` so the orchestrator can reuse it
+        // instead of resolving the identical value a second time.
+        Ok((chat_messages, compressed_this_turn, last_reported_input_tokens, context_window))
     }
 
     /// Run the display-only AGENTS.md acknowledgement exchange (streams to the
@@ -800,8 +834,11 @@ impl SessionProcessor {
             }
 
             // Build request (fresh for each attempt)
+            // P-6: share the history by refcount bump instead of cloning
+            // the entire `Vec<ChatMessage>` (including all tool-result
+            // `ContentPart`s) on every retry attempt.
             let attempt_messages: Arc<Vec<ChatMessage>> =
-                Arc::new(loop_state.chat_messages.clone());
+                Arc::clone(&loop_state.chat_messages);
             let attempt_request = ChatRequest {
                 model: turn.model_ref.model_id.clone(),
                 messages: attempt_messages,
@@ -837,21 +874,19 @@ impl SessionProcessor {
                             if turn.session_config.compression.enabled
                                 && is_token_overflow_error_message(&error_message)
                             {
-                                _emergency_compress(
+                                // P-21: consolidated emergency-compress helper
+                                // (single implementation shared with the stream
+                                // Error path below).
+                                emergency_compress_on_overflow(
                                     &self.event_bus,
                                     session_id,
-                                    &mut loop_state.chat_messages,
+                                    Arc::make_mut(&mut loop_state.chat_messages),
                                     context_window,
                                     &turn.session_config.compression,
                                     &mut loop_state.compressed_this_turn,
                                     &mut loop_state.last_reported_input_tokens,
+                                    &error_message,
                                 );
-                                self.event_bus.publish(Event::AgentNotice {
-                                    session_id: session_id.to_string(),
-                                    message: format!(
-                                        "{error_message} — will emergency-compress and retry"
-                                    ),
-                                });
                             } else {
                                 self.event_bus.publish(Event::AgentNotice {
                                     session_id: session_id.to_string(),
@@ -1042,21 +1077,17 @@ impl SessionProcessor {
                                     && is_token_overflow_error_message(&message)
                             };
                             if is_emergency_overflow {
-                                _emergency_compress(
+                                // P-21: consolidated emergency-compress helper.
+                                emergency_compress_on_overflow(
                                     &self.event_bus,
                                     session_id,
-                                    &mut loop_state.chat_messages,
+                                    Arc::make_mut(&mut loop_state.chat_messages),
                                     context_window,
                                     &turn.session_config.compression,
                                     &mut loop_state.compressed_this_turn,
                                     &mut loop_state.last_reported_input_tokens,
+                                    &message,
                                 );
-                                self.event_bus.publish(Event::AgentNotice {
-                                    session_id: session_id.to_string(),
-                                    message: format!(
-                                        "{message} — will emergency-compress and retry"
-                                    ),
-                                });
                                 had_retryable_error = true;
                             } else if should_retry_stream_error(
                                 &message,
@@ -1199,7 +1230,11 @@ impl SessionProcessor {
                 step,
                 "Model produced {reason} — injecting nudge to continue"
             );
-            loop_state.chat_messages.push(ChatMessage {
+            // P-6: `Arc::make_mut` clones the history only when another `Arc`
+            // reference is live (e.g. a still-owned `ChatRequest`). On the
+            // no-tool path the retry request has already been dropped, so
+            // this is a cheap in-place push.
+            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
                 role: "assistant".to_string(),
                 content: ChatContent::Text(text_buffer.to_string()),
             });
@@ -1213,7 +1248,7 @@ impl SessionProcessor {
                 "Please continue — use tool calls to proceed with the task. \
                  Do not output dots or placeholder text."
             };
-            loop_state.chat_messages.push(ChatMessage {
+            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text(nudge_text.to_string()),
             });
@@ -1273,4 +1308,38 @@ impl SessionProcessor {
 
         Ok(assistant_msg)
     }
+}
+
+/// P-21: consolidated emergency-compression helper used by both the
+/// `chat()`-error path and the stream-`Error`-event path in
+/// [`SessionProcessor::call_llm_step`].
+///
+/// Runs [`emergency_compress_chat_messages`] and then publishes a single
+/// `AgentNotice` describing the overflow + retry. Consolidating the two
+/// previous call sites means the compress logic lives in one place and the
+/// notice message format is consistent.
+#[allow(clippy::too_many_arguments)]
+fn emergency_compress_on_overflow(
+    event_bus: &EventBus,
+    session_id: &str,
+    chat_messages: &mut Vec<ChatMessage>,
+    context_window: usize,
+    compression_config: &ragent_config::compression::CompressionConfig,
+    compressed_this_turn: &mut bool,
+    last_reported_input_tokens: &mut u64,
+    error_message: &str,
+) {
+    emergency_compress_chat_messages(
+        event_bus,
+        session_id,
+        chat_messages,
+        context_window,
+        compression_config,
+        compressed_this_turn,
+        last_reported_input_tokens,
+    );
+    event_bus.publish(Event::AgentNotice {
+        session_id: session_id.to_string(),
+        message: format!("{error_message} — will emergency-compress and retry"),
+    });
 }

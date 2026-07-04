@@ -115,6 +115,10 @@ pub enum InputAction {
     ToggleLog,
     /// Toggle the profiler panel visibility and profiler state (Alt+P).
     ToggleProfile,
+    /// Toggle the TODO panel visibility (Alt+T).
+    ToggleTodo,
+    /// Toggle the Memory side panel visibility (Alt+M).
+    ToggleMemory,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
 }
@@ -653,6 +657,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleProfile)
         }
+        // Alt+T toggles the TODO panel (placed before generic char-insert
+        // handling so the `t` is never inserted into the input buffer — NFR-002).
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleTodo)
+        }
+        // Alt+M toggles the Memory side panel (placed before generic char-insert
+        // handling so the `m` is never inserted into the input buffer — NFR-002,
+        // FR-011).
+        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleMemory)
+        }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleYolo)
         }
@@ -845,9 +860,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             .flatten()
                             .filter(|k| !k.is_empty())
                     };
-                    let token = ragent_agent::provider::copilot::resolve_copilot_github_token(Some(
-                        &db_lookup,
-                    ));
+                    let token = ragent_agent::provider::copilot::resolve_copilot_github_token(
+                        Some(&db_lookup),
+                    );
                     if let Some(ref tk) = token {
                         // Try token exchange to check if we have a working token
                         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -1745,7 +1760,8 @@ fn start_copilot_device_flow_setup(app: &mut App) {
                     // so also try the gh CLI token which has broader scope.
                     let api_base = {
                         let mut base =
-                            ragent_agent::provider::copilot::discover_copilot_api_base(&token).await;
+                            ragent_agent::provider::copilot::discover_copilot_api_base(&token)
+                                .await;
                         if base.is_none() {
                             if let Some(gh_token) =
                                 ragent_agent::provider::copilot::find_gh_cli_token()

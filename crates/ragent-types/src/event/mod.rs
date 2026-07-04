@@ -27,6 +27,31 @@ pub enum FinishReason {
     Cancelled,
 }
 
+/// P-15: one tool call's lifecycle summary inside a [`Event::ToolCallBatch`].
+///
+/// Bundles the `ToolCallStart` + `ToolCallEnd` + `ToolResult` data for a
+/// single tool call so consumers can render a whole step's tool calls
+/// atomically without sorting racing per-call events by `call_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallBatchEntry {
+    /// Provider-assigned call identifier.
+    pub call_id: String,
+    /// Name of the tool that was invoked.
+    pub tool: String,
+    /// Error message if the tool call failed, or `None` on success.
+    pub error: Option<String>,
+    /// Wall-clock execution time in milliseconds.
+    pub duration_ms: u64,
+    /// The result content (or error text), possibly truncated for display.
+    pub content: String,
+    /// Total number of lines in the full (untruncated) result content.
+    pub content_line_count: usize,
+    /// Optional structured metadata from the tool (e.g. file counts, edit counts).
+    pub metadata: Option<serde_json::Value>,
+    /// Whether the tool succeeded.
+    pub success: bool,
+}
+
 /// A discrete occurrence in the lifecycle of a session.
 ///
 /// TODO: Consider using `Cow<'static, str>` for string fields that are
@@ -355,6 +380,24 @@ pub enum Event {
         metadata: Option<serde_json::Value>,
         /// Whether the tool succeeded.
         success: bool,
+    },
+    /// P-15: an atomic batch of per-tool-call lifecycle events for one loop
+    /// step.
+    ///
+    /// In `parallel_tool_calls` mode the per-call `ToolCallStart` /
+    /// `ToolCallEnd` / `ToolResult` events race and the TUI must sort them
+    /// by `call_id`. This variant delivers the complete set of tool calls
+    /// for a step in a single publication so consumers can render them
+    /// atomically. The per-call events are still published as a fallback
+    /// (per PERFPLAN Milestone D risk note) until the TUI/HTTP server are
+    /// proven on the batch variant.
+    ToolCallBatch {
+        /// Session this batch belongs to.
+        session_id: String,
+        /// Step number within the turn (1-based).
+        step: u64,
+        /// One entry per tool call in this step, in dispatch order.
+        calls: Vec<ToolCallBatchEntry>,
     },
     /// The Copilot device flow completed successfully.
     CopilotDeviceFlowComplete {
@@ -692,6 +735,7 @@ impl Event {
             Self::ModelResponse { .. } => "ModelResponse",
             Self::ToolCallArgs { .. } => "ToolCallArgs",
             Self::ToolResult { .. } => "ToolResult",
+            Self::ToolCallBatch { .. } => "ToolCallBatch",
             Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
             Self::GitLabSetupComplete { .. } => "GitLabSetupComplete",
             Self::SessionAborted { .. } => "SessionAborted",
@@ -761,6 +805,7 @@ impl Event {
             | Self::ModelResponse { session_id, .. }
             | Self::ToolCallArgs { session_id, .. }
             | Self::ToolResult { session_id, .. }
+            | Self::ToolCallBatch { session_id, .. }
             | Self::SessionAborted { session_id, .. }
             | Self::QuotaUpdate { session_id, .. }
             | Self::SubagentStart { session_id, .. }

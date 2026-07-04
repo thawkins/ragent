@@ -2,7 +2,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-
 use ratatui::layout::Rect;
 
 use ragent_agent::{
@@ -12,12 +11,14 @@ use ragent_agent::{
 };
 use ragent_team::team::TeamStore;
 
-
 // Prompt optimization templates
 
 // State types from app/state.rs
 use crate::app::state::{
-    atomic_config_update, is_image_path, percent_decode_path, save_clipboard_image_to_temp, LogLevel, LogEntry, LlmRequestStat, LlmStatsSummary, ScreenMode, ProviderSetupStep, FileMenuEntry, FileMenuState, ScrollbarDragPane, SelectionPane, TextSelection, ContextAction, OutputViewTarget, OutputViewState, App
+    App, ContextAction, FileMenuEntry, FileMenuState, LlmRequestStat, LlmStatsSummary, LogEntry,
+    LogLevel, OutputViewState, OutputViewTarget, ProviderSetupStep, ScreenMode, ScrollbarDragPane,
+    SelectionPane, TextSelection, atomic_config_update, is_image_path, percent_decode_path,
+    save_clipboard_image_to_temp,
 };
 
 // Helpers
@@ -27,9 +28,6 @@ use crate::app::helpers::*;
 use crate::theme::{StatusCategory, StatusMessage};
 
 impl App {
-
-
-
     pub(crate) fn ollama_cloud_api_key(&self) -> Option<String> {
         self.storage
             .get_provider_auth("ollama_cloud")
@@ -76,7 +74,11 @@ impl App {
         self.start_provider_compaction_for_session(&sid, auto_triggered)
     }
 
-    pub(crate) fn dispatch_user_message(&mut self, text: String, image_paths: Vec<std::path::PathBuf>) {
+    pub(crate) fn dispatch_user_message(
+        &mut self,
+        text: String,
+        image_paths: Vec<std::path::PathBuf>,
+    ) {
         self.auto_compact_failed = false;
         let Some(sid) = self.session_id.clone() else {
             self.status = "⚠ No active session".to_string();
@@ -273,6 +275,8 @@ impl App {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
             SelectionPane::Profile => self.profile_area,
+            SelectionPane::Todo => self.todo_area,
+            SelectionPane::Memory => self.memory_area,
             SelectionPane::Input => self.input_area,
         }
     }
@@ -295,7 +299,12 @@ impl App {
         }
     }
 
-    pub(crate) fn debug_log_input_transition(&self, source: &str, before_input: &str, before_cursor: usize) {
+    pub(crate) fn debug_log_input_transition(
+        &self,
+        source: &str,
+        before_input: &str,
+        before_cursor: usize,
+    ) {
         #[cfg(debug_assertions)]
         {
             if before_input != self.input || before_cursor != self.input_cursor {
@@ -1215,7 +1224,18 @@ impl App {
             .copied()
     }
 
-    pub(crate) fn pane_at(&self, col: u16, row: u16) -> Option<SelectionPane> {
+    /// Map a screen coordinate to the side-panel pane it lands in.
+    ///
+    /// Returns the [`SelectionPane`] (Messages / Profile / Log / Todo /
+    /// Memory / Input) whose cached area contains `(col, row)`, or `None`
+    /// when the coordinate is outside every active pane. Side-panel panes
+    /// (Profile / Log / Todo / Memory) are only reported when their
+    /// corresponding `show_*` flag is true, so hidden panels never win
+    /// hit-testing even if their cached rect is stale. This is the single
+    /// mouse hit-testing entry point used by `handle_mouse_event` for
+    /// left-click selection start, right-click context-menu open, and
+    /// scrollbar-gutter detection (FR-013).
+    pub fn pane_at(&self, col: u16, row: u16) -> Option<SelectionPane> {
         let pos = (col, row).into();
         if self.message_area.area() > 0 && self.message_area.contains(pos) {
             Some(SelectionPane::Messages)
@@ -1226,6 +1246,13 @@ impl App {
             Some(SelectionPane::Profile)
         } else if self.show_log && self.log_area.area() > 0 && self.log_area.contains(pos) {
             Some(SelectionPane::Log)
+        } else if self.show_todo && self.todo_area.area() > 0 && self.todo_area.contains(pos) {
+            Some(SelectionPane::Todo)
+        } else if self.show_memory
+            && self.memory_area.area() > 0
+            && self.memory_area.contains(pos)
+        {
+            Some(SelectionPane::Memory)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
             Some(SelectionPane::Input)
         } else {
@@ -1404,6 +1431,8 @@ impl App {
             ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll),
             ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll),
             ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll),
+            ScrollbarDragPane::Todo => (self.todo_area, self.todo_max_scroll),
+            ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll),
         };
 
         if area.height <= 1 || max_scroll == 0 {
@@ -1424,6 +1453,8 @@ impl App {
             ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Log => self.log_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Profile => self.profile_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Todo => self.todo_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Memory => self.memory_scroll_offset = offset.min(max_scroll),
         }
     }
 
@@ -1495,6 +1526,4 @@ impl App {
             .map(|m| m.text_content().lines().count())
             .sum()
     }
-
-
 }

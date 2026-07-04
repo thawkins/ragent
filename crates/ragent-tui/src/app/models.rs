@@ -2,7 +2,6 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-
 use pulldown_cmark::{Options, Parser, html};
 
 use ragent_agent::team::TeamManager;
@@ -15,12 +14,12 @@ use ragent_agent::{
 use ragent_team::team::TeamStore;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
-
 // Prompt optimization templates
 
 // State types from app/state.rs
 use crate::app::state::{
-    LogLevel, PROVIDER_LIST, ModelPickerEntry, ProviderSetupStep, ConfiguredProvider, ProviderSource, FileMenuEntry, FileMenuState, App
+    App, ConfiguredProvider, FileMenuEntry, FileMenuState, LogLevel, ModelPickerEntry,
+    PROVIDER_LIST, ProviderSetupStep, ProviderSource,
 };
 
 // Helpers
@@ -345,7 +344,10 @@ impl App {
             .find(|entry| entry.id == model_ref.model_id)
     }
 
-    pub(crate) fn effective_thinking_config_for_agent(&self, agent: &AgentInfo) -> Option<ThinkingConfig> {
+    pub(crate) fn effective_thinking_config_for_agent(
+        &self,
+        agent: &AgentInfo,
+    ) -> Option<ThinkingConfig> {
         self.explicit_selected_thinking_config()
             .or_else(|| agent.thinking.clone())
             .or_else(|| {
@@ -357,7 +359,10 @@ impl App {
             })
     }
 
-    pub(crate) fn effective_thinking_level_for_agent(&self, agent: &AgentInfo) -> Option<ThinkingLevel> {
+    pub(crate) fn effective_thinking_level_for_agent(
+        &self,
+        agent: &AgentInfo,
+    ) -> Option<ThinkingLevel> {
         self.effective_thinking_config_for_agent(agent)
             .map(|config| config.level)
     }
@@ -1071,7 +1076,10 @@ impl App {
             .unwrap_or_default()
     }
 
-    pub(crate) fn selected_model_fallback_entries(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+    pub(crate) fn selected_model_fallback_entries(
+        &self,
+        provider_id: &str,
+    ) -> Vec<ModelPickerEntry> {
         let Some(model_ref) = self.selected_model.as_deref() else {
             return Vec::new();
         };
@@ -1120,7 +1128,10 @@ impl App {
         }
     }
 
-    pub(crate) fn resolved_model_entries_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+    pub(crate) fn resolved_model_entries_for_provider(
+        &self,
+        provider_id: &str,
+    ) -> Vec<ModelPickerEntry> {
         let default_entries = || {
             self.provider_registry
                 .get(provider_id)
@@ -1147,11 +1158,19 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else if self.provider_api_key("huggingface").is_some() {
+                    // A token is configured but (a) no models are cached and
+                    // (b) synchronous discovery returned nothing. Per the
+                    // HuggingFace provider contract, when a token is present
+                    // we MUST NOT fall back to the static default catalog —
+                    // doing so would surface stale curated models after the
+                    // user has authenticated. Return an empty list so the
+                    // picker shows "no models" instead of stale defaults
+                    // (see test_huggingface_with_token_does_not_fall_back_to_static_defaults_without_discovery).
                     let discovered = self.sync_discover_models("huggingface");
                     if !discovered.is_empty() {
                         self.picker_entries_from_models(discovered)
                     } else {
-                        self.hf_default_model_entries()
+                        Vec::new()
                     }
                 } else {
                     self.hf_default_model_entries()
@@ -1686,7 +1705,11 @@ impl App {
         self.session_processor.tool_registry.set_hidden(&hidden);
     }
 
-    pub(crate) fn populate_directory_menu(&mut self, dir_rel: &std::path::Path, filter: Option<&str>) {
+    pub(crate) fn populate_directory_menu(
+        &mut self,
+        dir_rel: &std::path::Path,
+        filter: Option<&str>,
+    ) {
         let wd = std::env::current_dir().unwrap_or_default();
         let abs = wd.join(dir_rel);
         let mut entries: Vec<FileMenuEntry> = Vec::new();
@@ -1776,6 +1799,13 @@ impl App {
         let profiler = ragent_agent::session::profiler::agent_loop_profiler();
         profiler.set_enabled(enabled);
         self.show_profile = enabled;
+        if enabled {
+            // Entering profile mode: dismiss the other side panels so only one
+            // occupies the side column (FR-012 mutual-exclusion policy).
+            self.show_log = false;
+            self.show_todo = false;
+            self.show_memory = false;
+        }
         self.status = if enabled {
             "profile panel visible".to_string()
         } else {
@@ -1790,5 +1820,4 @@ impl App {
             },
         );
     }
-
 }

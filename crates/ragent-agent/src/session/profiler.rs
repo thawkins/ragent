@@ -101,12 +101,26 @@ impl AgentLoopProfiler {
     }
 
     /// Start a profiling scope for a static operation label.
+    ///
+    /// P-25: checks `is_enabled()` *before* allocating the owned label
+    /// `String`, so the default (profiling-off) path performs zero heap
+    /// allocations. The previous form called `scope_owned(label.to_string())`
+    /// unconditionally, paying the `to_string()` even when profiling was
+    /// disabled and the scope would be discarded immediately.
     #[must_use]
     pub fn scope(self: &Arc<Self>, label: &'static str) -> ProfileScope {
+        if !self.is_enabled() {
+            return ProfileScope::disabled();
+        }
         self.scope_owned(label.to_string())
     }
 
     /// Start a profiling scope for a dynamically generated operation label.
+    ///
+    /// P-26: the `label_fn` closure is only invoked when profiling is enabled,
+    /// so the default (profiling-off) path never pays the cost of building the
+    /// label string. This short-circuit is verified by
+    /// `test_scope_with_skips_label_fn_when_disabled`.
     #[must_use]
     pub fn scope_with<F>(self: &Arc<Self>, label_fn: F) -> ProfileScope
     where

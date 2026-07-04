@@ -1,9 +1,40 @@
 # Release
 
-## Current Version: 0.1.0-alpha.129
+## Current Version: 0.1.0-alpha.130
 
 ### Changed
-- **Workspace version** — Bumped to `0.1.0-alpha.129`.
+- **Workspace version** — Bumped to `0.1.0-alpha.130`.
+- **TODO panel** — Implemented a third side panel (Alt+T) in `ragent-tui`
+  that renders the session's TODO items from `ragent-storage`. The panel
+  follows the existing log/profile side-panel pattern with mutual
+  exclusion, text selection, scrollbar drag, and a `/todo` slash alias.
+  All 12 plan tasks (T-001…T-012) and 8 acceptance criteria from the
+  `todopanel` spec are satisfied.
+- **Agentic-loop performance upgrade** — Implemented all six milestones
+  (A–F) of `PERFPLAN.md`, covering 26 findings (P-1…P-26) plus 5
+  measurement/gating tasks (F-1…F-5). Highlights:
+  - Deleted inline nudge recomputation; single `set_step` call; verified
+    empty-buffer stall guard (`handle_no_tool_decision`).
+  - `LoopState.chat_messages` is now `Arc<Vec<ChatMessage>>` with
+    `Arc::make_mut` for cheap clones; tool-definition bytes cached on
+    `SessionProcessor`; one `ToolContext` per step; hoisted reusable Vecs;
+    `text_buffer` moved via `mem::take`.
+  - `get_messages` routed through `storage_op`; cached config keyed by
+    file mtimes; `build_turn_chat_messages` returns the context window;
+    `TaskManager.has_pending_background` AtomicBool skips drain scans;
+    interim-save hash uses `serde_json::to_vec` bytes.
+  - `ToolsSent` published only on step 1; added `Event::ToolCallBatch` +
+    `ToolCallBatchEntry` and SSE forwarding; tool-result preview scan
+    capped at 400 bytes.
+  - Consolidated emergency-compression call sites; verified async history
+    reads; short-circuit when `last_reported_input_tokens > 0`; added
+    `cached_spec_section` to `SystemPromptCache` keyed by
+    `(spec_id, spec.modified_at)` with `/spec activate` invalidation.
+  - Added `MockLlmClient`/`MockLlmScript` in `ragent-bench`, criterion
+    `agent_loop` benchmarks, baseline report, `/perf` TUI alias, and
+    `scripts/check-bench-regression.sh` CI guard wired into `pre-flight.sh`.
+
+## Previous Version: 0.1.0-alpha.129
 - **Compression made permanent** — Removed the `compression` and
   `compression-ml` Cargo feature flags across the workspace.
   `headroom-core` is now an unconditional dependency of `ragent-agent`,

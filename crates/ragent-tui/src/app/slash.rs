@@ -2,14 +2,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-
-
-use ragent_agent::{
-    event::Event,
-    mcp::McpClient,
-    message::Message,
-    tool::TeamManagerInterface,
-};
+use ragent_agent::{event::Event, mcp::McpClient, message::Message, tool::TeamManagerInterface};
 use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
 };
@@ -22,7 +15,8 @@ use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
-    LogLevel, ProviderSetupStep, SLASH_COMMANDS, SlashMenuEntry, SlashMenuState, PendingForceCleanup, McpDiscoverState, App, RoleMode
+    App, LogLevel, McpDiscoverState, PendingForceCleanup, ProviderSetupStep, RoleMode,
+    SLASH_COMMANDS, SlashMenuEntry, SlashMenuState,
 };
 
 // Helpers
@@ -1015,11 +1009,39 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "log" => {
                 self.show_log = !self.show_log;
+                if self.show_log {
+                    // Entering log mode: dismiss the other side panels so only
+                    // one occupies the side column (FR-012).
+                    self.show_profile = false;
+                    self.show_todo = false;
+                    self.show_memory = false;
+                }
                 self.status = if self.show_log {
                     "log panel visible".to_string()
                 } else {
                     "log panel hidden".to_string()
                 };
+            }
+            "todo" => {
+                // `/todo` slash alias — toggles the TODO side panel (FR-010,
+                // optional). Mirrors the `/log` alias above and the Alt+T
+                // InputAction::ToggleTodo handler in input_handler.rs. The
+                // actual TODO mutation commands (`/todo add`, etc.) are handled
+                // by a different dispatch path; this arm only fires when `args`
+                // is empty, so it never shadows those subcommands.
+                if args.is_empty() {
+                    self.show_todo = !self.show_todo;
+                    if self.show_todo {
+                        self.show_log = false;
+                        self.show_profile = false;
+                        self.show_memory = false;
+                    }
+                    self.status = if self.show_todo {
+                        "todo panel visible".to_string()
+                    } else {
+                        "todo panel hidden".to_string()
+                    };
+                }
             }
             "profile" => match args {
                 "on" => {
@@ -1033,6 +1055,24 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         "From: /profile\nUsage: `/profile on` or `/profile off`\n",
                     );
                     self.status = "profile usage".to_string();
+                }
+            },
+            // PERFPLAN F-4: `/perf` is an alias for `/profile` that toggles
+            // the agent-loop profiler panel reading
+            // `AgentLoopProfiler::snapshot()`. The panel itself already
+            // existed as `/profile`; the alias matches the PERFPLAN wording.
+            "perf" => match args {
+                "on" => {
+                    self.set_profile_panel_enabled(true);
+                }
+                "off" => {
+                    self.set_profile_panel_enabled(false);
+                }
+                _ => {
+                    self.append_assistant_text(
+                        "From: /perf\nUsage: `/perf on` or `/perf off` (alias for /profile)\n",
+                    );
+                    self.status = "perf usage".to_string();
                 }
             },
             "llmstats" => {
@@ -1472,6 +1512,9 @@ Usage: /provider [show]
 
                         match cfg.save_to_source() {
                             Ok(()) => {
+                                // P-2: invalidate the cached config so the next turn
+                                // picks up the newly-saved file.
+                                self.session_processor.invalidate_config_cache();
                                 self.append_assistant_text(&format!(
                                     "From: /tools\n✅ `{switch}` visibility is now **{}**.",
                                     if enabled { "on" } else { "off" }
@@ -4011,6 +4054,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         .await
                                         .replace(spec_id.clone())
                                 });
+                                // P-24: invalidate the cached spec section so the
+                                // next turn re-reads the newly-activated spec.
+                                self.session_processor
+                                    .system_prompt_cache()
+                                    .invalidate_spec_cache();
                                 let _ = self
                                     .session_processor
                                     .spec_manager
@@ -4305,23 +4353,19 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                 .map(|&i| runner.tasks()[i].id.clone())
                                                 .collect();
                                             let total = task_ids.len();
-                                            self.spec_impl_state = Some(
-                                                crate::app::state::SpecImplState {
+                                            self.spec_impl_state =
+                                                Some(crate::app::state::SpecImplState {
                                                     spec_id: spec_id.clone(),
                                                     specs_root: specs_root.clone(),
                                                     task_ids,
                                                     current_rank: 1,
                                                     total,
-                                                },
-                                            );
+                                                });
 
                                             // Dispatch the first task's prompt.
                                             if let Some(prompt) = runner.task_prompt(1) {
                                                 self.dispatch_spec_impl_task(
-                                                    prompt,
-                                                    &spec_id,
-                                                    1,
-                                                    total,
+                                                    prompt, &spec_id, 1, total,
                                                 );
                                             }
                                         }
@@ -4523,6 +4567,25 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                 match args.trim() {
                     "show" | "" => {
+                        // Toggle the Memory side panel (FR-008), mirroring the
+                        // `/log` and `/todo` slash aliases. The textual
+                        // `/memory show` output is still appended to the chat
+                        // so users get both the transcript and the live panel.
+                        self.show_memory = !self.show_memory;
+                        if self.show_memory {
+                            // Entering Memory mode: dismiss the other side
+                            // panels so only one occupies the side column
+                            // (FR-004 mutual-exclusion policy).
+                            self.show_log = false;
+                            self.show_profile = false;
+                            self.show_todo = false;
+                        }
+                        self.status = if self.show_memory {
+                            "memory panel visible".to_string()
+                        } else {
+                            "memory panel hidden".to_string()
+                        };
+
                         let mut output = String::from("From: /memory show\n\n");
 
                         let proj_content = std::fs::read_to_string(&project_mem)
@@ -4904,7 +4967,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let update_msg = match ragent_agent::updater::check_for_update().await {
                         Some(info) => format!("⚠️  Update available: v{}", info.version),
                         None => {
-                            format!("✅ Up to date (v{})", ragent_agent::updater::CURRENT_VERSION)
+                            format!(
+                                "✅ Up to date (v{})",
+                                ragent_agent::updater::CURRENT_VERSION
+                            )
                         }
                     };
                     lines.push(update_msg);
@@ -5169,6 +5235,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         match cfg.save_to_source() {
                             Ok(()) => {
+                                // P-2: invalidate the cached config so the next turn
+                                // picks up the newly-saved file.
+                                self.session_processor.invalidate_config_cache();
                                 self.status = "codeindex: on".to_string();
                             }
                             Err(e) => {
@@ -5215,6 +5284,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                         match cfg.save_to_source() {
                             Ok(()) => {
+                                // P-2: invalidate the cached config so the next turn
+                                // picks up the newly-saved file.
+                                self.session_processor.invalidate_config_cache();
                                 self.status = "codeindex: off".to_string();
                             }
                             Err(e) => {
@@ -5871,5 +5943,4 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
         self.assert_ui_invariants();
     }
-
 }

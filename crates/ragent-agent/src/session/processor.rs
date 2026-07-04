@@ -39,13 +39,12 @@ use crate::session::permissions::{
     check_permission_with_prompt as _check_permission, extract_command_name,
     extract_resource_from_input, split_bash_command,
 };
-use crate::session::stream_buffer::stall_pattern_set;
 use crate::tool::{McpToolWrapper, ToolContext, ToolRegistry};
 
 // Re-export the public helpers that external callers (tests, benches) import
 // from `session::processor::...` so the extraction does not break those paths.
 pub use crate::session::history::{
-    chat_request_payload_bytes, detect_incomplete_file_task, estimate_request_bytes,
+    chat_request_payload_bytes, estimate_request_bytes,
     estimate_tool_definition_bytes, history_to_chat_messages, is_permanent_llm_api_error,
     is_token_overflow_error_message, stream_has_meaningful_partial_output,
     should_retry_stream_error, tool_result_content_for_llm,
@@ -107,6 +106,13 @@ pub struct SessionProcessor {
     /// Invalidated together with [`cached_tool_definitions`] by
     /// [`invalidate_tool_cache`].
     pub cached_tool_names: parking_lot::RwLock<Option<Arc<[String]>>>,
+    /// Cached total serialised byte size of the cached tool definitions
+    /// (P-7 / PERF-014). Populated alongside [`cached_tool_definitions`] so
+    /// the per-step request-size estimate can reuse the sum instead of
+    /// re-serialising ~111 `ToolDefinition::parameters` JSON schemas on every
+    /// step. Invalidated together with [`cached_tool_definitions`] by
+    /// [`invalidate_tool_cache`].
+    pub cached_tool_definition_bytes: parking_lot::RwLock<Option<u64>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
@@ -127,6 +133,33 @@ pub struct SessionProcessor {
     /// [`crate::tool::ToolContext`] so they can detect stale-file edits
     /// (editrenewal FR-003).
     pub read_timestamps: Arc<RwLock<HashMap<PathBuf, u64>>>,
+    /// P-2: cache of the resolved [`ragent_config::Config`] keyed by the
+    /// modification times of every config file that contributed to it. The
+    /// config is immutable for the lifetime of a session, so re-reading
+    /// `ragent.json` from disk on every `process_user_message` call is pure
+    /// I/O. This cache reloads only when one of the contributing files
+    /// changes on disk (or when an environment-variable override
+    /// (`RAGENT_CONFIG` / `RAGENT_CONFIG_CONTENT`) is present, which
+    /// disables the cache because env vars have no mtime to track).
+    pub cached_config: parking_lot::Mutex<Option<CachedConfig>>,
+}
+
+/// P-2: the cached resolved config plus the inputs used to build it.
+///
+/// `file_mtines` records `(path, mtime)` for every entry in
+/// [`Config::config_paths`]. The cache is valid while none of those mtimes
+/// change. `env_overrides_present` records whether either
+/// `RAGENT_CONFIG` or `RAGENT_CONFIG_CONTENT` was set at load time — when
+/// set, the cache is bypassed on the next load because env vars have no
+/// mtime to track.
+#[derive(Clone)]
+pub struct CachedConfig {
+    /// The resolved configuration wrapped in `Arc` for cheap cloning.
+    pub config: Arc<ragent_config::Config>,
+    /// `(path, mtime)` pairs for each contributing config file.
+    pub file_mtimes: Vec<(PathBuf, std::time::SystemTime)>,
+    /// Whether env-var overrides were present when this entry was built.
+    pub env_overrides_present: bool,
 }
 
 impl SessionProcessor {
@@ -191,9 +224,19 @@ impl SessionProcessor {
             let mut names = self.cached_tool_names.write();
             *names = None;
         }
+        {
+            let mut bytes = self.cached_tool_definition_bytes.write();
+            *bytes = None;
+        }
     }
 
     /// Return cached tool definitions, populating the cache if necessary.
+    ///
+    /// P-7 / PERF-014: also populates [`cached_tool_definition_bytes`] with
+    /// the total serialised byte size of the definitions (computed once via
+    /// [`estimate_tool_definition_bytes`]) so the per-step request-size
+    /// estimate can reuse the sum instead of re-serialising ~111 tool
+    /// schemas on every step.
     fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
         {
             let guard = self.cached_tool_definitions.read();
@@ -205,6 +248,10 @@ impl SessionProcessor {
         // PERF-003: also cache the tool-name list used by the `ToolsSent`
         // event so we don't allocate ~111 Strings on every loop step.
         let names: Arc<[String]> = defs.iter().map(|t| t.name.clone()).collect();
+        // P-7: pre-compute the total serialised byte size of the tool
+        // definitions so `estimate_request_bytes`-style estimators can
+        // reuse the sum without re-serialising every schema per step.
+        let tool_bytes = estimate_tool_definition_bytes(&defs);
         {
             let mut guard = self.cached_tool_definitions.write();
             *guard = Some(defs.clone());
@@ -213,7 +260,18 @@ impl SessionProcessor {
             let mut names_guard = self.cached_tool_names.write();
             *names_guard = Some(names);
         }
+        {
+            let mut bytes_guard = self.cached_tool_definition_bytes.write();
+            *bytes_guard = Some(tool_bytes);
+        }
         defs
+    }
+
+    /// Return the cached total serialised byte size of the tool definitions
+    /// (P-7). Populated alongside [`get_cached_tool_definitions`]; returns
+    /// `None` when the cache is empty or invalidated.
+    fn get_cached_tool_definition_bytes(&self) -> Option<u64> {
+        self.cached_tool_definition_bytes.read().as_ref().copied()
     }
 
     /// Return the cached tool names for the `ToolsSent` event (PERF-003).
@@ -255,6 +313,58 @@ impl SessionProcessor {
     /// and clears the per-component entries.
     pub fn invalidate_system_prompt_cache(&self) {
         self.system_prompt_cache().invalidate_all();
+    }
+
+    /// Invalidate the P-2 config cache (force the next `prepare_client`
+    /// call to re-read `ragent.json` from disk). Call this when the config
+    /// is known to have changed externally (e.g. after a `/config save`
+    /// slash command) so the next turn picks up the new values.
+    pub fn invalidate_config_cache(&self) {
+        let mut guard = self.cached_config.lock();
+        *guard = None;
+    }
+
+    /// Resolve the per-turn [`ragent_config::Config`], using the P-2 mtime
+    /// cache to skip the disk read when none of the contributing config
+    /// files have changed since the last load.
+    ///
+    /// Returns the config wrapped in `Arc` so it can be cloned cheaply into
+    /// the per-turn [`TurnClient`] and per-tool-call [`ToolContext`]s.
+    pub(crate) fn load_config_cached(&self) -> Arc<ragent_config::Config> {
+        use std::time::SystemTime;
+        let env_overrides_present =
+            std::env::var_os("RAGENT_CONFIG").is_some() || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
+        // Try the cache: valid only when no env-var overrides are present and
+        // every recorded file's mtime is unchanged.
+        {
+            let guard = self.cached_config.lock();
+            if let Some(cached) = guard.as_ref()
+                && !env_overrides_present
+                && cached.file_mtimes.iter().all(|(path, mtime)| {
+                    std::fs::metadata(path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .map_or(false, |current| current == *mtime)
+                })
+            {
+                return cached.config.clone();
+            }
+        }
+        // Cache miss (or invalid): reload from disk.
+        let cfg = ragent_config::Config::load().unwrap_or_default();
+        let file_mtimes: Vec<(PathBuf, SystemTime)> = cfg
+            .config_paths
+            .iter()
+            .filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok().map(|mt| (p.clone(), mt)))
+            .collect();
+        let arc = Arc::new(cfg);
+        let mut guard = self.cached_config.lock();
+        *guard = Some(CachedConfig {
+            config: Arc::clone(&arc),
+            file_mtimes,
+            env_overrides_present,
+        });
+        arc
     }
     /// Run a blocking storage operation on a dedicated thread to avoid
     /// stalling the Tokio runtime.
@@ -371,7 +481,9 @@ impl SessionProcessor {
             .await?;
 
         // 4. Build chat messages from history
-        let (mut chat_messages, compressed_this_turn, last_reported_input_tokens) = self
+        // P-3: `build_turn_chat_messages` also returns the resolved
+        // `context_window` so the orchestrator does not re-resolve it below.
+        let (chat_messages_vec, compressed_this_turn, last_reported_input_tokens, context_window) = self
             .build_turn_chat_messages(
                 session_id,
                 agent,
@@ -380,10 +492,20 @@ impl SessionProcessor {
                 &profiler,
             )
             .await?;
+        // P-6: hold the per-turn chat history as `Arc<Vec<ChatMessage>>`
+        // so the per-retry `ChatRequest` can share it by refcount bump
+        // instead of cloning the entire `Vec` on every attempt.
+        let mut chat_messages: std::sync::Arc<Vec<ChatMessage>> =
+            std::sync::Arc::new(chat_messages_vec);
 
         // 5. Run AGENTS.md init exchange (display-only, skipped for subagents)
         {
-            let history = self.session_manager.get_messages(session_id)?;
+            // P-1: route `get_messages` through `storage_op` so the SQLite
+            // read runs on a dedicated blocking thread instead of stalling
+            // the async runtime. Every other storage call in the loop already
+            // goes through `storage_op`; this one site was missed.
+            let sid = session_id.to_string();
+            let history = self.storage_op(move |s| s.get_messages(&sid)).await?;
             self.run_inline_init_acknowledgement(
                 session_id,
                 agent,
@@ -404,6 +526,9 @@ impl SessionProcessor {
         } else {
             self.get_cached_tool_definitions()
         };
+        // P-7: prime the tool-definition byte cache alongside the definitions
+        // cache so the per-step request-size estimator can reuse the sum.
+        let _ = self.get_cached_tool_definition_bytes();
         let cached_tool_names: Option<std::sync::Arc<[String]>> = if max_steps > 1 {
             self.get_cached_tool_names()
         } else {
@@ -418,6 +543,13 @@ impl SessionProcessor {
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compressed_this_turn = compressed_this_turn;
         let mut last_reported_input_tokens = last_reported_input_tokens;
+        // P-17: reuse the per-step ContentPart buffers across loop iterations
+        // to avoid reallocating two `Vec<ContentPart>`s on every step. They
+        // are emptied via `std::mem::take` when pushed into `chat_messages`,
+        // so the next iteration starts with an empty (but allocated) Vec.
+        let mut assistant_content_parts: Vec<ContentPart> = Vec::new();
+        let mut tool_result_parts: Vec<ContentPart> = Vec::new();
+        let mut bg_parts: Vec<ContentPart> = Vec::new();
 
         let assistant_msg_id = {
             let _scope = profiler.scope("storage.assistant_placeholder.create");
@@ -428,25 +560,23 @@ impl SessionProcessor {
             id
         };
 
-        let context_window = self
-            .provider_registry
-            .get(&turn.model_ref.provider_id)
-            .and_then(|p| {
-                p.default_models()
-                    .into_iter()
-                    .find(|m| m.id == turn.model_ref.model_id)
-            })
-            .map(|m| m.context_window)
-            .unwrap_or(128_000);
+        // P-3: reuse the `context_window` returned by
+        // `build_turn_chat_messages` instead of re-resolving it from the
+        // provider registry a second time.
 
         // 7. Agent loop
         loop {
             let _step_scope = profiler.scope("loop.step.total");
             let step = {
                 let _scope = profiler.scope("loop.step.setup");
-                self.event_bus
-                    .set_step(session_id, self.event_bus.current_step(session_id) + 1);
-                self.event_bus.current_step(session_id) as usize
+                // P-13: compute the new step once, set it, and reuse the
+                // value. The previous form called `current_step` twice
+                // (once to read, once to re-read after `set_step`); the
+                // second read is redundant because we already know the
+                // value we just stored.
+                let new_step = self.event_bus.current_step(session_id) + 1;
+                self.event_bus.set_step(session_id, new_step);
+                new_step as usize
             };
             if step > max_steps {
                 warn!("Reached max steps ({}), stopping agent loop", max_steps);
@@ -488,7 +618,13 @@ impl SessionProcessor {
 
             debug!("Agent loop step {}/{}", step, max_steps);
 
-            if !tool_definitions.is_empty() {
+            // P-4: only publish `ToolsSent` on the first step of the turn —
+            // the TUI only renders the tool list once and the previous form
+            // cloned ~111 `String`s (or cloned the cached `Arc<[String]>`
+            // into a `Vec<String>`) on every step. When `cached_tool_names`
+            // is populated we hand the `Arc<[String]>` straight to the event
+            // (P-4/D-1), so the publish is a single refcount bump.
+            if step == 1 && !tool_definitions.is_empty() {
                 let _scope = profiler.scope("loop.step.publish_tools");
                 let tool_names: Vec<String> = match &cached_tool_names {
                     Some(names) => names.iter().cloned().collect(),
@@ -551,7 +687,7 @@ impl SessionProcessor {
                     compression_ratio: result.stats.compression_ratio,
                     did_compress,
                 });
-                chat_messages = result.chat_messages;
+                chat_messages = Arc::new(result.chat_messages);
                 compressed_this_turn = true;
                 last_reported_input_tokens = 0;
             }
@@ -582,6 +718,7 @@ impl SessionProcessor {
                     &profiler,
                 )
                 .await?;
+            let mut llm_result = llm_result;
             chat_messages = loop_state.chat_messages;
             compressed_this_turn = loop_state.compressed_this_turn;
             last_reported_input_tokens = loop_state.last_reported_input_tokens;
@@ -623,85 +760,37 @@ impl SessionProcessor {
                 }
             }
 
-            // No-tool decision: stall/planning/incomplete nudge
+            // No-tool decision: stall/planning/incomplete nudge (P-5).
+            // The `handle_no_tool_decision` helper mutates the supplied
+            // `LoopState` in place — pushing nudge messages into
+            // `chat_messages` and updating `task_completeness_nudged` — so the
+            // orchestrator trusts its return value and reads back the mutated
+            // fields instead of recomputing the three nudge booleans inline.
             if llm_result.tool_calls.is_empty() {
-                let _should_continue = self.handle_no_tool_decision(
+                let mut loop_state = crate::session::loop_steps::LoopState {
+                    chat_messages: std::mem::take(&mut chat_messages),
+                    assistant_parts: std::sync::Arc::clone(&assistant_parts),
+                    agent_switch_requested,
+                    task_complete_requested,
+                    task_completeness_nudged,
+                    last_interim_hash,
+                    cumulative_model_wait_ms,
+                    compressed_this_turn,
+                    last_reported_input_tokens,
+                };
+                let should_continue = self.handle_no_tool_decision(
                     session_id,
                     step,
                     &turn.model_ref,
                     &tool_definitions,
                     &user_msg,
-                    &mut crate::session::loop_steps::LoopState {
-                        chat_messages: std::mem::take(&mut chat_messages),
-                        assistant_parts: std::sync::Arc::clone(&assistant_parts),
-                        agent_switch_requested,
-                        task_complete_requested,
-                        task_completeness_nudged,
-                        last_interim_hash,
-                        cumulative_model_wait_ms,
-                        compressed_this_turn,
-                        last_reported_input_tokens,
-                    },
+                    &mut loop_state,
                     &llm_result.text_buffer,
                 );
-                // Reconstruct chat_messages from the loop state
-                // (handle_no_tool_decision may have pushed nudge messages)
-                // Actually, handle_no_tool_decision takes &mut LoopState and
-                // pushes to loop_state.chat_messages. We need to get them back.
-                // Let me fix this — I need to not recreate the LoopState here.
-                // For now, let's keep the inline version.
-                // Actually, let me just inline the no-tool decision.
-                let (should_nudge_stall, should_nudge_planning, should_nudge_incomplete) = {
-                    let is_ollama =
-                        matches!(turn.model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
-                    let trimmed_text = llm_result.text_buffer.trim();
-                    let looks_like_stall = !trimmed_text.is_empty()
-                        && !tool_definitions.is_empty()
-                        && trimmed_text
-                            .chars()
-                            .all(|c| c == '.' || c == ' ' || c == '\n');
-                    let looks_like_planning = !llm_result.text_buffer.is_empty()
-                        && !tool_definitions.is_empty()
-                        && stall_pattern_set().is_match(&llm_result.text_buffer);
-                    let should_nudge_stall = looks_like_stall && step <= 8;
-                    let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
-                    let should_nudge_incomplete = !task_completeness_nudged
-                        && !tool_definitions.is_empty()
-                        && detect_incomplete_file_task(&user_msg.text_content(), &assistant_parts);
-                    (should_nudge_stall, should_nudge_planning, should_nudge_incomplete)
-                };
-                if should_nudge_stall || should_nudge_planning || should_nudge_incomplete {
-                    let reason = if should_nudge_stall {
-                        "stall (dots-only output)"
-                    } else if should_nudge_planning {
-                        "planning text without tool calls"
-                    } else {
-                        task_completeness_nudged = true;
-                        "task incomplete — file output requested but not created"
-                    };
-                    tracing::info!(
-                        session_id = %session_id,
-                        step,
-                        "Model produced {reason} — injecting nudge to continue"
-                    );
-                    chat_messages.push(ChatMessage {
-                        role: "assistant".to_string(),
-                        content: ChatContent::Text(llm_result.text_buffer.clone()),
-                    });
-                    let nudge_text = if should_nudge_incomplete {
-                        "You have not completed the requested task. The user asked \
-                         you to create or write a file, but no file-writing tool \
-                         was called. Please use the appropriate tool (e.g. \
-                         write_file, create_file) to produce the requested output \
-                         now."
-                    } else {
-                        "Please continue — use tool calls to proceed with the task. \
-                         Do not output dots or placeholder text."
-                    };
-                    chat_messages.push(ChatMessage {
-                        role: "user".to_string(),
-                        content: ChatContent::Text(nudge_text.to_string()),
-                    });
+                // Read back the mutations the helper performed.
+                chat_messages = std::mem::take(&mut loop_state.chat_messages);
+                task_completeness_nudged = loop_state.task_completeness_nudged;
+                if should_continue {
                     continue;
                 }
                 break;
@@ -710,15 +799,46 @@ impl SessionProcessor {
             // Tool dispatch phase (kept inline due to closure complexity)
             {
                 let _scope = profiler.scope("loop.tool_phase.total");
-                let mut assistant_content_parts: Vec<ContentPart> = Vec::new();
+                // P-17: clear the reused per-step buffers (cheap — the
+                // allocations from the previous step are retained).
+                assistant_content_parts.clear();
+                tool_result_parts.clear();
+                // P-18: move `text_buffer` into the `ContentPart::Text` rather
+                // than cloning it. The buffer is not referenced after this
+                // point (the response-preview and no-tool-nudge paths ran
+                // earlier and already consumed whatever they needed).
                 if !llm_result.text_buffer.is_empty() {
-                    assistant_content_parts.push(ContentPart::Text {
-                        text: llm_result.text_buffer.clone(),
-                    });
+                    let text = std::mem::take(&mut llm_result.text_buffer);
+                    assistant_content_parts.push(ContentPart::Text { text });
                 }
                 let parallel_tool_calls = turn.session_config.experimental.parallel_tool_calls;
-                let mut tool_result_parts: Vec<ContentPart> = Vec::new();
                 let mut futures = Vec::new();
+                // P-8/P-9: build a single `ToolContext` for this step and clone
+                // it per tool call. `active_spec` is read once here (P-9) so
+                // the async lock is acquired at most once per step instead of
+                // once per tool call. The cloned value is also reused by the
+                // auto-spec-task-update block below (P-10).
+                let active_spec_id = self.active_spec.read().await.clone();
+                let base_tool_ctx = ToolContext {
+                    session_id: session_id.to_string(),
+                    working_dir: turn.working_dir.clone(),
+                    event_bus: self.event_bus.clone(),
+                    storage: Some(self.session_manager.storage().clone()),
+                    task_manager: self.task_manager.get().cloned(),
+                    active_model: Some(turn.model_ref.clone()),
+                    team_context: turn.team_context.clone(),
+                    team_manager: self
+                        .team_manager
+                        .get()
+                        .cloned()
+                        .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                    code_index: self.code_index.get().cloned(),
+                    spec_manager: self.spec_manager.get().cloned(),
+                    active_spec_id: active_spec_id.clone(),
+                    config: Some(std::sync::Arc::clone(&turn.session_config)),
+                    cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                    read_timestamps: self.read_timestamps.clone(),
+                };
                 type ToolExecutionResult = Result<
                     (
                         PendingToolCall,
@@ -733,6 +853,12 @@ impl SessionProcessor {
                     tokio::task::JoinError,
                 >;
                 let result_profiler = profiler.clone();
+                // P-15: collect one `ToolCallBatchEntry` per tool call so a
+                // single `Event::ToolCallBatch` can be published at the end of
+                // the step, giving consumers an atomic view of all tool calls.
+                // The per-call events are still published inside the spawned
+                // task as a fallback (PERFPLAN Milestone D risk note).
+                let mut batch_entries: Vec<ragent_types::event::ToolCallBatchEntry> = Vec::new();
                 let mut handle_tool_execution_result = |result: ToolExecutionResult| {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
@@ -740,6 +866,7 @@ impl SessionProcessor {
                             tc, input, status, output_value, error, duration_ms,
                             result_content, tool_metadata,
                         )) => {
+                            let success = status == ToolCallStatus::Completed;
                             std::sync::Arc::make_mut(&mut assistant_parts).push(
                                 MessagePart::ToolCall {
                                     tool: tc.name.clone(),
@@ -748,7 +875,7 @@ impl SessionProcessor {
                                         status,
                                         input,
                                         output: output_value,
-                                        error,
+                                        error: error.clone(),
                                         duration_ms: Some(duration_ms),
                                     },
                                 },
@@ -760,6 +887,37 @@ impl SessionProcessor {
                                     &result_content,
                                     tool_metadata.as_ref(),
                                 ),
+                            });
+                            // P-15: capture the per-call summary for the batch
+                            // event. Reuse the already-computed line count and
+                            // preview from the spawned task where available;
+                            // fall back to computing them here for the batch.
+                            let content_line_count = tool_metadata
+                                .as_ref()
+                                .and_then(|m| m.get("lines"))
+                                .and_then(serde_json::Value::as_u64)
+                                .map_or_else(|| result_content.lines().count(), |n| n as usize);
+                            let batch_content = if result_content.len() > 200 {
+                                let scan_end = 400.min(result_content.len());
+                                let end = result_content[..scan_end]
+                                    .char_indices()
+                                    .map(|(i, _)| i)
+                                    .take_while(|&i| i <= 200)
+                                    .last()
+                                    .unwrap_or(0);
+                                format!("{}…", &result_content[..end])
+                            } else {
+                                result_content.clone()
+                            };
+                            batch_entries.push(ragent_types::event::ToolCallBatchEntry {
+                                call_id: tc.id.clone(),
+                                tool: tc.name.clone(),
+                                error: error.clone(),
+                                duration_ms,
+                                content: batch_content,
+                                content_line_count,
+                                metadata: tool_metadata.clone(),
+                                success,
                             });
                             if let Some(meta) = tool_metadata.as_ref() {
                                 if meta.get("agent_switch").is_some()
@@ -793,26 +951,12 @@ impl SessionProcessor {
                         name: tc.name.clone(),
                         input: input.clone(),
                     });
-                    let tool_ctx = ToolContext {
-                        session_id: session_id.to_string(),
-                        working_dir: turn.working_dir.clone(),
-                        event_bus: self.event_bus.clone(),
-                        storage: Some(self.session_manager.storage().clone()),
-                        task_manager: self.task_manager.get().cloned(),
-                        active_model: Some(turn.model_ref.clone()),
-                        team_context: turn.team_context.clone(),
-                        team_manager: self
-                            .team_manager
-                            .get()
-                            .cloned()
-                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                        code_index: self.code_index.get().cloned(),
-                        spec_manager: self.spec_manager.get().cloned(),
-                        active_spec_id: self.active_spec.read().await.clone(),
-                        config: Some(std::sync::Arc::clone(&turn.session_config)),
-                        cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-                        read_timestamps: self.read_timestamps.clone(),
-                    };
+                    // P-8/P-9: clone the per-step `ToolContext` rather than
+                    // rebuilding it (and re-acquiring the `active_spec` async
+                    // lock) for every tool call. `base_tool_ctx` is built once
+                    // before the loop; the clone is cheap (Arc refcount bumps
+                    // plus a `PathBuf`/`String` clone).
+                    let tool_ctx = base_tool_ctx.clone();
                     let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
@@ -1015,7 +1159,21 @@ impl SessionProcessor {
                             .and_then(serde_json::Value::as_u64)
                             .map_or_else(|| result_content.lines().count(), |n| n as usize);
                         let result_preview = if result_content.len() > 200 {
-                            let end = result_content.char_indices().map(|(i, _)| i).take_while(|&i| i <= 200).last().unwrap_or(0);
+                            // P-19: cap the char-boundary scan at the first
+                            // 400 bytes. The previous form iterated
+                            // `char_indices` over the entire (potentially
+                            // huge) `result_content` and took while
+                            // `i <= 200`; for large tool outputs that was
+                            // O(n) per event. We only ever need a ≤200-byte
+                            // preview, so scanning the first 400 bytes is
+                            // always sufficient and bounded.
+                            let scan_end = 400.min(result_content.len());
+                            let end = result_content[..scan_end]
+                                .char_indices()
+                                .map(|(i, _)| i)
+                                .take_while(|&i| i <= 200)
+                                .last()
+                                .unwrap_or(0);
                             format!("{}…", &result_content[..end])
                         } else { result_content.clone() };
                         let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
@@ -1049,10 +1207,20 @@ impl SessionProcessor {
                         if handle_tool_execution_result(result) { break; }
                     }
                 }
+                // P-15: publish a single `ToolCallBatch` for this step with
+                // all per-call summaries, so consumers can render atomically.
+                if !batch_entries.is_empty() {
+                    self.event_bus.publish(Event::ToolCallBatch {
+                        session_id: session_id_arc.to_string(),
+                        step: step as u64,
+                        calls: batch_entries,
+                    });
+                }
                 if agent_switch_requested || task_complete_requested { break; }
-                // Auto task status updates
+                // Auto task status updates (P-10: reuse the `active_spec_id`
+                // already read above for the `ToolContext`, and short-circuit
+                // when no spec is active or no file-write tool was called).
                 {
-                    let active_spec_id = self.active_spec.read().await.clone();
                     if let Some(ref spec_id_str) = active_spec_id
                         && let Some(ref spec_mgr) = self.spec_manager.get()
                         && llm_result.tool_calls.iter().any(|tc| matches!(tc.name.as_str(), "write"|"edit"|"multiedit"|"multi_edit"|"patch"|"create"|"append_to_file"))
@@ -1076,33 +1244,43 @@ impl SessionProcessor {
                         }
                     }
                 }
-                // Append to chat history
-                chat_messages.push(ChatMessage { role: "assistant".to_string(), content: ChatContent::Parts(assistant_content_parts) });
-                chat_messages.push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(tool_result_parts) });
+                // Append to chat history (P-17: `std::mem::take` moves the
+                // contents into `ChatContent::Parts` while leaving the Vec
+                // buffer allocated for reuse on the next step). P-6: mutate the
+                // shared `Arc<Vec>` via `Arc::make_mut` so an unchanged
+                // history is not cloned.
+                Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "assistant".to_string(), content: ChatContent::Parts(std::mem::take(&mut assistant_content_parts)) });
+                Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(std::mem::take(&mut tool_result_parts)) });
             }
 
             // Background task injection
             {
                 let _scope = profiler.scope("loop.background.total");
                 if let Some(tm) = self.task_manager.get() {
-                    let completed = tm.drain_completed(session_id).await;
-                    if !completed.is_empty() {
-                        let _scope = profiler.scope("loop.background.inject_completed");
-                        let mut bg_parts: Vec<ContentPart> = Vec::new();
-                        for task in &completed {
-                            let status_label = match task.status {
-                                crate::task::TaskStatus::Completed => "completed",
-                                crate::task::TaskStatus::Failed => "failed",
-                                crate::task::TaskStatus::Cancelled => "cancelled",
-                                crate::task::TaskStatus::Suspended => "suspended",
-                                crate::task::TaskStatus::Terminating => "terminating",
-                                crate::task::TaskStatus::Running => "running",
-                            };
-                            let body = task.result.as_deref().or(task.error.as_deref()).unwrap_or("(no output)");
-                            let text = format!("[Background Task {status_label}: {} — {}]\n\n{body}", task.agent_name, &task.id[..8.min(task.id.len())]);
-                            bg_parts.push(ContentPart::Text { text });
+                    // P-11: skip the lock+scan when no background tasks are
+                    // pending. The flag is set by `spawn_background` and
+                    // cleared by `drain_completed` when nothing remains.
+                    if tm.has_pending_background() {
+                        let completed = tm.drain_completed(session_id).await;
+                        if !completed.is_empty() {
+                            let _scope = profiler.scope("loop.background.inject_completed");
+                            // P-17: reuse the hoisted `bg_parts` buffer.
+                            bg_parts.clear();
+                            for task in &completed {
+                                let status_label = match task.status {
+                                    crate::task::TaskStatus::Completed => "completed",
+                                    crate::task::TaskStatus::Failed => "failed",
+                                    crate::task::TaskStatus::Cancelled => "cancelled",
+                                    crate::task::TaskStatus::Suspended => "suspended",
+                                    crate::task::TaskStatus::Terminating => "terminating",
+                                    crate::task::TaskStatus::Running => "running",
+                                };
+                                let body = task.result.as_deref().or(task.error.as_deref()).unwrap_or("(no output)");
+                                let text = format!("[Background Task {status_label}: {} — {}]\n\n{body}", task.agent_name, &task.id[..8.min(task.id.len())]);
+                                bg_parts.push(ContentPart::Text { text });
+                            }
+                            Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(std::mem::take(&mut bg_parts)) });
                         }
-                        chat_messages.push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(bg_parts) });
                     }
                 }
             }
@@ -1110,6 +1288,13 @@ impl SessionProcessor {
             // Interim save
             {
                 let _scope = profiler.scope("storage.assistant_interim.update");
+                // P-12: hash the assistant parts to detect changes since the
+                // last interim save. Tool-call input/output are hashed via
+                // `serde_json`'s serialised bytes rather than
+                // `Value::to_string()`, which re-serialises every tool-call
+                // input/output on every step. `serde_json::to_vec` produces a
+                // canonical byte form that hashes directly with no
+                // intermediate `String` allocation.
                 let current_hash = {
                     use rustc_hash::FxHasher;
                     use std::hash::{Hash, Hasher};
@@ -1119,13 +1304,29 @@ impl SessionProcessor {
                         match part {
                             MessagePart::Text { text } => text.hash(&mut hasher),
                             MessagePart::ToolCall { tool, call_id, state } => {
-                                tool.hash(&mut hasher); call_id.hash(&mut hasher);
-                                state.input.to_string().hash(&mut hasher);
-                                if let Some(out) = &state.output { out.to_string().hash(&mut hasher); }
-                                if let Some(err) = &state.error { err.hash(&mut hasher); }
+                                tool.hash(&mut hasher);
+                                call_id.hash(&mut hasher);
+                                // P-12: hash the status discriminant only (the
+                                // `ToolCallStatus` enum does not derive `Hash`,
+                                // but its discriminant is stable and sufficient
+                                // for change detection).
+                                std::mem::discriminant(&state.status).hash(&mut hasher);
+                                hash_value(&mut hasher, &state.input);
+                                if let Some(out) = &state.output {
+                                    hash_value(&mut hasher, out);
+                                }
+                                if let Some(err) = &state.error {
+                                    err.hash(&mut hasher);
+                                }
+                                if let Some(dur) = &state.duration_ms {
+                                    dur.hash(&mut hasher);
+                                }
                             }
                             MessagePart::Reasoning { text } => text.hash(&mut hasher),
-                            MessagePart::Image(img) => { img.mime_type.hash(&mut hasher); img.path.hash(&mut hasher); }
+                            MessagePart::Image(img) => {
+                                img.mime_type.hash(&mut hasher);
+                                img.path.hash(&mut hasher);
+                            }
                         }
                     }
                     hasher.finish()
@@ -1143,10 +1344,21 @@ impl SessionProcessor {
         let parts_owned = std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
         let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
         assistant_msg.id = assistant_msg_id;
-        {
-            let msg = assistant_msg.clone();
-            self.storage_op(move |s| s.update_message(&msg)).await?;
-        }
+        // P-20: move the message into the `storage_op` closure and have the
+        // closure return it, so we avoid cloning the full `Message` (which
+        // includes the parts `Vec`) on the final save. The closure owns the
+        // message, persists it, and hands it back to us via the `storage_op`
+        // return value. The id is cloned only for the `MessageEnd` event.
+        // (`Message` has no `Default`, so we use `std::mem::replace` with a
+        // cheap placeholder rather than `std::mem::take`.)
+        let msg_id_for_end = assistant_msg.id.clone();
+        let moved_msg = std::mem::replace(&mut assistant_msg, Message::new(session_id, Role::Assistant, Vec::new()));
+        let saved_msg = self
+            .storage_op(move |s| {
+                s.update_message(&moved_msg)?;
+                Ok(moved_msg)
+            })
+            .await?;
         let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
         let other_ms = total_elapsed_ms.saturating_sub(cumulative_model_wait_ms);
         tracing::info!(
@@ -1156,11 +1368,11 @@ impl SessionProcessor {
         );
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
-            message_id: assistant_msg.id.clone(),
+            message_id: msg_id_for_end,
             reason: FinishReason::Stop,
         });
         crate::hooks::fire_hooks(&turn.parsed_hook_configs, crate::hooks::HookTrigger::OnSessionEnd, &turn.working_dir, &[]);
-        Ok(assistant_msg)
+        Ok(saved_msg)
     }
 
     /// Run the display-only AGENTS.md acknowledgement exchange.
@@ -1462,6 +1674,23 @@ impl SessionProcessor {
             "No API key found for provider '{provider_id}'. Set the appropriate environment variable \
              or run `ragent auth {provider_id} <key>` to store one."
         )
+    }
+}
+
+/// P-12: hash a [`serde_json::Value`] into the supplied hasher using its
+/// serialised bytes, avoiding the `Value::to_string()` allocation that the
+/// interim-save hash previously paid for every tool-call input/output on
+/// every loop step.
+///
+/// Falls back to hashing the `Value`'s `Debug` representation if
+/// serialisation fails (effectively never for valid `Value`s, but keeps the
+/// hash total — every code path contributes — so the change-detection
+/// logic stays sound).
+fn hash_value<H: std::hash::Hasher>(hasher: &mut H, value: &Value) {
+    use std::hash::Hash;
+    match serde_json::to_vec(value) {
+        Ok(bytes) => bytes.hash(hasher),
+        Err(_) => format!("{value:?}").hash(hasher),
     }
 }
 

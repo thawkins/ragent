@@ -296,6 +296,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::ModelResponse { .. } => "model_response",
         Event::ToolCallArgs { .. } => "tool_call_args",
         Event::ToolResult { .. } => "tool_result",
+        Event::ToolCallBatch { .. } => "tool_call_batch",
         Event::CopilotDeviceFlowComplete { .. } => "copilot_device_flow_complete",
         Event::SessionAborted { .. } => "session_aborted",
         Event::QuotaUpdate { .. } => "quota_update",
@@ -560,6 +561,18 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
                 success: *success,
             })
         }
+
+        // P-15: forward the batch as JSON. Consumers that haven't migrated
+        // to the batch variant still receive the per-call events above.
+        Event::ToolCallBatch {
+            session_id,
+            step,
+            calls,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "step": step,
+            "calls": calls,
+        })),
 
         Event::CopilotDeviceFlowComplete { token, api_base } => to_data(&CopilotFlowP {
             token_present: !token.is_empty(),

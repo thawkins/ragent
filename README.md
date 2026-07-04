@@ -339,11 +339,13 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.129** — The core architecture, tool system (~111 tools), TUI, HTTP
+**v0.1.0-alpha.130** — The core architecture, tool system (~111 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
+  - TODO side panel added (Alt+T) with `/todo` slash alias
+  - Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
   - All 279 compiler warnings eliminated (build, tests, benches, examples)
   - Context compression pipeline added (`/compress` slash command)
   - `read` tool instructions clarified (`end_line` is absolute line number)

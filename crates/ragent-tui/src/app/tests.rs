@@ -38,6 +38,8 @@ mod tests {
             spec_manager: std::sync::OnceLock::new(),
             cached_tool_definitions: parking_lot::RwLock::new(None),
             cached_tool_names: parking_lot::RwLock::new(None),
+            cached_tool_definition_bytes: parking_lot::RwLock::new(None),
+        cached_config: parking_lot::Mutex::new(None),
             auto_approve: false,
             system_prompt_cache: parking_lot::RwLock::new(None),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(

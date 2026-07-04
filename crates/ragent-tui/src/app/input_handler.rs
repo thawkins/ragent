@@ -1,7 +1,6 @@
 //! Keyboard and mouse event handling for the TUI.
 use std::sync::atomic::Ordering;
 
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use ragent_agent::event::Event;
@@ -12,7 +11,8 @@ use crate::input::{self, InputAction};
 
 // State types from app/state.rs
 use crate::app::state::{
-    LogLevel, ProviderSetupStep, ScrollbarDragPane, SelectionPane, TextSelection, ContextAction, ContextMenuState, App
+    App, ContextAction, ContextMenuState, LogLevel, ProviderSetupStep, ScrollbarDragPane,
+    SelectionPane, TextSelection,
 };
 
 // Helpers
@@ -84,6 +84,10 @@ impl App {
                 } else if self.show_log && self.log_area.contains((event.column, event.row).into())
                 {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                } else if self.show_memory
+                    && self.memory_area.contains((event.column, event.row).into())
+                {
+                    self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_add(3);
                 }
@@ -102,6 +106,10 @@ impl App {
                 } else if self.show_log && self.log_area.contains((event.column, event.row).into())
                 {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                } else if self.show_memory
+                    && self.memory_area.contains((event.column, event.row).into())
+                {
+                    self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                 }
@@ -298,6 +306,28 @@ impl App {
                     self.scrollbar_drag = Some(ScrollbarDragPane::Profile);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Profile);
+                } else if self.show_todo
+                    && self.todo_area.height > 0
+                    && event.column == self.todo_area.right().saturating_sub(1)
+                    && self.todo_area.contains(pos.into())
+                    && self.todo_max_scroll > 0
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Todo);
+                    self.text_selection = None;
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Todo);
+                } else if self.show_memory
+                    && self.memory_area.height > 0
+                    && event.column == self.memory_area.right().saturating_sub(1)
+                    && self.memory_area.contains(pos.into())
+                    && self.memory_max_scroll > 0
+                {
+                    // Click on the Memory panel scrollbar gutter (rightmost
+                    // column of `memory_area`) initiates a scrollbar drag so
+                    // the user can jump-scroll the Memory pane the same way as
+                    // the Log / Profile / TODO panels (FR-013 hit-testing).
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Memory);
+                    self.text_selection = None;
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Memory);
                 } else {
                     // If the file menu is open and the click falls within its popup,
                     // handle file/directory selection via mouse.
@@ -480,6 +510,10 @@ impl App {
             SelectionPane::Profile => self
                 .profile_max_scroll
                 .saturating_sub(self.profile_scroll_offset),
+            SelectionPane::Todo => self.todo_max_scroll.saturating_sub(self.todo_scroll_offset),
+            SelectionPane::Memory => self
+                .memory_max_scroll
+                .saturating_sub(self.memory_scroll_offset),
             _ => 0,
         };
         start_row = start_row.saturating_add(scroll_top);
@@ -489,6 +523,8 @@ impl App {
             SelectionPane::Messages => &self.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
             SelectionPane::Profile => &self.profile_content_lines,
+            SelectionPane::Todo => &self.todo_content_lines,
+            SelectionPane::Memory => &self.memory_content_lines,
             SelectionPane::Input => {
                 // For input widgets, build a single-line content from app.input
                 let input_text = format!("> {}", self.input);
@@ -523,6 +559,8 @@ impl App {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
             SelectionPane::Profile => self.profile_area,
+            SelectionPane::Todo => self.todo_area,
+            SelectionPane::Memory => self.memory_area,
             _ => unreachable!(),
         };
 
@@ -750,6 +788,12 @@ impl App {
                         self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
                     } else if self.show_profile {
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
+                    } else if self.show_todo {
+                        self.todo_scroll_offset = self.todo_scroll_offset.saturating_add(3);
+                    } else if self.show_memory {
+                        // Memory panel shares the LogScrollUp / LogScrollDown
+                        // key bindings with the other side panels (FR-009).
+                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
                     }
                 }
                 InputAction::LogScrollDown => {
@@ -757,11 +801,21 @@ impl App {
                         self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                     } else if self.show_profile {
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
+                    } else if self.show_todo {
+                        self.todo_scroll_offset = self.todo_scroll_offset.saturating_sub(3);
+                    } else if self.show_memory {
+                        self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
                     }
                 }
                 InputAction::ToggleLog => {
                     self.show_log = !self.show_log;
-                    if !self.show_log {
+                    if self.show_log {
+                        // Entering log mode: dismiss the other side panels so
+                        // only one occupies the side column (FR-012).
+                        self.show_profile = false;
+                        self.show_todo = false;
+                        self.show_memory = false;
+                    } else {
                         if self
                             .text_selection
                             .as_ref()
@@ -831,6 +885,83 @@ impl App {
                             );
                         }
                     }
+                    self.needs_redraw = true;
+                }
+                InputAction::ToggleTodo => {
+                    // Toggle the TODO panel visibility (Alt+T). Implements
+                    // FR-002 (toggle) and FR-003 (mutual exclusion of side
+                    // panels — only one of log/profile/todo is visible at a
+                    // time, matching the `/log` and `/profile` slash commands
+                    // in app/slash.rs). On hide, any active Todo-pane text
+                    // selection or context menu is cleared.
+                    self.show_todo = !self.show_todo;
+                    if self.show_todo {
+                        // Entering TODO mode: dismiss the other side panels so
+                        // only one occupies the side column (FR-012/SPEC
+                        // mutual-exclusion policy).
+                        self.show_log = false;
+                        self.show_profile = false;
+                        self.show_memory = false;
+                    } else {
+                        // Leaving TODO mode: clear Todo-pane selection state.
+                        if self
+                            .text_selection
+                            .as_ref()
+                            .is_some_and(|s| s.pane == SelectionPane::Todo)
+                        {
+                            self.text_selection = None;
+                        }
+                        if self
+                            .context_menu
+                            .as_ref()
+                            .is_some_and(|m| m.pane == SelectionPane::Todo)
+                        {
+                            self.context_menu = None;
+                        }
+                    }
+                    self.status = if self.show_todo {
+                        "todo panel visible".to_string()
+                    } else {
+                        "todo panel hidden".to_string()
+                    };
+                    self.needs_redraw = true;
+                }
+                // Alt+M toggles the Memory side panel (FR-003). Implements
+                // mutual exclusion with the log / profile / TODO panels
+                // (FR-004): when the Memory panel becomes visible the other
+                // side panels are dismissed so only one occupies the side
+                // column. On hide, any active Memory-pane text selection or
+                // context menu is cleared (FR-005). A status-bar message is
+                // set describing the new state (FR-014).
+                InputAction::ToggleMemory => {
+                    self.show_memory = !self.show_memory;
+                    if self.show_memory {
+                        // Entering Memory mode: dismiss the other side panels
+                        // so only one occupies the side column (FR-004).
+                        self.show_log = false;
+                        self.show_profile = false;
+                        self.show_todo = false;
+                    } else {
+                        if self
+                            .text_selection
+                            .as_ref()
+                            .is_some_and(|s| s.pane == SelectionPane::Memory)
+                        {
+                            self.text_selection = None;
+                        }
+                        if self
+                            .context_menu
+                            .as_ref()
+                            .is_some_and(|m| m.pane == SelectionPane::Memory)
+                        {
+                            self.context_menu = None;
+                        }
+                    }
+                    self.status = if self.show_memory {
+                        "memory panel visible".to_string()
+                    } else {
+                        "memory panel hidden".to_string()
+                    };
                     self.needs_redraw = true;
                 }
                 InputAction::OutputViewPageUp => {
@@ -1089,5 +1220,4 @@ impl App {
         self.assert_ui_invariants();
         self.debug_log_input_transition("key", &before_input, before_cursor);
     }
-
 }

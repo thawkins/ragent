@@ -52,6 +52,8 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
         cached_tool_names: parking_lot::RwLock::new(None),
+        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
+        cached_config: parking_lot::Mutex::new(None),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -1674,8 +1676,13 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
 fn test_slash_tools_office_on_shows_office_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
+    // Declare `_temp` before `_guard` so that on drop `_guard` (which restores
+    // cwd) runs BEFORE `_temp` (which deletes the tempdir). The reverse order
+    // would delete the directory while the process cwd still points inside
+    // it, leaving subsequent tests in a ghost directory where
+    // `std::env::current_dir()` fails with `NotFound`.
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -1714,8 +1721,10 @@ fn test_slash_tools_office_on_shows_office_tools() {
 fn test_slash_tools_teams_on_shows_team_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
+    // `_temp` before `_guard` so cwd is restored before the tempdir is
+    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -1755,8 +1764,10 @@ fn test_slash_tools_teams_on_shows_team_tools() {
 fn test_slash_tools_agents_on_shows_agent_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
+    // `_temp` before `_guard` so cwd is restored before the tempdir is
+    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -1796,8 +1807,10 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
 fn test_slash_tools_plan_on_shows_plan_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    let _guard = CwdGuard(original_cwd);
+    // `_temp` before `_guard` so cwd is restored before the tempdir is
+    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -2286,7 +2299,12 @@ async fn test_slash_spec_validate_all() {
     );
 }
 
-#[tokio::test]
+// Use a multi-threaded runtime because `execute_slash_command("/spec create …")`
+// spawns a background task that calls `processor.process_message`, whose model
+// resolution path can reach `sync_discover_models` → `tokio::task::block_in_place`.
+// `block_in_place` panics on the default current-thread `#[tokio::test]` runtime;
+// `flavor = "multi_thread"` provides a runtime where it is permitted.
+#[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_create_starts_generation() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
@@ -2375,7 +2393,13 @@ fn test_slash_config_no_args_shows_usage() {
 fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let _lock = cwd_lock();
+    let original_cwd = std::env::current_dir().expect("cwd");
+    // `_temp` before `_guard` so cwd is restored before the tempdir is
+    // deleted. Without `_guard` the process cwd is left pointing at the
+    // (now-deleted) tempdir, which makes `std::env::current_dir()` fail in
+    // every subsequent test in this binary.
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
     ragent_config::yolo::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
@@ -2426,7 +2450,11 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
 fn test_slash_yolo_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let _lock = cwd_lock();
+    let original_cwd = std::env::current_dir().expect("cwd");
+    // `_temp` before `_guard` so cwd is restored before the tempdir is
+    // deleted (see test_alt_y_toggles_yolo_mode_and_status_bar_indicator).
     let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
     ragent_config::yolo::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
