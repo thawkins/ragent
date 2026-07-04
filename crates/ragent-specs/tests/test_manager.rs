@@ -3,7 +3,7 @@ use ragent_specs::spec::SpecStatus;
 use std::path::PathBuf;
 
 fn specs_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../specs")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 #[tokio::test]
