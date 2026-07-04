@@ -1,6 +1,17 @@
 # Release
 
-## Current Version: 0.1.0-alpha.133
+## Current Version: 0.1.0-alpha.134
+
+### Fixed
+- **Scrollbar drag math regression** — Reverted the `top_based` inversion introduced for Memory/TODO panels in `0.1.0-alpha.132` and updated the Memory panel tests to match the bottom-based offset convention used by the rest of the TUI.
+
+## Previous Version: 0.1.0-alpha.133
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.133`.
+- **fix tests that depend on untracked files** — Pointed `ragent-specs` real-project integration tests at the self-contained fixture under `crates/ragent-specs/tests/fixtures/testspec` so they no longer rely on the untracked `specs/` directory.
+
+## Previous Version: 0.1.0-alpha.132
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.133`.
