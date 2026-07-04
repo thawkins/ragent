@@ -14,10 +14,10 @@ use super::thinking::{
     full_reasoning_levels, reasoning_levels_from_supported_efforts,
     request_uses_unsupported_anthropic_display,
 };
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::event::FinishReason;
 
 /// Extract the MIME type from a `data:<mime>;base64,<data>` URI.
 ///

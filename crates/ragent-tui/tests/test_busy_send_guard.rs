@@ -6,8 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifi
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 
 use ragent_agent::{
-    agent,
-StreamConfig,
+    StreamConfig, agent,
     event::Event,
     event::EventBus,
     permission::PermissionChecker,

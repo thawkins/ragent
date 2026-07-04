@@ -898,7 +898,6 @@ fn extract_body_hash(ctx: &ExtractionContext, node: Node) -> String {
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/codeindex_rust_parser.rs"]
 mod parser_rust_tests;

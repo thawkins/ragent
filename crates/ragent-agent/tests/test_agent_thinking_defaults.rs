@@ -1,7 +1,7 @@
 //! Tests for agent/config thinking fallback precedence.
 
-use ragent_agent::agent::{AgentInfo, ModelRef, apply_fallback_thinking, resolve_agent};
 use ragent_agent::Config;
+use ragent_agent::agent::{AgentInfo, ModelRef, apply_fallback_thinking, resolve_agent};
 use ragent_agent::provider::create_default_registry;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 

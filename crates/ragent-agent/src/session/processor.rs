@@ -34,25 +34,22 @@ use crate::provider::ProviderRegistry;
 use crate::session::SessionManager;
 use crate::session::cache::SystemPromptCache;
 use crate::session::history::PendingToolCall;
-use crate::session::history::should_compress_with_reported as _should_compress_with_reported;
 use crate::session::permissions::{
-    check_permission_with_prompt as _check_permission, extract_command_name,
-    extract_resource_from_input, split_bash_command,
+    extract_command_name, extract_resource_from_input, split_bash_command,
 };
 use crate::tool::{McpToolWrapper, ToolContext, ToolRegistry};
 
 // Re-export the public helpers that external callers (tests, benches) import
 // from `session::processor::...` so the extraction does not break those paths.
+pub use crate::session::history::emergency_compress_chat_messages;
+pub use crate::session::history::should_compress_with_reported;
 pub use crate::session::history::{
-    chat_request_payload_bytes, estimate_request_bytes,
-    estimate_tool_definition_bytes, history_to_chat_messages, is_permanent_llm_api_error,
-    is_token_overflow_error_message, stream_has_meaningful_partial_output,
-    should_retry_stream_error, tool_result_content_for_llm,
+    chat_request_payload_bytes, estimate_request_bytes, estimate_tool_definition_bytes,
+    history_to_chat_messages, is_permanent_llm_api_error, is_token_overflow_error_message,
+    should_retry_stream_error, stream_has_meaningful_partial_output, tool_result_content_for_llm,
 };
 pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
-pub use crate::session::history::emergency_compress_chat_messages;
-pub use crate::session::history::should_compress_with_reported;
 
 /// Drives the agentic conversation loop for a single session.///
 /// Holds shared references to the session manager, LLM provider registry,
@@ -332,8 +329,8 @@ impl SessionProcessor {
     /// the per-turn [`TurnClient`] and per-tool-call [`ToolContext`]s.
     pub(crate) fn load_config_cached(&self) -> Arc<ragent_config::Config> {
         use std::time::SystemTime;
-        let env_overrides_present =
-            std::env::var_os("RAGENT_CONFIG").is_some() || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
+        let env_overrides_present = std::env::var_os("RAGENT_CONFIG").is_some()
+            || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
         // Try the cache: valid only when no env-var overrides are present and
         // every recorded file's mtime is unchanged.
         {
@@ -355,7 +352,12 @@ impl SessionProcessor {
         let file_mtimes: Vec<(PathBuf, SystemTime)> = cfg
             .config_paths
             .iter()
-            .filter_map(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok().map(|mt| (p.clone(), mt)))
+            .filter_map(|p| {
+                std::fs::metadata(p)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|mt| (p.clone(), mt))
+            })
             .collect();
         let arc = Arc::new(cfg);
         let mut guard = self.cached_config.lock();
@@ -483,8 +485,8 @@ impl SessionProcessor {
         // 4. Build chat messages from history
         // P-3: `build_turn_chat_messages` also returns the resolved
         // `context_window` so the orchestrator does not re-resolve it below.
-        let (chat_messages_vec, compressed_this_turn, last_reported_input_tokens, context_window) = self
-            .build_turn_chat_messages(
+        let (chat_messages_vec, compressed_this_turn, last_reported_input_tokens, context_window) =
+            self.build_turn_chat_messages(
                 session_id,
                 agent,
                 &turn.model_ref,
@@ -643,7 +645,7 @@ impl SessionProcessor {
 
             let should_run_compression = turn.session_config.compression.enabled
                 && !compressed_this_turn
-                && _should_compress_with_reported(
+                && should_compress_with_reported(
                     &chat_messages,
                     context_window,
                     turn.session_config.compression.auto_threshold,
@@ -736,15 +738,8 @@ impl SessionProcessor {
                     });
                 }
                 if !llm_result.text_buffer.is_empty() {
-                    let response_preview = if llm_result.text_buffer.len() > 200 {
-                        let mut end = 200;
-                        while end > 0 && !llm_result.text_buffer.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        format!("{}…", &llm_result.text_buffer[..end])
-                    } else {
-                        llm_result.text_buffer.clone()
-                    };
+                    let response_preview =
+                        ragent_types::truncate_bytes(&llm_result.text_buffer, 200);
                     let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
                     cumulative_model_wait_ms += model_elapsed_ms;
                     self.event_bus.publish(Event::ModelResponse {
@@ -863,8 +858,14 @@ impl SessionProcessor {
                     let _scope = result_profiler.scope("loop.tool_phase.handle_result");
                     match result {
                         Ok((
-                            tc, input, status, output_value, error, duration_ms,
-                            result_content, tool_metadata,
+                            tc,
+                            input,
+                            status,
+                            output_value,
+                            error,
+                            duration_ms,
+                            result_content,
+                            tool_metadata,
                         )) => {
                             let success = status == ToolCallStatus::Completed;
                             std::sync::Arc::make_mut(&mut assistant_parts).push(
@@ -897,18 +898,7 @@ impl SessionProcessor {
                                 .and_then(|m| m.get("lines"))
                                 .and_then(serde_json::Value::as_u64)
                                 .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                            let batch_content = if result_content.len() > 200 {
-                                let scan_end = 400.min(result_content.len());
-                                let end = result_content[..scan_end]
-                                    .char_indices()
-                                    .map(|(i, _)| i)
-                                    .take_while(|&i| i <= 200)
-                                    .last()
-                                    .unwrap_or(0);
-                                format!("{}…", &result_content[..end])
-                            } else {
-                                result_content.clone()
-                            };
+                            let batch_content = ragent_types::truncate_bytes(&result_content, 200);
                             batch_entries.push(ragent_types::event::ToolCallBatchEntry {
                                 call_id: tc.id.clone(),
                                 tool: tc.name.clone(),
@@ -1004,7 +994,16 @@ impl SessionProcessor {
                                 });
                                 let input_val: Value = serde_json::from_str(&tc_clone.args_json)
                                     .unwrap_or_else(|_| serde_json::json!({}));
-                                return (tc_clone.clone(), input_val, ToolCallStatus::Error, None, Some(err_msg), 0u64, String::new(), None);
+                                return (
+                                    tc_clone.clone(),
+                                    input_val,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(err_msg),
+                                    0u64,
+                                    String::new(),
+                                    None,
+                                );
                             }
                             crate::hooks::PreToolUseResult::ModifiedInput { input } => input,
                             crate::hooks::PreToolUseResult::NoDecision => {
@@ -1040,30 +1039,49 @@ impl SessionProcessor {
                                             let mut all_approved = true;
                                             for sub_cmd in &sub_commands {
                                                 let cmd_name = extract_command_name(sub_cmd);
-                                                let permission_action = _check_permission(
-                                                    &permission_checker,
-                                                    &event_bus,
-                                                    &session_id_for_perm,
-                                                    perm_category,
-                                                    &cmd_name,
-                                                    &tc_clone.name,
-                                                    auto_approve,
-                                                ).await;
+                                                let permission_action =
+                                                    check_permission_with_prompt(
+                                                        &permission_checker,
+                                                        &event_bus,
+                                                        &session_id_for_perm,
+                                                        perm_category,
+                                                        &cmd_name,
+                                                        &tc_clone.name,
+                                                        auto_approve,
+                                                    )
+                                                    .await;
                                                 match permission_action {
-                                                    Ok(crate::permission::PermissionAction::Allow) => continue,
-                                                    Ok(crate::permission::PermissionAction::Deny) => { all_approved = false; break; }
-                                                    Ok(crate::permission::PermissionAction::Ask) => { all_approved = false; break; }
-                                                    Err(_) => { all_approved = false; break; }
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Allow,
+                                                    ) => continue,
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Deny,
+                                                    ) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Ask,
+                                                    ) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
+                                                    Err(_) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
                                                 }
                                             }
                                             if all_approved {
                                                 tool.execute(tool_input, &tool_ctx).await
                                             } else {
-                                                Err(anyhow::anyhow!("Permission denied for one or more sub-commands"))
+                                                Err(anyhow::anyhow!(
+                                                    "Permission denied for one or more sub-commands"
+                                                ))
                                             }
                                         }
                                     } else {
-                                        let permission_action = _check_permission(
+                                        let permission_action = check_permission_with_prompt(
                                             &permission_checker,
                                             &event_bus,
                                             &session_id_for_perm,
@@ -1071,11 +1089,22 @@ impl SessionProcessor {
                                             &resource,
                                             &tc_clone.name,
                                             auto_approve,
-                                        ).await;
+                                        )
+                                        .await;
                                         match permission_action {
-                                            Ok(crate::permission::PermissionAction::Allow) => tool.execute(tool_input, &tool_ctx).await,
-                                            Ok(crate::permission::PermissionAction::Deny) => Err(anyhow::anyhow!("Permission denied by user or policy")),
-                                            Ok(crate::permission::PermissionAction::Ask) => Err(anyhow::anyhow!("Permission check returned Ask (internal error)")),
+                                            Ok(crate::permission::PermissionAction::Allow) => {
+                                                tool.execute(tool_input, &tool_ctx).await
+                                            }
+                                            Ok(crate::permission::PermissionAction::Deny) => {
+                                                Err(anyhow::anyhow!(
+                                                    "Permission denied by user or policy"
+                                                ))
+                                            }
+                                            Ok(crate::permission::PermissionAction::Ask) => {
+                                                Err(anyhow::anyhow!(
+                                                    "Permission check returned Ask (internal error)"
+                                                ))
+                                            }
                                             Err(e) => Err(e),
                                         }
                                     }
@@ -1107,19 +1136,31 @@ impl SessionProcessor {
                                 &tool_input_for_post_hook,
                                 &output_json.to_string(),
                                 success,
-                            ).await
+                            )
+                            .await
                         };
                         let result = if let Some(modified) = modified_output {
-                            if let Some(modified_content) = modified.get("content").and_then(|v| v.as_str()) {
-                                Ok(crate::tool::ToolOutput { content: modified_content.to_string(), metadata: Some(modified.clone()) })
-                            } else { result }
-                        } else { result };
+                            if let Some(modified_content) =
+                                modified.get("content").and_then(|v| v.as_str())
+                            {
+                                Ok(crate::tool::ToolOutput {
+                                    content: modified_content.to_string(),
+                                    metadata: Some(modified.clone()),
+                                })
+                            } else {
+                                result
+                            }
+                        } else {
+                            result
+                        };
                         let (output_value, error) = match &result {
                             Ok(output) => {
                                 let val = match &output.metadata {
                                     Some(meta) if meta.is_object() => {
                                         let mut obj = meta.clone();
-                                        obj.as_object_mut().unwrap().insert("content".to_string(), json!(output.content));
+                                        obj.as_object_mut()
+                                            .unwrap()
+                                            .insert("content".to_string(), json!(output.content));
                                         obj
                                     }
                                     _ => json!({ "content": output.content }),
@@ -1138,7 +1179,11 @@ impl SessionProcessor {
                                 &[("RAGENT_ERROR", err_msg.as_str())],
                             );
                         }
-                        let status = if result.is_ok() { ToolCallStatus::Completed } else { ToolCallStatus::Error };
+                        let status = if result.is_ok() {
+                            ToolCallStatus::Completed
+                        } else {
+                            ToolCallStatus::Error
+                        };
                         let success = status == ToolCallStatus::Completed;
                         event_bus.publish(Event::ToolCallEnd {
                             session_id: session_id_str.clone(),
@@ -1158,24 +1203,7 @@ impl SessionProcessor {
                             .and_then(|m| m.get("lines"))
                             .and_then(serde_json::Value::as_u64)
                             .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                        let result_preview = if result_content.len() > 200 {
-                            // P-19: cap the char-boundary scan at the first
-                            // 400 bytes. The previous form iterated
-                            // `char_indices` over the entire (potentially
-                            // huge) `result_content` and took while
-                            // `i <= 200`; for large tool outputs that was
-                            // O(n) per event. We only ever need a ≤200-byte
-                            // preview, so scanning the first 400 bytes is
-                            // always sufficient and bounded.
-                            let scan_end = 400.min(result_content.len());
-                            let end = result_content[..scan_end]
-                                .char_indices()
-                                .map(|(i, _)| i)
-                                .take_while(|&i| i <= 200)
-                                .last()
-                                .unwrap_or(0);
-                            format!("{}…", &result_content[..end])
-                        } else { result_content.clone() };
+                        let result_preview = ragent_types::truncate_bytes(&result_content, 200);
                         let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
                         event_bus.publish(Event::ToolResult {
                             session_id: session_id_str.clone(),
@@ -1188,9 +1216,27 @@ impl SessionProcessor {
                         });
                         if let Some(engine) = extraction_engine.get() {
                             let sid = session_id_str.clone();
-                            engine.on_tool_result(&tc_clone.name, &input, &result_content, success, &sid, &storage_clone, &event_bus_clone, &hook_working_dir);
+                            engine.on_tool_result(
+                                &tc_clone.name,
+                                &input,
+                                &result_content,
+                                success,
+                                &sid,
+                                &storage_clone,
+                                &event_bus_clone,
+                                &hook_working_dir,
+                            );
                         }
-                        (tc_clone, input, status, output_value, error, duration_ms, result_content, tool_metadata)
+                        (
+                            tc_clone,
+                            input,
+                            status,
+                            output_value,
+                            error,
+                            duration_ms,
+                            result_content,
+                            tool_metadata,
+                        )
                     });
                     if parallel_tool_calls {
                         futures.push(fut);
@@ -1204,7 +1250,9 @@ impl SessionProcessor {
                         futures::future::join_all(futures).await
                     };
                     for result in results {
-                        if handle_tool_execution_result(result) { break; }
+                        if handle_tool_execution_result(result) {
+                            break;
+                        }
                     }
                 }
                 // P-15: publish a single `ToolCallBatch` for this step with
@@ -1216,14 +1264,27 @@ impl SessionProcessor {
                         calls: batch_entries,
                     });
                 }
-                if agent_switch_requested || task_complete_requested { break; }
+                if agent_switch_requested || task_complete_requested {
+                    break;
+                }
                 // Auto task status updates (P-10: reuse the `active_spec_id`
                 // already read above for the `ToolContext`, and short-circuit
                 // when no spec is active or no file-write tool was called).
                 {
                     if let Some(ref spec_id_str) = active_spec_id
                         && let Some(ref spec_mgr) = self.spec_manager.get()
-                        && llm_result.tool_calls.iter().any(|tc| matches!(tc.name.as_str(), "write"|"edit"|"multiedit"|"multi_edit"|"patch"|"create"|"append_to_file"))
+                        && llm_result.tool_calls.iter().any(|tc| {
+                            matches!(
+                                tc.name.as_str(),
+                                "write"
+                                    | "edit"
+                                    | "multiedit"
+                                    | "multi_edit"
+                                    | "patch"
+                                    | "create"
+                                    | "append_to_file"
+                            )
+                        })
                         && let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str)
                         && let Ok(mut spec) = spec_mgr.read_spec(&id).await
                     {
@@ -1231,7 +1292,12 @@ impl SessionProcessor {
                         for task in spec.tasks.iter_mut() {
                             if task.status == ragent_specs::spec::TaskStatus::InProgress {
                                 task.status = ragent_specs::spec::TaskStatus::Completed;
-                                task.completed_at = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
+                                task.completed_at = Some(
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                );
                                 updated = true;
                             }
                         }
@@ -1249,8 +1315,14 @@ impl SessionProcessor {
                 // buffer allocated for reuse on the next step). P-6: mutate the
                 // shared `Arc<Vec>` via `Arc::make_mut` so an unchanged
                 // history is not cloned.
-                Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "assistant".to_string(), content: ChatContent::Parts(std::mem::take(&mut assistant_content_parts)) });
-                Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(std::mem::take(&mut tool_result_parts)) });
+                Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                    role: "assistant".to_string(),
+                    content: ChatContent::Parts(std::mem::take(&mut assistant_content_parts)),
+                });
+                Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Parts(std::mem::take(&mut tool_result_parts)),
+                });
             }
 
             // Background task injection
@@ -1275,11 +1347,22 @@ impl SessionProcessor {
                                     crate::task::TaskStatus::Terminating => "terminating",
                                     crate::task::TaskStatus::Running => "running",
                                 };
-                                let body = task.result.as_deref().or(task.error.as_deref()).unwrap_or("(no output)");
-                                let text = format!("[Background Task {status_label}: {} — {}]\n\n{body}", task.agent_name, &task.id[..8.min(task.id.len())]);
+                                let body = task
+                                    .result
+                                    .as_deref()
+                                    .or(task.error.as_deref())
+                                    .unwrap_or("(no output)");
+                                let text = format!(
+                                    "[Background Task {status_label}: {} — {}]\n\n{body}",
+                                    task.agent_name,
+                                    &task.id[..8.min(task.id.len())]
+                                );
                                 bg_parts.push(ContentPart::Text { text });
                             }
-                            Arc::make_mut(&mut chat_messages).push(ChatMessage { role: "user".to_string(), content: ChatContent::Parts(std::mem::take(&mut bg_parts)) });
+                            Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                                role: "user".to_string(),
+                                content: ChatContent::Parts(std::mem::take(&mut bg_parts)),
+                            });
                         }
                     }
                 }
@@ -1303,7 +1386,11 @@ impl SessionProcessor {
                         std::mem::discriminant(part).hash(&mut hasher);
                         match part {
                             MessagePart::Text { text } => text.hash(&mut hasher),
-                            MessagePart::ToolCall { tool, call_id, state } => {
+                            MessagePart::ToolCall {
+                                tool,
+                                call_id,
+                                state,
+                            } => {
                                 tool.hash(&mut hasher);
                                 call_id.hash(&mut hasher);
                                 // P-12: hash the status discriminant only (the
@@ -1332,7 +1419,8 @@ impl SessionProcessor {
                     hasher.finish()
                 };
                 if last_interim_hash != Some(current_hash) {
-                    let mut interim = Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
+                    let mut interim =
+                        Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
                     interim.id = assistant_msg_id.clone();
                     let _ = self.storage_op(move |s| s.update_message(&interim)).await;
                     last_interim_hash = Some(current_hash);
@@ -1341,7 +1429,8 @@ impl SessionProcessor {
         }
 
         // 8. Finalize
-        let parts_owned = std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
+        let parts_owned =
+            std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
         let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
         assistant_msg.id = assistant_msg_id;
         // P-20: move the message into the `storage_op` closure and have the
@@ -1352,7 +1441,10 @@ impl SessionProcessor {
         // (`Message` has no `Default`, so we use `std::mem::replace` with a
         // cheap placeholder rather than `std::mem::take`.)
         let msg_id_for_end = assistant_msg.id.clone();
-        let moved_msg = std::mem::replace(&mut assistant_msg, Message::new(session_id, Role::Assistant, Vec::new()));
+        let moved_msg = std::mem::replace(
+            &mut assistant_msg,
+            Message::new(session_id, Role::Assistant, Vec::new()),
+        );
         let saved_msg = self
             .storage_op(move |s| {
                 s.update_message(&moved_msg)?;
@@ -1371,7 +1463,12 @@ impl SessionProcessor {
             message_id: msg_id_for_end,
             reason: FinishReason::Stop,
         });
-        crate::hooks::fire_hooks(&turn.parsed_hook_configs, crate::hooks::HookTrigger::OnSessionEnd, &turn.working_dir, &[]);
+        crate::hooks::fire_hooks(
+            &turn.parsed_hook_configs,
+            crate::hooks::HookTrigger::OnSessionEnd,
+            &turn.working_dir,
+            &[],
+        );
         Ok(saved_msg)
     }
 
@@ -1693,4 +1790,3 @@ fn hash_value<H: std::hash::Hasher>(hasher: &mut H, value: &Value) {
         Err(_) => format!("{value:?}").hash(hasher),
     }
 }
-

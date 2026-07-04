@@ -1,9 +1,9 @@
 # Release
 
-## Current Version: 0.1.0-alpha.130
+## Current Version: 0.1.0-alpha.131
 
 ### Changed
-- **Workspace version** — Bumped to `0.1.0-alpha.130`.
+- **Workspace version** — Bumped to `0.1.0-alpha.131`.
 - **TODO panel** — Implemented a third side panel (Alt+T) in `ragent-tui`
   that renders the session's TODO items from `ragent-storage`. The panel
   follows the existing log/profile side-panel pattern with mutual

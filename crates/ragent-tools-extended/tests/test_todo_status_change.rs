@@ -166,7 +166,9 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         storage: Some(storage),
         code_index: None,
         config: None,
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     }
 }
 

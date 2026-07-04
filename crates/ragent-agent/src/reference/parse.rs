@@ -138,7 +138,6 @@ fn classify_ref(raw: &str) -> FileRef {
     FileRef::Fuzzy(raw.to_string())
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/reference_parse.rs"]
 mod tests_tests;

@@ -362,7 +362,6 @@ impl SkillRegistry {
     }
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/skill_mod.rs"]
 mod tests_tests;

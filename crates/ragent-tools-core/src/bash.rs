@@ -70,7 +70,6 @@ impl ShellType {
     fn is_posix(&self) -> bool {
         matches!(self, ShellType::Bash | ShellType::GitBash(_))
     }
-
 }
 
 // ── Shell discovery ───────────────────────────────────────────────────────
@@ -1234,7 +1233,6 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
 }
 
 // ── Tests ─────────────────────────���────────────────────────────────────────
-
 
 #[cfg(test)]
 #[path = "../tests/inline/bash.rs"]

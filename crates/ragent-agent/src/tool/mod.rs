@@ -594,23 +594,24 @@ impl Tool for LegacyMultiEditAlias {
         self.inner.permission_category()
     }
 
-          async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-              let normalised = Self::normalise_legacy_params(input);
-              let mut output = self.inner.execute(normalised, ctx).await?;
-              // editrenewal FR-012: emit a deprecation warning whenever the legacy
-              // `multiedit` tool name is used, directing callers to `multi_edit`.
-              let metadata = output.metadata.get_or_insert_with(|| json!({}));
-              if let Some(obj) = metadata.as_object_mut() {
-                  obj.insert(
-                      "deprecation_warning".to_string(),
-                      json!(
-                          "The 'multiedit' tool name is deprecated. Use 'multi_edit' \
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let normalised = Self::normalise_legacy_params(input);
+        let mut output = self.inner.execute(normalised, ctx).await?;
+        // editrenewal FR-012: emit a deprecation warning whenever the legacy
+        // `multiedit` tool name is used, directing callers to `multi_edit`.
+        let metadata = output.metadata.get_or_insert_with(|| json!({}));
+        if let Some(obj) = metadata.as_object_mut() {
+            obj.insert(
+                "deprecation_warning".to_string(),
+                json!(
+                    "The 'multiedit' tool name is deprecated. Use 'multi_edit' \
                            with file_path/old_string/new_string parameters instead."
-                      ),
-                  );
-              }
-              Ok(output)
-          }}
+                ),
+            );
+        }
+        Ok(output)
+    }
+}
 
 fn register_extracted_core_tools(registry: &ToolRegistry) {
     let extracted = ragent_tools_core::create_core_registry();

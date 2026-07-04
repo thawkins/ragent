@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use ragent_agent::{
-    agent,
-StreamConfig,
+    StreamConfig, agent,
     event::{Event, EventBus},
     permission::PermissionChecker,
     provider,

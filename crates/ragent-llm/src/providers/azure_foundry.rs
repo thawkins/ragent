@@ -150,7 +150,6 @@ impl AzureFoundryClient {
             inner: OpenAiClient::new(api_key, &base),
         }
     }
-
 }
 
 /// Standalone function to discover Azure AI Foundry models.

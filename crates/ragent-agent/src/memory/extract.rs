@@ -193,7 +193,12 @@ impl ExtractionEngine {
         }
 
         // 3. Extract patterns from file edits.
-        if success && matches!(tool_name, "edit" | "write" | "create" | "multiedit" | "multi_edit") {
+        if success
+            && matches!(
+                tool_name,
+                "edit" | "write" | "create" | "multiedit" | "multi_edit"
+            )
+        {
             if let Some(candidate) =
                 Self::extract_pattern_from_edit(tool_name, input, result_content, working_dir)
             {

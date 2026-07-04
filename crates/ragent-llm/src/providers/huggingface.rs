@@ -16,10 +16,10 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::should_warn_unsupported_thinking;
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::event::FinishReason;
 
 /// Default API base URL for the HuggingFace Inference API.
 /// As of 2025, HuggingFace migrated from `api-inference.huggingface.co` to
@@ -949,7 +949,6 @@ fn estimate_context_from_id(model_id: &str) -> usize {
     // Default for most modern models
     32_000
 }
-
 
 #[cfg(test)]
 #[path = "../../tests/inline/huggingface.rs"]

@@ -2,21 +2,16 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-
-
 use ragent_agent::{
     agent::ModelRef,
     event::Event,
     message::{Message, MessagePart, Role},
 };
 
-
 // Prompt optimization templates
 
 // State types from app/state.rs
-use crate::app::state::{
-    LogLevel, App
-};
+use crate::app::state::{App, LogLevel};
 
 // Helpers
 
@@ -60,8 +55,9 @@ impl App {
         session_id: &str,
         auto_triggered: bool,
     ) -> bool {
-        let compaction_agent = ragent_agent::agent::resolve_agent("compaction", &Default::default())
-            .unwrap_or_else(|_| self.agent_info.clone());
+        let compaction_agent =
+            ragent_agent::agent::resolve_agent("compaction", &Default::default())
+                .unwrap_or_else(|_| self.agent_info.clone());
 
         let mut agent = compaction_agent;
         let resolved_model = self
@@ -368,5 +364,4 @@ impl App {
             self.status = format!("compress {}", mode);
         }
     }
-
 }

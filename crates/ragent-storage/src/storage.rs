@@ -2242,5 +2242,3 @@ pub struct EmbeddingMatch {
     /// Cosine similarity score in `[-1.0, 1.0]`.  Higher = more similar.
     pub score: f32,
 }
-
-

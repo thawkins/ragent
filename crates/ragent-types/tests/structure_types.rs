@@ -24,21 +24,69 @@ use std::path::{Path, PathBuf};
 /// define it with `pub struct <Name>` / `pub enum <Name>` / `pub type <Name>`.
 const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
     // Message family (D2) — canonical in ragent-types/src/message/mod.rs
-    ("Message", "crates/ragent-types/src/message/mod.rs", "struct"),
-    ("MessagePart", "crates/ragent-types/src/message/mod.rs", "enum"),
-    ("ImageData", "crates/ragent-types/src/message/mod.rs", "struct"),
-    ("ToolCallState", "crates/ragent-types/src/message/mod.rs", "struct"),
-    ("ToolCallStatus", "crates/ragent-types/src/message/mod.rs", "enum"),
+    (
+        "Message",
+        "crates/ragent-types/src/message/mod.rs",
+        "struct",
+    ),
+    (
+        "MessagePart",
+        "crates/ragent-types/src/message/mod.rs",
+        "enum",
+    ),
+    (
+        "ImageData",
+        "crates/ragent-types/src/message/mod.rs",
+        "struct",
+    ),
+    (
+        "ToolCallState",
+        "crates/ragent-types/src/message/mod.rs",
+        "struct",
+    ),
+    (
+        "ToolCallStatus",
+        "crates/ragent-types/src/message/mod.rs",
+        "enum",
+    ),
     ("Role", "crates/ragent-types/src/message/mod.rs", "enum"),
     // Permission family (D3) — Permission* (action/rule/checker/request) in
     // ragent-config; PermissionDecision in ragent-types (used by events).
-    ("Permission", "crates/ragent-config/src/permission.rs", "enum"),
-    ("PermissionAction", "crates/ragent-config/src/permission.rs", "enum"),
-    ("PermissionRule", "crates/ragent-config/src/permission.rs", "struct"),
-    ("PermissionRequest", "crates/ragent-config/src/permission.rs", "struct"),
-    ("PermissionChecker", "crates/ragent-config/src/permission.rs", "struct"),
-    ("PermissionRuleset", "crates/ragent-config/src/permission.rs", "type"),
-    ("PermissionDecision", "crates/ragent-types/src/permission.rs", "enum"),
+    (
+        "Permission",
+        "crates/ragent-config/src/permission.rs",
+        "enum",
+    ),
+    (
+        "PermissionAction",
+        "crates/ragent-config/src/permission.rs",
+        "enum",
+    ),
+    (
+        "PermissionRule",
+        "crates/ragent-config/src/permission.rs",
+        "struct",
+    ),
+    (
+        "PermissionRequest",
+        "crates/ragent-config/src/permission.rs",
+        "struct",
+    ),
+    (
+        "PermissionChecker",
+        "crates/ragent-config/src/permission.rs",
+        "struct",
+    ),
+    (
+        "PermissionRuleset",
+        "crates/ragent-config/src/permission.rs",
+        "type",
+    ),
+    (
+        "PermissionDecision",
+        "crates/ragent-types/src/permission.rs",
+        "enum",
+    ),
     // LLM primitive family (D8) — canonical in ragent-types/src/llm.rs
     ("ToolDefinition", "crates/ragent-types/src/llm.rs", "struct"),
     ("ChatRequest", "crates/ragent-types/src/llm.rs", "struct"),
@@ -55,9 +103,21 @@ const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
     // are NOT covered by this guard; only the storage-row types in
     // `ragent-storage` are.
     ("Storage", "crates/ragent-storage/src/storage.rs", "struct"),
-    ("SessionRow", "crates/ragent-storage/src/storage.rs", "struct"),
-    ("KgEntityRow", "crates/ragent-storage/src/storage.rs", "struct"),
-    ("KgRelationshipRow", "crates/ragent-storage/src/storage.rs", "struct"),
+    (
+        "SessionRow",
+        "crates/ragent-storage/src/storage.rs",
+        "struct",
+    ),
+    (
+        "KgEntityRow",
+        "crates/ragent-storage/src/storage.rs",
+        "struct",
+    ),
+    (
+        "KgRelationshipRow",
+        "crates/ragent-storage/src/storage.rs",
+        "struct",
+    ),
 ];
 
 /// Return the workspace root (the directory containing `Cargo.toml` with the
@@ -77,7 +137,10 @@ fn workspace_root() -> PathBuf {
         }
         match dir.parent() {
             Some(parent) => dir = parent,
-            None => panic!("could not locate workspace root above {}", manifest_dir.display()),
+            None => panic!(
+                "could not locate workspace root above {}",
+                manifest_dir.display()
+            ),
         }
     }
 }
@@ -136,7 +199,16 @@ fn defines_type(file_path: &Path, type_name: &str, kind: &str) -> bool {
             // The token must be followed by `{`, `(`, `;`, whitespace, or EOL
             // so we don't match `pub struct FooBar` when searching for `Foo`.
             if next.is_none()
-                || matches!(next, Some('{') | Some('(') | Some(';') | Some(' ') | Some('\t') | Some('<') | Some('='))
+                || matches!(
+                    next,
+                    Some('{')
+                        | Some('(')
+                        | Some(';')
+                        | Some(' ')
+                        | Some('\t')
+                        | Some('<')
+                        | Some('=')
+                )
             {
                 return true;
             }
@@ -211,7 +283,13 @@ fn no_ragent_types_llm_legacy_types_remain() {
     let llm_file = workspace_root.join("crates/ragent-types/src/llm.rs");
     let contents = fs::read_to_string(&llm_file)
         .expect("ragent-types/src/llm.rs must exist for this guard to run");
-    for legacy in ["pub trait LlmProvider", "pub struct LlmResponse", "pub struct Usage", "pub struct ModelInfo", "pub struct ProviderConfig"] {
+    for legacy in [
+        "pub trait LlmProvider",
+        "pub struct LlmResponse",
+        "pub struct Usage",
+        "pub struct ModelInfo",
+        "pub struct ProviderConfig",
+    ] {
         assert!(
             !contents.contains(legacy),
             "legacy type `{legacy}` should not be re-introduced in ragent-types/src/llm.rs (see REMPLAN.md M1 / T1.3)"
@@ -241,9 +319,7 @@ fn no_path_attributes_to_ragent_team_in_agent() {
         };
         for (lineno, line) in contents.lines().enumerate() {
             let trimmed = line.trim();
-            if trimmed.starts_with("#[path")
-                && trimmed.contains("ragent-team")
-            {
+            if trimmed.starts_with("#[path") && trimmed.contains("ragent-team") {
                 let rel = file
                     .strip_prefix(&workspace_root)
                     .map(|p| p.to_string_lossy().to_string())

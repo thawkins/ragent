@@ -541,5 +541,3 @@ Specify the exact output structure (prefer structured/JSON responses for downstr
 Instruct how to handle missing data, ambiguous inputs, or out-of-scope requests.
 
 Output only the completed optimized prompt — no meta-commentary."#;
-
-

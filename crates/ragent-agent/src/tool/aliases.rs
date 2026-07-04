@@ -25,8 +25,8 @@ use super::{Tool, ToolContext, ToolOutput};
 // them back to the agent-local `Tool` trait via `ExtractedCoreToolAdapter`
 // (the same adapter the runtime registry uses for every core tool).
 use super::ExtractedCoreToolAdapter;
-use ragent_tools_core::{bash, write};
 use crate::event::Event;
+use ragent_tools_core::{bash, write};
 
 // ---------------------------------------------------------------------------
 // Helper: build a normalised input Value and delegate to a canonical tool

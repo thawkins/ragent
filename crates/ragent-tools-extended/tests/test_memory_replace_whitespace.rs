@@ -20,7 +20,9 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         storage: None,
         code_index: None,
         config: None,
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     }
 }
 

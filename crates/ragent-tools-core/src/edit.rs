@@ -138,9 +138,8 @@ impl Tool for EditTool {
             .or_else(|| input["new_str"].as_str())
             .context("Missing required 'new_string' (or legacy 'new_str') parameter")?;
 
-        let used_legacy_params = !input["path"].is_null()
-            || !input["old_str"].is_null()
-            || !input["new_str"].is_null();
+        let used_legacy_params =
+            !input["path"].is_null() || !input["old_str"].is_null() || !input["new_str"].is_null();
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
@@ -382,11 +381,14 @@ fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
 pub(crate) fn build_snippet(content: &str, change_start: usize, change_end: usize) -> String {
     // Determine the 1-based line numbers of the edited region.
     let change_start_line = byte_offset_to_line(content, change_start);
-    let change_end_line = byte_offset_to_line(content, change_end.saturating_sub(1).max(change_start));
+    let change_end_line =
+        byte_offset_to_line(content, change_end.saturating_sub(1).max(change_start));
 
     let total_lines = content.lines().count().max(1);
 
-    let snippet_start = change_start_line.saturating_sub(SNIPPET_CONTEXT_LINES).max(1);
+    let snippet_start = change_start_line
+        .saturating_sub(SNIPPET_CONTEXT_LINES)
+        .max(1);
     let snippet_end = (change_end_line + SNIPPET_CONTEXT_LINES).min(total_lines);
 
     let lines: Vec<&str> = content.lines().collect();

@@ -107,7 +107,6 @@ fn split_first_word(s: &str) -> Option<(&str, &str)> {
 }
 
 #[cfg(test)]
-
 #[cfg(test)]
 #[path = "../../tests/inline/router_modifiers.rs"]
 mod router_modifiers_tests;

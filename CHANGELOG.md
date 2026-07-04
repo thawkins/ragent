@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-alpha.131
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.131`.
+- **CI/CD updates and formatting fixes** — Applied GitHub Actions workflow
+  maintenance and repository formatting improvements.
+
 ## Version: 0.1.0-alpha.130
 
 ### Changed
@@ -34,6 +42,18 @@
   - Added `MockLlmClient`/`MockLlmScript` in `ragent-bench`, criterion
     `agent_loop` benchmarks, baseline report, `/perf` TUI alias, and
     `scripts/check-bench-regression.sh` CI guard wired into `pre-flight.sh`.
+
+### Fixed
+
+- **Tool-result preview char-boundary panic** — Replaced the three manual
+  200-byte preview builders in `crates/ragent-agent/src/session/processor.rs`
+  (`response_preview`, `batch_content`, and `result_preview`) with
+  `ragent_types::truncate_bytes`, which steps back from a byte cut point to
+  the previous valid UTF-8 character boundary. This prevents the panic
+  `end byte index 400 is not a char boundary; it is inside '\u{2014}'` when
+  a fixed 400-byte scan landed in the middle of a multi-byte em dash.
+  Added `test_truncate_bytes_em_dash_at_400_boundary` in
+  `crates/ragent-types/tests/test_strutil.rs` to guard the exact scenario.
 
 ## Version: 0.1.0-alpha.129
 

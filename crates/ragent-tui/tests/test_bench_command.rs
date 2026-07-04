@@ -3,7 +3,6 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use ragent_bench::{BenchProgressHandle, BenchRunEvent, BenchRunOutcome, BenchRunProgress};
 use ragent_agent::{
     agent,
     event::EventBus,
@@ -13,6 +12,7 @@ use ragent_agent::{
     storage::Storage,
     tool,
 };
+use ragent_bench::{BenchProgressHandle, BenchRunEvent, BenchRunOutcome, BenchRunProgress};
 use ragent_tui::App;
 
 fn make_app() -> App {

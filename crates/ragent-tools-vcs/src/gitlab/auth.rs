@@ -11,8 +11,8 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use ragent_config::Config;
 use crate::storage::Storage;
+use ragent_config::Config;
 
 /// Database key for the GitLab Personal Access Token (stored encrypted in `provider_auth`).
 const DB_PROVIDER_ID: &str = "gitlab";

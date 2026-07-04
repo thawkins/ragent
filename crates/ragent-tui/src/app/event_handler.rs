@@ -2,8 +2,6 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-
-
 use ragent_agent::{
     agent::ModelRef,
     event::{Event, FinishReason},
@@ -15,16 +13,16 @@ use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TeamMember, TeamStore,
 };
 
-
 // Prompt optimization templates
 
 // State types from app/state.rs
 use crate::app::state::{
-    LogLevel, LlmRequestStat, ModelLoadingState, ModelDownloadState, ProviderSetupStep, OutputViewTarget, OutputViewState, QuestionRequest, App, PlanApprovalState
+    App, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState, OutputViewState,
+    OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest,
 };
 
 // Helpers
-use crate::app::helpers::*;
+use crate::app::helpers::{is_discovery_notice, short_session_id, summarise_error};
 
 // Re-export status types from theme
 
@@ -77,7 +75,12 @@ impl App {
         }
     }
 
-    pub(crate) fn execute_plan_delegation(&mut self, session_id: &str, task: String, context: String) {
+    pub(crate) fn execute_plan_delegation(
+        &mut self,
+        session_id: &str,
+        task: String,
+        context: String,
+    ) {
         // Push current agent to stack so plan_exit can restore it
         self.agent_stack.push(self.agent_info.clone());
 
@@ -1574,7 +1577,12 @@ impl App {
         }
     }
 
-    pub(crate) fn send_teammate_message(&mut self, team_name: &str, teammate_name: &str, text: &str) {
+    pub(crate) fn send_teammate_message(
+        &mut self,
+        team_name: &str,
+        teammate_name: &str,
+        text: &str,
+    ) {
         let member = self
             .team_members
             .iter()
@@ -1871,8 +1879,7 @@ impl App {
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(flag.clone());
         self.is_processing = true;
-        self.status =
-            format!("spec: implementing {spec_id} — task {rank}/{total}");
+        self.status = format!("spec: implementing {spec_id} — task {rank}/{total}");
 
         let event_bus = self.event_bus.clone();
         let sid = session_id;
@@ -1908,9 +1915,7 @@ impl App {
         };
 
         // Read the spec to check the just-run task's status.
-        let spec = tokio::task::block_in_place(|| {
-            rt.block_on(async { mgr.read_spec(&sid).await })
-        });
+        let spec = tokio::task::block_in_place(|| rt.block_on(async { mgr.read_spec(&sid).await }));
         let spec = match spec {
             Ok(s) => s,
             Err(e) => {
@@ -1941,8 +1946,11 @@ impl App {
             self.append_assistant_text(&format!(
                 "From: /spec impl\n\n🚫 Task **{}** ({}/{}) is **{}** — run stopped.\n\n\
                  Re-run `/spec impl {}` to resume from this task.",
-                current_task_id, state.current_rank, state.total,
-                task_status.as_str(), state.spec_id,
+                current_task_id,
+                state.current_rank,
+                state.total,
+                task_status.as_str(),
+                state.spec_id,
             ));
             self.push_log_no_agent(
                 LogLevel::Warn,
@@ -1964,7 +1972,8 @@ impl App {
             if spec.status == SpecStatus::InProgress {
                 if let Err(e) = tokio::task::block_in_place(|| {
                     rt.block_on(async {
-                        mgr.transition(&mut spec, SpecStatus::Implemented, "spec-impl").await
+                        mgr.transition(&mut spec, SpecStatus::Implemented, "spec-impl")
+                            .await
                     })
                 }) {
                     self.push_log_no_agent(
@@ -2029,5 +2038,4 @@ impl App {
         ));
         self.dispatch_spec_impl_task(prompt, &state.spec_id, next_rank, state.total);
     }
-
 }

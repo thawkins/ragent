@@ -2,16 +2,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-
-
-
-
 // Prompt optimization templates
 
 // State types from app/state.rs
-use crate::app::state::{
-    LogLevel, App
-};
+use crate::app::state::{App, LogLevel};
 
 // Helpers
 
@@ -121,7 +115,10 @@ impl App {
         }
     }
 
-    pub(crate) fn render_bench_init_event(&self, event: &ragent_bench::BenchInitProgressEvent) -> String {
+    pub(crate) fn render_bench_init_event(
+        &self,
+        event: &ragent_bench::BenchInitProgressEvent,
+    ) -> String {
         match event {
             ragent_bench::BenchInitProgressEvent::Starting {
                 suite_id,
@@ -445,5 +442,4 @@ impl App {
             }
         });
     }
-
 }

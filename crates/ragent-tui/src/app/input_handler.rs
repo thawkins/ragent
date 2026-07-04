@@ -16,7 +16,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::*;
+use crate::app::helpers::short_session_id;
 
 // Re-export status types from theme
 

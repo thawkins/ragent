@@ -8,7 +8,11 @@ use serde_json::Value;
 /// Override via the `RAGENT_GITHUB_CLIENT_ID` environment variable, or set in
 /// `~/.ragent/config.toml` as `github_client_id`. Requires a registered
 /// GitHub OAuth App — see docs/github-oauth.md.
-const GITHUB_CLIENT_ID_DEFAULT: &str = "";
+///
+/// This value is shared with the GitHub Copilot provider, which already
+/// performs GitHub OAuth device flow. Using the same OAuth application keeps
+/// the login experience consistent across VCS tools and Copilot.
+const GITHUB_CLIENT_ID_DEFAULT: &str = "Iv1.b507a08c87ecfe98";
 
 /// Lightweight authenticated GitHub API client.
 #[derive(Clone)]

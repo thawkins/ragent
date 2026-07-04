@@ -651,7 +651,6 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
 // NOTE: Async filesystem validation is a Milestone-4 integration task.
 // The `validate` function above is sufficient for the validation engine.
 
-
 #[cfg(test)]
 #[path = "../tests/inline/validate.rs"]
 mod tests_tests;

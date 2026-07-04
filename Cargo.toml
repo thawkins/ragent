@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.130"
+version = "0.1.0-alpha.131"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -191,7 +191,7 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ── Hardware / IPMI ──────────────────────────────────────────────────────
-rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "1.4", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 # ── Document format support ─────────────────────────────────────────────
 docx-rust = "0.1"

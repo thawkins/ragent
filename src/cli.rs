@@ -12,7 +12,7 @@ use ragent_agent::{Config, event::EventBus, storage::Storage};
 /// # Errors
 ///
 /// Returns an error if job execution fails.
-pub(crate) async fn run_orchestration_example() -> anyhow::Result<()> {
+pub async fn run_orchestration_example() -> anyhow::Result<()> {
     tracing::info!("Running orchestration example");
     let registry = ragent_agent::orchestrator::AgentRegistry::new();
 
@@ -53,7 +53,7 @@ pub(crate) async fn run_orchestration_example() -> anyhow::Result<()> {
 }
 
 #[derive(clap::Subcommand)]
-pub(crate) enum ResearchCommands {
+pub enum ResearchCommands {
     /// Run a gathering session and create a research item.
     Create {
         /// Research name (URL-safe identifier)
@@ -125,7 +125,7 @@ pub(crate) enum ResearchCommands {
 /// crate. Emits a `ragent-research:` JSON line for each event so the
 /// output is machine-parseable even when the session produces many
 /// sources (T-035).
-pub(crate) async fn handle_research_command(command: ResearchCommands) -> Result<()> {
+pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{ResearchManager, SessionConfig, SessionEvent, SessionObserver};
     use std::sync::Arc;

@@ -202,25 +202,25 @@ impl Tool for MultiEditTool {
             _locks.push(super::file_lock::lock_file(path).await);
         }
 
-                  // Phase 1: Read all target files once. Each edit is resolved against
-                  // this ORIGINAL content so byte ranges are stable and comparable.
-                  let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
-                  for path in &unique_paths {
-                      let content = tokio::fs::read_to_string(path)
-                          .await
-                          .with_context(|| format!("Failed to read file: {}", path.display()))?;
-                      file_contents.insert(path.clone(), content);
-                  }
+        // Phase 1: Read all target files once. Each edit is resolved against
+        // this ORIGINAL content so byte ranges are stable and comparable.
+        let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
+        for path in &unique_paths {
+            let content = tokio::fs::read_to_string(path)
+                .await
+                .with_context(|| format!("Failed to read file: {}", path.display()))?;
+            file_contents.insert(path.clone(), content);
+        }
 
-                  // Phase 1b: Stale-file detection (editrenewal FR-003 / FR-009).
-                  // For every target file that the session has recorded a read
-                  // timestamp for, reject the batch if the file was modified after it
-                  // was read. Files with no recorded timestamp proceed (no baseline).
-                  for path in &unique_paths {
-                      if let Err(e) = check_stale_file(path, ctx) {
-                          bail!("{e}");
-                      }
-                  }
+        // Phase 1b: Stale-file detection (editrenewal FR-003 / FR-009).
+        // For every target file that the session has recorded a read
+        // timestamp for, reject the batch if the file was modified after it
+        // was read. Files with no recorded timestamp proceed (no baseline).
+        for path in &unique_paths {
+            if let Err(e) = check_stale_file(path, ctx) {
+                bail!("{e}");
+            }
+        }
         // Phase 2: Resolve every edit against the original file content and
         // group resolved edits by file path. Uses the strict exact-match
         // matcher (editrenewal FR-004 / FR-009): old_string must occur
@@ -325,18 +325,18 @@ impl Tool for MultiEditTool {
             total_removed += removed;
         }
 
-                  // Phase 5: Write all modified files.
-                  for (path, content) in &file_contents {
-                      if file_stats.contains_key(path) {
-                          tokio::fs::write(path, content)
-                              .await
-                              .with_context(|| format!("Failed to write file: {}", path.display()))?;
-                          // Refresh the read timestamp for this file so a follow-up
-                          // edit in the same session does not trip the stale-file
-                          // check on a file we just wrote (editrenewal FR-003).
-                          record_edit_timestamp(path, ctx);
-                      }
-                  }
+        // Phase 5: Write all modified files.
+        for (path, content) in &file_contents {
+            if file_stats.contains_key(path) {
+                tokio::fs::write(path, content)
+                    .await
+                    .with_context(|| format!("Failed to write file: {}", path.display()))?;
+                // Refresh the read timestamp for this file so a follow-up
+                // edit in the same session does not trip the stale-file
+                // check on a file we just wrote (editrenewal FR-003).
+                record_edit_timestamp(path, ctx);
+            }
+        }
         let file_count = file_stats.len();
 
         // Build per-file stats array sorted by path for stable display order.

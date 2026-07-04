@@ -23,8 +23,8 @@ use std::sync::Arc;
 
 use futures::Stream;
 
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatRequest, LlmClient, StreamEvent};
+use ragent_types::event::FinishReason;
 
 /// Pre-canned scenarios produced by [`MockLlmClient`].
 ///

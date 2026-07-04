@@ -171,15 +171,11 @@ impl ResearchItem {
         out.push_str(&format!("name: {}\n", self.name.as_str()));
         out.push_str(&format!(
             "title: \"{}\"\n",
-            self.title
-                .replace(['\n', '\r'], " ")
-                .replace('\"', "\\\"")
+            self.title.replace(['\n', '\r'], " ").replace('\"', "\\\"")
         ));
         out.push_str(&format!(
             "topic: \"{}\"\n",
-            self.topic
-                .replace(['\n', '\r'], " ")
-                .replace('\"', "\\\"")
+            self.topic.replace(['\n', '\r'], " ").replace('\"', "\\\"")
         ));
         out.push_str(&format!("status: {}\n", self.status));
         out.push_str(&format!("created: {}\n", self.created_at.to_rfc3339()));
@@ -192,8 +188,7 @@ impl ResearchItem {
             for q in &self.queries {
                 out.push_str(&format!(
                     "  - \"{}\"\n",
-                    q.replace(['\n', '\r'], " ")
-                        .replace('\"', "\\\"")
+                    q.replace(['\n', '\r'], " ").replace('\"', "\\\"")
                 ));
             }
         }

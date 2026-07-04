@@ -22,7 +22,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::*;
+use crate::app::helpers::{MentionSpan, short_session_id};
 
 // Re-export status types from theme
 use crate::theme::{StatusCategory, StatusMessage};
@@ -1248,9 +1248,7 @@ impl App {
             Some(SelectionPane::Log)
         } else if self.show_todo && self.todo_area.area() > 0 && self.todo_area.contains(pos) {
             Some(SelectionPane::Todo)
-        } else if self.show_memory
-            && self.memory_area.area() > 0
-            && self.memory_area.contains(pos)
+        } else if self.show_memory && self.memory_area.area() > 0 && self.memory_area.contains(pos)
         {
             Some(SelectionPane::Memory)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {

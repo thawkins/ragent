@@ -227,7 +227,9 @@ async fn test_team_idle_publishes_teammate_idle_event() {
         active_spec_id: None,
         config: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     };
 
     let tool = ragent_team::tools::team_idle::TeamIdleTool;

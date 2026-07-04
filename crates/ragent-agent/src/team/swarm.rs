@@ -180,5 +180,3 @@ fn remove_trailing_commas(s: &str) -> String {
     }
     result
 }
-
-

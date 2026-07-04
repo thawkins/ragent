@@ -472,7 +472,10 @@ async fn test_overlap_rejection_leaves_file_unchanged() {
         .await
         .expect_err("overlapping edits must be rejected");
     let msg = format!("{err}");
-    assert!(msg.contains("overlap"), "error should mention overlap: {msg}");
+    assert!(
+        msg.contains("overlap"),
+        "error should mention overlap: {msg}"
+    );
     assert!(
         msg.contains("Edits 0 and 1") || msg.contains("Edits 1 and 0"),
         "error should name the overlapping indices: {msg}"

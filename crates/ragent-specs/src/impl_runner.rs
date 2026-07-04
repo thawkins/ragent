@@ -183,7 +183,12 @@ impl SpecImplRunner {
         let total = self.execution_order.len();
         let idx = *self.execution_order.get(rank.checked_sub(1)?)?;
         let task = &self.tasks[idx];
-        Some(Self::build_single_task_prompt(task, &self.spec_name, rank, total))
+        Some(Self::build_single_task_prompt(
+            task,
+            &self.spec_name,
+            rank,
+            total,
+        ))
     }
 
     /// Build the prompt for a single task (FR-021), with a header noting the
@@ -212,7 +217,8 @@ impl SpecImplRunner {
              task_id=\"{id}\", status=\"completed\". \
              If the task cannot be completed, mark it as `blocked` with the \
              same tool.\n",
-            spec = spec_name, id = task.id,
+            spec = spec_name,
+            id = task.id,
         ));
         prompt
     }

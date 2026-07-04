@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use ragent_types::event::EventBus;
 use ragent_tools_core::think::ThinkTool;
 use ragent_tools_core::{Tool, ToolContext};
+use ragent_types::event::EventBus;
 use serde_json::json;
 
 #[tokio::test]

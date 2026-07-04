@@ -4,8 +4,7 @@
 //! (T-010 of the testconsolidate spec). All tested functions are public.
 
 use ragent_types::resource::{
-    acquire_process_permit, acquire_tool_permit, available_process_permits,
-    available_tool_permits,
+    acquire_process_permit, acquire_tool_permit, available_process_permits, available_tool_permits,
 };
 use serial_test::serial;
 

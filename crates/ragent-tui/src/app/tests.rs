@@ -1,14 +1,14 @@
 //! Inline tests for the TUI app module.
 #[cfg(test)]
 mod tests {
+    use crate::app::helpers::{is_discovery_notice, try_extract_research_code_block};
+    use crate::app::{App, ModelPickerEntry};
     use ragent_agent::{
         agent, event::EventBus, permission::PermissionChecker, provider, session::SessionManager,
         session::processor::SessionProcessor, storage::Storage, tool,
     };
     use ragent_types::{ThinkingConfig, ThinkingLevel};
     use std::sync::Arc;
-    use crate::app::{App, ModelPickerEntry};
-    use crate::app::helpers::{is_discovery_notice, try_extract_research_code_block};
 
     pub(crate) fn test_app() -> App {
         let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
@@ -39,12 +39,12 @@ mod tests {
             cached_tool_definitions: parking_lot::RwLock::new(None),
             cached_tool_names: parking_lot::RwLock::new(None),
             cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
+            cached_config: parking_lot::Mutex::new(None),
             auto_approve: false,
             system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
+            read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         });
         let agent_info =
             agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

@@ -9,14 +9,15 @@
 use std::sync::Arc;
 
 use ragent_agent::event::EventBus;
+use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest};
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 use ragent_agent::permission::{PermissionAction, PermissionChecker};
 use ragent_agent::session::processor::{
-    build_detailed_tool_reference_section, chat_request_payload_bytes, check_permission_with_prompt,
-    history_to_chat_messages, is_permanent_llm_api_error, is_token_overflow_error_message,
-    should_retry_stream_error, stream_has_meaningful_partial_output, tool_result_content_for_llm,
+    build_detailed_tool_reference_section, chat_request_payload_bytes,
+    check_permission_with_prompt, history_to_chat_messages, is_permanent_llm_api_error,
+    is_token_overflow_error_message, should_retry_stream_error,
+    stream_has_meaningful_partial_output, tool_result_content_for_llm,
 };
-use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest};
 use ragent_agent::tool::create_default_registry;
 use serde_json::{Value, json};
 
@@ -322,12 +323,8 @@ fn test_hidden_tool_families_are_excluded_from_prompt_and_request_tools() {
     registry.set_hidden(&hidden);
 
     let defs = registry.definitions();
-    assert!(!defs
-        .iter()
-        .any(|tool| tool.name == "github_list_issues"));
-    assert!(!defs
-        .iter()
-        .any(|tool| tool.name == "github_review_pr"));
+    assert!(!defs.iter().any(|tool| tool.name == "github_list_issues"));
+    assert!(!defs.iter().any(|tool| tool.name == "github_review_pr"));
 }
 
 #[test]

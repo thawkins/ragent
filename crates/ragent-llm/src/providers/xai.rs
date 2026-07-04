@@ -262,7 +262,6 @@ impl Provider for XaiProvider {
     }
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/xai.rs"]
 mod tests_tests;

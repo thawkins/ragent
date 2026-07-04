@@ -948,7 +948,6 @@ fn regex_count(pattern: &str, text: &str) -> u64 {
     })
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/router_classifier.rs"]
 mod router_classifier_tests;

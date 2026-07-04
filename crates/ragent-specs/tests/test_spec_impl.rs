@@ -252,14 +252,23 @@ fn test_build_single_task_prompt_contains_required_fields() {
 
     // Header identifies the task, title, and spec.
     assert!(prompt.contains("T-003"), "prompt must name the task id");
-    assert!(prompt.contains("Build parser"), "prompt must name the title");
+    assert!(
+        prompt.contains("Build parser"),
+        "prompt must name the title"
+    );
     assert!(prompt.contains("myspec"), "prompt must name the spec");
 
     // Position in the run.
-    assert!(prompt.contains("task 2 of 5"), "prompt must state rank/total");
+    assert!(
+        prompt.contains("task 2 of 5"),
+        "prompt must state rank/total"
+    );
 
     // Requirement is included.
-    assert!(prompt.contains("FR-003"), "prompt must include requirement refs");
+    assert!(
+        prompt.contains("FR-003"),
+        "prompt must include requirement refs"
+    );
     assert!(prompt.contains("FR-004"));
 
     // spec_task_update instruction with correct spec_id and task_id.
@@ -267,7 +276,10 @@ fn test_build_single_task_prompt_contains_required_fields() {
     assert!(prompt.contains("spec_id=\"myspec\""));
     assert!(prompt.contains("task_id=\"T-003\""));
     assert!(prompt.contains("status=\"completed\""));
-    assert!(prompt.contains("blocked"), "prompt must mention blocked fallback");
+    assert!(
+        prompt.contains("blocked"),
+        "prompt must mention blocked fallback"
+    );
 }
 
 /// `build_single_task_prompt` should not depend on the task's dependencies

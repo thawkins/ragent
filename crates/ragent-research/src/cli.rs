@@ -626,9 +626,7 @@ async fn walk(root: &Path, dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> any
                 .next()
                 .map(|e| e == ext)
                 .unwrap_or(false);
-            if matches_ext
-                && let Ok(rel) = path.strip_prefix(root)
-            {
+            if matches_ext && let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_path_buf());
             }
         }

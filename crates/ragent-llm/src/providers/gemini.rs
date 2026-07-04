@@ -13,10 +13,10 @@ use std::pin::Pin;
 use super::thinking::{
     full_reasoning_levels, gemini_thinking_config_from_request, gemini_thinking_levels_for_model,
 };
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::event::FinishReason;
 
 /// Default API base URL for Google Gemini API.
 pub const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com";

@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use futures::Stream;
 use futures::stream;
 use ragent_llm::llm::{ChatRequest, LlmClient};
-use ragent_types::event::FinishReason;
 use ragent_types::StreamEvent;
+use ragent_types::event::FinishReason;
 
 /// A canned sequence of [`StreamEvent`]s replayed by [`MockLlmClient`].
 ///
@@ -44,8 +44,13 @@ impl MockLlmScript {
     #[must_use]
     pub fn text_only(text: &str) -> Self {
         Self::new(vec![
-            StreamEvent::TextDelta { text: text.to_string() },
-            StreamEvent::Usage { input_tokens: 16, output_tokens: 8 },
+            StreamEvent::TextDelta {
+                text: text.to_string(),
+            },
+            StreamEvent::Usage {
+                input_tokens: 16,
+                output_tokens: 8,
+            },
             StreamEvent::Finish {
                 reason: FinishReason::Stop,
             },
@@ -66,8 +71,13 @@ impl MockLlmScript {
                 id: "call-1".to_string(),
                 args_json: args_json.to_string(),
             },
-            StreamEvent::ToolCallEnd { id: "call-1".to_string() },
-            StreamEvent::Usage { input_tokens: 16, output_tokens: 8 },
+            StreamEvent::ToolCallEnd {
+                id: "call-1".to_string(),
+            },
+            StreamEvent::Usage {
+                input_tokens: 16,
+                output_tokens: 8,
+            },
             StreamEvent::Finish {
                 reason: FinishReason::ToolUse,
             },

@@ -14,7 +14,7 @@ use serde_json::json;
 use crate::ToolOutput;
 
 /// Tool output returned when the code index is temporarily locked.
-pub(crate) fn busy_output(name: &str) -> ToolOutput {
+pub fn busy_output(name: &str) -> ToolOutput {
     ToolOutput {
         content: format!(
             "Code index is currently busy (re-indexing in progress). \
@@ -37,7 +37,7 @@ pub(crate) fn busy_output(name: &str) -> ToolOutput {
 /// * `Ok(Some(value))` when the lock was acquired and the operation completed.
 /// * `Ok(None)` when the index is currently busy (the lock was not acquired).
 /// * `Err(...)` on a real failure such as a database error.
-pub(crate) async fn with_retry<T, F>(op: F) -> Result<Option<T>>
+pub async fn with_retry<T, F>(op: F) -> Result<Option<T>>
 where
     F: FnMut() -> Result<Option<T>> + Send,
 {

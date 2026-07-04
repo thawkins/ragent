@@ -18,9 +18,7 @@
 
 use std::sync::Arc;
 
-use crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::{Terminal, backend::TestBackend};
 use tempfile::TempDir;
@@ -366,7 +364,10 @@ fn test_drag_extends_memory_selection_endpoint() {
     app.handle_mouse_event(mouse_down(85, 3));
     app.handle_mouse_event(mouse_drag(100, 7));
 
-    let sel = app.text_selection.as_ref().expect("selection should persist");
+    let sel = app
+        .text_selection
+        .as_ref()
+        .expect("selection should persist");
     assert_eq!(sel.pane, SelectionPane::Memory);
     assert_eq!(sel.anchor, (85, 3));
     assert_eq!(sel.endpoint, (100, 7));
@@ -471,7 +472,10 @@ fn test_toggle_memory_flips_show_memory_flag() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
     assert!(app.show_memory, "first Alt+M should set show_memory=true");
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
-    assert!(!app.show_memory, "second Alt+M should set show_memory=false");
+    assert!(
+        !app.show_memory,
+        "second Alt+M should set show_memory=false"
+    );
 }
 
 #[test]
@@ -499,7 +503,10 @@ fn test_toggle_memory_mutually_excludes_log_panel() {
     // Enable Memory panel — log must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
     assert!(app.show_memory, "Memory panel should be visible");
-    assert!(!app.show_log, "log panel must be hidden when Memory is shown");
+    assert!(
+        !app.show_log,
+        "log panel must be hidden when Memory is shown"
+    );
 
     // Re-enable log panel — Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::ALT));
@@ -520,10 +527,7 @@ fn test_toggle_memory_mutually_excludes_todo_panel() {
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
     assert!(app.show_memory);
-    assert!(
-        !app.show_todo,
-        "TODO panel must hide when Memory is shown"
-    );
+    assert!(!app.show_todo, "TODO panel must hide when Memory is shown");
 
     // Re-enable TODO panel — Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
@@ -651,7 +655,10 @@ fn test_alt_m_does_not_insert_m_when_panel_already_visible() {
         "Alt+M must not insert 'm' when hiding the panel; got {:?}",
         app.input
     );
-    assert!(!app.show_memory, "Alt+M should have toggled show_memory off");
+    assert!(
+        !app.show_memory,
+        "Alt+M should have toggled show_memory off"
+    );
 }
 
 // ════════════════════��════════════════════════════════════════════════════════
@@ -841,10 +848,7 @@ fn test_log_scroll_down_on_memory_does_not_underflow_below_zero() {
     app.show_todo = false;
     app.memory_scroll_offset = 0;
 
-    app.handle_key_event(KeyEvent::new(
-        KeyCode::PageDown,
-        KeyModifiers::CONTROL,
-    ));
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
     assert_eq!(
         app.memory_scroll_offset, 0,
         "LogScrollDown at offset 0 must saturate at 0, not underflow"

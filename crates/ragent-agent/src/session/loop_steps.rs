@@ -37,18 +37,17 @@ use crate::agent::AgentInfo;
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
-use crate::session::processor::SessionProcessor;
+use crate::session::history::emergency_compress_chat_messages;
 use crate::session::history::{
     PendingToolCall, chat_request_payload_bytes, detect_incomplete_file_task,
     history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
     is_token_overflow_error_message, should_retry_stream_error,
     stream_has_meaningful_partial_output,
 };
-use crate::session::history::emergency_compress_chat_messages;
+use crate::session::processor::SessionProcessor;
 use crate::session::prompt_builders::{
     TOOL_CALLING_GUIDANCE, build_codeindex_guidance_section_active,
-    build_codeindex_guidance_section_disabled,
-    build_detailed_tool_reference_section as _build_detailed_tool_reference,
+    build_codeindex_guidance_section_disabled, build_detailed_tool_reference_section,
     build_tool_reference_section,
 };
 use crate::session::stream_buffer::{StreamBuffer, stall_pattern_set};
@@ -411,9 +410,9 @@ impl SessionProcessor {
             let cache = self.system_prompt_cache();
             cache
                 .get_tool_reference(&self.tool_registry, |registry| {
-                    _build_detailed_tool_reference(registry)
+                    build_detailed_tool_reference_section(registry)
                 })
-                .unwrap_or_else(|| _build_detailed_tool_reference(&self.tool_registry))
+                .unwrap_or_else(|| build_detailed_tool_reference_section(&self.tool_registry))
         } else {
             let cache = self.system_prompt_cache();
             cache
@@ -457,10 +456,7 @@ impl SessionProcessor {
 
         system_prompt.push_str(TOOL_CALLING_GUIDANCE);
 
-        if team_context
-            .map(|tc| tc.is_lead)
-            .unwrap_or(false)
-        {
+        if team_context.map(|tc| tc.is_lead).unwrap_or(false) {
             system_prompt.push_str(
                 "\n## Team Lead — Task Distribution Rules\n\n\
                  When you receive a request that involves a list of N independent items \
@@ -534,9 +530,7 @@ impl SessionProcessor {
             let cache = self.system_prompt_cache();
             match spec_mgr.read_spec(&spec_id).await {
                 Ok(spec) => {
-                    if let Some(cached) =
-                        cache.get_spec_section(active_spec_id, spec.modified_at)
-                    {
+                    if let Some(cached) = cache.get_spec_section(active_spec_id, spec.modified_at) {
                         system_prompt.push_str(&cached);
                     } else {
                         let mut spec_section = format!(
@@ -544,7 +538,9 @@ impl SessionProcessor {
                              **Status:** {}\n\
                              **Title:** {}\n\n\
                              ### Requirements\n\n",
-                            spec.id, spec.status.as_str(), spec.title
+                            spec.id,
+                            spec.status.as_str(),
+                            spec.title
                         );
                         for req in &spec.requirements {
                             spec_section.push_str(&format!(
@@ -684,7 +680,12 @@ impl SessionProcessor {
 
         // P-3: return `context_window` so the orchestrator can reuse it
         // instead of resolving the identical value a second time.
-        Ok((chat_messages, compressed_this_turn, last_reported_input_tokens, context_window))
+        Ok((
+            chat_messages,
+            compressed_this_turn,
+            last_reported_input_tokens,
+            context_window,
+        ))
     }
 
     /// Run the display-only AGENTS.md acknowledgement exchange (streams to the
@@ -837,8 +838,7 @@ impl SessionProcessor {
             // P-6: share the history by refcount bump instead of cloning
             // the entire `Vec<ChatMessage>` (including all tool-result
             // `ContentPart`s) on every retry attempt.
-            let attempt_messages: Arc<Vec<ChatMessage>> =
-                Arc::clone(&loop_state.chat_messages);
+            let attempt_messages: Arc<Vec<ChatMessage>> = Arc::clone(&loop_state.chat_messages);
             let attempt_request = ChatRequest {
                 model: turn.model_ref.model_id.clone(),
                 messages: attempt_messages,
@@ -868,9 +868,7 @@ impl SessionProcessor {
                             attempt + 1,
                             crate::sanitize::redact_secrets(&error_message)
                         );
-                        if attempt < max_retries
-                            && !is_permanent_llm_api_error(&error_message)
-                        {
+                        if attempt < max_retries && !is_permanent_llm_api_error(&error_message) {
                             if turn.session_config.compression.enabled
                                 && is_token_overflow_error_message(&error_message)
                             {
@@ -1191,8 +1189,7 @@ impl SessionProcessor {
         text_buffer: &str,
     ) -> bool {
         let (should_nudge_stall, should_nudge_planning, should_nudge_incomplete) = {
-            let is_ollama =
-                matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
+            let is_ollama = matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
             let trimmed_text = text_buffer.trim();
             let looks_like_stall = !trimmed_text.is_empty()
                 && !tool_definitions.is_empty()
@@ -1207,7 +1204,10 @@ impl SessionProcessor {
 
             let should_nudge_incomplete = !loop_state.task_completeness_nudged
                 && !tool_definitions.is_empty()
-                && detect_incomplete_file_task(&user_msg.text_content(), &loop_state.assistant_parts);
+                && detect_incomplete_file_task(
+                    &user_msg.text_content(),
+                    &loop_state.assistant_parts,
+                );
 
             (
                 should_nudge_stall,

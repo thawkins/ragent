@@ -15,8 +15,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use ragent_agent::{
-    agent,
-    Config,
+    Config, agent,
     event::EventBus,
     memory::BlockStorage,
     permission::PermissionChecker,
@@ -27,8 +26,6 @@ use ragent_agent::{
 };
 
 mod cli;
-
-
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -323,12 +320,7 @@ async fn main() -> Result<()> {
         tool_registry.set_hidden(&hidden_tools);
     }
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(
-        config
-            .permission
-            .clone()
-            .into_iter()
-            .map(Into::into)
-            .collect(),
+        config.permission.clone(),
     )));
 
     // Resolve the active agent
@@ -694,7 +686,8 @@ async fn main() -> Result<()> {
                     }
                 }
             } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
-                match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
+                match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref())
+                    .await
                 {
                     Ok(models) if models.is_empty() => {
                         writeln!(
@@ -904,4 +897,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

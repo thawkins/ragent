@@ -100,13 +100,7 @@ async fn test_edit_strict_rejects_crlf_mismatch() {
         "old_string": "fn foo() {\n    bar\n}\n",
         "new_string": "fn foo() {\n    baz\n}\n",
     });
-    let msg = expect_edit_error(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {\r\n    bar\r\n}\r\n",
-        input,
-    )
-    .await;
+    let msg = expect_edit_error(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n", input).await;
     assert!(
         msg.contains("not found"),
         "strict matcher should reject CRLF mismatch: {msg}"
@@ -122,13 +116,7 @@ async fn test_edit_strict_rejects_trailing_space_mismatch() {
         "old_string": "fn foo() {\n    bar\n}\n",
         "new_string": "fn foo() {\n    baz\n}\n",
     });
-    let msg = expect_edit_error(
-        tmp.path(),
-        "a.rs",
-        "fn foo() {  \n    bar  \n}\n",
-        input,
-    )
-    .await;
+    let msg = expect_edit_error(tmp.path(), "a.rs", "fn foo() {  \n    bar  \n}\n", input).await;
     assert!(
         msg.contains("not found"),
         "strict matcher should reject trailing-space mismatch: {msg}"
@@ -370,22 +358,28 @@ async fn test_edit_returns_snippet_with_line_numbers() {
         "old_string": "line 6\n",
         "new_string": "line 6 edited\n",
     });
-    let out = EditTool
-        .execute(input, &ctx(tmp.path()))
-        .await
-        .unwrap();
+    let out = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
     let meta = out.metadata.unwrap();
     let snippet = meta["snippet"].as_str().unwrap_or(out.content.as_str());
 
     // Snippet should include line numbers and the edited line marker.
-    assert!(snippet.contains("6"), "snippet should reference line 6: {snippet}");
+    assert!(
+        snippet.contains("6"),
+        "snippet should reference line 6: {snippet}"
+    );
     assert!(
         snippet.contains("edited"),
         "snippet should show the edited content: {snippet}"
     );
     // Should include context before (line 2) and after (line 10).
-    assert!(snippet.contains("line 2"), "snippet should include context before: {snippet}");
-    assert!(snippet.contains("line 10"), "snippet should include context after: {snippet}");
+    assert!(
+        snippet.contains("line 2"),
+        "snippet should include context before: {snippet}"
+    );
+    assert!(
+        snippet.contains("line 10"),
+        "snippet should include context after: {snippet}"
+    );
 }
 
 // ── Canonical vs legacy parameter names (FR-001, FR-012) ─────────────────────
@@ -417,10 +411,7 @@ async fn test_edit_legacy_param_names_accepted() {
         .execute(input, &ctx(tmp.path()))
         .await
         .expect("legacy params should be accepted");
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "fn foo() { 2 }\n"
-    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn foo() { 2 }\n");
     // Should emit a deprecation warning in metadata.
     let meta = out.metadata.unwrap();
     assert!(
@@ -438,10 +429,7 @@ async fn test_edit_canonical_params_no_deprecation_warning() {
         "old_string": "fn foo() { 1 }",
         "new_string": "fn foo() { 2 }",
     });
-    let out = EditTool
-        .execute(input, &ctx(tmp.path()))
-        .await
-        .unwrap();
+    let out = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
     let meta = out.metadata.unwrap();
     assert!(
         meta.get("deprecation_warning").is_none(),
@@ -471,8 +459,5 @@ async fn test_read_then_edit_no_stale_error() {
         .execute(input, &c)
         .await
         .expect("read-then-edit should succeed without stale error");
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        "fn foo() { 2 }\n"
-    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn foo() { 2 }\n");
 }

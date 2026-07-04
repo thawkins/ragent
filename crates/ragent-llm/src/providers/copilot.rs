@@ -33,10 +33,10 @@ use std::sync::Mutex;
 use super::thinking::{
     full_reasoning_levels, reasoning_effort_from_request, reasoning_levels_from_supported_efforts,
 };
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::event::FinishReason;
 
 /// Default GitHub Copilot API base URL (used with IDE OAuth tokens after
 /// token exchange).

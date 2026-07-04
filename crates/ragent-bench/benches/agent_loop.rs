@@ -22,12 +22,14 @@ use std::time::Instant;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
+use ragent_agent::llm::{
+    ChatContent, ChatMessage, ChatRequest, ContentPart, LlmClient, ToolDefinition,
+};
+use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::session::processor::{
     estimate_request_bytes, estimate_tool_definition_bytes, history_to_chat_messages,
     tool_result_content_for_llm,
 };
-use ragent_agent::message::{Message, MessagePart, Role};
-use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, LlmClient, ToolDefinition};
 use ragent_bench::{MockLlmClient, MockLlmScript};
 use ragent_types::StreamEvent;
 use serde_json::json;
@@ -42,7 +44,9 @@ fn synthetic_history(n: usize) -> Vec<Message> {
             "session-bench",
             Role::Assistant,
             vec![
-                MessagePart::Text { text: format!("response {i}") },
+                MessagePart::Text {
+                    text: format!("response {i}"),
+                },
                 MessagePart::ToolCall {
                     tool: "bash".to_string(),
                     call_id: format!("call-{i}"),
@@ -116,7 +120,11 @@ fn interim_save_hash(parts: &[MessagePart]) -> u64 {
         std::mem::discriminant(part).hash(&mut hasher);
         match part {
             MessagePart::Text { text } => text.hash(&mut hasher),
-            MessagePart::ToolCall { tool, call_id, state } => {
+            MessagePart::ToolCall {
+                tool,
+                call_id,
+                state,
+            } => {
                 tool.hash(&mut hasher);
                 call_id.hash(&mut hasher);
                 std::mem::discriminant(&state.status).hash(&mut hasher);
@@ -154,9 +162,7 @@ fn bench_history_to_chat_messages(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(n), &history, |b, history| {
             b.iter(|| {
                 let h = history.clone();
-                rt.block_on(async move {
-                    black_box(history_to_chat_messages(&h).await)
-                })
+                rt.block_on(async move { black_box(history_to_chat_messages(&h).await) })
             });
         });
     }
@@ -250,8 +256,7 @@ fn bench_mock_llm_chat_stream(c: &mut Criterion) {
         });
     });
     // Tool-call script — measures tool-call assembly throughput.
-    let tool_script =
-        MockLlmScript::single_tool_call("bash", r#"{"command":"echo hi"}"#);
+    let tool_script = MockLlmScript::single_tool_call("bash", r#"{"command":"echo hi"}"#);
     let tool_client = MockLlmClient::new(tool_script);
     group.bench_function("single_tool_call", |b| {
         b.iter(|| {

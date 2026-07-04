@@ -9,16 +9,16 @@ pub use self::state::*;
 
 mod helpers;
 
-mod init;
-mod compress;
 mod bench;
-mod swarm;
-mod research;
-mod models;
-mod slash;
-mod input_handler;
+mod compress;
 mod event_handler;
+mod init;
+mod input_handler;
+mod models;
+mod research;
 mod session_ops;
+mod slash;
+mod swarm;
 
 // Re-export status types from theme for use in app
 pub use crate::theme::{StatusCategory, StatusHistory, StatusMessage};

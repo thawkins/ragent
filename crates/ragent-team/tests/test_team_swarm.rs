@@ -4,7 +4,9 @@
 //! (T-006 of the testconsolidate spec). All tested functions are public via
 //! `ragent_team::` re-exports.
 
-use ragent_team::{build_decomposition_user_prompt, parse_decomposition, parse_decomposition_with_default};
+use ragent_team::{
+    build_decomposition_user_prompt, parse_decomposition, parse_decomposition_with_default,
+};
 
 #[test]
 fn test_parse_clean_json() {

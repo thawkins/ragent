@@ -32,8 +32,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use ragent_config::{Capabilities, Cost};
 use crate::llm::LlmClient;
+use ragent_config::{Capabilities, Cost};
 
 /// Metadata describing an LLM model, including its cost, capabilities, and context limits.
 #[derive(Debug, Clone, Serialize, Deserialize)]

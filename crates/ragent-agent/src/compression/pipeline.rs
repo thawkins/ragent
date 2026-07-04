@@ -1133,7 +1133,6 @@ pub fn compress_help(config: &CompressionConfig) -> String {
     help
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/compression_pipeline.rs"]
 mod compression_pipeline_tests;

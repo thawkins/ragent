@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use async_trait::async_trait;
 
-use ragent_prompt_opt::{optimize, system_prompt, Completer, OptMethod};
+use ragent_prompt_opt::{Completer, OptMethod, optimize, system_prompt};
 
 /// A test-only Completer that echoes system+user for deterministic assertions.
 struct MockCompleter;

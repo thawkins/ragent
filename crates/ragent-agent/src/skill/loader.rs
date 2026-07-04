@@ -397,7 +397,6 @@ fn load_skills_from_dir(skills_dir: &Path, scope: SkillScope, out: &mut Vec<Skil
     }
 }
 
-
 #[cfg(test)]
 #[path = "../../tests/inline/skill_loader.rs"]
 mod tests_tests;

@@ -48,16 +48,34 @@ fn byte_offset_to_line_basic() {
 fn build_snippet_includes_context_and_marker() {
     let content = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n";
     let snippet = build_snippet(content, 12, 14);
-    assert!(snippet.contains("   1  l1"), "should include context before: {snippet}");
-    assert!(snippet.contains("   5> l5"), "should mark the changed line: {snippet}");
-    assert!(snippet.contains("   9  l9"), "should include context after: {snippet}");
-    assert!(!snippet.contains("l10"), "should clamp after context: {snippet}");
+    assert!(
+        snippet.contains("   1  l1"),
+        "should include context before: {snippet}"
+    );
+    assert!(
+        snippet.contains("   5> l5"),
+        "should mark the changed line: {snippet}"
+    );
+    assert!(
+        snippet.contains("   9  l9"),
+        "should include context after: {snippet}"
+    );
+    assert!(
+        !snippet.contains("l10"),
+        "should clamp after context: {snippet}"
+    );
 }
 
 #[test]
 fn build_snippet_clamps_to_file_start() {
     let content = "l1\nl2\nl3\nl4\nl5\n";
     let snippet = build_snippet(content, 0, 2);
-    assert!(snippet.contains("   1> l1"), "should mark line 1: {snippet}");
-    assert!(snippet.contains("   5  l5"), "should include up to line 5: {snippet}");
+    assert!(
+        snippet.contains("   1> l1"),
+        "should mark line 1: {snippet}"
+    );
+    assert!(
+        snippet.contains("   5  l5"),
+        "should include up to line 5: {snippet}"
+    );
 }

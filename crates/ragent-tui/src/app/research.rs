@@ -2,9 +2,6 @@
 //!
 //! Extracted from `app.rs` in REMPLAN.md M5 / T5.3.
 
-
-
-
 use ragent_agent::event::Event;
 
 use crate::research_adapter::TuiResearchObserver;
@@ -12,9 +9,7 @@ use crate::research_adapter::TuiResearchObserver;
 // Prompt optimization templates
 
 // State types from app/state.rs
-use crate::app::state::{
-    LogLevel, App
-};
+use crate::app::state::{App, LogLevel};
 
 // Helpers
 

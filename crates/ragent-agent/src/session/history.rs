@@ -536,9 +536,7 @@ pub fn stream_has_meaningful_partial_output(
     reasoning_buffer: &str,
     saw_completed_tool_call: bool,
 ) -> bool {
-    saw_completed_tool_call
-        || !text_buffer.trim().is_empty()
-        || !reasoning_buffer.trim().is_empty()
+    saw_completed_tool_call || !text_buffer.trim().is_empty() || !reasoning_buffer.trim().is_empty()
 }
 
 /// Return `true` if a stream error should be retried: the error is retryable,

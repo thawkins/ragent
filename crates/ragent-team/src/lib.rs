@@ -49,10 +49,10 @@ pub mod tool {
 /// Re-exported from `ragent_agent::tool`.
 pub mod tools {
     pub use ragent_agent::tool::{
-        team_approve_plan, team_assign_task, team_broadcast, team_cleanup, team_create,
-        team_idle, team_memory_read, team_memory_write, team_message, team_read_messages,
-        team_shutdown_ack, team_shutdown_teammate, team_spawn, team_status, team_submit_plan,
-        team_task_claim, team_task_complete, team_task_create, team_task_list, team_wait,
+        team_approve_plan, team_assign_task, team_broadcast, team_cleanup, team_create, team_idle,
+        team_memory_read, team_memory_write, team_message, team_read_messages, team_shutdown_ack,
+        team_shutdown_teammate, team_spawn, team_status, team_submit_plan, team_task_claim,
+        team_task_complete, team_task_create, team_task_list, team_wait,
     };
 }
 

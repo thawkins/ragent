@@ -16,10 +16,10 @@ use std::pin::Pin;
 use super::thinking::{
     binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
 };
-use ragent_types::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::event::FinishReason;
 
 const DEFAULT_OLLAMA_CLOUD_HOST: &str = "https://ollama.com";
 

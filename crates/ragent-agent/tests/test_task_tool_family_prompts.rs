@@ -222,7 +222,9 @@ async fn test_task_complete_rejects_task_id_and_result_inputs() {
         active_spec_id: None,
         config: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(
@@ -266,7 +268,9 @@ async fn test_task_complete_accepts_summary_input() {
         active_spec_id: None,
         config: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(

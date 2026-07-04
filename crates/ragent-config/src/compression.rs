@@ -192,5 +192,3 @@ impl Default for TokenizerConfig {
         }
     }
 }
-
-

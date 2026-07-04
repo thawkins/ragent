@@ -599,12 +599,8 @@ impl McpClient {
             }
         };
 
-        let params = CallToolRequestParams {
-            meta: None,
-            name: tool_name.to_string().into(),
-            arguments,
-            task: None,
-        };
+        let params = CallToolRequestParams::new(tool_name.to_string())
+            .with_arguments(arguments.unwrap_or_default());
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),

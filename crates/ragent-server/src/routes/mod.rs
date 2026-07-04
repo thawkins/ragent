@@ -28,13 +28,13 @@ use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
 
 use ragent_agent::{
+    Config,
     agent::{self, AgentInfo},
     event::{Event, EventBus},
     sanitize::redact_secrets,
     session::processor::SessionProcessor,
     storage::{SessionRow, Storage},
     task::TaskManager,
-    Config,
 };
 
 use crate::sse::event_to_sse;

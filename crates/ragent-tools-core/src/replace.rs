@@ -101,7 +101,11 @@ impl FindDiag {
     }
 
     /// Build a `MultipleMatches` diagnostic.
-    pub(crate) fn multiple(_pass: &'static str, count: usize, _closest_line: Option<usize>) -> Self {
+    pub(crate) fn multiple(
+        _pass: &'static str,
+        count: usize,
+        _closest_line: Option<usize>,
+    ) -> Self {
         Self {
             kind: FindDiagKind::MultipleMatches(count),
         }

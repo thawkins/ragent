@@ -26,8 +26,8 @@ use chrono::Utc;
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, warn};
 
-use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
 use crate::Config;
+use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
 use crate::event::{Event, EventBus};
 use crate::session::processor::SessionProcessor;
 use crate::team::config::{MemberStatus, PlanStatus};
@@ -1665,5 +1665,3 @@ fn publish_message_event(
         }
     }
 }
-
-

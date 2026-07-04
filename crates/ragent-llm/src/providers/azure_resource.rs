@@ -400,9 +400,9 @@ impl LlmClient for AzureAnthropicClient {
         //
         // Simplification: we build an identical async_stream here that mirrors
         // AnthropicClient::chat after the HTTP response is received.
-        use ragent_types::event::FinishReason;
         use crate::llm::StreamEvent;
         use futures::StreamExt;
+        use ragent_types::event::FinishReason;
         use serde_json::Value;
         use std::collections::HashMap;
 

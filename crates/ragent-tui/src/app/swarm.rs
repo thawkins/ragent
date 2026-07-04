@@ -1,16 +1,9 @@
 //! Swarm decomposition handling for the TUI.
 
-
-
-use ragent_team::team::{
-    self, MemberStatus,
-};
-
+use ragent_team::team::{self, MemberStatus};
 
 // State types from app/state.rs
-use crate::app::state::{
-    LogLevel, App
-};
+use crate::app::state::{App, LogLevel};
 
 // Helpers
 
@@ -662,5 +655,4 @@ impl App {
             s.completed = true;
         }
     }
-
 }

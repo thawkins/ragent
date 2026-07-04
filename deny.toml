@@ -14,6 +14,30 @@ ignore = [
     # RUSTSEC-2024-0370: proc-macro-error is unmaintained.
     # proc-macro-error is a transitive dep (via ouroboros -> allsorts -> printpdf).
     { id = "RUSTSEC-2024-0370", reason = "transitive via printpdf; functionality unaffected" },
+    # RUSTSEC-2024-0384: instant crate no longer maintained.
+    # instant is a transitive dep (via measure_time -> tantivy); awaiting upstream update.
+    { id = "RUSTSEC-2024-0384", reason = "transitive via tantivy; awaiting upstream update" },
+    # RUSTSEC-2025-0119: markdown parser panic (unmaintained pulldown-cmark fork).
+    # pulldown-cmark is a transitive dep (via ratatui); no actionable fix available.
+    { id = "RUSTSEC-2025-0119", reason = "transitive via ratatui; no fixed version available" },
+    # RUSTSEC-2026-0192: ttf-parser unmaintained.
+    # ttf-parser is a transitive dep (via printpdf); functionality unaffected.
+    { id = "RUSTSEC-2026-0192", reason = "transitive via printpdf; functionality unaffected" },
+    # RUSTSEC-2026-0190: anyhow downcast_mut unsoundness.
+    # anyhow is a transitive dep widely used; awaiting upstream fix.
+    { id = "RUSTSEC-2026-0190", reason = "transitive; awaiting upstream fix" },
+    # RUSTSEC-2026-0187: lopdf stack overflow via deeply nested PDF objects.
+    # lopdf 0.39 is a direct dep; upgrade to 0.42+ requires ooxmlsdk/quick-xml break.
+    { id = "RUSTSEC-2026-0187", reason = "direct dep blocked by ooxmlsdk/quick-xml compatibility; trusted PDF input" },
+    # RUSTSEC-2026-0194: quick-xml quadratic duplicate-attribute check.
+    # quick-xml 0.39 is a direct dep; upgrade blocked by ooxmlsdk 0.3 compatibility.
+    { id = "RUSTSEC-2026-0194", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
+    # RUSTSEC-2026-0195: quick-xml unbounded namespace declarations.
+    # Same compatibility constraint as RUSTSEC-2026-0194.
+    { id = "RUSTSEC-2026-0195", reason = "direct dep blocked by ooxmlsdk compatibility; trusted XML input" },
+    # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion from unbounded
+    # out-of-order stream reassembly. Transitive via reqwest/h3; awaiting upstream fix.
+    { id = "RUSTSEC-2026-0185", reason = "transitive via reqwest/h3; awaiting upstream fix" },
 ]
 
 [licenses]
@@ -53,4 +77,5 @@ wildcards = "warn"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# headroom-core is pulled from a Git tag until it is published to crates.io.
+allow-git = ["https://github.com/chopratejas/headroom.git"]

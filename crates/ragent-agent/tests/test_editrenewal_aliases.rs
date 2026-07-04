@@ -24,11 +24,7 @@ fn def_for(tool_name: &str) -> ToolDefinition {
 
 fn names_sorted() -> Vec<String> {
     let registry = create_default_registry();
-    let mut names: Vec<String> = registry
-        .definitions()
-        .into_iter()
-        .map(|d| d.name)
-        .collect();
+    let mut names: Vec<String> = registry.definitions().into_iter().map(|d| d.name).collect();
     names.sort();
     names
 }
@@ -104,16 +100,34 @@ fn test_edit_description_states_uniqueness_and_context() {
 fn test_edit_schema_declares_canonical_params() {
     let def = def_for("edit");
     let schema_str = def.parameters.to_string();
-    assert!(schema_str.contains("file_path"), "edit schema should list file_path");
-    assert!(schema_str.contains("old_string"), "edit schema should list old_string");
-    assert!(schema_str.contains("new_string"), "edit schema should list new_string");
+    assert!(
+        schema_str.contains("file_path"),
+        "edit schema should list file_path"
+    );
+    assert!(
+        schema_str.contains("old_string"),
+        "edit schema should list old_string"
+    );
+    assert!(
+        schema_str.contains("new_string"),
+        "edit schema should list new_string"
+    );
 }
 
 #[test]
 fn test_multi_edit_schema_declares_canonical_params() {
     let def = def_for("multi_edit");
     let schema_str = def.parameters.to_string();
-    assert!(schema_str.contains("file_path"), "multi_edit schema should list file_path");
-    assert!(schema_str.contains("old_string"), "multi_edit schema should list old_string");
-    assert!(schema_str.contains("new_string"), "multi_edit schema should list new_string");
+    assert!(
+        schema_str.contains("file_path"),
+        "multi_edit schema should list file_path"
+    );
+    assert!(
+        schema_str.contains("old_string"),
+        "multi_edit schema should list old_string"
+    );
+    assert!(
+        schema_str.contains("new_string"),
+        "multi_edit schema should list new_string"
+    );
 }

@@ -6,8 +6,7 @@ use std::{
 };
 
 use ragent_agent::{
-    agent,
-StreamConfig,
+    StreamConfig, agent,
     event::{Event, EventBus},
     permission::{PermissionChecker, PermissionRequest},
     provider,
