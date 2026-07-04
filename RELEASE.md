@@ -1,17 +1,17 @@
 # Release
 
-## Current Version: 0.1.0-alpha.134
+## Current Version: 0.1.0-alpha.135
+
+### Fixed
+- **Workspace version** — Bumped to `0.1.0-alpha.135`.
+- **fix ci** — Resolved GitHub Actions "Check and Test" failure caused by the `0.1.0-alpha.132` scrollbar drag math regression in Memory/TODO panels. Reverted the `top_based` inversion in `apply_scrollbar_drag()` and updated the Memory panel tests to use the bottom-based offset convention consistent with Messages/Log/Profile.
+
+## Previous Version: 0.1.0-alpha.134
 
 ### Fixed
 - **Scrollbar drag math regression** — Reverted the `top_based` inversion introduced for Memory/TODO panels in `0.1.0-alpha.132` and updated the Memory panel tests to match the bottom-based offset convention used by the rest of the TUI.
 
 ## Previous Version: 0.1.0-alpha.133
-
-### Changed
-- **Workspace version** — Bumped to `0.1.0-alpha.133`.
-- **fix tests that depend on untracked files** — Pointed `ragent-specs` real-project integration tests at the self-contained fixture under `crates/ragent-specs/tests/fixtures/testspec` so they no longer rely on the untracked `specs/` directory.
-
-## Previous Version: 0.1.0-alpha.132
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.133`.

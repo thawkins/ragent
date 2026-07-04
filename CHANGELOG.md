@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-alpha.135
+
+### Fixed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.135`.
+- **fix ci** — Resolved GitHub Actions "Check and Test" failure caused by the `0.1.0-alpha.132` scrollbar drag math regression in Memory/TODO panels. Reverted the `top_based` inversion in `apply_scrollbar_drag()` and updated the Memory panel tests to use the bottom-based offset convention consistent with Messages/Log/Profile.
+
 ## Version: 0.1.0-alpha.134
 
 ### Fixed
