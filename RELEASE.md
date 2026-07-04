@@ -1,6 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.131
+## Current Version: 0.1.0-alpha.132
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.132`.
+- **fix thumb scrolls** — TUI thumb/srollbar scrolling improvements.
+
+## Previous Version: 0.1.0-alpha.131
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.131`.

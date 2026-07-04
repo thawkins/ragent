@@ -2121,7 +2121,10 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
+        // Render the scrollbar in the full panel area (not the inner content
+        // area) so the thumb lines up with the rightmost column that the
+        // mouse handler hit-tests for side panels, matching the messages pane.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
 
@@ -2233,7 +2236,9 @@ fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        // Render in the full panel area so the scrollbar gutter aligns with
+        // the mouse hit-test column used by the drag handler.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
 
@@ -2317,7 +2322,9 @@ fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        // Render in the full panel area so the scrollbar gutter aligns with
+        // the mouse hit-test column used by the drag handler.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
 
@@ -2536,7 +2543,9 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        // Render in the full panel area so the scrollbar gutter aligns with
+        // the mouse hit-test column used by the drag handler.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }
 

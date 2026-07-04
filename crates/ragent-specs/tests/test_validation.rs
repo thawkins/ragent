@@ -8,8 +8,8 @@ use std::collections::HashMap;
 #[test]
 fn test_validate_real_project_spec() {
     let id = SpecId::new("testspec").unwrap();
-    let spec_md = include_str!("../../../specs/testspec/SPEC.md");
-    let plan_md = include_str!("../../../specs/testspec/PLAN.md");
+    let spec_md = include_str!("fixtures/testspec/SPEC.md");
+    let plan_md = include_str!("fixtures/testspec/PLAN.md");
 
     let mut spec = Spec::new(id, "testspec");
     spec.spec_md = spec_md.to_string();
@@ -29,7 +29,7 @@ fn test_validate_real_project_spec() {
 
 #[test]
 fn test_parse_requirements_from_real_spec() {
-    let spec_md = include_str!("../../../specs/testspec/SPEC.md");
+    let spec_md = include_str!("fixtures/testspec/SPEC.md");
     let reqs = parse_requirements(spec_md);
 
     // Real spec has 15 FRs and 7 NFRs
@@ -54,7 +54,7 @@ fn test_parse_requirements_from_real_spec() {
 
 #[test]
 fn test_detect_all_ears_templates_in_real_spec() {
-    let spec_md = include_str!("../../../specs/testspec/SPEC.md");
+    let spec_md = include_str!("fixtures/testspec/SPEC.md");
     let reqs = parse_requirements(spec_md);
 
     let mut template_counts: HashMap<EarsTemplate, usize> = HashMap::new();
@@ -95,7 +95,7 @@ fn test_detect_all_ears_templates_in_real_spec() {
 
 #[test]
 fn test_extract_sections_from_real_spec() {
-    let spec_md = include_str!("../../../specs/testspec/SPEC.md");
+    let spec_md = include_str!("fixtures/testspec/SPEC.md");
     let sections = extract_sections(spec_md);
 
     let names: Vec<String> = sections.iter().map(|(_, n, _)| n.clone()).collect();

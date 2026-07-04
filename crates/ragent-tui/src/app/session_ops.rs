@@ -1425,12 +1425,16 @@ impl App {
     }
 
     pub(crate) fn apply_scrollbar_drag(&mut self, mouse_y: u16, pane: ScrollbarDragPane) {
-        let (area, max_scroll) = match pane {
-            ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll),
-            ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll),
-            ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll),
-            ScrollbarDragPane::Todo => (self.todo_area, self.todo_max_scroll),
-            ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll),
+        let (area, max_scroll, top_based) = match pane {
+            // Messages, Log and Profile store scroll_offset as lines from the
+            // bottom of the content. TODO and Memory store it as lines from
+            // the top, so their drag math is inverted to keep the thumb
+            // position visually consistent with the content.
+            ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll, false),
+            ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll, false),
+            ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll, false),
+            ScrollbarDragPane::Todo => (self.todo_area, self.todo_max_scroll, true),
+            ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll, true),
         };
 
         if area.height <= 1 || max_scroll == 0 {
@@ -1443,9 +1447,16 @@ impl App {
         let track_height = (area.height.saturating_sub(1)) as f32;
         let fraction = (relative / track_height).clamp(0.0, 1.0);
 
-        // fraction 0.0 = top of content, 1.0 = bottom of content
-        // scroll_offset is "lines from bottom": top → max_scroll, bottom → 0
-        let offset = ((1.0 - fraction) * max_scroll as f32).round() as u16;
+        // fraction 0.0 = top of track, 1.0 = bottom of track.
+        // For bottom-based offsets dragging to the top of the track should
+        // show the top of the content (offset = max_scroll). For top-based
+        // offsets dragging to the top of the track should show the top of
+        // the content (offset = 0).
+        let offset = if top_based {
+            (fraction * max_scroll as f32).round() as u16
+        } else {
+            ((1.0 - fraction) * max_scroll as f32).round() as u16
+        };
 
         match pane {
             ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
