@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-alpha.133
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.133`.
+- **fix tests that depend on untracked files** — Pointed `ragent-specs` real-project integration tests at the self-contained fixture under `crates/ragent-specs/tests/fixtures/testspec` so they no longer rely on the untracked `specs/` directory.
+
 ## Version: 0.1.0-alpha.132
 
 ### Changed
