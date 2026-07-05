@@ -12,6 +12,7 @@ use ragent_agent::{
     tool,
 };
 use ragent_tui::App;
+use ragent_tui::app::{ConfiguredProvider, ProviderSource};
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 fn make_app() -> App {
@@ -160,6 +161,14 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
 
     let mut app = make_app();
     app.agent_info = agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent");
+    // detect_provider() relies on ambient env vars / auto-discovery (e.g. gh
+    // CLI tokens) which are not present in CI. Set the configured provider
+    // explicitly so the test is deterministic regardless of environment.
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "anthropic".to_string(),
+        name: "Anthropic".to_string(),
+        source: ProviderSource::Database,
+    });
     app.selected_model = Some("anthropic/claude-sonnet-4-20250514".to_string());
 
     let label = app

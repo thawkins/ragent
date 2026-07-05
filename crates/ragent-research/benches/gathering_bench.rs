@@ -102,6 +102,7 @@ fn make_pages(n: usize) -> HashMap<String, WebFetchedPage> {
             (
                 format!("https://example.com/{i}"),
                 WebFetchedPage {
+                    published_at: None,
                     url: format!("https://example.com/{i}"),
                     title: format!("Page {i}"),
                     body: "Rust async body content".repeat(20),

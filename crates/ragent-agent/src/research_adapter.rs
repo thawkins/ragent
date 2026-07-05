@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::json;
 
@@ -276,9 +276,21 @@ struct AgentWebFetchTool {
     ctx: AgentToolContext,
 }
 
+/// Maximum number of bytes of raw HTML to download when extracting a
+/// publication date. The date metadata lives in the page `<head>`, which is
+/// always near the start of the document, so a small cap is plenty and keeps
+/// the extra request cheap.
+const DATE_EXTRACTION_MAX_HTML_BYTES: usize = 64 * 1024;
+
+/// User-Agent used for the supplementary raw-HTML fetch performed to extract
+/// a publication date. Mirrors the one used by the `webfetch` tool.
+const DATE_EXTRACTION_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
+
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
     async fn fetch(&self, url: &str) -> Result<WebFetchedPage> {
+        // First, fetch the rendered text body via the existing webfetch tool so
+        // the research system gets the same content it always has.
         let input = json!({
             "url": url,
             "format": "text",
@@ -290,12 +302,71 @@ impl WebFetchTool for AgentWebFetchTool {
             .find(|l| !l.trim().is_empty())
             .unwrap_or(url)
             .to_string();
+
+        // Second, opportunistically fetch the raw HTML head to extract a
+        // publication date from the page's embedded metadata. This is a
+        // best-effort step: any failure (network error, non-HTML content,
+        // missing date) simply leaves `published_at` as `None` so the
+        // research run is never aborted by a date-extraction failure.
+        let published_at = extract_published_at_for_url(url).await.unwrap_or(None);
+
         Ok(WebFetchedPage {
             url: url.to_string(),
             title,
             body: output.content,
+            published_at,
         })
     }
+}
+
+/// Fetch the raw HTML for `url` and attempt to extract a publication date.
+///
+/// Only the first [`DATE_EXTRACTION_MAX_HTML_BYTES`] bytes are read because
+/// publication-date metadata lives in the document `<head>`, which appears
+/// near the start of the response. Non-HTML responses and any network error
+/// are mapped to `Ok(None)` so callers can treat date extraction as
+/// best-effort.
+async fn extract_published_at_for_url(url: &str) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Ok(None);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .user_agent(DATE_EXTRACTION_USER_AGENT)
+        .build()
+        .context("failed to build HTTP client for date extraction")?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("date-extraction fetch failed for {url}"))?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    if !content_type.contains("text/html") && !content_type.contains("application/xhtml") {
+        return Ok(None);
+    }
+    // Read only the leading chunk: the <head> with the date metadata is at the
+    // top of the document. `text()` reads the whole body; instead we take the
+    // first bytes via a streaming read.
+    let body_bytes = response
+        .bytes()
+        .await
+        .with_context(|| format!("failed to read body for date extraction: {url}"))?;
+    let head_chunk: &[u8] = if body_bytes.len() > DATE_EXTRACTION_MAX_HTML_BYTES {
+        &body_bytes[..DATE_EXTRACTION_MAX_HTML_BYTES]
+    } else {
+        &body_bytes
+    };
+    let html = String::from_utf8_lossy(head_chunk);
+    Ok(ragent_research::extract_published_at(&html))
 }
 
 struct AgentLocalTool {

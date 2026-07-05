@@ -814,7 +814,11 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     // supporting file.
     for (idx, src) in web.iter().enumerate() {
         if let Source::Web {
-            title, url, body, ..
+            published_at: None,
+            title,
+            url,
+            body,
+            ..
         } = src
         {
             let label = if title.is_empty() {
@@ -1153,6 +1157,7 @@ mod tests {
                 pages: HashMap::from([(
                     "https://example.com".into(),
                     WebFetchedPage {
+                        published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
                         body: "body".into(),
@@ -1222,6 +1227,7 @@ mod tests {
         impl crate::web_gatherer::WebFetchTool for OkFetch {
             async fn fetch(&self, _: &str) -> anyhow::Result<crate::web_gatherer::WebFetchedPage> {
                 Ok(crate::web_gatherer::WebFetchedPage {
+                    published_at: None,
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
@@ -1308,6 +1314,7 @@ mod tests {
         impl WebFetchTool for OkFetch {
             async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
                 Ok(WebFetchedPage {
+                    published_at: None,
                     url: url.to_string(),
                     title: "Example".into(),
                     body: "body".into(),
@@ -1530,6 +1537,7 @@ mod tests {
     fn default_summary_counts_each_source_type() {
         let s = vec![
             Source::Web {
+                published_at: None,
                 url: "u".into(),
                 title: "t".into(),
                 captured_at: chrono::Utc::now(),
@@ -1557,6 +1565,7 @@ mod tests {
     fn default_summary_names_web_titles_and_local_paths() {
         let s = vec![
             Source::Web {
+                published_at: None,
                 url: "https://a".into(),
                 title: "Article A".into(),
                 captured_at: chrono::Utc::now(),
@@ -1564,6 +1573,7 @@ mod tests {
                 body: String::new(),
             },
             Source::Web {
+                published_at: None,
                 url: "https://b".into(),
                 title: "Article B".into(),
                 captured_at: chrono::Utc::now(),
@@ -1606,6 +1616,7 @@ mod tests {
     #[test]
     fn default_findings_include_source_citation_marker() {
         let s = vec![Source::Web {
+            published_at: None,
             url: "https://a".into(),
             title: "Article A".into(),
             captured_at: chrono::Utc::now(),
@@ -1625,6 +1636,7 @@ mod tests {
     fn default_findings_emits_per_source_with_excerpts() {
         let s = vec![
             Source::Web {
+                published_at: None,
                 url: "https://a".into(),
                 title: "Article A".into(),
                 captured_at: chrono::Utc::now(),
@@ -1686,6 +1698,7 @@ mod tests {
     #[test]
     fn default_findings_falls_back_to_metadata_when_body_is_empty() {
         let s = vec![Source::Web {
+            published_at: None,
             url: "https://a".into(),
             title: "Empty Page".into(),
             captured_at: chrono::Utc::now(),

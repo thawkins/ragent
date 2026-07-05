@@ -59,6 +59,7 @@ pub mod source_registry;
 pub mod state;
 pub mod status;
 pub mod verify;
+pub mod web_date;
 pub mod web_gatherer;
 
 pub use adaptive::{AdaptiveStopper, StopDecision};
@@ -107,6 +108,7 @@ pub use state::{
 };
 pub use status::ResearchStatus;
 pub use verify::{KeywordVerifier, VerificationResult, Verifier};
+pub use web_date::extract_published_at;
 pub use web_gatherer::{
     GatherEvent, GatherResult, HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer,
     WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer, WebSearchHit, WebSearchTool,

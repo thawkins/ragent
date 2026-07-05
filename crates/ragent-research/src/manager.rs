@@ -811,6 +811,7 @@ mod tests {
     fn render_document_for_renders_full_document() {
         let name = sample_name();
         let sources = vec![Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: Utc::now(),
@@ -845,6 +846,7 @@ mod tests {
             .unwrap();
         let mut item = mgr.show("rust-async").await.unwrap();
         item.add_source(Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: Utc::now(),

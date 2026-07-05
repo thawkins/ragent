@@ -30,6 +30,7 @@ struct FixedFetch;
 impl WebFetchTool for FixedFetch {
     async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
         Ok(WebFetchedPage {
+            published_at: None,
             url: url.to_string(),
             title: "Fake source".into(),
             body: "This is the body of the fake source used for benchmarking.".into(),

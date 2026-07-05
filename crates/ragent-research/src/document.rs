@@ -32,12 +32,19 @@
 //!
 //! ## References Index
 //!
-//! | # | Type | Path/URL | Title | Relevance | Captured |
-//! |---|------|----------|-------|-----------|----------|
-//! | 1 | web  | https://... | ... | ... | ... |
-//! | 2 | local | src/lib.rs | ... | ... | ... |
-//! | 3 | spec  | foo | ... | ... | ... |
+//! | # | Type | Path/URL | Title | Published | Relevance | Captured |
+//! |---|------|----------|-------|-----------|-----------|----------|
+//! | 1 | web  | https://... | ... | 2024-03-22 | ... | ... |
+//! | 2 | local | src/lib.rs | ... | — | ... | ... |
+//! | 3 | spec  | foo | ... | — | ... | ... |
 //! ```
+//!
+//! The **Published** column shows each web source's publication date (parsed
+//! from the page's embedded metadata at fetch time) and `—` for sources that
+//! have no publication date. Each finding also carries a `**Source date
+//! range:**` line summarising the earliest–latest publication dates of its
+//! cited web sources so the relative age of the evidence is visible at a
+//! glance.
 //!
 //! All sections are always present (even if empty) so a downstream tool that
 //! reads `RESEARCH.md` can rely on a stable structure.
@@ -302,6 +309,11 @@ fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
 /// and path/URL so the reader can map the finding back to the References
 /// Index. Returns `None` when there are no citations or none of the cited
 /// indices map to a known source.
+///
+/// A `**Source date range:**` line is appended after the bullet list showing
+/// the earliest and latest publication dates of the cited *web* sources, so
+/// the reader can judge the relative age of the evidence backing the finding.
+/// The line reads `—` when no cited web source exposes a publication date.
 fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     // If the finding already contains a Sources paragraph (e.g. produced by
     // the LLM itself), don't append a duplicate list.
@@ -316,23 +328,82 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
 
     let mut out = String::from("**Sources:**\n");
     let mut any = false;
-    for idx in indices {
+    for idx in &indices {
         if let Some(src) = sources.get(idx - 1) {
             any = true;
             out.push_str(&format!(
-                "- [{idx}] {title} — {path}\n",
+                "- [{idx}] {title} — {path}{published}\n",
                 idx = idx,
                 title = src.title(),
-                path = src.path_or_url()
+                path = src.path_or_url(),
+                published = src
+                    .published_at()
+                    .map(|dt| format!(" (published {})", dt.format("%Y-%m-%d")))
+                    .unwrap_or_default()
             ));
         }
     }
     if !any {
         return None;
     }
+    // Append the date-range line summarising the publication dates of the
+    // cited web sources, so the relative age of the evidence is visible at
+    // a glance per finding.
+    if let Some(range) = render_finding_date_range(&indices, sources) {
+        out.push_str(&format!("\n{range}"));
+    }
     // Trim trailing newline; the caller inserts blank lines.
     out.truncate(out.trim_end().len());
     Some(out)
+}
+
+/// Compute a `**Source date range:**` summary line for the cited sources.
+///
+/// Considers only web sources that expose a `published_at` value. Returns
+/// `None` when none of the cited sources is a dated web source. The returned
+/// line uses the form `earliest..latest` (both inclusive, `YYYY-MM-DD`), or a
+/// single date when all dated sources share the same publication date.
+fn render_finding_date_range(indices: &[usize], sources: &[Source]) -> Option<String> {
+    let mut dates: Vec<chrono::DateTime<chrono::Utc>> = Vec::new();
+    let mut total_web = 0usize;
+    for idx in indices {
+        let src = sources.get(idx - 1)?;
+        if matches!(src, Source::Web { .. }) {
+            total_web += 1;
+            if let Some(dt) = src.published_at() {
+                dates.push(dt);
+            }
+        }
+    }
+    if dates.is_empty() {
+        // No dated web sources: still emit a line when the finding cites web
+        // sources, so the reader knows the dates were unavailable rather than
+        // absent.
+        return total_web.checked_sub(0).map(|_| {
+            if total_web > 0 {
+                "**Source date range:** — (cited web sources did not expose a publication date)"
+                    .to_string()
+            } else {
+                "**Source date range:** — (no web sources cited)".to_string()
+            }
+        });
+    }
+    dates.sort();
+    let earliest = dates.first()?;
+    let latest = dates.last()?;
+    let span = if earliest == latest {
+        format!("{}", earliest.format("%Y-%m-%d"))
+    } else {
+        format!(
+            "{}..{}",
+            earliest.format("%Y-%m-%d"),
+            latest.format("%Y-%m-%d")
+        )
+    };
+    let with_dates = dates.len();
+    Some(format!(
+        "**Source date range:** {span} ({with_dates} of {total_web} cited web sources dated)"
+    ))
 }
 fn escape_pipe(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -384,16 +455,21 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             url,
             title,
             captured_at,
+            published_at,
             body,
             ..
         } => Some(format!(
             "# Web source\n\n\
              - URL: {url}\n\
              - Title: {title}\n\
+             - Published (UTC): {published}\n\
              - Captured (UTC): {captured}\n\n\
              ```text\n{body}\n```\n",
             url = url,
             title = title,
+            published = published_at
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| "—".to_string()),
             captured = captured_at.to_rfc3339(),
             body = if body.is_empty() {
                 "(no body captured for this source)"
@@ -820,6 +896,7 @@ mod tests {
     #[test]
     fn render_supporting_file_produces_web_block() {
         let source = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: Utc::now(),
@@ -835,6 +912,7 @@ mod tests {
     #[test]
     fn render_supporting_file_produces_web_placeholder_when_body_empty() {
         let source = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: Utc::now(),
@@ -885,6 +963,7 @@ mod tests {
     #[test]
     fn render_bibliography_includes_source_preview() {
         let source = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: Utc::now(),
@@ -921,6 +1000,7 @@ mod tests {
     fn assemble_document_appends_sources_list_for_citations() {
         let mut item = sample_item();
         item.add_source(Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example Article".into(),
             captured_at: Utc::now(),
@@ -956,6 +1036,7 @@ mod tests {
     fn assemble_document_dedupes_and_sorts_citation_indices() {
         let mut item = sample_item();
         item.add_source(Source::Web {
+            published_at: None,
             url: "https://a".into(),
             title: "A".into(),
             captured_at: Utc::now(),
@@ -963,6 +1044,7 @@ mod tests {
             body: "body".into(),
         });
         item.add_source(Source::Web {
+            published_at: None,
             url: "https://b".into(),
             title: "B".into(),
             captured_at: Utc::now(),
@@ -986,6 +1068,84 @@ mod tests {
     }
 
     #[test]
+    fn assemble_document_appends_source_date_range_for_cited_web_sources() {
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            published_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2023-01-10T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
+            url: "https://a.example".into(),
+            title: "A".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "body".into(),
+        });
+        item.add_source(Source::Web {
+            published_at: Some(
+                chrono::DateTime::parse_from_rfc3339("2024-06-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
+            url: "https://b.example".into(),
+            title: "B".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-02.md"),
+            body: "body".into(),
+        });
+        item.add_source(Source::Web {
+            published_at: None,
+            url: "https://c.example".into(),
+            title: "C".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-03.md"),
+            body: "body".into(),
+        });
+        let mut doc = sample_doc(item);
+        doc.findings = vec!["**Observation:** spans [#1], [#2], and [#3].".into()];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        assert!(
+            finding.contains(
+                "**Source date range:** 2023-01-10..2024-06-01 (2 of 3 cited web sources dated)"
+            ),
+            "finding should carry a source date range line: {}",
+            finding
+        );
+        // The bullet for the dated source should include its publication date.
+        assert!(
+            finding.contains("(published 2023-01-10)"),
+            "dated source bullet should include its publication date: {}",
+            finding
+        );
+    }
+
+    #[test]
+    fn assemble_document_notes_undated_web_sources_in_date_range() {
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            published_at: None,
+            url: "https://a.example".into(),
+            title: "A".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "body".into(),
+        });
+        let mut doc = sample_doc(item);
+        doc.findings = vec!["**Observation:** only [#1].".into()];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        assert!(
+            finding.contains(
+                "**Source date range:** — (cited web sources did not expose a publication date)"
+            ),
+            "finding should note that cited web sources had no date: {}",
+            finding
+        );
+    }
+
+    #[test]
     fn assemble_document_omits_sources_paragraph_without_citations() {
         let doc = sample_doc(sample_item());
         let assembled = assemble_document(&doc);
@@ -999,6 +1159,7 @@ mod tests {
     fn assemble_document_skips_sources_list_when_finding_already_has_one() {
         let mut item = sample_item();
         item.add_source(Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example Article".into(),
             captured_at: Utc::now(),

@@ -70,6 +70,13 @@ pub enum Source {
         title: String,
         /// Timestamp at which the page was fetched.
         captured_at: DateTime<Utc>,
+        /// Publication date of the page, parsed from embedded metadata (HTML
+        /// `<meta>` tags, JSON-LD `datePublished`, or `<time datetime="...">`
+        /// elements) when available. `None` when the page did not expose a
+        /// parseable publication date, or when the source was loaded from an
+        /// older `RESEARCH.md` that predates this field.
+        #[serde(default)]
+        published_at: Option<DateTime<Utc>>,
         /// Relative path to the supporting file under `research/<name>/sources/`.
         body_path: PathBuf,
         /// Captured page text, fenced into the supporting file at write time.
@@ -161,6 +168,18 @@ impl Source {
         }
     }
 
+    /// Publication date of the source, when known.
+    ///
+    /// Only [`Source::Web`] carries a publication date (parsed from the page's
+    /// embedded metadata at fetch time). Local, spec, and other sources do not
+    /// have a meaningful publication date and always return `None`.
+    pub fn published_at(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Web { published_at, .. } => *published_at,
+            _ => None,
+        }
+    }
+
     /// Optional relevance note for local and spec sources.
     pub fn relevance(&self) -> Option<&str> {
         match self {
@@ -204,6 +223,7 @@ mod tests {
     #[test]
     fn type_str_for_each_variant() {
         let web = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: dt(),
@@ -251,6 +271,7 @@ mod tests {
     #[test]
     fn title_and_path_or_url_for_each_variant() {
         let web = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: dt(),
@@ -284,6 +305,7 @@ mod tests {
     fn captured_at_is_accessible_for_each_variant() {
         let now = dt();
         let web = Source::Web {
+            published_at: None,
             url: "u".into(),
             title: "t".into(),
             captured_at: now,
@@ -296,6 +318,7 @@ mod tests {
     #[test]
     fn serde_round_trip_web() {
         let s = Source::Web {
+            published_at: None,
             url: "https://example.com".into(),
             title: "Example".into(),
             captured_at: dt(),
@@ -386,6 +409,7 @@ mod tests {
     #[test]
     fn body_and_has_body_for_each_variant() {
         let web = Source::Web {
+            published_at: None,
             url: "u".into(),
             title: "t".into(),
             captured_at: dt(),
@@ -396,6 +420,7 @@ mod tests {
         assert!(web.has_body());
 
         let empty = Source::Web {
+            published_at: None,
             url: "u".into(),
             title: "t".into(),
             captured_at: dt(),

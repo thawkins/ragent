@@ -66,6 +66,7 @@ async fn write_document_persists_supports_files_and_index() {
         .unwrap();
     let mut item: ResearchItem = mgr.show("rust-async").await.unwrap();
     item.add_source(Source::Web {
+        published_at: None,
         url: "https://example.com".into(),
         title: "Example".into(),
         captured_at: chrono::Utc::now(),
@@ -329,6 +330,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     impl WebFetchTool for FakeFetch {
         async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
             Ok(WebFetchedPage {
+                published_at: None,
                 url: url.to_string(),
                 title: "Example Page".into(),
                 body: "Real page body — talks about Rust lifetimes.".into(),

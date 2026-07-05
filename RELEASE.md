@@ -1,6 +1,24 @@
 # Release
 
-## Current Version: 0.1.0-alpha.135
+## Current Version: 0.1.0-alpha.136
+
+### Added
+
+- **Research source publication dates** — The `/research` slash command now
+  captures the publication date of each web source and surfaces it in the
+  `RESEARCH.md` output and references. A new `**Source date range:**` line
+  under each finding summarises the earliest–latest publication dates of its
+  cited web sources, so the relative age of the evidence is visible at a
+  glance. Dates are parsed best-effort from JSON-LD `datePublished`, article
+  meta tags (`article:published_time`, `pubdate`, `dc.date`, etc.), `<time>`
+  elements, and a visible-text fallback; any failure leaves the date as `—`
+  without aborting the research run. The References Index table gained a
+  **Published** column, supporting files show `Published (UTC)`, and the new
+  `ragent_research::extract_published_at` helper is re-exported for
+  `ragent-agent`'s best-effort raw-HTML fetch. Older `RESEARCH.md` files
+  remain loadable via `#[serde(default)]` on the new optional field.
+
+## Previous Version: 0.1.0-alpha.135
 
 ### Fixed
 - **Workspace version** — Bumped to `0.1.0-alpha.135`.

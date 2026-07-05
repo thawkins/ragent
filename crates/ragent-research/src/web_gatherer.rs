@@ -33,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
 use ragent_llm::provider::ProviderRegistry;
@@ -373,6 +373,10 @@ pub struct WebFetchedPage {
     /// Rendered text body of the page, in UTF-8. HTML tags should already
     /// have been stripped by the implementation.
     pub body: String,
+    /// Publication date parsed from the page's embedded metadata, when the
+    /// fetcher was able to determine one. `None` when the page did not expose
+    /// a parseable publication date.
+    pub published_at: Option<DateTime<Utc>>,
 }
 
 /// Trait abstracting the existing `websearch` tool.
@@ -627,6 +631,7 @@ impl WebGatherer {
                         url: page.url,
                         title,
                         captured_at: Utc::now(),
+                        published_at: page.published_at,
                         body_path,
                         body,
                     });
@@ -745,6 +750,7 @@ mod tests {
         impl WebFetchTool for OkFetch {
             async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
                 Ok(WebFetchedPage {
+                    published_at: None,
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
@@ -781,6 +787,7 @@ mod tests {
         pages.insert(
             "https://a.example".into(),
             WebFetchedPage {
+                published_at: None,
                 url: "https://a.example".into(),
                 title: "A — resolved".into(),
                 body: "body a".into(),
@@ -789,6 +796,7 @@ mod tests {
         pages.insert(
             "https://b.example".into(),
             WebFetchedPage {
+                published_at: None,
                 url: "https://b.example".into(),
                 title: "B — resolved".into(),
                 body: "body b".into(),
@@ -797,6 +805,7 @@ mod tests {
         pages.insert(
             "https://c.example".into(),
             WebFetchedPage {
+                published_at: None,
                 url: "https://c.example".into(),
                 title: "".into(), // empty title should fall back to search hit title
                 body: "body c".into(),
@@ -808,6 +817,7 @@ mod tests {
 
         for (i, src) in sources.iter().enumerate() {
             let Source::Web {
+                published_at: None,
                 url,
                 title,
                 body_path,
@@ -847,6 +857,7 @@ mod tests {
         pages.insert(
             "https://ok".into(),
             WebFetchedPage {
+                published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
                 body: "b".into(),
@@ -887,6 +898,7 @@ mod tests {
             pages.insert(
                 u.into(),
                 WebFetchedPage {
+                    published_at: None,
                     url: u.into(),
                     title: u.into(),
                     body: "b".into(),
@@ -940,6 +952,7 @@ mod tests {
         impl WebFetchTool for OkFetch {
             async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
                 Ok(WebFetchedPage {
+                    published_at: None,
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
@@ -1016,6 +1029,7 @@ mod tests {
         pages.insert(
             "https://ok".into(),
             WebFetchedPage {
+                published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
                 body: "b".into(),
@@ -1068,6 +1082,7 @@ mod tests {
         impl WebFetchTool for OkFetch {
             async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
                 Ok(WebFetchedPage {
+                    published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
                     body: format!("body-{url}"),

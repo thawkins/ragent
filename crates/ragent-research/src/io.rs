@@ -201,25 +201,34 @@ impl ResearchIo {
     ///
     /// `captured_at` is the timestamp shown for the "No sources captured"
     /// placeholder; pass `Utc::now()` when generating fresh output.
+    ///
+    /// The table includes a **Published** column (between **Title** and
+    /// **Relevance**) showing each web source's publication date when it
+    /// could be parsed from the page's embedded metadata, and `—` otherwise.
+    /// Non-web sources have no publication date and always show `—`.
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
-                "## References Index\n\n| # | Type | Path/URL | Title | Relevance | Captured |\n\
-                 |---|------|----------|-------|-----------|----------|\n\
-                 | 1 | other | — | No sources captured | (no gathering run) | {} |\n",
+                "## References Index\n\n| # | Type | Path/URL | Title | Published | Relevance | Captured |\n\
+                 |---|------|----------|-------|-----------|-----------|----------|\n\
+                 | 1 | other | — | No sources captured | — | (no gathering run) | {} |\n",
                 captured_at.to_rfc3339()
             );
         }
         let mut out = String::from(
             "## References Index\n\n\
-             | # | Type | Path/URL | Title | Relevance | Captured |\n\
-             |---|------|----------|-------|-----------|----------|\n",
+             | # | Type | Path/URL | Title | Published | Relevance | Captured |\n\
+             |---|------|----------|-------|-----------|-----------|----------|\n",
         );
         for (idx, source) in sources.iter().enumerate() {
             let n = idx + 1;
             let kind = source.type_str();
             let path = source.path_or_url();
             let title = sanitize_inline(source.title());
+            let published = source
+                .published_at()
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "—".to_string());
             let relevance = match source {
                 Source::Local { relevance, .. } => sanitize_inline(relevance),
                 Source::Spec { relevance, .. } if !relevance.is_empty() => {
@@ -229,7 +238,7 @@ impl ResearchIo {
             };
             let captured = source.captured_at().to_rfc3339();
             out.push_str(&format!(
-                "| {n} | {kind} | {path} | {title} | {relevance} | {captured} |\n"
+                "| {n} | {kind} | {path} | {title} | {published} | {relevance} | {captured} |\n"
             ));
         }
         out
@@ -457,6 +466,48 @@ mod tests {
         }];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());
         assert!(idx.contains(r"a\|b"), "pipe must be escaped: {idx}");
+    }
+
+    #[test]
+    fn references_index_includes_published_column_for_web_sources() {
+        use chrono::TimeZone;
+        let published = Utc.with_ymd_and_hms(2024, 3, 22, 0, 0, 0).unwrap();
+        let sources = vec![
+            Source::Web {
+                url: "https://dated.example".into(),
+                title: "Dated".into(),
+                captured_at: Utc::now(),
+                published_at: Some(published),
+                body_path: PathBuf::from("sources/web-01.md"),
+                body: String::new(),
+            },
+            Source::Web {
+                url: "https://undated.example".into(),
+                title: "Undated".into(),
+                captured_at: Utc::now(),
+                published_at: None,
+                body_path: PathBuf::from("sources/web-02.md"),
+                body: String::new(),
+            },
+        ];
+        let idx = ResearchIo::render_references_index(&sources, Utc::now());
+        assert!(
+            idx.contains("Published"),
+            "header row must include Published column: {idx}"
+        );
+        assert!(
+            idx.contains("2024-03-22"),
+            "dated web source should show its publication date: {idx}"
+        );
+        // The undated row should render an em-dash placeholder for Published.
+        let undated_row = idx
+            .lines()
+            .find(|l| l.contains("https://undated.example"))
+            .unwrap_or_default();
+        assert!(
+            undated_row.contains("| — |"),
+            "undated web source should show '—' for Published: {idx}"
+        );
     }
 
     #[test]

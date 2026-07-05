@@ -350,6 +350,7 @@ mod tests {
 
     fn web_source(url: &str) -> Source {
         Source::Web {
+            published_at: None,
             url: url.to_string(),
             title: "title".to_string(),
             captured_at: Utc::now(),

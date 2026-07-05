@@ -471,6 +471,7 @@ mod tests {
     impl WebFetchTool for FakeFetch {
         async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
             Ok(WebFetchedPage {
+                published_at: None,
                 url: url.to_string(),
                 title: "fake".to_string(),
                 body: "body text".to_string(),
