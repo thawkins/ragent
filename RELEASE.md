@@ -1,6 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.136
+## Current Version: 0.1.0-alpha.137
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.137`. Follow-up to
+  `0.1.0-alpha.136`, which added web source publication dates to the
+  `/research` slash command (`RESEARCH.md` References Index **Published**
+  column, per-finding `**Source date range:**`, and the
+  `ragent_research::extract_published_at` helper).
+
+## Previous Version: 0.1.0-alpha.136
 
 ### Added
 
