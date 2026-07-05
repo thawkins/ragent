@@ -356,6 +356,7 @@ impl App {
                 Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
             }
             "config" => Some("[show]".to_string()),
+            "init" => Some("[config]".to_string()),
             "thinking" => Some("[auto|off|low|medium|high]".to_string()),
             "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),

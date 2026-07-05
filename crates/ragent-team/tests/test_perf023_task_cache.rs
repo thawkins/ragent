@@ -19,6 +19,10 @@ use parking_lot::RwLock;
 
 use ragent_team::team::{MemberStatus, Task, TaskList, TeamMember, TeamStore};
 
+#[path = "support/mod.rs"]
+mod support;
+use support::setup_workspace;
+
 /// A minimal `TeamManager`-like fixture exposing only the PERF-023 cache
 /// surface. We cannot easily construct a real `TeamManager` here (it needs a
 /// live `SessionProcessor`), so we re-implement the cache in front of a
@@ -80,13 +84,6 @@ impl TaskCacheFixture {
         *self.mtime.write() = disk_mtime;
         Ok(written)
     }
-}
-
-fn setup_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = tmp.path().to_path_buf();
-    std::fs::create_dir_all(dir.join(".ragent/teams")).expect("create .ragent/teams");
-    (tmp, dir)
 }
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {

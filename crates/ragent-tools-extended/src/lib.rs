@@ -37,6 +37,9 @@ pub mod memory {
     pub mod embedding;
     pub mod migrate;
     pub mod storage;
+
+    #[cfg(test)]
+    mod test_helpers;
 }
 
 use anyhow::Result;

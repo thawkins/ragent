@@ -7,7 +7,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for the Go programming language.
 pub struct GoParser {
@@ -20,14 +20,11 @@ impl GoParser {
         Self { _private: () }
     }
 
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let lang = tree_sitter_go::LANGUAGE;
-        parser
-            .set_language(&lang.into())
-            .context("failed to load Go grammar")?;
-        Ok(parser)
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_go::LANGUAGE,
+        "failed to load Go grammar",
+        "tree-sitter parse returned None"
+    );
 }
 
 impl LanguageParser for GoParser {
@@ -36,10 +33,7 @@ impl LanguageParser for GoParser {
     }
 
     fn parse(&self, source: &[u8]) -> Result<ParsedFile> {
-        let mut parser = Self::create_parser()?;
-        let tree = parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None")?;
+        let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
         let mut ctx = Ctx {
@@ -405,12 +399,12 @@ fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
         .map(|n| ctx.text(n).to_string())
 }
 
+/// Build a qualified name from the current scope and a local name.
+///
+/// Delegates to [`super::util::build_qname`] with the `.` separator.
+#[inline]
 fn build_qname(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}.{}", scope.join("."), name)
-    }
+    super::util::build_qname(scope, name, ".")
 }
 
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {

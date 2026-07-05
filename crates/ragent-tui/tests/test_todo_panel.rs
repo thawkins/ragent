@@ -9,18 +9,7 @@
 //! Tests live in `crates/ragent-tui/tests/` per the AGENTS.md test-organization
 //! rule (no inline `#[cfg(test)]` modules in `src/`).
 
-use std::sync::Arc;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ragent_agent::{
-    StreamConfig, agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
 use ragent_tui::{
     App,
     app::ScreenMode,
@@ -29,54 +18,8 @@ use ragent_tui::{
 };
 use ratatui::{Terminal, backend::TestBackend};
 
-/// Build an [`App`] backed by an in-memory database.
-fn make_app() -> App {
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let event_bus = Arc::new(EventBus::default());
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 /// Render the app into a string buffer of the given terminal size, with the
 /// TODO panel visible.
@@ -108,7 +51,7 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
 fn test_alt_t_maps_to_toggle_todo_action() {
     // FR-002: Alt+T must produce InputAction::ToggleTodo when no modal is
     // active (no permission dialog, no provider setup, no slash menu).
-    let mut app = make_app();
+    let mut app = support::make_app();
     let key = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT);
     let action = handle_key(&mut app, key);
     // InputAction does not derive PartialEq, so we match on the variant
@@ -123,7 +66,7 @@ fn test_alt_t_maps_to_toggle_todo_action() {
 fn test_toggle_todo_flips_show_todo_flag() {
     // FR-002: dispatching ToggleTodo via the full key-event path flips
     // `show_todo`.
-    let mut app = make_app();
+    let mut app = support::make_app();
     assert!(!app.show_todo, "show_todo should start false");
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
     assert!(app.show_todo, "first toggle should set show_todo=true");
@@ -135,7 +78,7 @@ fn test_toggle_todo_flips_show_todo_flag() {
 fn test_toggle_todo_mutually_excludes_log_panel() {
     // FR-003 / FR-012: enabling the TODO panel must hide the log panel, and
     // enabling the log panel must hide the TODO panel.
-    let mut app = make_app();
+    let mut app = support::make_app();
     // Start with the log panel visible.
     app.show_log = true;
     app.show_todo = false;
@@ -158,7 +101,7 @@ fn test_toggle_todo_mutually_excludes_log_panel() {
 fn test_toggle_todo_mutually_excludes_profile_panel() {
     // FR-003 / FR-012: enabling the TODO panel must hide the profile panel,
     // and enabling the profile panel must hide the TODO panel.
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.show_profile = true;
     app.show_todo = false;
 
@@ -177,7 +120,7 @@ fn test_toggle_todo_mutually_excludes_profile_panel() {
 
 #[test]
 fn test_toggle_todo_status_message_reflects_state() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
     assert_eq!(app.status, "todo panel visible");
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
@@ -194,7 +137,7 @@ fn test_render_todo_panel_empty_shows_placeholder() {
     // FR-005: with zero TODO items the panel shows "No TODO items" in dark
     // gray. We render with a session id that has no todos and assert the
     // placeholder text appears in the buffer.
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("empty-session".to_string());
     app.show_todo = true;
     app.show_log = false;
@@ -216,7 +159,7 @@ fn test_render_todo_panel_empty_shows_placeholder() {
 fn test_render_todo_panel_populated_shows_items() {
     // FR-006 / FR-013: with TODO items the panel renders one line per item
     // formatted as `[<STATUS>] <title>` ordered by created_at ascending.
-    let mut app = make_app();
+    let mut app = support::make_app();
     let session_id = "todo-session".to_string();
     app.session_id = Some(session_id.clone());
     app.show_todo = true;
@@ -264,7 +207,7 @@ fn test_render_todo_panel_unknown_status_uses_dark_gray() {
     // colour directly from the TestBackend buffer without pulling in extra
     // helpers, so this test just confirms the row still renders with the
     // uppercased status prefix and does not panic.
-    let mut app = make_app();
+    let mut app = support::make_app();
     let session_id = "weird-session".to_string();
     app.session_id = Some(session_id.clone());
     app.show_todo = true;
@@ -288,7 +231,7 @@ fn test_render_todo_panel_unknown_status_uses_dark_gray() {
 fn test_render_todo_panel_does_not_mutate_todos() {
     // FR-011: rendering the panel is read-only with respect to the todos
     // table. Re-rendering must not change the stored rows.
-    let mut app = make_app();
+    let mut app = support::make_app();
     let session_id = "immutable-session".to_string();
     app.session_id = Some(session_id.clone());
     app.show_todo = true;
@@ -322,7 +265,7 @@ fn test_render_todo_panel_does_not_mutate_todos() {
 fn test_render_todo_panel_no_session_shows_empty_placeholder() {
     // When there is no active session id, get_todos is not called and the
     // panel falls back to the empty placeholder (no panic).
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = None;
     app.show_todo = true;
     app.current_screen = ScreenMode::Chat;
@@ -338,7 +281,7 @@ fn test_render_todo_panel_no_session_shows_empty_placeholder() {
 fn test_render_todo_panel_sets_todo_area_rect() {
     // FR-015: while the TODO panel is visible, `app.todo_area` must be
     // populated with the panel's rect so mouse hit-testing works.
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("area-session".to_string());
     app.show_todo = true;
     app.current_screen = ScreenMode::Chat;
@@ -354,7 +297,7 @@ fn test_render_todo_panel_sets_todo_area_rect() {
 fn test_render_todo_panel_hidden_clears_todo_area() {
     // When the TODO panel is not visible, todo_area should be reset to an
     // empty rect by the layout split.
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("hidden-session".to_string());
     app.show_todo = false;
     app.current_screen = ScreenMode::Chat;
@@ -374,7 +317,7 @@ fn test_render_todo_panel_scrollbar_appears_when_overflowing() {
     // todos to force overflow, then assert that `todo_max_scroll` is greater
     // than zero (the scrollbar only renders when total_lines > visible_height,
     // which implies max_scroll > 0 for single-line rows).
-    let mut app = make_app();
+    let mut app = support::make_app();
     let session_id = "overflow-session".to_string();
     app.session_id = Some(session_id.clone());
     app.show_todo = true;

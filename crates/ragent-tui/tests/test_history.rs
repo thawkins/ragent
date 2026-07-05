@@ -4,72 +4,14 @@
 //! non-blocking `flush_history_if_due` debounce mechanism introduced in
 //! Milestone 2 of the TUI compliance plan.
 
-use std::sync::Arc;
-
-use ragent_agent::{
-    agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::App;
 use tempfile::TempDir;
+
+#[path = "support/mod.rs"]
+mod support;
 
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
-
-/// Build an [`App`] backed by an in-memory database.
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
 
 // =========================================================================
 // set_history_file
@@ -77,7 +19,7 @@ fn make_app() -> App {
 
 #[test]
 fn test_set_history_file_stores_path() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     assert!(app.history_file_path.is_none());
 
     let path = std::path::PathBuf::from("/tmp/test_history.txt");
@@ -94,7 +36,7 @@ fn test_save_history_writes_entries() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec!["hello".into(), "world".into()];
 
@@ -109,7 +51,7 @@ fn test_save_history_creates_parent_directories() {
     let dir = TempDir::new().unwrap();
     let nested = dir.path().join("a").join("b").join("c").join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(nested.clone());
     app.input_history = vec!["deep".into()];
 
@@ -121,7 +63,7 @@ fn test_save_history_creates_parent_directories() {
 
 #[test]
 fn test_save_history_no_path_is_noop() {
-    let app = make_app();
+    let app = support::make_app();
     // No history_file_path set — save should silently succeed.
     assert!(app.save_history().is_ok());
 }
@@ -131,7 +73,7 @@ fn test_save_history_empty_entries() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     // input_history is already empty by default
 
@@ -146,7 +88,7 @@ fn test_save_history_overwrites_previous() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
 
     app.input_history = vec!["first".into()];
@@ -174,7 +116,7 @@ fn test_save_history_permission_denied() {
 
     let file = readonly_dir.join("subdir").join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file);
     app.input_history = vec!["test".into()];
 
@@ -195,7 +137,7 @@ fn test_load_history_reads_entries() {
     let file = dir.path().join("history.txt");
     std::fs::write(&file, "alpha\nbeta\ngamma").unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file);
 
     app.load_history().unwrap();
@@ -209,7 +151,7 @@ fn test_load_history_filters_empty_lines() {
     let file = dir.path().join("history.txt");
     std::fs::write(&file, "one\n\n\ntwo\n\nthree\n").unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file);
 
     app.load_history().unwrap();
@@ -225,7 +167,7 @@ fn test_load_history_trims_to_100() {
     let entries: Vec<String> = (0..150).map(|i| format!("entry_{i}")).collect();
     std::fs::write(&file, entries.join("\n")).unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file);
 
     app.load_history().unwrap();
@@ -241,7 +183,7 @@ fn test_load_history_missing_file_is_ok() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("nonexistent.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file);
 
     // Should succeed silently — the file simply doesn't exist yet.
@@ -251,7 +193,7 @@ fn test_load_history_missing_file_is_ok() {
 
 #[test]
 fn test_load_history_no_path_is_noop() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     // No history_file_path set.
     assert!(app.load_history().is_ok());
 }
@@ -262,7 +204,7 @@ fn test_load_history_clears_previous_entries() {
     let file = dir.path().join("history.txt");
     std::fs::write(&file, "fresh").unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.input_history = vec!["stale1".into(), "stale2".into()];
     app.set_history_file(file);
 
@@ -285,7 +227,7 @@ fn test_load_history_permission_denied() {
     std::fs::write(&file, "secret").unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
 
     let result = app.load_history();
@@ -304,7 +246,7 @@ fn test_history_round_trip() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec![
         "first command".into(),
@@ -330,7 +272,7 @@ fn test_history_round_trip() {
 
 #[test]
 fn test_dirty_flag_starts_false() {
-    let app = make_app();
+    let app = support::make_app();
     assert!(!app.history_dirty);
     assert!(app.history_save_deadline.is_none());
 }
@@ -340,7 +282,7 @@ fn test_flush_history_if_due_noop_when_clean() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec!["hello".into()];
     // history_dirty is false — flush should be a no-op.
@@ -355,7 +297,7 @@ async fn test_flush_history_if_due_saves_after_deadline() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec!["debounced".into()];
 
@@ -385,7 +327,7 @@ async fn test_flush_history_if_due_skips_before_deadline() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec!["too_early".into()];
 
@@ -406,7 +348,7 @@ async fn test_flush_history_if_due_skips_before_deadline() {
 
 #[tokio::test]
 async fn test_flush_history_if_due_no_path_set() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.history_dirty = true;
     app.history_save_deadline = Some(
         std::time::Instant::now()
@@ -430,7 +372,7 @@ fn test_history_round_trip_unicode() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("history.txt");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.set_history_file(file.clone());
     app.input_history = vec![
         "こんにちは世界".into(),

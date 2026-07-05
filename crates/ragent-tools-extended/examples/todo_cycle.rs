@@ -13,6 +13,10 @@ use ragent_tools_extended::{Tool, ToolContext};
 use ragent_types::event::EventBus;
 use serde_json::json;
 
+// NOTE: DemoStorage is a documented example variant of the shared MockStorage
+// test helper (see tests/support/mock_storage.rs, DUPPLAN.md Milestone H).
+// It is kept here as a self-contained example rather than importing the test
+// support module, so the example can be understood in isolation.
 struct DemoStorage {
     todos: Arc<Mutex<HashMap<String, TodoRow>>>,
 }

@@ -6,10 +6,10 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Return metadata for a file or directory.
 pub struct FileInfoTool;
@@ -111,15 +111,6 @@ impl Tool for FileInfoTool {
                 "permissions": permissions,
             })),
         })
-    }
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }
 

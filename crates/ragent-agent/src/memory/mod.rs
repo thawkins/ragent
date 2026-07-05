@@ -32,6 +32,9 @@ pub mod knowledge_graph;
 pub mod migrate;
 pub mod storage;
 pub mod store;
+
+#[cfg(test)]
+mod test_helpers;
 pub mod visualisation;
 
 pub use block::{BlockScope, MemoryBlock};

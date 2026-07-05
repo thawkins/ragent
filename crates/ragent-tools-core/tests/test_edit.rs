@@ -2,7 +2,7 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/edit.rs`
 //! (T-008 of the testconsolidate spec). The tests exercise `pub(crate)`
-//! helpers (`resolve_path`, `byte_offset_to_line`, `build_snippet`).
+//! helpers (`byte_offset_to_line`, `build_snippet`).
 //! The source module is re-imported via `#[path]` (FR-008); `pub(crate)`
 //! items are visible because the `#[path]` module becomes part of the
 //! test crate. Shims are provided for `super::replace` and `super::{Tool,...}`
@@ -18,10 +18,15 @@ mod file_lock {
     pub use ragent_tools_core::file_lock::lock_file;
 }
 
+mod path_util {
+    pub use ragent_tools_core::path_util::resolve_path;
+}
+
 #[path = "../src/edit.rs"]
 mod edit;
 
-use edit::{build_snippet, byte_offset_to_line, resolve_path};
+use edit::{build_snippet, byte_offset_to_line};
+use ragent_tools_core::path_util::resolve_path;
 use std::path::{Path, PathBuf};
 
 #[test]

@@ -1,71 +1,14 @@
 //! Regression tests for status-bar context and stream byte metrics.
 
-use std::sync::Arc;
+use ragent_agent::event::Event;
+use ragent_tui::app::{ConfiguredProvider, ProviderSource};
 
-use ragent_agent::{
-    StreamConfig, agent,
-    event::{Event, EventBus},
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::{
-    App,
-    app::{ConfiguredProvider, ProviderSource},
-};
-
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 #[test]
 fn test_usage_display_shows_pct_then_context_window_size() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.configured_provider = Some(ConfiguredProvider {
         id: "ollama_cloud".to_string(),
         name: "Ollama Cloud".to_string(),
@@ -83,7 +26,7 @@ fn test_usage_display_shows_pct_then_context_window_size() {
 
 #[test]
 fn test_request_started_resets_inbound_and_sets_outbound_bytes() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
     app.stream_in_bytes = 321;
 
@@ -102,7 +45,7 @@ fn test_request_started_resets_inbound_and_sets_outbound_bytes() {
 
 #[test]
 fn test_compression_finished_updates_last_input_tokens_and_status() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
     app.last_input_tokens = 90_000;
 
@@ -128,7 +71,7 @@ fn test_compression_finished_updates_last_input_tokens_and_status() {
 
 #[test]
 fn test_compression_finished_no_change_updates_status() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
     app.last_input_tokens = 1_000;
 
@@ -146,7 +89,7 @@ fn test_compression_finished_no_change_updates_status() {
 
 #[test]
 fn test_compression_events_ignored_for_other_session() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
 
     app.handle_event(Event::CompressionStarted {

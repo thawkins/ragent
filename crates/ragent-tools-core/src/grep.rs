@@ -17,10 +17,11 @@ use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{Searcher, SearcherBuilder, Sink, SinkMatch};
 use ignore::WalkBuilder;
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Maximum number of matching lines returned before results are truncated.
 const MAX_RESULTS: usize = 500;
@@ -298,15 +299,5 @@ impl Sink for CollectSink<'_> {
 
         results.push(format!("{display_path}:{line_num}:{line}"));
         Ok(true)
-    }
-}
-
-/// Resolves a path string to an absolute [`PathBuf`] relative to the working directory.
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

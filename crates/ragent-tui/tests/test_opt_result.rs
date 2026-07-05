@@ -2,63 +2,8 @@
 
 use std::sync::Arc;
 
-use ragent_agent::{
-    agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::App;
-
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 // =========================================================================
 // poll_pending_opt — no result pending
@@ -66,7 +11,7 @@ fn make_app() -> App {
 
 #[test]
 fn test_poll_pending_opt_noop_when_empty() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let status_before = app.status.clone();
     app.poll_pending_opt();
     // Status shouldn't change when there's no pending result.
@@ -79,7 +24,7 @@ fn test_poll_pending_opt_noop_when_empty() {
 
 #[test]
 fn test_poll_pending_opt_ok_updates_status_and_messages() {
-    let mut app = make_app();
+    let mut app = support::make_app();
 
     // Create a session so append_assistant_text can push messages.
     app.session_id = Some("test-session".to_string());
@@ -103,7 +48,7 @@ fn test_poll_pending_opt_ok_updates_status_and_messages() {
 
 #[test]
 fn test_poll_pending_opt_err_updates_status() {
-    let mut app = make_app();
+    let mut app = support::make_app();
 
     {
         let mut guard = app.opt_result.lock().unwrap();
@@ -132,7 +77,7 @@ fn test_poll_pending_opt_err_updates_status() {
 
 #[test]
 fn test_poll_pending_opt_recovers_from_poisoned_mutex() {
-    let mut app = make_app();
+    let mut app = support::make_app();
 
     // Poison the mutex by panicking inside a lock.
     let opt_result_clone = Arc::clone(&app.opt_result);
@@ -154,7 +99,7 @@ fn test_poll_pending_opt_recovers_from_poisoned_mutex() {
 
 #[test]
 fn test_poll_pending_opt_poisoned_mutex_with_result() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
     // Deposit a result, then poison the mutex.
@@ -184,7 +129,7 @@ fn test_poll_pending_opt_poisoned_mutex_with_result() {
 
 #[test]
 fn test_opt_result_deposit_and_poll_cycle() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
 
     // Simulate multiple cycles of deposit → poll.

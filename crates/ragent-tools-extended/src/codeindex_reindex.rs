@@ -4,21 +4,10 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::codeindex_not_available;
 
 /// Trigger a full re-index of the codebase.
 pub struct CodeIndexReindexTool;
-
-fn not_available() -> ToolOutput {
-    ToolOutput {
-        content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `/codeindex on` to enable it."
-            .to_string(),
-        metadata: Some(json!({
-            "error": "codeindex_disabled",
-            "fallback_tools": []
-        })),
-    }
-}
 
 #[async_trait::async_trait]
 impl Tool for CodeIndexReindexTool {
@@ -47,7 +36,12 @@ impl Tool for CodeIndexReindexTool {
     async fn execute(&self, _input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let idx = match &ctx.code_index {
             Some(idx) => idx,
-            None => return Ok(not_available()),
+            None => {
+                return Ok(codeindex_not_available(
+                    "Use `/codeindex on` to enable it.",
+                    &[],
+                ));
+            }
         };
 
         let result = idx.full_reindex()?;

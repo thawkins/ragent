@@ -4,22 +4,11 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::codeindex_not_available;
 use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Show status and statistics of the codebase index.
 pub struct CodeIndexStatusTool;
-
-fn not_available() -> ToolOutput {
-    ToolOutput {
-        content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `/codeindex on` to enable it."
-            .to_string(),
-        metadata: Some(json!({
-            "error": "codeindex_disabled",
-            "enabled": false
-        })),
-    }
-}
 
 #[async_trait::async_trait]
 impl Tool for CodeIndexStatusTool {
@@ -47,7 +36,12 @@ impl Tool for CodeIndexStatusTool {
     async fn execute(&self, _input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let idx = match &ctx.code_index {
             Some(idx) => idx,
-            None => return Ok(not_available()),
+            None => {
+                return Ok(codeindex_not_available(
+                    "Use `/codeindex on` to enable it.",
+                    &[],
+                ));
+            }
         };
 
         let stats = match with_retry(|| Ok(idx.try_status())).await? {

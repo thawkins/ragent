@@ -1,68 +1,11 @@
 //! Tests for the model-picker thinking-level selector flow.
 
-use std::sync::Arc;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ragent_agent::{
-    agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::App;
 use ragent_tui::app::{ModelPickerEntry, ProviderSetupStep};
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 fn reasoning_entry() -> ModelPickerEntry {
     ModelPickerEntry {
@@ -90,7 +33,7 @@ fn reasoning_entry() -> ModelPickerEntry {
 
 #[test]
 fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
         provider_id: "anthropic".to_string(),
         provider_name: "Anthropic".to_string(),
@@ -121,7 +64,7 @@ fn test_model_selection_opens_thinking_selector_for_reasoning_models() {
 
 #[test]
 fn test_thinking_selector_confirm_persists_selected_level() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
         provider_id: "anthropic".to_string(),
         provider_name: "Anthropic".to_string(),

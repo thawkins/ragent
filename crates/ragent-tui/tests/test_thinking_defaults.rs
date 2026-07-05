@@ -1,67 +1,13 @@
 //! Tests for config-driven thinking defaults in the TUI model picker and status label.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
-use ragent_agent::{
-    agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::App;
+use ragent_agent::agent;
 use ragent_tui::app::{ConfiguredProvider, ProviderSource};
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 struct CwdGuard(std::path::PathBuf);
 
@@ -114,7 +60,7 @@ fn test_models_for_provider_applies_model_and_provider_thinking_defaults() {
     )
     .expect("write config");
 
-    let app = make_app();
+    let app = support::make_app();
     let models = app.models_for_provider("anthropic");
 
     let sonnet = models
@@ -159,7 +105,7 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
     )
     .expect("write config");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.agent_info = agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent");
     // detect_provider() relies on ambient env vars / auto-discovery (e.g. gh
     // CLI tokens) which are not present in CI. Set the configured provider

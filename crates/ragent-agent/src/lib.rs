@@ -20,7 +20,13 @@ pub mod orchestrator;
 pub mod perf;
 pub mod permission;
 pub mod reference;
-pub mod resource;
+/// Process resource limits — bounded concurrency for child process spawns
+/// and tool execution.
+///
+/// Re-exported from `ragent_types::resource` (DUPPLAN.md Milestone E).
+/// Previously duplicated as a local `resource.rs` file; now a single source of
+/// truth lives in `ragent_types::resource`.
+pub use ragent_types::resource;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
 pub mod session;

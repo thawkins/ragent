@@ -6,11 +6,11 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt as _;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Append text to a file.
 pub struct AppendFileTool;
@@ -86,14 +86,5 @@ impl Tool for AppendFileTool {
                 "lines": lines,
             })),
         })
-    }
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

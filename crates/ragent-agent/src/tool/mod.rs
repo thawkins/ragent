@@ -15,14 +15,6 @@ pub use mcp_tool::McpToolWrapper;
 pub mod aliases;
 /// Task cancellation tool.
 pub mod cancel_task;
-pub mod github_issues;
-pub mod github_prs;
-/// GitLab issue tools (list, get, create, comment, close).
-pub mod gitlab_issues;
-/// GitLab merge request tools (list, get, create, merge, approve).
-pub mod gitlab_mrs;
-/// GitLab CI/CD pipeline and job tools.
-pub mod gitlab_pipelines;
 pub mod list_tasks;
 pub mod new_task;
 pub mod plan;

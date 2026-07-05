@@ -26,17 +26,15 @@ use ragent_agent::tool::{Tool, ToolContext};
 use ragent_team::team::{MemberStatus, TeamMember, TeamStore};
 use serde_json::json;
 
+#[path = "support/mod.rs"]
+mod support;
+use support::setup_workspace;
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 /// Create a temp working dir that contains a `.ragent/teams/` directory so
 /// `TeamStore::create(..., project_local = true)` succeeds. Returns the
 /// tempdir (keep it alive for the test duration) and the working-dir path.
-fn setup_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = tmp.path().to_path_buf();
-    std::fs::create_dir_all(dir.join(".ragent/teams")).expect("create .ragent/teams");
-    (tmp, dir)
-}
 
 fn make_ctx(
     working_dir: &std::path::Path,

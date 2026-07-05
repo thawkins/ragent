@@ -4,22 +4,11 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::codeindex_not_available;
 use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Query file-level dependency relationships from the code index.
 pub struct CodeIndexDependenciesTool;
-
-fn not_available() -> ToolOutput {
-    ToolOutput {
-        content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `grep` to search for import/use statements manually."
-            .to_string(),
-        metadata: Some(json!({
-            "error": "codeindex_disabled",
-            "fallback_tools": ["grep"]
-        })),
-    }
-}
 
 #[async_trait::async_trait]
 impl Tool for CodeIndexDependenciesTool {
@@ -60,7 +49,12 @@ impl Tool for CodeIndexDependenciesTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let idx = match &ctx.code_index {
             Some(idx) => idx,
-            None => return Ok(not_available()),
+            None => {
+                return Ok(codeindex_not_available(
+                    "Use `grep` to search for import/use statements manually.",
+                    &["grep"],
+                ));
+            }
         };
 
         let path = input["path"]

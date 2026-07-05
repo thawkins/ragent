@@ -182,16 +182,6 @@ fn html_to_text(html: &str) -> String {
 }
 
 /// Minimal fallback tag stripper for when html2text fails.
-fn strip_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-    result
-}
+///
+/// Re-exported from [`ragent_types::html::strip_tags`] (DUPPLAN.md Milestone F).
+pub use ragent_types::html::strip_tags;

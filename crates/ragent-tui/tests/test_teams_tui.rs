@@ -12,73 +12,17 @@
 //! - `[T]` badge appears when team members are present
 //! - Team events update `active_team` and `team_members`
 
-use std::sync::Arc;
 use std::sync::Mutex;
 
-use ragent_agent::{
-    agent,
-    event::{Event, EventBus},
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
+use ragent_agent::event::Event;
 use ragent_team::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
-use ragent_tui::App;
 use ragent_tui::app::{LogEntry, LogLevel};
 use ratatui::{Terminal, backend::TestBackend};
 
+#[path = "support/mod.rs"]
+mod support;
+
 static CWD_LOCK: Mutex<()> = Mutex::new(());
-
-/// Build an [`App`] backed by an in-memory database.
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
 
 fn unique_team_name(prefix: &str) -> String {
     let nanos = std::time::SystemTime::now()
@@ -92,7 +36,7 @@ fn unique_team_name(prefix: &str) -> String {
 
 #[test]
 fn test_team_status_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team status");
@@ -111,7 +55,7 @@ fn test_team_status_no_active_team() {
 
 #[test]
 fn test_team_status_with_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     // Inject an active team into app state (as TeammateSpawned event would).
@@ -141,7 +85,7 @@ fn test_team_status_with_active_team() {
 
 #[test]
 fn test_team_status_no_args_defaults_to_status() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     // Without args, `/team` should behave like `/team status`
@@ -154,7 +98,7 @@ fn test_team_status_no_args_defaults_to_status() {
 
 #[test]
 fn test_team_create_no_name_shows_usage() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team create");
@@ -179,7 +123,7 @@ fn test_team_show_no_name_lists_all_registered_teams() {
     let _a = TeamStore::create("show-all-a", "lead-a", tmp.path(), true).expect("create a");
     let _b = TeamStore::create("show-all-b", "lead-b", tmp.path(), true).expect("create b");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show");
 
@@ -226,7 +170,7 @@ fn test_team_show_no_name_empty_registry_message() {
     // case the test is skipped with a diagnostic rather than failing, so it
     // only enforces the empty-registry behaviour on machines where the global
     // registry is actually empty.
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show");
 
@@ -264,7 +208,7 @@ fn test_team_show_loads_named_team_details() {
     member.current_task_id = Some("task-007".to_string());
     store.add_member(member).expect("add member");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command("/team show show-team");
 
@@ -296,7 +240,7 @@ fn test_teams_alias_show_loads_named_team_details() {
     let _store =
         TeamStore::create("alias-team", "lead-session", tmp.path(), true).expect("create alias");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command("/teams show alias-team");
 
@@ -320,7 +264,7 @@ fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 
     let _a = TeamStore::create("alias-all-a", "lead-session", tmp.path(), true).expect("create");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command("/teams show");
 
@@ -338,7 +282,7 @@ fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 
 #[test]
 fn test_team_help_shows_command_reference() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team help");
@@ -368,7 +312,7 @@ fn test_team_help_shows_command_reference() {
 
 #[test]
 fn test_teams_alias_help_shows_command_reference() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/teams help");
@@ -383,7 +327,7 @@ fn test_teams_alias_help_shows_command_reference() {
 
 #[test]
 fn test_team_help_creates_session_when_missing() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     assert!(app.session_id.is_none());
 
     app.execute_slash_command("/team help");
@@ -401,7 +345,7 @@ fn test_team_help_creates_session_when_missing() {
 
 #[test]
 fn test_team_close_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team close");
@@ -411,7 +355,7 @@ fn test_team_close_no_active_team() {
 
 #[test]
 fn test_team_close_clears_active_team_state() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
     app.team_members
@@ -430,7 +374,7 @@ fn test_team_close_clears_active_team_state() {
 
 #[test]
 fn test_team_delete_no_name_shows_usage() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team delete");
@@ -456,7 +400,7 @@ fn test_team_delete_removes_existing_team() {
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
     assert!(team_path.exists(), "team dir should exist before delete");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.execute_slash_command(&format!("/team delete {team_name}"));
 
@@ -484,7 +428,7 @@ fn test_team_delete_active_team_clears_session_state() {
         TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
     app.team_members
@@ -520,7 +464,7 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
         TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
     let mut m = TeamMember::new("worker", "tm-001", "general");
@@ -551,7 +495,7 @@ fn test_team_create_sets_active_team() {
     // Create the .ragent directory so project-local teams can be stored.
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team create bp1 my-test-team");
@@ -587,7 +531,7 @@ fn test_team_create_sets_active_team() {
 
 #[test]
 fn test_team_tasks_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team tasks");
@@ -621,7 +565,7 @@ fn test_team_tasks_renders_table_with_status() {
     t2.assigned_to = Some("tm-001".to_string());
     task_store.add_task(t2).expect("add task 2");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
@@ -655,7 +599,7 @@ fn test_team_tasks_renders_table_with_status() {
 
 #[test]
 fn test_team_clear_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team clear");
@@ -685,7 +629,7 @@ fn test_team_clear_removes_tasks_for_active_team() {
     let tasks_path = store.dir.join("tasks.json");
     assert!(tasks_path.exists(), "tasks.json should exist before clear");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
 
@@ -704,7 +648,7 @@ fn test_team_clear_removes_tasks_for_active_team() {
 
 #[test]
 fn test_team_message_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team message alice hello");
@@ -714,7 +658,7 @@ fn test_team_message_no_active_team() {
 
 #[test]
 fn test_team_message_unknown_teammate() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
 
@@ -729,7 +673,7 @@ fn test_team_message_unknown_teammate() {
 
 #[test]
 fn test_team_message_missing_text_shows_usage() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team message");
@@ -745,7 +689,7 @@ fn test_team_message_missing_text_shows_usage() {
 
 #[test]
 fn test_team_cleanup_no_active_team() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team cleanup");
@@ -759,7 +703,7 @@ fn test_team_cleanup_no_active_team() {
 
 #[test]
 fn test_team_cleanup_clears_state() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
     app.team_members
@@ -780,7 +724,7 @@ fn test_team_cleanup_clears_state() {
 
 #[test]
 fn test_team_cleanup_blocked_when_teammates_active() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("busy-team", "s1"));
 
@@ -804,7 +748,7 @@ fn test_team_cleanup_blocked_when_teammates_active() {
 
 #[test]
 fn test_team_unknown_subcommand_shows_error() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.execute_slash_command("/team frobnicate");
@@ -827,7 +771,7 @@ fn test_team_members_drives_t_badge_set() {
     // The [T] badge is rendered in layout_active_agents by checking
     // whether the task's child_session_id is in the teammate_ids set.
     // This test verifies that the set is built from team_members correctly.
-    let mut app = make_app();
+    let mut app = support::make_app();
     let mut m = TeamMember::new("security-reviewer", "tm-001", "general");
     m.session_id = Some("sess-tm-001".to_string());
     app.team_members.push(m);
@@ -848,7 +792,7 @@ fn test_team_members_drives_t_badge_set() {
 
 #[test]
 fn test_event_teammate_spawned_adds_member_and_shows_panel() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
 
@@ -874,7 +818,7 @@ fn test_event_teammate_spawned_adds_member_and_shows_panel() {
 
 #[test]
 fn test_event_teammate_spawned_deduplicates() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
 
@@ -910,7 +854,7 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
     member.status = MemberStatus::Working;
     store.add_member(member).expect("add member");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("sess-lead".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "sess-lead"));
 
@@ -939,7 +883,7 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
     let team_name = unique_team_name("tool-created");
     let _store = TeamStore::create(&team_name, "s1", tmp.path(), true).expect("create team");
 
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("s1".to_string());
 
     app.handle_event(Event::ToolResult {
@@ -970,7 +914,7 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
 
 #[test]
 fn test_event_teammate_idle_updates_status() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "sess-lead".to_string();
     app.session_id = Some(sid.clone());
 
@@ -996,7 +940,7 @@ fn test_event_teammate_idle_updates_status() {
 
 #[test]
 fn test_event_team_task_claimed_sets_current_task() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
     app.team_members
@@ -1018,7 +962,7 @@ fn test_event_team_task_claimed_sets_current_task() {
 
 #[test]
 fn test_event_team_task_completed_clears_current_task() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
     let mut m = TeamMember::new("tm-a", "tm-001", "general");
@@ -1043,7 +987,7 @@ fn test_event_team_task_completed_clears_current_task() {
 
 #[test]
 fn test_event_team_cleaned_up_resets_state() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
     app.active_team = Some(TeamConfig::new("gone-team", "s1"));
@@ -1063,7 +1007,7 @@ fn test_event_team_cleaned_up_resets_state() {
 
 #[test]
 fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1129,7 +1073,7 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
 
 #[test]
 fn test_teams_panel_uses_task_log_fallback_for_steps() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1171,7 +1115,7 @@ fn test_teams_panel_uses_task_log_fallback_for_steps() {
 
 #[test]
 fn test_teams_panel_uses_session_message_fallback_for_steps() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1218,7 +1162,7 @@ fn test_teams_panel_uses_session_message_fallback_for_steps() {
 
 #[test]
 fn test_buttons_render_dimmed_when_unavailable() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1250,7 +1194,7 @@ fn test_buttons_render_dimmed_when_unavailable() {
 
 #[test]
 fn test_buttons_render_with_active_blue_state() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1304,7 +1248,7 @@ fn test_buttons_render_with_active_blue_state() {
 
 #[test]
 fn test_agents_popup_renders_tidy_table_columns() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.current_screen = ragent_tui::app::ScreenMode::Chat;
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
@@ -1357,7 +1301,7 @@ fn test_agents_popup_renders_tidy_table_columns() {
 
 #[test]
 fn test_event_teammate_message_logs_preview() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
 
@@ -1385,7 +1329,7 @@ fn test_event_teammate_message_logs_preview() {
 
 #[test]
 fn test_event_teammate_message_increments_receiver_counter() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
 

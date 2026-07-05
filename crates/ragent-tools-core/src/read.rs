@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::SystemTime;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Maximum number of cached file entries (each entry is an `Arc<String>`).
 const CACHE_MAX_ENTRIES: usize = 256;
@@ -330,15 +331,6 @@ fn format_lines(lines: &[&str], first_num: usize) -> String {
         .join("\n")
 }
 
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
-    }
-}
-
 // ── Section detection ────────────────────────────────────────────────
 
 /// A detected structural section within a file.
@@ -448,6 +440,9 @@ fn detect_markdown_sections(lines: &[&str]) -> Vec<(usize, String)> {
     markers
 }
 
+// NOTE: intentional duplication with `detect_go_sections` — see DUPPLAN.md
+// Milestone J.  Same shape, different language grammar; generalising would
+// obscure intent.
 fn detect_python_sections(lines: &[&str]) -> Vec<(usize, String)> {
     let mut markers = Vec::new();
     for (i, line) in lines.iter().enumerate() {

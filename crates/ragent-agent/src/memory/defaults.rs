@@ -91,18 +91,12 @@ fn global_defaults() -> Vec<(&'static str, &'static str, &'static str)> {
 mod tests {
     use super::*;
     use crate::memory::storage::FileBlockStorage;
-    use tempfile::TempDir;
 
-    fn setup() -> TempDir {
-        tempfile::Builder::new()
-            .prefix("ragent-mem-defaults-")
-            .tempdir()
-            .expect("create temp dir")
-    }
+    use crate::memory::test_helpers::setup_temp_dir;
 
     #[test]
     fn test_seed_creates_defaults() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -119,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_seed_idempotent() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -132,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_seed_does_not_overwrite() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 

@@ -9,7 +9,7 @@
 //! `quick-xml` is used for robust XML parsing.
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use quick_xml::events::Event;
@@ -58,18 +58,8 @@ pub fn detect_format(path: &Path) -> Result<LibreFormat> {
     }
 }
 
-/// Resolves a path string against a working directory.
-///
-/// If `path_str` is absolute, returns it as-is. Otherwise, joins it to `working_dir`.
-#[must_use]
-pub fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
-    }
-}
+/// Re-export of the shared path-resolution helper (DUPPLAN.md Milestone B).
+pub use ragent_tools_core::path_util::resolve_path;
 
 /// Maximum output size in bytes before truncation (100 KB).
 pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;

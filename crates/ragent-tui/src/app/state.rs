@@ -711,7 +711,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "init",
-        description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
+        description: "Analyse the project and write a summary, or create a default config: /init [config]",
     },
     SlashCommandDef {
         trigger: "codeindex",

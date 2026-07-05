@@ -98,6 +98,10 @@ fi
 print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
 
+# VCS tool duplication guard (DUPPLAN.md Milestone A)
+print_step "VCS tool duplication guard..."
+bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"
+
 # PERFPLAN F-5: agent-loop bench regression guard (skipped in --quick mode).
 if [[ "${QUICK_MODE}" != "true" ]]; then
     print_step "Agent-loop bench regression guard..."

@@ -476,14 +476,8 @@ pub fn import_claude_code(
 mod tests {
     use super::*;
     use crate::memory::storage::FileBlockStorage;
-    use tempfile::TempDir;
 
-    fn setup() -> TempDir {
-        tempfile::Builder::new()
-            .prefix("ragent-import-export-")
-            .tempdir()
-            .expect("create temp dir")
-    }
+    use crate::memory::test_helpers::setup_temp_dir;
 
     #[test]
     fn test_export_format_serialisation() {
@@ -544,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_import_cline_directory() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let working_dir = PathBuf::from(dir.path());
         let storage = FileBlockStorage::new();
 
@@ -575,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_import_cline_dry_run() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let working_dir = PathBuf::from(dir.path());
         let storage = FileBlockStorage::new();
 
@@ -596,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_import_claude_code_file() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let working_dir = PathBuf::from(dir.path());
         let storage = FileBlockStorage::new();
 

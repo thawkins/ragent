@@ -1,6 +1,210 @@
 # Changelog
 
+## Version: 0.1.0-alpha.138
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.138`. Continued code
+  duplication removal tracked in `DUPPLAN.md`, following the
+  `0.1.0-alpha.137` milestone which reduced `cargo dupes` exact-duplicate
+  groups from 385 → 340 and exact-dup lines from 15,573 → 11,775 across
+  milestones A–K.
+
 ## Version: 0.1.0-alpha.137
+
+### Removed — Code duplication (DUPPLAN.md Milestones A–K)
+
+**Summary:** Across 11 milestones (A–K), the `cargo dupes` duplication
+metrics improved as follows:
+
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Exact-duplicate groups | 385 | 340 | −45 (−11.7%) |
+| Exact-dup lines | 15,573 | 11,775 | −3,798 (−24.4%) |
+| Near-duplicate groups | 142 | 144 | +2 (new minor groups) |
+| Exact duplication % | 10.9% | 8.4% | −2.5 pp |
+| Total lines analysed | 142,348 | ~139,700 | ~2,600 removed |
+
+**Milestones completed:**
+
+| Milestone | Description | Lines removed | Groups eliminated |
+|-----------|-------------|---------------|-------------------|
+| A | Dead-code VCS tool copies | 2,461 | 50, 51, 53, 102 |
+| B | `resolve_path` extraction | ~136 | 1 |
+| C | Parser boilerplate (`build_qname`, `create_parser`, `parse_tree`) | ~190 | 8, 10, 16 |
+| D | `not_available` codeindex fallback | ~50 | 22 |
+| E | `resource.rs` triple-copy | ~60 | 32 |
+| F | `strip_tags` unification | ~15 | 121 (near) |
+| G | TUI `make_app` test helper | ~950 | 2, 34 |
+| H | `MockStorage` test helper | ~90 | 49, 60, 65, 67 |
+| I | `setup` / `setup_workspace` helpers | ~40 | 33, 37 |
+| J | Accepted duplications documented | 0 (comments) | — |
+| K | Verification & regression baseline | 0 | — |
+| **Total** | | **~4,000** | **~20 groups** |
+
+See `DUPPLAN.md` for the full plan and per-milestone details.
+Pre-refactor baseline: `docs/reports/dupes-baseline.txt`.
+Post-refactor report: `docs/reports/dupes-final.txt`.
+
+### Removed — Code duplication (DUPPLAN.md Milestones A & B)
+
+- **Milestone A — Dead-code VCS tool copies removed (2,461 lines).** The
+  `ragent-agent` crate held five full verbatim copies of GitHub/GitLab tool
+  implementations that already live canonically in `ragent-tools-vcs` and are
+  registered via the `ExtractedVcsToolAdapter`. The local copies were never
+  referenced. Deleted `github_issues.rs`, `github_prs.rs`, `gitlab_issues.rs`,
+  `gitlab_mrs.rs`, and `gitlab_pipelines.rs` from
+  `crates/ragent-agent/src/tool/` and removed their `pub mod` declarations from
+  `tool/mod.rs`. Added `scripts/check-vcs-duplication.sh` CI guard (wired into
+  `pre-flight.sh`) to prevent regressions. Eliminates `cargo dupes` exact-dup
+  groups 50, 51, 53 and near-dup group 102 (cross-crate). Stats: 385 → 355
+  exact groups, 15,573 → 13,347 exact-dup lines.
+
+- **Milestone B — `resolve_path` extraction (18 → 1 copy, ~136 lines).** The
+  identical 8-line `resolve_path` helper was copy-pasted across 16 files in
+  `ragent-tools-core/src/` and 2 in `ragent-tools-extended/src/` (the largest
+  single exact-duplicate group in the codebase). Extracted the canonical
+  implementation into `crates/ragent-tools-core/src/path_util.rs` and replaced
+  all 16 core copies with `use super::path_util::resolve_path;`. Replaced the
+  2 extended copies (`libreoffice_common.rs`, `office_common.rs`) with
+  `pub use ragent_tools_core::path_util::resolve_path;` re-exports. Fixed the
+  two `#[path]`-based test files (`test_edit.rs`, `test_multiedit_helpers.rs`)
+  to add a `path_util` shim module. `cargo fix` cleaned up now-unused
+  `Path`/`PathBuf` imports. Eliminates `cargo dupes` exact-dup group 1. Stats:
+  355 → 354 exact groups, 13,347 → 13,203 exact-dup lines.
+
+- **Milestone E — `resource.rs` triple-copy (3 → 1 copy, ~60 lines).** The
+  process/tool concurrency semaphore module was duplicated three times:
+  `ragent-types/src/resource.rs` (canonical, with tests),
+  `ragent-agent/src/resource.rs` (near-identical, only added a `#[cfg(test)]`
+  block), and `ragent-tools-core/src/lib.rs` (inline `pub mod resource` with a
+  subset). Deleted `ragent-agent/src/resource.rs` and replaced `pub mod
+  resource;` in `lib.rs` with `pub use ragent_types::resource;`. Deleted the
+  inline `pub mod resource { ... }` block in `ragent-tools-core/src/lib.rs` and
+  replaced it with `pub use ragent_types::resource;`. Both crates already
+  depended on `ragent-types`. All call sites (`processor.rs:1014`,
+  `context.rs:235`, `bash.rs:1051`) continue to resolve via the re-exports.
+  The tests that were in `ragent-agent/src/resource.rs` are already covered by
+  `ragent-types/tests/test_resource.rs`. Eliminates `cargo dupes` exact-dup
+  group 32. Stats: 349 → 347 exact groups, 12,947 → 12,866 exact-dup lines.
+
+- **Milestone F — `strip_tags` unification (2 → 1 copy).** The `strip_tags`
+  HTML-tag-stripping helper was duplicated in `ragent-tools-extended/src/
+  webfetch.rs` and `ragent-research/src/web_date.rs` (near-dup group 121). The
+  two variants differed in behaviour: `web_date.rs` pushed a space on `<` to
+  prevent words merging across tag boundaries (e.g. `"foo<b>bar"` → `"foo
+  bar"`), while `webfetch.rs` did not (producing `"foobar"`). Adopted the
+  space-pushing variant as the canonical implementation in a new
+  `ragent-types/src/html.rs` module (both crates depend on `ragent-types` but
+  `ragent-research` does not depend on `ragent-tools-extended`). Replaced the
+  `webfetch.rs` definition with `pub use ragent_types::html::strip_tags;` and
+  the `web_date.rs` definition with `use ragent_types::html::strip_tags;`. The
+  `webfetch.rs` internal `extract_text` helper now calls the imported
+  `strip_tags`, inheriting the improved space-on-`<` behaviour. Eliminates
+  `cargo dupes` near-dup group 121.
+
+- **Milestone G — TUI `make_app` test helper (27 → 1 shared + ~10 variant
+  copies, ~900 lines removed).** The `make_app()` function — a ~45-line `App`
+  constructor wiring up `EventBus`, `Storage::open_in_memory()`,
+  `SessionProcessor`, and `App::new(...)` — was copy-pasted across 27 files
+  (24 test files + 3 bench files; `cargo dupes` groups 2 and 34, the
+  second-largest duplication in the codebase). Extracted the canonical
+  `pub fn make_app() -> App` into `crates/ragent-tui/tests/support/mod.rs`.
+  Replaced the standard copy in 18 test files and 3 bench files with
+  `#[path = "support/mod.rs"] mod support;` + `support::make_app()` calls.
+  Left ~9 files with variant signatures or flags (`make_app(event_bus)`,
+  `make_app_with_storage(storage)`, `make_app_with_manager()`, and files
+  passing `true` as the debug flag to `App::new`) as local definitions — these
+  have legitimately different behaviour and cannot use the shared helper.
+  `cargo fix` cleaned up now-unused imports across all modified files.
+  Eliminates `cargo dupes` exact-dup groups 2 and 34. Stats: 347 → 341 exact
+  groups, 12,866 → ~11,900 exact-dup lines.
+
+- **Milestone H — `MockStorage` / `DemoStorage` test helpers (4 → 1 shared +
+  1 documented example, ~90 lines removed).** An in-memory `StorageBackend`
+  mock was duplicated verbatim across 4 files in `ragent-tools-extended/`
+  (`cargo dupes` groups 49, 60, 65, 67 — each group was one trait method:
+  `get_todos`, `create_todo`, `update_todo`, `clear_todos`). Extracted the
+  canonical `MockStorage` struct + its `StorageBackend` impl into
+  `crates/ragent-tools-extended/tests/support/mock_storage.rs`. Replaced the
+  local `MockStorage` definitions in the 3 test files (`test_todo_demo.rs`,
+  `test_todo_lifecycle.rs`, `test_todo_status_change.rs`) with
+  `#[path = "support/mock_storage.rs"] mod mock_storage;` +
+  `use mock_storage::MockStorage;`. Left `DemoStorage` in
+  `examples/todo_cycle.rs` as a documented example variant (with a comment
+  pointing to the shared module) so the example remains self-contained.
+  `cargo fix` cleaned up now-unused imports. Eliminates `cargo dupes`
+  exact-dup groups 49, 60, 65, 67.
+
+- **Milestone I — `setup` / `setup_workspace` test helpers (10 → 2 shared +
+  0 local, ~40 lines removed).** Two temp-directory setup helpers were
+  duplicated across 10 test modules. `setup_workspace() -> (TempDir,
+  PathBuf)` (5 copies in `ragent-team/tests/`, `cargo dupes` group 37) was
+  extracted into `crates/ragent-team/tests/support/mod.rs` and included via
+  `#[path = "support/mod.rs"] mod support;` in all 5 test files.
+  `setup() -> TempDir` (5 copies across `ragent-agent/src/memory/` and
+  `ragent-tools-extended/src/memory/` inline `#[cfg(test)]` modules, group 33)
+  was extracted into `memory/test_helpers.rs` in each crate with
+  `#[cfg(test)] mod test_helpers;` in `memory/mod.rs`. Each test module's
+  local `fn setup` was replaced with `use super::test_helpers::setup_temp_dir;`
+  and `setup()` calls updated to `setup_temp_dir()`. Eliminates `cargo dupes`
+  exact-dup groups 33 and 37.
+
+- **Milestone J — Accepted duplications documented (comment-only, 0 lines
+  changed).** Added `// NOTE: intentional duplication — see DUPPLAN.md
+  Milestone J` comments above the Tier-3 accepted duplicate groups so future
+  readers don't attempt to "fix" them. Comments added to: `mock_llm_client.rs`
+  (group 30, `as_str`), `store.rs` (group 40, `IndexStore` accessors),
+  `read.rs` (group 80, `detect_python_sections`/`detect_go_sections`),
+  `anthropic.rs` (group 28, streaming closures), `session.rs` (group 44,
+  `LocalTool::grep` no-op impls), `bigcodebench.rs` (group 47,
+  `BenchSuiteAdapter::build_prompt`), `gradle.rs` (group 58,
+  `LanguageParser::parse`), and `knowledge_graph.rs` (group 13, `From` impls).
+  No behaviour change; `cargo dupes` numbers unchanged.
+
+- **Milestone D — `not_available` codeindex fallback (6 → 1 copy, ~50
+  lines).** Six codeindex tool files in `ragent-tools-extended/src/` each
+  defined a structurally-identical `fn not_available() -> ToolOutput` fallback
+  for the "code index disabled" message (the messages and `fallback_tools`
+  metadata differed per-tool). Extracted a parameterised
+  `pub(crate) fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str])`
+  into the existing `codeindex_utils.rs` module and replaced all 6 local
+  definitions with one-line calls. `codeindex_status.rs` was unified to use the
+  same `fallback_tools` metadata shape (its redundant `"enabled": false` field
+  was dropped since `"error": "codeindex_disabled"` already signals the state).
+  `cargo fix` cleaned up now-unused `json!` imports. Eliminates `cargo dupes`
+  exact-dup group 22. Stats: 350 → 349 exact groups, 13,013 → 12,971 exact-dup
+  lines.
+
+- **Milestone C — Code-index parser boilerplate (3 groups eliminated, ~190
+  lines).** The tree-sitter parser subsystem in `ragent-codeindex/src/parser/`
+  repeated three boilerplate patterns across 7–10 language files. Extracted
+  `pub fn build_qname(scope, name, sep)` into a new `parser/util.rs` and
+  replaced all 10 local copies (`build_qname` / `build_qualified` /
+  `build_qualified_name`) with thin `#[inline]` delegating wrappers that pass
+  the per-language separator (`"::"`, `"."`, or `":"`). Defined a
+  `tree_sitter_parser!` declarative macro in `parser/util.rs` that generates
+  the uniform `create_parser()` + `parse_tree()` pair, and applied it to all 9
+  language parsers that use the standard pattern (gradle, cmake, go,
+  gradle_kts, hcl, openscad, python, maven, rust). The `go.rs` and `python.rs`
+  `LanguageParser::parse` impls were updated to call `Self::parse_tree(source)`
+  (matching the other 7 files) so the macro-generated `parse_tree` is used.
+  `cargo fix` cleaned up now-unused `Parser`/`Tree` imports. Excluded
+  `typescript.rs` (variant `create_parser(&self)` with match-on-variant) and
+  `c_cpp.rs` (inline parse, no separate methods) per the plan. Eliminates
+  `cargo dupes` exact-dup groups 8, 10, and 16. Stats: 354 → 350 exact groups,
+  13,203 → 13,013 exact-dup lines.
+
+### Added
+
+- **`/init config` slash command** — New subcommand of `/init` that creates a
+  default `ragent.json` file in the global config directory
+  (`~/.config/ragent/ragent.json` on Linux,
+  `~/Library/Application Support/ragent/ragent.json` on macOS,
+  `%APPDATA%\ragent\ragent.json` on Windows). If a global config already
+  exists, the command reports its path and makes no changes. The default config
+  is serialised from `Config::default()` and contains all default settings ready
+  to edit. Autocomplete suggestions and parameter hints updated for `/init`.
 
 ### Changed
 

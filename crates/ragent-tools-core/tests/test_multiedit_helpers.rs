@@ -2,7 +2,7 @@
 //!
 //! Relocated from the inline `#[cfg(test)]` module in `src/multiedit.rs`
 //! (T-008 of the testconsolidate spec). The tests exercise `pub(crate)`
-//! helpers (`resolve_path`, `format_strict_error`) and the public
+//! helpers (`format_strict_error`) and the public
 //! `FindError` enum. The source module is re-imported via `#[path]`
 //! (FR-008); `pub(crate)` items are visible because the `#[path]` module
 //! becomes part of the test crate. Shims are provided for `super::replace`
@@ -18,10 +18,15 @@ mod file_lock {
     pub use ragent_tools_core::file_lock::lock_file;
 }
 
+mod path_util {
+    pub use ragent_tools_core::path_util::resolve_path;
+}
+
 #[path = "../src/multiedit.rs"]
 mod multiedit;
 
-use multiedit::{format_strict_error, resolve_path};
+use multiedit::format_strict_error;
+use ragent_tools_core::path_util::resolve_path;
 use ragent_tools_core::replace::FindError;
 use std::path::{Path, PathBuf};
 

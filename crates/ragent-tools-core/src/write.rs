@@ -5,9 +5,9 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Writes string content to a file, creating parent directories if they do not exist.
 ///
@@ -94,14 +94,5 @@ impl Tool for WriteTool {
                 "file_count": 1,
             })),
         })
-    }
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

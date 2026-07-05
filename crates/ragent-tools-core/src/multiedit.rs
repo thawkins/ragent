@@ -34,6 +34,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use super::path_util::resolve_path;
 use super::replace::{FindError, find_exact_replacement_range};
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -401,16 +402,6 @@ pub(crate) fn format_strict_error(err: &FindError, edit_index: usize, path: &Pat
             n,
             path.display()
         ),
-    }
-}
-
-/// Resolves a path relative to the working directory, or returns it as-is if absolute.
-pub(crate) fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }
 

@@ -124,6 +124,9 @@ impl App {
             "config" => {
                 vec!["show".to_string()]
             }
+            "init" => {
+                vec!["config".to_string()]
+            }
             _ => Vec::new(),
         }
     }
@@ -571,38 +574,148 @@ impl App {
             },
 
             // ── /init ────────────────────────────────────────────────────────
-            "init" => {
-                let sid = self.session_id.clone().unwrap_or_default();
-                self.append_assistant_text(
-                    "From: /init\n🔍 **Analysing project…**\n\n\
-                     The explore agent will examine the project structure, README, build files, \
-                     and test layout, then write a summary to `.ragent/memory/PROJECT_ANALYSIS.md`. \
-                     Future sessions will automatically load this context."
-                );
-                self.push_log_no_agent(
-                    LogLevel::Info,
-                    "init: starting project analysis".to_string(),
-                );
+            "init" => match args.trim() {
+                // /init config — write a default ragent.json to the global
+                // config directory (~/.config/ragent/ragent.json on Linux,
+                // ~/Library/Application Support/ragent/ragent.json on macOS,
+                // %APPDATA%\ragent\ragent.json on Windows).
+                "config" => {
+                    let config_dir = match dirs::config_dir() {
+                        Some(d) => d.join("ragent"),
+                        None => {
+                            self.append_assistant_text(
+                                "From: /init config\n❌ **Cannot determine the global config \
+                                 directory for this platform.**\n\nPlease set the \
+                                 `XDG_CONFIG_HOME` environment variable (Linux) or ensure \
+                                 the platform config directory is available.",
+                            );
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                "init config: no config dir".to_string(),
+                            );
+                            self.status = "init config: error".to_string();
+                            return;
+                        }
+                    };
+                    let config_path = config_dir.join("ragent.json");
 
-                // Find the explore agent and dispatch the analysis task directly
-                // (no agent-stack push — init runs as a one-shot subagent that writes memory).
-                let explore_agent = self
-                    .cycleable_agents
-                    .iter()
-                    .find(|a| a.name == "explore")
-                    .cloned();
+                    if config_path.exists() {
+                        self.append_assistant_text(&format!(
+                            "From: /init config\n⚠️  **A global config already exists at:**\n\
+                             \x20  `{}`\n\n\
+                             No changes were made. Edit the file directly to modify your \
+                             configuration.",
+                            config_path.display()
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "init config: skipped (file exists at {})",
+                                config_path.display()
+                            ),
+                        );
+                        self.status = "init config: already exists".to_string();
+                        return;
+                    }
 
-                let mut agent = explore_agent.unwrap_or_else(|| {
-                    // Fallback: use current agent with a suitable prompt
-                    self.agent_info.clone()
-                });
+                    // Create the config directory and write a default config.
+                    let default_config = ragent_config::Config::default();
+                    let json = match serde_json::to_string_pretty(&default_config) {
+                        Ok(j) => j,
+                        Err(e) => {
+                            self.append_assistant_text(&format!(
+                                "From: /init config\n❌ **Failed to serialise default config: \
+                                 {}**",
+                                e
+                            ));
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("init config: serialise error: {e}"),
+                            );
+                            self.status = "init config: error".to_string();
+                            return;
+                        }
+                    };
 
-                self.apply_selected_model_and_thinking(&mut agent);
+                    if let Err(e) = std::fs::create_dir_all(&config_dir) {
+                        self.append_assistant_text(&format!(
+                            "From: /init config\n❌ **Failed to create config directory `{}`: \
+                             {}**",
+                            config_dir.display(),
+                            e
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Error,
+                            format!("init config: create dir error: {}", e),
+                        );
+                        self.status = "init config: error".to_string();
+                        return;
+                    }
 
-                // Allow file writes so the agent can call memory_write
-                agent.permission = ragent_agent::agent::default_permissions();
+                    if let Err(e) = std::fs::write(&config_path, &json) {
+                        self.append_assistant_text(&format!(
+                            "From: /init config\n❌ **Failed to write config file `{}`: {}**",
+                            config_path.display(),
+                            e
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Error,
+                            format!("init config: write error: {}", e),
+                        );
+                        self.status = "init config: error".to_string();
+                        return;
+                    }
 
-                let task = "\
+                    self.append_assistant_text(&format!(
+                        "From: /init config\n✅ **Default config created at:**\n\
+                         \x20  `{}`\n\n\
+                         This file contains all default settings. Edit it to configure \
+                         providers, agents, permissions, memory, and more.",
+                        config_path.display()
+                    ));
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!(
+                            "init config: wrote default config to {}",
+                            config_path.display()
+                        ),
+                    );
+                    self.status = "init config: created".to_string();
+                }
+                _ => {
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    self.append_assistant_text(
+                        "From: /init\n🔍 **Analysing project…**\n\n\
+                         The explore agent will examine the project structure, README, build \
+                         files, and test layout, then write a summary to \
+                         `.ragent/memory/PROJECT_ANALYSIS.md`. Future sessions will \
+                         automatically load this context.",
+                    );
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        "init: starting project analysis".to_string(),
+                    );
+
+                    // Find the explore agent and dispatch the analysis task directly
+                    // (no agent-stack push — init runs as a one-shot subagent that writes
+                    // memory).
+                    let explore_agent = self
+                        .cycleable_agents
+                        .iter()
+                        .find(|a| a.name == "explore")
+                        .cloned();
+
+                    let mut agent = explore_agent.unwrap_or_else(|| {
+                        // Fallback: use current agent with a suitable prompt
+                        self.agent_info.clone()
+                    });
+
+                    self.apply_selected_model_and_thinking(&mut agent);
+
+                    // Allow file writes so the agent can call memory_write
+                    agent.permission = ragent_agent::agent::default_permissions();
+
+                    let task = "\
 You are performing a one-time project analysis to build persistent memory for this codebase.\n\n\
 Analyse the following aspects of the project:\n\
 1. Programming language(s), frameworks, and key dependencies\n\
@@ -617,28 +730,29 @@ After your analysis, call the `memory_write` tool with:\n\
 - content: a well-structured markdown summary of your findings\n\n\
 Be concise but comprehensive. This will be injected into future agent sessions automatically.\
 "
-                .to_string();
+                    .to_string();
 
-                let msg = Message::user_text(&sid, &task);
-                self.messages.push(msg);
+                    let msg = Message::user_text(&sid, &task);
+                    self.messages.push(msg);
 
-                let processor = self.session_processor.clone();
-                let flag = Arc::new(AtomicBool::new(false));
-                self.cancel_flag = Some(flag.clone());
-                self.is_processing = true;
-                self.status = "init: analysing project…".to_string();
+                    let processor = self.session_processor.clone();
+                    let flag = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(flag.clone());
+                    self.is_processing = true;
+                    self.status = "init: analysing project…".to_string();
 
-                let event_bus = self.event_bus.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = processor.process_message(&sid, &task, &agent, flag).await {
-                        tracing::warn!(error = %e, "init: analysis failed");
-                        event_bus.publish(ragent_agent::event::Event::AgentError {
-                            session_id: sid,
-                            error: format!("init analysis failed: {e}"),
-                        });
-                    }
-                });
-            }
+                    let event_bus = self.event_bus.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = processor.process_message(&sid, &task, &agent, flag).await {
+                            tracing::warn!(error = %e, "init: analysis failed");
+                            event_bus.publish(ragent_agent::event::Event::AgentError {
+                                session_id: sid,
+                                error: format!("init analysis failed: {e}"),
+                            });
+                        }
+                    });
+                }
+            },
             "clear" => {
                 self.messages.clear();
                 self.scroll_offset = 0;

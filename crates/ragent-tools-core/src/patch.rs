@@ -8,9 +8,10 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Applies a unified diff patch to one or more files.
 pub struct PatchTool;
@@ -423,13 +424,4 @@ fn matches_at(haystack: &[String], needle: &[&str], pos: usize) -> bool {
         .iter()
         .zip(&haystack[pos..])
         .all(|(n, h)| *n == h.as_str())
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
-    }
 }

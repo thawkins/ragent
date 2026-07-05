@@ -990,6 +990,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spec list\|search\|show\|impl\|implement` | Spec lifecycle commands |
 | `/research create\|list\|show\|search\|delete` | Research commands |
 | `/config show` | Show resolved configuration |
+| `/init config` | Create a default `ragent.json` in the global config directory |
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
 | `/mcp discover\|list\|call` | MCP server commands |

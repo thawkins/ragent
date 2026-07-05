@@ -55,6 +55,7 @@ impl MockScenario {
     /// Returns a stable string identifier for the scenario.
     ///
     /// Useful in benchmark reports and log lines.
+    // NOTE: intentional duplication — see DUPPLAN.md Milestone J
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

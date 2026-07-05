@@ -3,7 +3,7 @@
 //! Provides format detection via file extension, an [`OfficeFormat`] enum,
 //! and a path resolution helper shared by all office tool modules.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Result, bail};
 
@@ -65,28 +65,11 @@ pub fn detect_format(path: &Path) -> Result<OfficeFormat> {
     }
 }
 
-/// Resolves a path string against a working directory.
+/// Re-export of the shared path-resolution helper (DUPPLAN.md Milestone B).
 ///
-/// If `path_str` is absolute, it is returned as-is.
-/// Otherwise it is joined to `working_dir`.
-///
-/// # Arguments
-///
-/// * `working_dir` - The base directory for relative paths.
-/// * `path_str` - The path string to resolve.
-///
-/// # Returns
-///
-/// The resolved absolute [`PathBuf`].
-#[must_use]
-pub fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
-    }
-}
+/// See [`ragent_tools_core::path_util::resolve_path`] for the canonical
+/// implementation and argument documentation.
+pub use ragent_tools_core::path_util::resolve_path;
 
 /// Maximum output size in bytes before truncation (100 KB).
 pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;

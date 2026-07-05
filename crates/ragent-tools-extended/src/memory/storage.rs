@@ -197,18 +197,12 @@ pub fn load_legacy_memory(scope: &BlockScope, working_dir: &PathBuf) -> Option<M
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
-    fn setup() -> TempDir {
-        tempfile::Builder::new()
-            .prefix("ragent-mem-block-")
-            .tempdir()
-            .expect("create temp dir")
-    }
+    use super::super::test_helpers::setup_temp_dir;
 
     #[test]
     fn test_save_and_load() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -230,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_load_nonexistent() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -242,7 +236,7 @@ mod tests {
 
     #[test]
     fn test_list_empty() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -252,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_list_multiple() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -268,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_delete() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -286,7 +280,7 @@ mod tests {
 
     #[test]
     fn test_delete_nonexistent() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -296,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_content_limit_enforced() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -316,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_atomic_write() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -335,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_load_all_blocks() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 
@@ -357,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_load_legacy_memory() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let mem_dir = wd.join(".ragent/memory");
         std::fs::create_dir_all(&mem_dir).unwrap();
@@ -370,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_load_legacy_memory_empty() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         // No MEMORY.md exists.
         let result = load_legacy_memory(&BlockScope::Project, &wd);
@@ -379,7 +373,7 @@ mod tests {
 
     #[test]
     fn test_global_scope_save_and_load() {
-        let tmp = setup();
+        let tmp = setup_temp_dir();
         let wd = PathBuf::from(tmp.path());
         let storage = FileBlockStorage::new();
 

@@ -1,64 +1,7 @@
 //! Tests for markdown rendering and ASCII table normalization (Section 4.E).
 
-use std::sync::Arc;
-
-use ragent_agent::{
-    agent,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
-use ragent_tui::App;
-
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 // =========================================================================
 // render_markdown_to_ascii — prefix gating
@@ -66,7 +9,7 @@ fn make_app() -> App {
 
 #[test]
 fn test_render_markdown_no_prefix_passthrough() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let input = "Hello world, **bold** text";
     let output = app.render_markdown_to_ascii(input);
     // Without the "From: /" prefix, text is returned as-is.
@@ -75,7 +18,7 @@ fn test_render_markdown_no_prefix_passthrough() {
 
 #[test]
 fn test_render_markdown_with_prefix_converts() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let input = "From: /help\n\n**Bold** text";
     let output = app.render_markdown_to_ascii(input);
     // html2text converts HTML back to terminal-friendly text.
@@ -95,7 +38,7 @@ fn test_render_markdown_with_prefix_converts() {
 
 #[test]
 fn test_render_markdown_table() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let input = "From: /test\n\n| Name | Value |\n|------|-------|\n| foo | 42 |\n| bar | 99 |";
     let output = app.render_markdown_to_ascii(input);
     // Should contain normalized table with pipes and dashes.
@@ -124,7 +67,7 @@ fn test_render_markdown_table() {
 
 #[test]
 fn test_normalize_tables_non_table_passthrough() {
-    let app = make_app();
+    let app = support::make_app();
     let input = "Hello\nWorld\nNo tables here";
     let output = app.normalize_ascii_tables(input);
     assert_eq!(output, input);
@@ -132,7 +75,7 @@ fn test_normalize_tables_non_table_passthrough() {
 
 #[test]
 fn test_normalize_tables_aligns_columns() {
-    let app = make_app();
+    let app = support::make_app();
     // Simulate html2text output with │ separators
     let input = "│ Name │ Value │\n─────────────────\n│ foo │ 42 │\n│ barbaz │ 1 │";
     let output = app.normalize_ascii_tables(input);
@@ -155,7 +98,7 @@ fn test_normalize_tables_aligns_columns() {
 
 #[test]
 fn test_normalize_tables_adds_borders() {
-    let app = make_app();
+    let app = support::make_app();
     // Table with │ separators — normalize should add +---+---+ borders.
     let input = "│ A │ B │\n──────────\n│ 1 │ 2 │";
     let output = app.normalize_ascii_tables(input);
@@ -175,14 +118,14 @@ fn test_normalize_tables_adds_borders() {
 
 #[test]
 fn test_render_markdown_empty_input() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let output = app.render_markdown_to_ascii("");
     assert_eq!(output, "");
 }
 
 #[test]
 fn test_render_markdown_code_block() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let input = "From: /test\n\n```rust\nfn main() {}\n```";
     let output = app.render_markdown_to_ascii(input);
     assert!(
@@ -193,7 +136,7 @@ fn test_render_markdown_code_block() {
 
 #[test]
 fn test_render_markdown_list() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     let input = "From: /test\n\n- Item one\n- Item two\n- Item three";
     let output = app.render_markdown_to_ascii(input);
     assert!(
@@ -208,7 +151,7 @@ fn test_render_markdown_list() {
 
 #[test]
 fn test_render_markdown_html2text_panic_fallback() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     // Construct HTML that triggers the html2text overflow in text_renderer.rs:509.
     // A deeply nested preformatted block with a width smaller than its internal
     // line accounting can cause `self.width - self.line.len` to underflow.

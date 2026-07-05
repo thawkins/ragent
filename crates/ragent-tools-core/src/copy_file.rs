@@ -5,9 +5,9 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Copy a file to a new location.
 pub struct CopyFileTool;
@@ -74,14 +74,5 @@ impl Tool for CopyFileTool {
                 "bytes": bytes,
             })),
         })
-    }
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

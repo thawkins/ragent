@@ -38,9 +38,10 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::SystemTime;
 
+use super::path_util::resolve_path;
 use super::replace::{FindError, find_exact_replacement_range};
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -424,17 +425,6 @@ pub(crate) fn byte_offset_to_line(content: &str, offset: usize) -> usize {
         }
     }
     line
-}
-
-/// Resolves a path relative to the working directory, or returns it as-is if
-/// absolute.
-pub(crate) fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
-    }
 }
 
 // ── Unit tests ─────────────────────────────────────────────────────────��─────

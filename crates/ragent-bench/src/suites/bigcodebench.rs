@@ -12,6 +12,8 @@ pub(super) static ADAPTER: BigCodeBenchAdapter = BigCodeBenchAdapter;
 
 pub(super) struct BigCodeBenchAdapter;
 
+// NOTE: intentional duplication — see DUPPLAN.md Milestone J.
+// Per-suite prompt builders; identical shape is coincidental.
 impl BenchSuiteAdapter for BigCodeBenchAdapter {
     fn suite_id(&self) -> &'static str {
         "bigcodebench"

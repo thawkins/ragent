@@ -246,14 +246,8 @@ pub fn search_blocks_cross_project(
 mod tests {
     use super::*;
     use crate::memory::storage::FileBlockStorage;
-    use tempfile::TempDir;
 
-    fn setup() -> TempDir {
-        tempfile::Builder::new()
-            .prefix("ragent-cross-project-")
-            .tempdir()
-            .expect("create temp dir")
-    }
+    use super::super::test_helpers::setup_temp_dir;
 
     fn config_enabled() -> CrossProjectConfig {
         CrossProjectConfig {
@@ -281,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_resolve_project_block_when_cross_disabled() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -304,7 +298,7 @@ mod tests {
             .prefix("ragent-global-test-")
             .tempdir()
             .expect("create temp home");
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -332,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_resolve_project_overrides_global() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -350,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_resolve_no_override_coexists() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -368,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_list_labels_cross_project() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -382,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_list_labels_disabled_only_project() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -398,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_search_blocks_cross_project() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 
@@ -422,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_search_blocks_project_override_shadows() {
-        let dir = setup();
+        let dir = setup_temp_dir();
         let storage = FileBlockStorage::new();
         let working_dir = PathBuf::from(dir.path());
 

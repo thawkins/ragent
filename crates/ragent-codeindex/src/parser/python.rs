@@ -6,7 +6,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for the Python programming language.
 pub struct PythonParser {
@@ -19,14 +19,11 @@ impl PythonParser {
         Self { _private: () }
     }
 
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_python::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .context("failed to load Python grammar")?;
-        Ok(parser)
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_python::LANGUAGE,
+        "failed to load Python grammar",
+        "tree-sitter parse returned None"
+    );
 }
 
 impl LanguageParser for PythonParser {
@@ -35,10 +32,7 @@ impl LanguageParser for PythonParser {
     }
 
     fn parse(&self, source: &[u8]) -> Result<ParsedFile> {
-        let mut parser = Self::create_parser()?;
-        let tree = parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None")?;
+        let tree = Self::parse_tree(source)?;
         let root = tree.root_node();
 
         let mut ctx = ExtractCtx {
@@ -420,12 +414,12 @@ fn child_by_field_text(ctx: &ExtractCtx, node: Node, field: &str) -> Option<Stri
         .map(|n| ctx.node_text(n).to_string())
 }
 
+/// Build a qualified name from the current scope and a local name.
+///
+/// Delegates to [`super::util::build_qname`] with the `.` separator.
+#[inline]
 fn build_qualified(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}.{}", scope.join("."), name)
-    }
+    super::util::build_qname(scope, name, ".")
 }
 
 fn extend_scope(scope: &[String], name: &str) -> Vec<String> {

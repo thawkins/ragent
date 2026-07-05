@@ -7,9 +7,9 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use similar::{ChangeTag, TextDiff};
-use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Show a unified diff between two files or text strings.
 pub struct DiffFilesTool;
@@ -130,14 +130,5 @@ impl Tool for DiffFilesTool {
             content: output,
             metadata: Some(json!({ "changes": changes })),
         })
-    }
-}
-
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

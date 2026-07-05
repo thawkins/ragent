@@ -166,6 +166,8 @@ pub struct Relationship {
     pub created_at: String,
 }
 
+// NOTE: intentional duplication — see DUPPLAN.md Milestone J.
+// Per-type conversions; cannot be genericised.
 impl From<crate::storage::KgEntityRow> for Entity {
     /// Map a storage-row entity into the agent's [`Entity`] type.
     fn from(row: crate::storage::KgEntityRow) -> Self {

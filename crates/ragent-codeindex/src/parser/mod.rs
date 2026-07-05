@@ -15,6 +15,7 @@ pub mod openscad;
 pub mod python;
 pub mod rust;
 pub mod typescript;
+pub mod util;
 
 use crate::types::{ImportEntry, Symbol, SymbolRef};
 use anyhow::Result;

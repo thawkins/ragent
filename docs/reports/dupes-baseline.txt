@@ -1,0 +1,25 @@
+# DUPPLAN Baseline — Pre-Refactor Duplication Report
+# Generated at the start of the DUPPLAN.md work session.
+#
+# These are the ORIGINAL statistics before any milestone work.
+# Captured via: cargo dupes stats --min-lines 6 --threshold 0.85 --exclude "target/*"
+
+Duplication Statistics (BASELINE — before DUPPLAN milestones)
+================================================================
+Total code units analyzed: 5141
+
+Exact duplicates: 385 groups (1108 code units)
+Near duplicates:  142 groups (332 code units)
+
+Duplicated lines (exact): 15573
+Duplicated lines (near):  5963
+Duplication: 10.9% exact, 4.2% near (of 142,348 total lines)
+
+Breakdown by location:
+  /src/   (production): 607 exact hits, 198 near hits
+  /tests/ (test code):   489 exact hits, 135 near hits
+  /benches/ (benchmarks): 55 exact hits, 6 near hits
+
+Target groups to eliminate (from DUPPLAN.md):
+  Exact: 1, 2, 8, 10, 16, 22, 32, 34, 49, 50, 51, 53, 60, 65, 67
+  Near:  102, 121

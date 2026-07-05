@@ -586,12 +586,12 @@ fn field_text(ctx: &Ctx, node: Node, field: &str) -> Option<String> {
         .map(|n| ctx.text(n).to_string())
 }
 
+/// Build a qualified name from the current scope and a local name.
+///
+/// Delegates to [`super::util::build_qname`] with the `::` separator.
+#[inline]
 fn build_qname(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}::{}", scope.join("::"), name)
-    }
+    super::util::build_qname(scope, name, "::")
 }
 
 fn ext_scope(scope: &[String], name: &str) -> Vec<String> {

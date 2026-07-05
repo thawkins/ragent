@@ -7,6 +7,9 @@
 // and memory_replace). Extracted in WSPLAN Milestone 2.
 pub mod replace;
 
+// Shared path-resolution helper (DUPPLAN.md Milestone B).
+pub mod path_util;
+
 // File operation tools
 pub mod append_file;
 pub mod copy_file;
@@ -63,30 +66,11 @@ pub mod sanitize {
 }
 
 /// Minimal process resource gate used by shell-based tools.
-pub mod resource {
-    use std::sync::LazyLock;
-
-    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-
-    /// Maximum number of concurrent child processes the core tools may spawn.
-    pub const MAX_CONCURRENT_PROCESSES: usize = 16;
-
-    static PROCESS_SEMAPHORE: LazyLock<std::sync::Arc<Semaphore>> =
-        LazyLock::new(|| std::sync::Arc::new(Semaphore::new(MAX_CONCURRENT_PROCESSES)));
-
-    /// Acquire a permit to spawn a child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only if the semaphore has been closed.
-    pub async fn acquire_process_permit() -> anyhow::Result<OwnedSemaphorePermit> {
-        PROCESS_SEMAPHORE
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| anyhow::anyhow!("process semaphore closed"))
-    }
-}
+///
+/// Re-exported from `ragent_types::resource` (DUPPLAN.md Milestone E).
+/// Previously duplicated as an inline module; now a single source of truth
+/// lives in `ragent_types::resource`.
+pub use ragent_types::resource;
 
 /// The result of a tool execution, including optional structured metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

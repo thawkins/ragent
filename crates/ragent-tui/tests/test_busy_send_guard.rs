@@ -5,72 +5,19 @@ use std::sync::Arc;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 
-use ragent_agent::{
-    StreamConfig, agent,
-    event::Event,
-    event::EventBus,
-    permission::PermissionChecker,
-    provider,
-    session::{SessionManager, processor::SessionProcessor},
-    storage::Storage,
-    tool,
-};
+use ragent_agent::event::Event;
 use ragent_tui::{
     App,
     input::{InputAction, handle_key},
     layout,
 };
 
-fn make_app() -> App {
-    let event_bus = Arc::new(EventBus::default());
-    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
-    let provider_registry = Arc::new(provider::create_default_registry());
-    let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
-    let session_processor = Arc::new(SessionProcessor {
-        session_manager,
-        provider_registry: provider_registry.clone(),
-        tool_registry,
-        permission_checker,
-        event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: StreamConfig::default(),
-        active_spec: tokio::sync::RwLock::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        cached_tool_definitions: parking_lot::RwLock::new(None),
-        cached_tool_names: parking_lot::RwLock::new(None),
-        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
-        cached_config: parking_lot::Mutex::new(None),
-        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-        auto_approve: false,
-        system_prompt_cache: parking_lot::RwLock::new(None),
-        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
-            std::collections::HashMap::new(),
-        )),
-    });
-    let agent_info =
-        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
-    App::new(
-        event_bus,
-        storage,
-        provider_registry,
-        session_processor,
-        agent_info,
-        false,
-        std::path::PathBuf::new(),
-    )
-}
+#[path = "support/mod.rs"]
+mod support;
 
 #[test]
 fn test_enter_is_ignored_while_processing() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.is_processing = true;
     app.input = "hello".to_string();
 
@@ -83,7 +30,7 @@ fn test_enter_is_ignored_while_processing() {
 
 #[test]
 fn test_enter_still_submits_when_idle() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.input = "hello".to_string();
 
     let action = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -96,7 +43,7 @@ fn test_enter_still_submits_when_idle() {
 
 #[test]
 fn test_plain_char_is_ignored_while_processing() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.is_processing = true;
     app.input = "draft".to_string();
 
@@ -115,7 +62,7 @@ fn test_plain_char_is_ignored_while_processing() {
 
 #[test]
 fn test_key_release_events_are_ignored() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.input = "draft".to_string();
 
     let action = handle_key(
@@ -134,7 +81,7 @@ fn test_key_release_events_are_ignored() {
 
 #[test]
 fn test_agent_error_clears_processing_so_input_unblocks() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.session_id = Some("session-1".to_string());
     app.is_processing = true;
     app.cancel_flag = Some(Arc::new(std::sync::atomic::AtomicBool::new(false)));
@@ -175,7 +122,7 @@ fn render_and_get_input_border_color(app: &mut App) -> Color {
 
 #[test]
 fn test_input_border_is_white_when_idle() {
-    let mut app = make_app();
+    let mut app = support::make_app();
 
     let color = render_and_get_input_border_color(&mut app);
 
@@ -184,7 +131,7 @@ fn test_input_border_is_white_when_idle() {
 
 #[test]
 fn test_input_border_is_red_when_busy() {
-    let mut app = make_app();
+    let mut app = support::make_app();
     app.is_processing = true;
 
     let color = render_and_get_input_border_color(&mut app);

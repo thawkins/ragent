@@ -1387,7 +1387,9 @@ mod tests {
         #[derive(Default)]
         struct SingleLocalTool;
         #[async_trait::async_trait]
-        impl LocalTool for SingleLocalTool {
+        // NOTE: intentional duplication — see DUPPLAN.md Milestone J.
+// Trait impls for different mock types; cannot be deduplicated.
+impl LocalTool for SingleLocalTool {
             async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
                 Ok(Vec::new())
             }

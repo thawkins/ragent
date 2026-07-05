@@ -1,0 +1,2259 @@
+Duplication Statistics
+=====================
+Total code units analyzed: 5008
+
+Exact duplicates: 340 groups (937 code units)
+Near duplicates:  144 groups (337 code units)
+
+Duplicated lines (exact): 11777
+Duplicated lines (near):  6012
+Duplication: 8.4% exact, 4.3% near (of 139,690 total lines)
+
+Exact Duplicates
+================
+
+Group 1 (fingerprint: 4cf56b680369e04d, 12 members):
+  - test_slash_opt_co_star_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1920-1935
+  - test_slash_opt_crispe_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1938-1950
+  - test_slash_opt_cot_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1953-1966
+  - test_slash_opt_draw_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1969-1981
+  - test_slash_opt_rise_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1984-1996
+  - test_slash_opt_meta_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:1999-2011
+  - test_slash_opt_variational_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:2014-2026
+  - test_slash_opt_qstar_alias_works (function) at crates/ragent-tui/tests/test_slash_commands.rs:2029-2042
+  - test_slash_opt_openai_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:2045-2057
+  - test_slash_opt_claude_formats_prompt (function) at crates/ragent-tui/tests/test_slash_commands.rs:2060-2072
+  - test_slash_opt_microsoft_alias_azure (function) at crates/ragent-tui/tests/test_slash_commands.rs:2075-2088
+  - test_slash_opt_o1_alias_works (function) at crates/ragent-tui/tests/test_slash_commands.rs:2152-2165
+
+Group 2 (fingerprint: a58df4e8c2843a93, 12 members):
+  - test_substitute_arguments_all (function) at crates/ragent-agent/tests/inline/skill_args.rs:58-66
+  - test_substitute_arguments_multi_word (function) at crates/ragent-agent/tests/inline/skill_args.rs:69-77
+  - test_substitute_indexed_args (function) at crates/ragent-agent/tests/inline/skill_args.rs:80-88
+  - test_substitute_indexed_out_of_bounds (function) at crates/ragent-agent/tests/inline/skill_args.rs:91-99
+  - test_substitute_positional_shorthand (function) at crates/ragent-agent/tests/inline/skill_args.rs:102-110
+  - test_substitute_session_id (function) at crates/ragent-agent/tests/inline/skill_args.rs:119-127
+  - test_substitute_skill_dir (function) at crates/ragent-agent/tests/inline/skill_args.rs:130-138
+  - test_substitute_all_variable_types (function) at crates/ragent-agent/tests/inline/skill_args.rs:141-152
+  - test_substitute_no_placeholders (function) at crates/ragent-agent/tests/inline/skill_args.rs:155-163
+  - test_substitute_empty_args (function) at crates/ragent-agent/tests/inline/skill_args.rs:166-174
+  - test_substitute_quoted_args (function) at crates/ragent-agent/tests/inline/skill_args.rs:177-185
+  - test_substitute_dollar_not_variable (function) at crates/ragent-agent/tests/inline/skill_args.rs:188-193
+
+Group 3 (fingerprint: 7a5a553c3fb4cab0, 11 members):
+  - mouse_down (function) at crates/ragent-tui/tests/test_memory_panel.rs:95-102
+  - mouse_drag (function) at crates/ragent-tui/tests/test_memory_panel.rs:104-111
+  - mouse_up (function) at crates/ragent-tui/tests/test_memory_panel.rs:113-120
+  - right_click (function) at crates/ragent-tui/tests/test_memory_panel.rs:122-129
+  - mouse_down (function) at crates/ragent-tui/tests/test_scrolling.rs:268-275
+  - mouse_drag (function) at crates/ragent-tui/tests/test_scrolling.rs:277-284
+  - mouse_up (function) at crates/ragent-tui/tests/test_scrolling.rs:286-293
+  - mouse_down (function) at crates/ragent-tui/tests/test_text_selection.rs:78-85
+  - mouse_drag (function) at crates/ragent-tui/tests/test_text_selection.rs:87-94
+  - mouse_up (function) at crates/ragent-tui/tests/test_text_selection.rs:96-103
+  - right_click (function) at crates/ragent-tui/tests/test_text_selection.rs:105-112
+
+Group 4 (fingerprint: 27e60e13ef742b33, 10 members):
+  - test_input_summary_read_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:14-19
+  - test_input_summary_write_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:22-27
+  - test_input_summary_list_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:30-35
+  - test_input_summary_bash_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:38-43
+  - test_input_summary_glob_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:70-75
+  - test_input_summary_edit_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:78-83
+  - test_input_summary_edit_tool_canonical_file_path (function) at crates/ragent-tui/tests/test_tool_display.rs:86-101
+  - test_input_summary_patch_tool_canonical_file_path (function) at crates/ragent-tui/tests/test_tool_display.rs:104-116
+  - test_input_summary_webfetch_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:119-124
+  - test_input_summary_websearch_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:127-135
+
+Group 5 (fingerprint: 38c9baa7ad4cf14a, 10 members):
+  - crlf_normalised_match (function) at crates/ragent-tools-core/tests/test_replace.rs:35-40
+  - trailing_whitespace_match (function) at crates/ragent-tools-core/tests/test_replace.rs:43-48
+  - blank_line_trailing_in_needle (function) at crates/ragent-tools-core/tests/test_replace.rs:168-173
+  - blank_line_leading_in_file (function) at crates/ragent-tools-core/tests/test_replace.rs:176-181
+  - blank_line_trailing_in_file (function) at crates/ragent-tools-core/tests/test_replace.rs:184-189
+  - blank_line_both_edges_differ (function) at crates/ragent-tools-core/tests/test_replace.rs:192-197
+  - final_newline_file_has_needle_lacks (function) at crates/ragent-tools-core/tests/test_replace.rs:200-205
+  - final_newline_needle_has_file_lacks (function) at crates/ragent-tools-core/tests/test_replace.rs:208-213
+  - final_newline_crlf_disagreement (function) at crates/ragent-tools-core/tests/test_replace.rs:216-221
+  - collapsed_disambiguates_by_whitespace_proximity (function) at crates/ragent-tools-core/tests/test_replace.rs:224-229
+
+Group 6 (fingerprint: ab6207f015e41b42, 10 members):
+  - test_score_token_count_short (function) at crates/ragent-llm/tests/inline/router_classifier.rs:22-28
+  - test_score_vocabulary_complexity_simple (function) at crates/ragent-llm/tests/inline/router_classifier.rs:41-47
+  - test_score_domain_specificity_general (function) at crates/ragent-llm/tests/inline/router_classifier.rs:78-84
+  - test_score_ambiguity_specific (function) at crates/ragent-llm/tests/inline/router_classifier.rs:98-104
+  - test_score_reasoning_depth_simple (function) at crates/ragent-llm/tests/inline/router_classifier.rs:139-145
+  - test_score_creativity_level_factual (function) at crates/ragent-llm/tests/inline/router_classifier.rs:159-165
+  - test_score_emotional_complexity_neutral (function) at crates/ragent-llm/tests/inline/router_classifier.rs:178-184
+  - test_score_multimodality_text_only (function) at crates/ragent-llm/tests/inline/router_classifier.rs:187-193
+  - test_score_knowledge_recency_evergreen (function) at crates/ragent-llm/tests/inline/router_classifier.rs:227-233
+  - test_score_mathematical_complexity_no_math (function) at crates/ragent-llm/tests/inline/router_classifier.rs:268-274
+
+Group 7 (fingerprint: b4ae04039f9014a4, 9 members):
+  - test_score_vocabulary_complexity_complex (function) at crates/ragent-llm/tests/inline/router_classifier.rs:50-58
+  - test_score_syntax_complexity_nested (function) at crates/ragent-llm/tests/inline/router_classifier.rs:67-75
+  - test_score_domain_specificity_medical (function) at crates/ragent-llm/tests/inline/router_classifier.rs:87-95
+  - test_score_ambiguity_open (function) at crates/ragent-llm/tests/inline/router_classifier.rs:107-115
+  - test_score_reasoning_depth_proof (function) at crates/ragent-llm/tests/inline/router_classifier.rs:148-156
+  - test_score_creativity_level_creative (function) at crates/ragent-llm/tests/inline/router_classifier.rs:168-175
+  - test_score_multimodality_with_image (function) at crates/ragent-llm/tests/inline/router_classifier.rs:196-203
+  - test_score_knowledge_recency_current (function) at crates/ragent-llm/tests/inline/router_classifier.rs:236-244
+  - test_score_mathematical_complexity_proof (function) at crates/ragent-llm/tests/inline/router_classifier.rs:277-285
+
+Group 8 (fingerprint: c989504cc04e5328, 9 members):
+  - test_protected_route_rejects_wrong_token (function) at crates/ragent-server/tests/test_integration.rs:90-99
+  - test_protected_route_rejects_non_bearer_scheme (function) at crates/ragent-server/tests/test_integration.rs:102-111
+  - test_protected_route_accepts_valid_token (function) at crates/ragent-server/tests/test_integration.rs:114-124
+  - test_auth_accepts_lowercase_bearer (function) at crates/ragent-server/tests/test_integration.rs:252-261
+  - test_auth_accepts_uppercase_bearer (function) at crates/ragent-server/tests/test_integration.rs:264-273
+  - test_auth_accepts_mixed_case_bearer (function) at crates/ragent-server/tests/test_integration.rs:276-285
+  - test_memory_blocks_list_empty (function) at crates/ragent-server/tests/test_memory_api.rs:85-94
+  - test_memory_search_empty_results (function) at crates/ragent-server/tests/test_memory_api.rs:108-117
+  - test_memory_block_get_not_found (function) at crates/ragent-server/tests/test_memory_api.rs:224-233
+
+Group 9 (fingerprint: 4aa1a05a4b11c5b8, 8 members):
+  - init_apps (function) at crates/ragent-bench/src/data.rs:1356-1364
+  - init_ds1000 (function) at crates/ragent-bench/src/data.rs:1366-1374
+  - init_repobench (function) at crates/ragent-bench/src/data.rs:1397-1405
+  - init_crosscodeeval (function) at crates/ragent-bench/src/data.rs:1407-1415
+  - init_swebench_lite (function) at crates/ragent-bench/src/data.rs:1417-1425
+  - init_swebench_verified (function) at crates/ragent-bench/src/data.rs:1427-1435
+  - init_livecodebench (function) at crates/ragent-bench/src/data.rs:1437-1445
+  - init_bigcodebench (function) at crates/ragent-bench/src/data.rs:1447-1455
+
+Group 10 (fingerprint: dca077a6baedbc58, 8 members):
+  - test_hardwired_team_tool_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:25-42
+  - test_hardwired_task_suffix_tool_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:45-62
+  - test_hardwired_ask_user_tool_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:65-82
+  - test_hardwired_todo_read_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:85-102
+  - test_hardwired_todo_write_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:105-122
+  - test_hardwired_wait_tasks_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:125-142
+  - test_hardwired_task_complete_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:145-165
+  - test_hardwired_list_tasks_is_auto_approved (function) at crates/ragent-agent/tests/session_processor.rs:168-188
+
+Group 11 (fingerprint: 354c46bfad560c47, 7 members):
+  - test_ambiguity_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:230-237
+  - test_reasoning_depth_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:240-247
+  - test_creativity_level_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:250-257
+  - test_emotional_complexity_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:260-267
+  - test_multimodality_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:270-277
+  - test_knowledge_recency_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:280-287
+  - test_mathematical_complexity_convenience_matches_lower (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:290-297
+
+Group 12 (fingerprint: cd92444416110c88, 7 members):
+  - test_function (function) at crates/ragent-codeindex/src/parser/go.rs:432-438
+  - test_interface (function) at crates/ragent-codeindex/src/parser/go.rs:477-489
+  - test_constants (function) at crates/ragent-codeindex/src/parser/go.rs:509-523
+  - test_interface (function) at crates/ragent-codeindex/src/parser/java.rs:544-554
+  - test_interface (function) at crates/ragent-codeindex/src/parser/typescript.rs:715-726
+  - test_arrow_function (function) at crates/ragent-codeindex/src/parser/typescript.rs:736-742
+  - test_enum_ts (function) at crates/ragent-codeindex/src/parser/typescript.rs:779-794
+
+Group 13 (fingerprint: 09ee86e792c43ae8, 6 members):
+  - test_reasoning_delta (function) at crates/ragent-server/tests/test_event_to_sse.rs:64-71
+  - test_agent_restore_requested (function) at crates/ragent-server/tests/test_event_to_sse.rs:280-287
+  - test_agent_error (function) at crates/ragent-server/tests/test_event_to_sse.rs:290-297
+  - test_session_aborted (function) at crates/ragent-server/tests/test_event_to_sse.rs:364-371
+  - test_subagent_cancelled (function) at crates/ragent-server/tests/test_event_to_sse.rs:407-414
+  - test_team_cleaned_up (function) at crates/ragent-server/tests/test_event_to_sse.rs:484-491
+
+Group 14 (fingerprint: 65e6a6a20717f578, 6 members):
+  - leading_whitespace_stripped_match (function) at crates/ragent-tools-core/tests/test_replace.rs:122-135
+  - leading_whitespace_match_preserves_relative_indent (function) at crates/ragent-tools-core/tests/test_replace.rs:138-145
+  - collapsed_whitespace_match (function) at crates/ragent-tools-core/tests/test_replace.rs:148-155
+  - reindent_preserves_relative_indentation_nested (function) at crates/ragent-tools-core/tests/test_replace.rs:242-249
+  - reindent_tab_vs_space_preserves_relative (function) at crates/ragent-tools-core/tests/test_replace.rs:252-259
+  - reindent_blank_lines_left_untouched (function) at crates/ragent-tools-core/tests/test_replace.rs:262-269
+
+Group 15 (fingerprint: 8630af7191060707, 6 members):
+  - tolerates_whitespace_around_name (function) at crates/ragent-research/src/plan_dep.rs:238-243
+  - tolerates_backticked_names (function) at crates/ragent-research/src/plan_dep.rs:246-251
+  - ignores_lines_inside_fenced_code_blocks (function) at crates/ragent-research/src/plan_dep.rs:262-273
+  - strips_inline_comments (function) at crates/ragent-research/src/plan_dep.rs:276-281
+  - is_case_sensitive_and_only_matches_lowercase_prefix (function) at crates/ragent-research/src/plan_dep.rs:284-294
+  - parses_inside_md_with_realistic_layout (function) at crates/ragent-research/src/plan_dep.rs:399-419
+
+Group 16 (fingerprint: b6cc541a1d6d3a3a, 6 members):
+  - test_tool_family_names_github (function) at crates/ragent-agent/tests/test_tool_visibility.rs:31-36
+  - test_tool_family_names_gitlab (function) at crates/ragent-agent/tests/test_tool_visibility.rs:39-44
+  - test_tool_family_names_codeindex (function) at crates/ragent-agent/tests/test_tool_visibility.rs:47-52
+  - test_tool_family_names_teams (function) at crates/ragent-agent/tests/test_tool_visibility.rs:55-60
+  - test_tool_family_names_agents (function) at crates/ragent-agent/tests/test_tool_visibility.rs:63-68
+  - test_tool_family_names_plan (function) at crates/ragent-agent/tests/test_tool_visibility.rs:71-76
+
+Group 17 (fingerprint: c6d528189de1eaeb, 6 members):
+  - <GradleParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/gradle.rs:42-62
+  - <GoParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/go.rs:35-55
+  - <GradleKtsParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/gradle_kts.rs:38-58
+  - <HclParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/hcl.rs:48-68
+  - <OpenScadParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/openscad.rs:39-59
+  - <PythonParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/python.rs:34-54
+
+Group 18 (fingerprint: cb3eceadc76724ae, 6 members):
+  - test_c_function (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:624-629
+  - test_c_typedef (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:667-672
+  - test_cpp_class (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:689-699
+  - test_unexported_function (function) at crates/ragent-codeindex/src/parser/go.rs:441-446
+  - test_type_alias (function) at crates/ragent-codeindex/src/parser/go.rs:548-557
+  - test_macro_definition (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:189-202
+
+Group 19 (fingerprint: cd20b749fcef19e0, 6 members):
+  - test_delete_prev_char_removes_emoji (function) at crates/ragent-tui/tests/test_input_unicode.rs:140-147
+  - test_delete_prev_char_removes_accented (function) at crates/ragent-tui/tests/test_input_unicode.rs:150-157
+  - test_delete_prev_char_at_start_is_noop (function) at crates/ragent-tui/tests/test_input_unicode.rs:160-167
+  - test_delete_next_char_removes_emoji (function) at crates/ragent-tui/tests/test_input_unicode.rs:174-181
+  - test_delete_next_char_at_end_is_noop (function) at crates/ragent-tui/tests/test_input_unicode.rs:184-191
+  - test_delete_next_char_cjk (function) at crates/ragent-tui/tests/test_input_unicode.rs:194-201
+
+Group 20 (fingerprint: 28808336a5ed94bf, 5 members):
+  - test_health_no_auth_required (function) at crates/ragent-server/tests/test_integration.rs:68-76
+  - test_protected_route_rejects_missing_auth (function) at crates/ragent-server/tests/test_integration.rs:79-87
+  - test_events_stream_requires_auth (function) at crates/ragent-server/tests/test_integration.rs:209-217
+  - test_memory_blocks_requires_auth (function) at crates/ragent-server/tests/test_memory_api.rs:74-82
+  - test_memory_search_requires_auth (function) at crates/ragent-server/tests/test_memory_api.rs:97-105
+
+Group 21 (fingerprint: 2c7811bf77035532, 5 members):
+  - test_create_session_invalid_path (function) at crates/ragent-server/tests/test_integration.rs:290-303
+  - test_create_session_not_a_directory (function) at crates/ragent-server/tests/test_integration.rs:306-318
+  - test_create_session_success (function) at crates/ragent-server/tests/test_integration.rs:321-332
+  - test_memory_store_invalid_category (function) at crates/ragent-server/tests/test_memory_api.rs:167-178
+  - test_memory_store_invalid_confidence (function) at crates/ragent-server/tests/test_memory_api.rs:181-194
+
+Group 22 (fingerprint: 55103e1370cda1ac, 5 members):
+  - test_class_declaration (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:598-608
+  - test_function_declaration (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:611-619
+  - test_output_block (function) at crates/ragent-codeindex/src/parser/hcl.rs:369-377
+  - test_module_block (function) at crates/ragent-codeindex/src/parser/hcl.rs:400-408
+  - test_provider_block (function) at crates/ragent-codeindex/src/parser/hcl.rs:411-419
+
+Group 23 (fingerprint: 693afe8d18d7e314, 5 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/anthropic.rs:628 (closure) at crates/ragent-llm/src/providers/anthropic.rs:628-634
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/anthropic.rs:636 (closure) at crates/ragent-llm/src/providers/anthropic.rs:636-642
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/huggingface.rs:674 (closure) at crates/ragent-llm/src/providers/huggingface.rs:674-680
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/openai.rs:562 (closure) at crates/ragent-llm/src/providers/openai.rs:562-568
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/openai.rs:570 (closure) at crates/ragent-llm/src/providers/openai.rs:570-576
+
+Group 24 (fingerprint: 8d209b285bb44359, 5 members):
+  - test_extract_path (function) at crates/ragent-llm/src/providers/bedrock_sigv4.rs:334-344
+  - test_strip_bedrock_suffix (function) at crates/ragent-llm/src/providers/bedrock.rs:1295-1305
+  - test_vendor_suffix_stripping (function) at crates/ragent-llm/tests/inline/xai.rs:112-119
+  - test_strip_explicit_agent_type_hint (function) at crates/ragent-team/tests/test_team_classify.rs:38-51
+  - test_canonical_tool_name_aliases (function) at crates/ragent-tui/tests/test_tool_display.rs:142-149
+
+Group 25 (fingerprint: 97809ecc627b70af, 5 members):
+  - MockScenario::as_str (method) at crates/ragent-llm/src/providers/mock_llm_client.rs:60-67
+  - ResearchStatus::as_str (method) at crates/ragent-research/src/status.rs:65-72
+  - OutputFormat::as_str (method) at crates/ragent-research/src/run_config.rs:38-45
+  - SynthesizeOutcome::as_str (method) at crates/ragent-research/src/session.rs:255-262
+  - SubQuestionStatus::as_str (method) at crates/ragent-research/src/state.rs:309-316
+
+Group 26 (fingerprint: 9878a8538e04d374, 5 members):
+  - test_detect_ears_ubiquitous (function) at crates/ragent-specs/tests/inline/validate.rs:81-86
+  - test_detect_ears_event_driven (function) at crates/ragent-specs/tests/inline/validate.rs:89-94
+  - test_detect_ears_state_driven (function) at crates/ragent-specs/tests/inline/validate.rs:97-102
+  - test_detect_ears_optional (function) at crates/ragent-specs/tests/inline/validate.rs:105-110
+  - test_detect_ears_unwanted (function) at crates/ragent-specs/tests/inline/validate.rs:113-118
+
+Group 27 (fingerprint: d94e8e8d831aea80, 5 members):
+  - <FakeFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/benches/gathering_bench.rs:34-39
+  - <FakeLocal as LocalTool>::read (trait impl block) at crates/ragent-research/benches/gathering_bench.rs:70-75
+  - <FakeFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/src/session.rs:1076-1081
+  - <FakeLocal as LocalTool>::read (trait impl block) at crates/ragent-research/src/session.rs:1112-1117
+  - <FakeLocal as LocalTool>::read (trait impl block) at crates/ragent-research/tests/test_research_integration.rs:227-232
+
+Group 28 (fingerprint: f926747b56c40da5, 5 members):
+  - RelationType::as_str (method) at crates/ragent-agent/src/memory/knowledge_graph.rs:116-124
+  - RoleMode::label (method) at crates/ragent-tui/src/app/state.rs:1466-1474
+  - RoleMode::icon (method) at crates/ragent-tui/src/app/state.rs:1478-1486
+  - StatusCategory::display_name (method) at crates/ragent-tui/src/theme.rs:448-456
+  - EarsTemplate::as_str (method) at crates/ragent-specs/src/spec.rs:148-156
+
+Group 29 (fingerprint: 1aaaf479a842289d, 4 members):
+  - test_slash_tools_office_on_shows_office_tools (function) at crates/ragent-tui/tests/test_slash_commands.rs:1676-1718
+  - test_slash_tools_teams_on_shows_team_tools (function) at crates/ragent-tui/tests/test_slash_commands.rs:1721-1761
+  - test_slash_tools_agents_on_shows_agent_tools (function) at crates/ragent-tui/tests/test_slash_commands.rs:1764-1804
+  - test_slash_tools_plan_on_shows_plan_tools (function) at crates/ragent-tui/tests/test_slash_commands.rs:1807-1847
+
+Group 30 (fingerprint: 2ddb3d014e62ea38, 4 members):
+  - test_edit_exact_match_baseline (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:79-90
+  - test_edit_strict_accepts_exact_crlf (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:127-139
+  - test_edit_delete_matched_text (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:239-250
+  - test_edit_canonical_param_names (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:388-399
+
+Group 31 (fingerprint: 3e982c2d0da9d7b8, 4 members):
+  - test_team_create_no_name_shows_usage (function) at crates/ragent-tui/tests/test_teams_tui.rs:100-111
+  - test_team_delete_no_name_shows_usage (function) at crates/ragent-tui/tests/test_teams_tui.rs:376-387
+  - test_team_message_missing_text_shows_usage (function) at crates/ragent-tui/tests/test_teams_tui.rs:675-686
+  - test_team_cleanup_no_active_team (function) at crates/ragent-tui/tests/test_teams_tui.rs:691-702
+
+Group 32 (fingerprint: 3f4664faf2c24052, 4 members):
+  - IndexStore::file_count (method) at crates/ragent-codeindex/src/store.rs:245-250
+  - IndexStore::total_bytes (method) at crates/ragent-codeindex/src/store.rs:253-260
+  - IndexStore::symbol_count (method) at crates/ragent-codeindex/src/store.rs:565-570
+  - IndexStore::reference_count (method) at crates/ragent-codeindex/src/store.rs:573-578
+
+Group 33 (fingerprint: 52510c2f5a4b0a5f, 4 members):
+  - test_inject_no_patterns (function) at crates/ragent-agent/tests/inline/skill_context.rs:82-87
+  - test_inject_echo_command (function) at crates/ragent-agent/tests/inline/skill_context.rs:90-95
+  - test_inject_multiple_commands (function) at crates/ragent-agent/tests/inline/skill_context.rs:98-103
+  - test_inject_preserves_surrounding_text (function) at crates/ragent-agent/tests/inline/skill_context.rs:118-123
+
+Group 34 (fingerprint: 531eaa9c2db2713d, 4 members):
+  - test_parse_directory (function) at crates/ragent-agent/tests/inline/reference_parse.rs:16-21
+  - test_parse_url (function) at crates/ragent-agent/tests/inline/reference_parse.rs:24-29
+  - test_parse_fuzzy_name (function) at crates/ragent-agent/tests/inline/reference_parse.rs:32-37
+  - test_parse_file_with_extension (function) at crates/ragent-agent/tests/inline/reference_parse.rs:40-45
+
+Group 35 (fingerprint: 559d6e4a78f07756, 4 members):
+  - PlanStatus::as_str (method) at crates/ragent-agent/src/team/config.rs:155-162
+  - TaskStatus::as_str (method) at crates/ragent-agent/src/team/task.rs:43-50
+  - Priority::as_str (method) at crates/ragent-specs/src/plan_parser.rs:79-86
+  - TaskStatus::as_str (method) at crates/ragent-specs/src/spec.rs:191-198
+
+Group 36 (fingerprint: 56d376b5c7dc5f07, 4 members):
+  - <NoopAnalysisEngine as AnalysisEngine>::analyze (trait impl block) at crates/ragent-research/src/analysis.rs:79-85
+  - <SingleLocalTool as LocalTool>::grep (trait impl block) at crates/ragent-research/src/session.rs:1396-1402
+  - <SpecOnlyTool as LocalTool>::grep (trait impl block) at crates/ragent-research/src/session.rs:1481-1487
+  - <NoLocal as LocalTool>::grep (trait impl block) at crates/ragent-research/tests/test_research_integration.rs:346-352
+
+Group 37 (fingerprint: 627f2120e08d6a89, 4 members):
+  - test_compress_history_with_mode_default_under_threshold (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:180-190
+  - test_compress_history_with_mode_conservative_under_threshold (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:193-208
+  - test_compress_history_with_mode_aggressive_under_threshold (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:211-226
+  - test_compress_history_with_mode_conservative_preserves_content (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:259-275
+
+Group 38 (fingerprint: 743aab45af2eaf47, 4 members):
+  - extract_block_def (function) at crates/ragent-codeindex/src/parser/cmake.rs:206-238
+  - extract_foreach_loop (function) at crates/ragent-codeindex/src/parser/cmake.rs:243-275
+  - extract_while_loop (function) at crates/ragent-codeindex/src/parser/cmake.rs:280-312
+  - extract_if_condition (function) at crates/ragent-codeindex/src/parser/cmake.rs:317-349
+
+Group 39 (fingerprint: 7a0e0a90a185b0f2, 4 members):
+  - <BigCodeBenchAdapter as BenchSuiteAdapter>::build_prompt (trait impl block) at crates/ragent-bench/src/suites/bigcodebench.rs:22-27
+  - <CrossCodeEvalAdapter as BenchSuiteAdapter>::build_prompt (trait impl block) at crates/ragent-bench/src/suites/crosscodeeval.rs:20-25
+  - <Ds1000Adapter as BenchSuiteAdapter>::build_prompt (trait impl block) at crates/ragent-bench/src/suites/ds1000.rs:20-25
+  - <RepoBenchAdapter as BenchSuiteAdapter>::build_prompt (trait impl block) at crates/ragent-bench/src/suites/repobench.rs:20-25
+
+Group 40 (fingerprint: 802069275601b564, 4 members):
+  - parse_list (function) at crates/ragent-specs/src/commands.rs:499-506
+  - parse_search (function) at crates/ragent-specs/src/commands.rs:509-516
+  - parse_activate (function) at crates/ragent-specs/src/commands.rs:587-594
+  - parse_coverage (function) at crates/ragent-specs/src/commands.rs:602-609
+
+Group 41 (fingerprint: a669962a92053da3, 4 members):
+  - parse_impl_basic (function) at crates/ragent-specs/src/commands.rs:652-661
+  - parse_impl_dry_run (function) at crates/ragent-specs/src/commands.rs:676-685
+  - parse_implement_basic (function) at crates/ragent-specs/src/commands.rs:708-717
+  - parse_implement_dry_run (function) at crates/ragent-specs/src/commands.rs:732-741
+
+Group 42 (fingerprint: c2b7b12841fa14e1, 4 members):
+  - get_allowlist (function) at crates/ragent-config/src/bash_lists.rs:65-70
+  - get_denylist (function) at crates/ragent-config/src/bash_lists.rs:74-79
+  - get_allowlist (function) at crates/ragent-config/src/dir_lists.rs:207-212
+  - get_denylist (function) at crates/ragent-config/src/dir_lists.rs:216-221
+
+Group 43 (fingerprint: c41f42cf9053a974, 4 members):
+  - test_import (function) at crates/ragent-codeindex/src/parser/gradle.rs:613-618
+  - test_include_import (function) at crates/ragent-codeindex/src/parser/cmake.rs:480-485
+  - test_add_subdirectory_import (function) at crates/ragent-codeindex/src/parser/cmake.rs:488-493
+  - test_import (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:622-627
+
+Group 44 (fingerprint: c55dfc8e06fc17f6, 4 members):
+  - test_gradle_plugins_block (function) at crates/ragent-codeindex/src/parser/gradle.rs:570-580
+  - test_gradle_dependencies (function) at crates/ragent-codeindex/src/parser/gradle.rs:583-591
+  - test_plugins_block (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:575-584
+  - test_dependencies_block (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:587-595
+
+Group 45 (fingerprint: c75760d63de9d850, 4 members):
+  - rejects_parent_traversal_with_path_traversal_error (function) at crates/ragent-research/src/research_name.rs:360-369
+  - rejects_forward_slash_with_path_traversal_error (function) at crates/ragent-research/src/research_name.rs:372-378
+  - rejects_backslash_with_path_traversal_error (function) at crates/ragent-research/src/research_name.rs:381-387
+  - rejects_leading_dot_with_path_traversal_error (function) at crates/ragent-research/src/research_name.rs:390-396
+
+Group 46 (fingerprint: cb109d4b8c1e3dc1, 4 members):
+  - parse_search (function) at crates/ragent-research/src/cli.rs:779-784
+  - parse_continue_without_message (function) at crates/ragent-research/src/cli.rs:834-839
+  - parse_create (function) at crates/ragent-specs/src/commands.rs:466-471
+  - parse_add (function) at crates/ragent-specs/src/commands.rs:752-757
+
+Group 47 (fingerprint: d6a291581ba2826e, 4 members):
+  - mouse_scroll_up (function) at crates/ragent-tui/tests/test_memory_panel.rs:131-138
+  - mouse_scroll_down (function) at crates/ragent-tui/tests/test_memory_panel.rs:140-147
+  - mouse_scroll_up (function) at crates/ragent-tui/tests/test_scrolling.rs:73-80
+  - mouse_scroll_down (function) at crates/ragent-tui/tests/test_scrolling.rs:82-89
+
+Group 48 (fingerprint: e2e28868f7958ac1, 4 members):
+  - <HookTrigger as std::fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/hooks/mod.rs:72-81
+  - <SkillScope as std::fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/skill/mod.rs:81-90
+  - <TaskStatus as std::fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/task/mod.rs:98-107
+  - <ContentType as std::fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/compression/pipeline.rs:66-75
+
+Group 49 (fingerprint: 00a0c4c3c89b7e9a, 3 members):
+  - exact_replacement_helper_not_found (function) at crates/ragent-tools-core/tests/test_replace.rs:67-73
+  - exact_replacement_helper_whitespace_sensitive (function) at crates/ragent-tools-core/tests/test_replace.rs:85-91
+  - memory_replace_errors_on_not_found (function) at crates/ragent-tools-extended/src/memory_write.rs:679-685
+
+Group 50 (fingerprint: 0546f5788f084c76, 3 members):
+  - enter_temp_config_dir (function) at crates/ragent-tui/tests/test_slash_commands.rs:88-93
+  - enter_temp_config_dir (function) at crates/ragent-tui/tests/test_thinking_defaults.rs:25-30
+  - enter_temp_config_dir (function) at crates/ragent-tui/tests/test_tools_visibility_command.rs:16-21
+
+Group 51 (fingerprint: 05cf10c722fa56f5, 3 members):
+  - test_parse_dispatch (function) at crates/ragent-codeindex/src/parser/mod.rs:179-185
+  - test_parse_openscad_dispatch (function) at crates/ragent-codeindex/src/parser/mod.rs:188-194
+  - test_parse_terraform_dispatch (function) at crates/ragent-codeindex/src/parser/mod.rs:197-206
+
+Group 52 (fingerprint: 07b318e9aa174ba0, 3 members):
+  - test_adjacent_touching_edits_allowed (function) at crates/ragent-tools-core/tests/test_multiedit.rs:233-252
+  - test_multi_edit_canonical_param_names (function) at crates/ragent-tools-core/tests/test_multiedit.rs:329-345
+  - test_multi_edit_legacy_param_names_accepted (function) at crates/ragent-tools-core/tests/test_multiedit.rs:350-366
+
+Group 53 (fingerprint: 1089188c8575a331, 3 members):
+  - test_has_thinking_from_capabilities (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:899-906
+  - test_has_thinking_from_template_markers (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:909-918
+  - test_has_thinking_from_template_go_template (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:921-930
+
+Group 54 (fingerprint: 148a7b4f6b55b140, 3 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:70 (closure) at crates/ragent-agent/benches/agent_loop.rs:70-77
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:78 (closure) at crates/ragent-agent/benches/agent_loop.rs:78-85
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:86 (closure) at crates/ragent-agent/benches/agent_loop.rs:86-93
+
+Group 55 (fingerprint: 14983e074948a9ea, 3 members):
+  - make_ctx (function) at crates/ragent-tools-extended/examples/todo_cycle.rs:142-154
+  - ctx (function) at crates/ragent-tools-extended/tests/test_todo_demo.rs:16-28
+  - test_ctx (function) at crates/ragent-tools-extended/tests/test_todo_lifecycle.rs:17-29
+
+Group 56 (fingerprint: 18514453b9eb1224, 3 members):
+  - ToolRegistry::get (method) at crates/ragent-tools-core/src/lib.rs:195-201
+  - ToolRegistry::get (method) at crates/ragent-tools-extended/src/lib.rs:255-261
+  - ToolRegistry::get (method) at crates/ragent-tools-vcs/src/lib.rs:118-124
+
+Group 57 (fingerprint: 1c48965e449a4ae8, 3 members):
+  - test_slash_agent_no_args_opens_dialog (function) at crates/ragent-tui/tests/test_slash_commands.rs:364-372
+  - test_slash_provider_opens_setup (function) at crates/ragent-tui/tests/test_slash_commands.rs:721-729
+  - test_slash_provider_reset_opens_dialog (function) at crates/ragent-tui/tests/test_slash_commands.rs:867-875
+
+Group 58 (fingerprint: 213f55c9a5b8eaeb, 3 members):
+  - test_extract_query_string (function) at crates/ragent-llm/src/providers/bedrock_sigv4.rs:347-353
+  - test_no_suffix_unchanged (function) at crates/ragent-llm/tests/inline/xai.rs:128-134
+  - test_to_posix_path (function) at crates/ragent-tools-core/tests/inline/bash.rs:214-220
+
+Group 59 (fingerprint: 235e6e271109c46a, 3 members):
+  - test_teams_alias_help_shows_command_reference (function) at crates/ragent-tui/tests/test_teams_tui.rs:314-326
+  - test_team_tasks_no_active_team (function) at crates/ragent-tui/tests/test_teams_tui.rs:533-545
+  - test_team_clear_no_active_team (function) at crates/ragent-tui/tests/test_teams_tui.rs:601-613
+
+Group 60 (fingerprint: 24055b4f90b4851c, 3 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/anthropic.rs:614 (closure) at crates/ragent-llm/src/providers/anthropic.rs:614-619
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/huggingface.rs:664 (closure) at crates/ragent-llm/src/providers/huggingface.rs:664-669
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/openai.rs:550 (closure) at crates/ragent-llm/src/providers/openai.rs:550-555
+
+Group 61 (fingerprint: 2a008ffecb44998c, 3 members):
+  - test_validate_no_requirements (function) at crates/ragent-specs/tests/inline/validate.rs:155-192
+  - test_validate_duplicate_req_id (function) at crates/ragent-specs/tests/inline/validate.rs:195-236
+  - test_validate_numbering_gap (function) at crates/ragent-specs/tests/inline/validate.rs:239-275
+
+Group 62 (fingerprint: 30485a6c83638ed5, 3 members):
+  - <FixedFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/benches/researchext_bench.rs:31-38
+  - <OkFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/src/session.rs:1315-1322
+  - <FakeFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/tests/test_research_integration.rs:331-338
+
+Group 63 (fingerprint: 323cb14a665ddd50, 3 members):
+  - App::suspend_agent_task (method) at crates/ragent-tui/src/app/event_handler.rs:1410-1420
+  - App::resume_agent_task (method) at crates/ragent-tui/src/app/event_handler.rs:1422-1432
+  - App::kill_agent_task (method) at crates/ragent-tui/src/app/event_handler.rs:1434-1444
+
+Group 64 (fingerprint: 337810130a827ea1, 3 members):
+  - extract_from_json_ld (function) at crates/ragent-research/src/web_date.rs:51-64
+  - find_date_in_json_value (function) at crates/ragent-research/src/web_date.rs:68-78
+  - extract_from_time_elements (function) at crates/ragent-research/src/web_date.rs:126-136
+
+Group 65 (fingerprint: 34e372623c1ce9cc, 3 members):
+  - test_score_context_dependency_no_history (function) at crates/ragent-llm/tests/inline/router_classifier.rs:118-124
+  - test_score_instruction_complexity_simple (function) at crates/ragent-llm/tests/inline/router_classifier.rs:206-212
+  - test_score_code_complexity_no_code (function) at crates/ragent-llm/tests/inline/router_classifier.rs:247-253
+
+Group 66 (fingerprint: 363f9931f78dd65d, 3 members):
+  - test_score_context_dependency_with_references (function) at crates/ragent-llm/tests/inline/router_classifier.rs:127-136
+  - test_score_instruction_complexity_multi_step (function) at crates/ragent-llm/tests/inline/router_classifier.rs:215-224
+  - test_score_code_complexity_with_code (function) at crates/ragent-llm/tests/inline/router_classifier.rs:256-265
+
+Group 67 (fingerprint: 3c00dd7061766eb5, 3 members):
+  - test_class_declaration (function) at crates/ragent-codeindex/src/parser/gradle.rs:594-610
+  - test_function_def (function) at crates/ragent-codeindex/src/parser/cmake.rs:437-451
+  - test_macro_def (function) at crates/ragent-codeindex/src/parser/cmake.rs:454-468
+
+Group 68 (fingerprint: 3d06242894c520f6, 3 members):
+  - <SemanticConfig as Default>::default (trait impl block) at crates/ragent-config/src/config.rs:1595-1601
+  - <RetrievalConfig as Default>::default (trait impl block) at crates/ragent-config/src/config.rs:1631-1637
+  - <CrossProjectConfig as Default>::default (trait impl block) at crates/ragent-config/src/config.rs:1816-1822
+
+Group 69 (fingerprint: 3f5f3d917f899cb2, 3 members):
+  - test_search_by_doc_comment (function) at crates/ragent-codeindex/src/search.rs:541-548
+  - test_search_by_body_snippet (function) at crates/ragent-codeindex/src/search.rs:551-558
+  - test_search_by_signature (function) at crates/ragent-codeindex/src/search.rs:561-568
+
+Group 70 (fingerprint: 412d4cf67d2ad143, 3 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:71 (closure) at crates/ragent-agent/benches/agent_loop.rs:71-76
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:79 (closure) at crates/ragent-agent/benches/agent_loop.rs:79-84
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:87 (closure) at crates/ragent-agent/benches/agent_loop.rs:87-92
+
+Group 71 (fingerprint: 4235efd531d57a10, 3 members):
+  - memory_replace_tolerates_trailing_whitespace (function) at crates/ragent-tools-extended/src/memory_write.rs:625-631
+  - memory_replace_tolerates_final_newline_mismatch (function) at crates/ragent-tools-extended/src/memory_write.rs:651-657
+  - memory_replace_tolerates_blank_line_in_needle (function) at crates/ragent-tools-extended/src/memory_write.rs:660-666
+
+Group 72 (fingerprint: 43793a56d6668853, 3 members):
+  - test_scroll_down_decrements_offset (function) at crates/ragent-tui/tests/test_scrolling.rs:102-107
+  - test_scroll_down_does_not_go_below_zero (function) at crates/ragent-tui/tests/test_scrolling.rs:110-115
+  - test_log_scroll_down_does_not_go_below_zero (function) at crates/ragent-tui/tests/test_scrolling.rs:128-133
+
+Group 73 (fingerprint: 47000db2742e9bc8, 3 members):
+  - config_enabled (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:252-258
+  - config_disabled (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:260-266
+  - config_no_override (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:268-274
+
+Group 74 (fingerprint: 4b8e73db33149a69, 3 members):
+  - test_edit_not_found_errors (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:170-187
+  - test_memory_replace_multiple_matches_errors (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:179-198
+  - test_memory_replace_not_found_errors (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:203-222
+
+Group 75 (fingerprint: 535c4b4d1356fa67, 3 members):
+  - test_team_status_no_args_defaults_to_status (function) at crates/ragent-tui/tests/test_teams_tui.rs:87-95
+  - test_team_close_no_active_team (function) at crates/ragent-tui/tests/test_teams_tui.rs:347-354
+  - test_team_message_no_active_team (function) at crates/ragent-tui/tests/test_teams_tui.rs:650-657
+
+Group 76 (fingerprint: 55ca74ec997c6d56, 3 members):
+  - record_edit_timestamp (function) at crates/ragent-tools-core/src/edit.rs:364-376
+  - record_edit_timestamp (function) at crates/ragent-tools-core/src/multiedit.rs:464-476
+  - record_read_timestamp (function) at crates/ragent-tools-core/src/read.rs:312-324
+
+Group 77 (fingerprint: 56b3655777dbd965, 3 members):
+  - ToolRegistry::contains (method) at crates/ragent-tools-core/src/lib.rs:219-224
+  - ToolRegistry::remove (method) at crates/ragent-tools-core/src/lib.rs:227-232
+  - ToolRegistry::contains (method) at crates/ragent-tools-extended/src/lib.rs:264-269
+
+Group 78 (fingerprint: 571befc6fa099e06, 3 members):
+  - parse_impl_with_task (function) at crates/ragent-specs/src/commands.rs:664-673
+  - parse_impl_all_options (function) at crates/ragent-specs/src/commands.rs:688-697
+  - parse_implement_with_task (function) at crates/ragent-specs/src/commands.rs:720-729
+
+Group 79 (fingerprint: 592a047c19310eb9, 3 members):
+  - test_parse_no_frontmatter (function) at crates/ragent-agent/tests/inline/skill_loader.rs:134-150
+  - test_parse_unclosed_frontmatter (function) at crates/ragent-agent/tests/inline/skill_loader.rs:153-169
+  - test_validate_name_invalid_chars (function) at crates/ragent-agent/tests/inline/skill_loader.rs:192-208
+
+Group 80 (fingerprint: 5f64d130d4c02af8, 3 members):
+  - ToolRegistry::new (method) at crates/ragent-tools-core/src/lib.rs:178-183
+  - ToolRegistry::new (method) at crates/ragent-tools-extended/src/lib.rs:240-245
+  - ToolRegistry::new (method) at crates/ragent-tools-vcs/src/lib.rs:103-108
+
+Group 81 (fingerprint: 62f0dbb7cc512ff4, 3 members):
+  - test_compact_in_progress_shows_compacting (function) at crates/ragent-tui/tests/test_compression_indicator.rs:13-27
+  - test_compress_in_progress_shows_compressing (function) at crates/ragent-tui/tests/test_compression_indicator.rs:30-44
+  - test_both_in_progress_shows_combined (function) at crates/ragent-tui/tests/test_compression_indicator.rs:47-61
+
+Group 82 (fingerprint: 650d7ecd6012d34a, 3 members):
+  - test_permission_from_flat_names (function) at crates/ragent-config/tests/test_permission.rs:9-14
+  - test_permission_from_namespaced_categories (function) at crates/ragent-config/tests/test_permission.rs:17-26
+  - test_permission_from_aliases (function) at crates/ragent-config/tests/test_permission.rs:36-45
+
+Group 83 (fingerprint: 6f5b5ab52c1833b7, 3 members):
+  - anthropic_thinking_levels_for_model (function) at crates/ragent-llm/src/providers/thinking.rs:52-62
+  - openai_thinking_levels_for_model (function) at crates/ragent-llm/src/providers/thinking.rs:65-72
+  - gemini_thinking_levels_for_model (function) at crates/ragent-llm/src/providers/thinking.rs:76-86
+
+Group 84 (fingerprint: 7be6d84edf749974, 3 members):
+  - check_path_within_root (function) at crates/ragent-agent/src/tool/mod.rs:73-117
+  - check_path_within_root (function) at crates/ragent-tools-core/src/lib.rs:123-167
+  - check_path_within_root (function) at crates/ragent-tools-extended/src/lib.rs:186-230
+
+Group 85 (fingerprint: 7e5b1ba540ece520, 3 members):
+  - ToolRegistry::register (method) at crates/ragent-tools-core/src/lib.rs:186-191
+  - ToolRegistry::register (method) at crates/ragent-tools-extended/src/lib.rs:247-252
+  - ToolRegistry::register (method) at crates/ragent-tools-vcs/src/lib.rs:110-115
+
+Group 86 (fingerprint: 86dff77381741a34, 3 members):
+  - test_tier_from_str_insensitive (function) at crates/ragent-llm/src/providers/router_config.rs:600-609
+  - parse_output_formats (function) at crates/ragent-research/src/run_config.rs:134-149
+  - test_priority_parse (function) at crates/ragent-specs/src/plan_parser.rs:442-448
+
+Group 87 (fingerprint: 89d050187c64e3c8, 3 members):
+  - ResponsiveBreakpoint::min_content_width (method) at crates/ragent-tui/src/utils.rs:41-47
+  - ResponsiveBreakpoint::status_bar_height (method) at crates/ragent-tui/src/utils.rs:50-56
+  - ResponsiveBreakpoint::button_column_width (method) at crates/ragent-tui/src/utils.rs:59-65
+
+Group 88 (fingerprint: 8e0d1d469523555d, 3 members):
+  - test_extracts_from_json_ld_date_published (function) at crates/ragent-research/src/web_date.rs:288-298
+  - test_extracts_from_time_element (function) at crates/ragent-research/src/web_date.rs:311-319
+  - test_handles_pubdate_meta_name (function) at crates/ragent-research/src/web_date.rs:346-352
+
+Group 89 (fingerprint: 9045325bf3870010, 3 members):
+  - test_tool_call_args (function) at crates/ragent-server/tests/test_event_to_sse.rs:143-152
+  - test_team_task_claimed (function) at crates/ragent-server/tests/test_event_to_sse.rs:460-469
+  - test_team_task_completed (function) at crates/ragent-server/tests/test_event_to_sse.rs:472-481
+
+Group 90 (fingerprint: 93b38b903f20529a, 3 members):
+  - <OkFetch as crate::web_gatherer::WebFetchTool>::fetch (trait impl block) at crates/ragent-research/src/session.rs:1228-1235
+  - <OkFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/src/web_gatherer.rs:751-758
+  - <OkFetch as WebFetchTool>::fetch (trait impl block) at crates/ragent-research/src/web_gatherer.rs:953-960
+
+Group 91 (fingerprint: 98d2fb047235d85f, 3 members):
+  - Mailbox::peek_unread_blocking (method) at crates/ragent-agent/src/team/mailbox.rs:642-650
+  - Mailbox::drain_unread_blocking (method) at crates/ragent-agent/src/team/mailbox.rs:653-661
+  - Mailbox::read_all_blocking (method) at crates/ragent-agent/src/team/mailbox.rs:688-696
+
+Group 92 (fingerprint: 9d544618be96ceaa, 3 members):
+  - make_app (function) at crates/ragent-tui/tests/test_scrolling.rs:25-71
+  - make_app (function) at crates/ragent-tui/tests/test_text_selection.rs:31-76
+  - make_app (function) at crates/ragent-tui/tests/support/mod.rs:29-75
+
+Group 93 (fingerprint: 9dc69b156c170442, 3 members):
+  - test_is_permanent_llm_api_error_ignores_retryable_statuses (function) at crates/ragent-agent/tests/session_processor.rs:299-306
+  - test_is_permanent_benchmark_api_error_ignores_retryable_statuses (function) at crates/ragent-bench/src/model.rs:596-603
+  - test_banned_command_word_boundary (function) at crates/ragent-tools-core/tests/inline/bash.rs:38-43
+
+Group 94 (fingerprint: 9dcbd6a7ba399b47, 3 members):
+  - test_insert_char_emoji_at_start (function) at crates/ragent-tui/tests/test_input_unicode.rs:72-79
+  - test_insert_char_emoji_in_middle (function) at crates/ragent-tui/tests/test_input_unicode.rs:82-89
+  - test_insert_char_at_end_of_unicode (function) at crates/ragent-tui/tests/test_input_unicode.rs:92-99
+
+Group 95 (fingerprint: a3de39caca800eb8, 3 members):
+  - test_mouse_scroll_up_on_messages (function) at crates/ragent-tui/tests/test_scrolling.rs:138-146
+  - test_mouse_scroll_up_on_log (function) at crates/ragent-tui/tests/test_scrolling.rs:161-169
+  - test_mouse_scroll_outside_panes_no_effect (function) at crates/ragent-tui/tests/test_scrolling.rs:211-220
+
+Group 96 (fingerprint: a501d003831eec8f, 3 members):
+  - test_tool_call_start (function) at crates/ragent-server/tests/test_event_to_sse.rs:104-113
+  - test_question_answered (function) at crates/ragent-server/tests/test_event_to_sse.rs:241-250
+  - test_agent_switched (function) at crates/ragent-server/tests/test_event_to_sse.rs:255-264
+
+Group 97 (fingerprint: a56bc98887e53962, 3 members):
+  - test_save_clipboard_image_rejects_oversized_buffer (function) at crates/ragent-tui/tests/test_clipboard_tempfile.rs:186-201
+  - test_save_clipboard_image_rejects_oversized_dimensions (function) at crates/ragent-tui/tests/test_clipboard_tempfile.rs:204-219
+  - test_save_clipboard_image_dimension_mismatch (function) at crates/ragent-tui/tests/test_clipboard_tempfile.rs:222-237
+
+Group 98 (fingerprint: a9f6e6325604f678, 3 members):
+  - <AgentMode as fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/agent/mod.rs:406-412
+  - <PermissionAction as fmt::Display>::fmt (trait impl block) at crates/ragent-config/src/permission.rs:34-40
+  - <Severity as fmt::Display>::fmt (trait impl block) at crates/ragent-specs/src/validate.rs:72-78
+
+Group 99 (fingerprint: b17163019122f666, 3 members):
+  - test_select_tier_exact_boundary_simple_medium (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:70-79
+  - test_select_tier_exact_boundary_medium_complex (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:94-102
+  - test_select_tier_exact_boundary_complex_reasoning (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:105-113
+
+Group 100 (fingerprint: b2ec92101b8efb2a, 3 members):
+  - parse_numbered_list_ignores_wrapped_lines (function) at crates/ragent-research/src/analysis.rs:668-674
+  - parse_numbered_list_handles_number_on_its_own_line (function) at crates/ragent-research/src/analysis.rs:676-685
+  - parse_numbered_list_number_with_content_same_line (function) at crates/ragent-research/src/analysis.rs:687-696
+
+Group 101 (fingerprint: b444e978038bc1de, 3 members):
+  - test_selection_normalized_forward (function) at crates/ragent-tui/tests/test_text_selection.rs:461-470
+  - test_selection_normalized_backward (function) at crates/ragent-tui/tests/test_text_selection.rs:473-482
+  - test_selection_normalized_same_row (function) at crates/ragent-tui/tests/test_text_selection.rs:485-494
+
+Group 102 (fingerprint: b57f038312700f49, 3 members):
+  - <CompressionMode as std::fmt::Display>::fmt (trait impl block) at crates/ragent-agent/src/compression/pipeline.rs:483-489
+  - <LibreFormat as std::fmt::Display>::fmt (trait impl block) at crates/ragent-tools-extended/src/libreoffice_common.rs:30-36
+  - <OfficeFormat as std::fmt::Display>::fmt (trait impl block) at crates/ragent-tools-extended/src/office_common.rs:22-28
+
+Group 103 (fingerprint: b92a56a1873f0fad, 3 members):
+  - MemoryScope::as_str (method) at crates/ragent-agent/src/team/config.rs:30-36
+  - TeamStatus::as_str (method) at crates/ragent-agent/src/team/config.rs:80-86
+  - Effort::as_str (method) at crates/ragent-specs/src/plan_parser.rs:36-42
+
+Group 104 (fingerprint: bcf3122f9fa551d5, 3 members):
+  - test_classify_complex_prompt (function) at crates/ragent-llm/tests/inline/router_classifier.rs:363-378
+  - test_classify_reasoning_prompt (function) at crates/ragent-llm/tests/inline/router_classifier.rs:381-396
+  - test_classify_creative_prompt (function) at crates/ragent-llm/tests/inline/router_classifier.rs:399-414
+
+Group 105 (fingerprint: be51b531bd073467, 3 members):
+  - make_app (function) at crates/ragent-tui/tests/test_memory_panel.rs:43-89
+  - make_app (function) at crates/ragent-tui/tests/test_permission_countdown.rs:20-65
+  - make_app (function) at crates/ragent-tui/tests/test_question_multiple_choice.rs:17-62
+
+Group 106 (fingerprint: be605b5371f296dd, 3 members):
+  - test_resolve_bedrock_model_id_short_aliases (function) at crates/ragent-llm/src/providers/bedrock.rs:1308-1326
+  - test_mime_to_converse_format (function) at crates/ragent-llm/src/providers/bedrock.rs:1392-1398
+  - test_infer_agent_type (function) at crates/ragent-team/tests/test_team_classify.rs:26-35
+
+Group 107 (fingerprint: bf3aae55db3b6df2, 3 members):
+  - test_todo_read_invalid_status_errors (function) at crates/ragent-tools-extended/tests/test_todo_lifecycle.rs:230-239
+  - test_todo_complete_nonexistent_errors (function) at crates/ragent-tools-extended/tests/test_todo_lifecycle.rs:242-253
+  - test_todo_remove_nonexistent_errors (function) at crates/ragent-tools-extended/tests/test_todo_lifecycle.rs:256-267
+
+Group 108 (fingerprint: c05a6684bcee76a4, 3 members):
+  - test_result_summary_read_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:200-211
+  - test_result_summary_glob_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:253-263
+  - test_result_summary_list_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:266-276
+
+Group 109 (fingerprint: c881412f7811d08d, 3 members):
+  - ToolRegistry::definitions (method) at crates/ragent-tools-core/src/lib.rs:250-264
+  - ToolRegistry::definitions (method) at crates/ragent-tools-extended/src/lib.rs:277-291
+  - ToolRegistry::definitions (method) at crates/ragent-tools-vcs/src/lib.rs:145-159
+
+Group 110 (fingerprint: ce3839fd339d9d79, 3 members):
+  - parse_f32_flag (function) at crates/ragent-bench/src/command.rs:305-310
+  - parse_u32_flag (function) at crates/ragent-bench/src/command.rs:312-317
+  - parse_usize_flag (function) at crates/ragent-bench/src/command.rs:319-324
+
+Group 111 (fingerprint: ceecfebb4dd9d75b, 3 members):
+  - get_visualisation_graph (function) at crates/ragent-server/src/routes/memory.rs:592-602
+  - get_visualisation_tags (function) at crates/ragent-server/src/routes/memory.rs:605-615
+  - get_visualisation_heatmap (function) at crates/ragent-server/src/routes/memory.rs:618-628
+
+Group 112 (fingerprint: d210db11f44b5275, 3 members):
+  - test_memory_replace_crlf (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:59-84
+  - test_memory_replace_trailing_spaces (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:89-114
+  - test_memory_replace_final_newline_mismatch (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:153-174
+
+Group 113 (fingerprint: d9705504949ee92d, 3 members):
+  - test_tier_display (function) at crates/ragent-llm/src/providers/router_config.rs:612-617
+  - scenario_as_str_is_stable (function) at crates/ragent-llm/src/providers/mock_llm_client.rs:288-293
+  - as_str_returns_kebab_case (function) at crates/ragent-research/src/status.rs:109-114
+
+Group 114 (fingerprint: db8257c4abd65e83, 3 members):
+  - <FakeLocal as LocalTool>::glob (trait impl block) at crates/ragent-research/benches/gathering_bench.rs:47-55
+  - <FakeLocal as LocalTool>::glob (trait impl block) at crates/ragent-research/src/session.rs:1089-1097
+  - <FakeLocal as LocalTool>::glob (trait impl block) at crates/ragent-research/tests/test_research_integration.rs:200-208
+
+Group 115 (fingerprint: dbb48ade53b41331, 3 members):
+  - test_minimal_mode_shows_spinner_icon (function) at crates/ragent-tui/tests/test_compression_indicator.rs:78-89
+  - test_full_mode_shows_full_label (function) at crates/ragent-tui/tests/test_compression_indicator.rs:92-103
+  - test_compact_mode_shows_full_label (function) at crates/ragent-tui/tests/test_compression_indicator.rs:106-117
+
+Group 116 (fingerprint: f1649bec8275af11, 3 members):
+  - GitHubClient::post (method) at crates/ragent-tools-vcs/src/github/client.rs:74-88
+  - GitHubClient::put (method) at crates/ragent-tools-vcs/src/github/client.rs:91-105
+  - GitHubClient::patch (method) at crates/ragent-tools-vcs/src/github/client.rs:108-122
+
+Group 117 (fingerprint: f48ab6670f9ce3ab, 3 members):
+  - <FakeLocal as LocalTool>::grep (trait impl block) at crates/ragent-research/benches/gathering_bench.rs:56-69
+  - <FakeLocal as LocalTool>::grep (trait impl block) at crates/ragent-research/src/session.rs:1098-1111
+  - <FakeLocal as LocalTool>::grep (trait impl block) at crates/ragent-research/tests/test_research_integration.rs:209-226
+
+Group 118 (fingerprint: f740d24f8845df3d, 3 members):
+  - test_slash_opt_unknown_method_shows_warning (function) at crates/ragent-tui/tests/test_slash_commands.rs:2091-2107
+  - test_slash_opt_missing_prompt_shows_warning (function) at crates/ragent-tui/tests/test_slash_commands.rs:2110-2125
+  - test_slash_opt_no_model_shows_warning (function) at crates/ragent-tui/tests/test_slash_commands.rs:2168-2184
+
+Group 119 (fingerprint: f91f4fff3867fb1c, 3 members):
+  - first_child_by_kind (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:447-455
+  - first_child_by_kind (function) at crates/ragent-codeindex/src/parser/hcl.rs:290-298
+  - child_text_by_kind (function) at crates/ragent-codeindex/src/parser/openscad.rs:347-355
+
+Group 120 (fingerprint: f9e9857d9aac1a7e, 3 members):
+  - test_parse_missing_mandatory_field (function) at crates/ragent-llm/tests/test_azure_resource_parser.rs:55-77
+  - test_parse_duplicate_ids (function) at crates/ragent-llm/tests/test_azure_resource_parser.rs:103-125
+  - test_api_type_invalid_skipped_with_warning (function) at crates/ragent-llm/tests/test_azure_resource_parser.rs:330-354
+
+Group 121 (fingerprint: fa1254b4638fd6e7, 3 members):
+  - test_todo_update_shows_status_change (function) at crates/ragent-tools-extended/tests/test_todo_status_change.rs:32-54
+  - test_todo_complete_shows_status_change (function) at crates/ragent-tools-extended/tests/test_todo_status_change.rs:57-78
+  - test_todo_complete_from_done_still_shows_arrow (function) at crates/ragent-tools-extended/tests/test_todo_status_change.rs:103-124
+
+Group 122 (fingerprint: 01ca80a46d54fc52, 2 members):
+  - serialize_response (function) at crates/ragent-server/src/routes/memory.rs:542-553
+  - serialize_response (function) at crates/ragent-server/src/routes/mod.rs:905-916
+
+Group 123 (fingerprint: 0225f815b441fee8, 2 members):
+  - <DemoStorage as StorageBackend>::search_memories (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:112-121
+  - <MockStorage as StorageBackend>::search_memories (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:136-145
+
+Group 124 (fingerprint: 02d6e480434f73f7, 2 members):
+  - test_qualified_names (function) at crates/ragent-codeindex/src/parser/python.rs:624-634
+  - test_qualified_names_nested (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:289-300
+
+Group 125 (fingerprint: 0341218412759e38, 2 members):
+  - remove_allowlist (function) at crates/ragent-config/src/dir_lists.rs:311-327
+  - remove_denylist (function) at crates/ragent-config/src/dir_lists.rs:351-367
+
+Group 126 (fingerprint: 03b19b012d41b9ec, 2 members):
+  - test_insert_text_unicode_in_middle (function) at crates/ragent-tui/tests/test_input_unicode.rs:106-113
+  - test_insert_text_empty_is_noop (function) at crates/ragent-tui/tests/test_input_unicode.rs:116-123
+
+Group 127 (fingerprint: 0409f53b3d559ad9, 2 members):
+  - PromptClassifier::score_creativity_level_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:563-584
+  - PromptClassifier::score_emotional_complexity_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:592-613
+
+Group 128 (fingerprint: 04797762ed1c6b23, 2 members):
+  - test_registry_list_user_invocable (function) at crates/ragent-agent/tests/inline/skill_mod.rs:102-116
+  - test_registry_list_agent_invocable (function) at crates/ragent-agent/tests/inline/skill_mod.rs:119-133
+
+Group 129 (fingerprint: 04fb3c19af5b3397, 2 members):
+  - test_models_for_provider_anthropic_is_nonempty (function) at crates/ragent-tui/tests/test_configured_provider_selection.rs:345-352
+  - test_models_for_provider_openai_is_nonempty (function) at crates/ragent-tui/tests/test_configured_provider_selection.rs:355-362
+
+Group 130 (fingerprint: 08fca8786246d594, 2 members):
+  - EventBatch::new (method) at crates/ragent-codeindex/src/worker.rs:99-104
+  - GatherResult::empty (method) at crates/ragent-research/src/web_gatherer.rs:347-352
+
+Group 131 (fingerprint: 09198ed908d1b573, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/benches/bench_cursor.rs:128 (closure) at crates/ragent-tui/benches/bench_cursor.rs:128-135
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/benches/bench_cursor.rs:146 (closure) at crates/ragent-tui/benches/bench_cursor.rs:146-153
+
+Group 132 (fingerprint: 0a4789f679d1dfdd, 2 members):
+  - test_resolve_region_bedrock_override (function) at crates/ragent-llm/src/providers/bedrock_credentials.rs:363-371
+  - test_resolve_region_default (function) at crates/ragent-llm/src/providers/bedrock_credentials.rs:384-391
+
+Group 133 (fingerprint: 0b1f9aceb95074e3, 2 members):
+  - test_slash_quit_stops_app (function) at crates/ragent-tui/tests/test_slash_commands.rs:263-269
+  - test_slash_exit_stops_app (function) at crates/ragent-tui/tests/test_slash_commands.rs:272-278
+
+Group 134 (fingerprint: 0bb5802a81656273, 2 members):
+  - test_build_request_body_applies_reasoning_effort (function) at crates/ragent-llm/src/providers/copilot.rs:1829-1857
+  - test_build_request_body_thinking_disabled_fallback (function) at crates/ragent-llm/src/providers/copilot.rs:1860-1888
+
+Group 135 (fingerprint: 0c047871f9b866c2, 2 members):
+  - ResearchManager::start_gathering (method) at crates/ragent-research/src/manager.rs:315-321
+  - ResearchManager::complete_gathering (method) at crates/ragent-research/src/manager.rs:324-330
+
+Group 136 (fingerprint: 0db70702306894da, 2 members):
+  - test_humaneval_executes_hidden_tests_for_body_only_completion (function) at crates/ragent-bench/tests/test_bench_core.rs:477-500
+  - test_run_target_executes_mbpp_assertions (function) at crates/ragent-bench/tests/test_bench_core.rs:652-678
+
+Group 137 (fingerprint: 0dbcbf28b1f7e0e7, 2 members):
+  - test_bedrock_has_claude_models (function) at crates/ragent-llm/tests/test_bedrock_provider.rs:64-75
+  - test_bedrock_has_nova_models (function) at crates/ragent-llm/tests/test_bedrock_provider.rs:79-90
+
+Group 138 (fingerprint: 0dc6357767cb0b6d, 2 members):
+  - SpecCommand::build_create_status (method) at crates/ragent-specs/src/commands.rs:258-263
+  - SpecCommand::build_add_status (method) at crates/ragent-specs/src/commands.rs:319-324
+
+Group 139 (fingerprint: 0e21dfc43b55a35b, 2 members):
+  - test_compress_help_shows_config_status (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:301-312
+  - test_compress_help_shows_compressor_config (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:315-326
+
+Group 140 (fingerprint: 11f9622de4227cdb, 2 members):
+  - Storage::delete_messages (method) at crates/ragent-storage/src/storage.rs:871-878
+  - Storage::clear_todos (method) at crates/ragent-storage/src/storage.rs:1267-1274
+
+Group 141 (fingerprint: 126291ec20d42a9b, 2 members):
+  - test_read_end_line_takes_precedence_over_num_lines (function) at crates/ragent-tools-core/tests/test_read_tool.rs:65-88
+  - test_read_num_lines_clamped_to_total_lines (function) at crates/ragent-tools-core/tests/test_read_tool.rs:91-114
+
+Group 142 (fingerprint: 13160361d5a7efe4, 2 members):
+  - test_edit_strict_rejects_crlf_mismatch (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:95-108
+  - test_edit_strict_rejects_trailing_space_mismatch (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:111-124
+
+Group 143 (fingerprint: 135819efb92da9c4, 2 members):
+  - ButtonVariant::enabled_bg_color (method) at crates/ragent-tui/src/widgets/button.rs:48-55
+  - ButtonVariant::active_bg_color (method) at crates/ragent-tui/src/widgets/button.rs:58-65
+
+Group 144 (fingerprint: 13826286284f6f4f, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-config/src/bash_lists.rs:136 (closure) at crates/ragent-config/src/bash_lists.rs:136-143
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-config/src/bash_lists.rs:174 (closure) at crates/ragent-config/src/bash_lists.rs:174-181
+
+Group 145 (fingerprint: 13a546f461c2c8da, 2 members):
+  - test_azure_anthropic_create_client_branches_correctly (function) at crates/ragent-llm/tests/test_azure_resource_anthropic.rs:66-113
+  - test_azure_openai_branch_unchanged (function) at crates/ragent-llm/tests/test_azure_resource_anthropic.rs:116-157
+
+Group 146 (fingerprint: 155731bd38b390c6, 2 members):
+  - SystemPromptCache::invalidate_tool_cache (method) at crates/ragent-agent/src/session/cache.rs:348-360
+  - SystemPromptCache::invalidate_team_cache (method) at crates/ragent-agent/src/session/cache.rs:370-377
+
+Group 147 (fingerprint: 17dc3d9eed3d47ef, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tools-core/src/edit.rs:329 (closure) at crates/ragent-tools-core/src/edit.rs:329-334
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tools-core/src/multiedit.rs:431 (closure) at crates/ragent-tools-core/src/multiedit.rs:431-436
+
+Group 148 (fingerprint: 184d88a6de1b68f7, 2 members):
+  - test_spec_coverage_invalid_id (function) at crates/ragent-agent/tests/test_spec_tools.rs:250-264
+  - test_spec_read_with_invalid_id (function) at crates/ragent-agent/tests/test_spec_tools.rs:353-365
+
+Group 149 (fingerprint: 18d64bb9822730e1, 2 members):
+  - test_parse_double_quoted (function) at crates/ragent-agent/tests/inline/skill_args.rs:30-35
+  - test_tokenize_escaped_space (function) at crates/ragent-agent/tests/inline/skill_context.rs:235-240
+
+Group 150 (fingerprint: 1d2ad27061256296, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/src/research_adapter.rs:107 (closure) at crates/ragent-agent/src/research_adapter.rs:107-112
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/src/research_adapter.rs:121 (closure) at crates/ragent-agent/src/research_adapter.rs:121-126
+
+Group 151 (fingerprint: 1d974224652395a5, 2 members):
+  - test_class_inheritance (function) at crates/ragent-codeindex/src/parser/python.rs:610-621
+  - test_decorator_property (function) at crates/ragent-codeindex/src/parser/python.rs:644-654
+
+Group 152 (fingerprint: 1f9c31b72d9dc251, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/src/model.rs:421 (closure) at crates/ragent-bench/src/model.rs:421-427
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/src/model.rs:438 (closure) at crates/ragent-bench/src/model.rs:438-444
+
+Group 153 (fingerprint: 20ede6efc33b9af5, 2 members):
+  - <CmakeParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/cmake.rs:42-62
+  - <MavenParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/maven.rs:41-61
+
+Group 154 (fingerprint: 221a7b3362d8dc0c, 2 members):
+  - test_result_summary_think_uses_full_thought_text (function) at crates/ragent-tui/tests/test_tool_display.rs:316-326
+  - test_result_summary_think_preserves_multiline_text (function) at crates/ragent-tui/tests/test_tool_display.rs:329-339
+
+Group 155 (fingerprint: 22a39f171b9400f0, 2 members):
+  - test_permission_checker_with_namespaced_categories (function) at crates/ragent-config/tests/test_permission.rs:48-61
+  - test_permission_checker_with_bash_execute (function) at crates/ragent-config/tests/test_permission.rs:64-76
+
+Group 156 (fingerprint: 23ba3559c396b82b, 2 members):
+  - App::thinking_level_setting_value (method) at crates/ragent-tui/src/app/models.rs:243-251
+  - App::thinking_level_short (method) at crates/ragent-tui/src/app/models.rs:280-288
+
+Group 157 (fingerprint: 246d8b8bff05e507, 2 members):
+  - serde_round_trip_web_backward_compatible_without_body (function) at crates/ragent-research/src/source.rs:334-348
+  - serde_round_trip_other_backward_compatible_without_body (function) at crates/ragent-research/src/source.rs:394-407
+
+Group 158 (fingerprint: 24cf32dc4e97511e, 2 members):
+  - test_cursor_byte_pos_ascii (function) at crates/ragent-tui/tests/test_input_unicode.rs:11-17
+  - test_cursor_byte_pos_cjk (function) at crates/ragent-tui/tests/test_input_unicode.rs:43-50
+
+Group 159 (fingerprint: 25e17c1ad483d6e7, 2 members):
+  - test_compression_mode_aggressive_aliases (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:109-118
+  - test_compression_mode_conservative_aliases (function) at crates/ragent-agent/tests/test_compression_pipeline.rs:127-136
+
+Group 160 (fingerprint: 260c18d2e3ae70a3, 2 members):
+  - test_context_cut_on_input_removes_selected_range_only (function) at crates/ragent-tui/tests/test_text_selection.rs:654-677
+  - test_context_cut_on_wrapped_unicode_input_removes_single_character (function) at crates/ragent-tui/tests/test_text_selection.rs:687-711
+
+Group 161 (fingerprint: 26bc264e931ce463, 2 members):
+  - test_mouse_scroll_down_on_memory_decrements_memory_scroll_offset (function) at crates/ragent-tui/tests/test_memory_panel.rs:267-276
+  - test_mouse_scroll_down_on_profile (function) at crates/ragent-tui/tests/test_scrolling.rs:197-206
+
+Group 162 (fingerprint: 272fc0249e6a570d, 2 members):
+  - test_function_item (function) at crates/ragent-codeindex/src/parser/openscad.rs:402-409
+  - test_var_declaration (function) at crates/ragent-codeindex/src/parser/openscad.rs:412-419
+
+Group 163 (fingerprint: 27ea7909c8513418, 2 members):
+  - test_c_enum (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:650-664
+  - test_visibility (function) at crates/ragent-codeindex/src/parser/java.rs:575-599
+
+Group 164 (fingerprint: 2823f5751307b311, 2 members):
+  - test_models_for_provider_sorts_case_insensitively (function) at crates/ragent-tui/src/app/tests.rs:79-96
+  - test_picker_entries_sort_case_insensitively (function) at crates/ragent-tui/src/app/tests.rs:130-148
+
+Group 165 (fingerprint: 2a5bf54b3c00c138, 2 members):
+  - test_parse_websearch_output (function) at crates/ragent-agent/src/research_adapter.rs:572-581
+  - test_parse_websearch_output (function) at crates/ragent-tui/src/research_adapter.rs:16-25
+
+Group 166 (fingerprint: 2a5fd1aa35b92d00, 2 members):
+  - from_frontmatter_parses_bold_labeled_format (function) at crates/ragent-research/src/item.rs:595-602
+  - from_frontmatter_still_parses_legacy_plain_yaml (function) at crates/ragent-research/src/item.rs:605-613
+
+Group 167 (fingerprint: 2d86382a8e8e8fc4, 2 members):
+  - test_state (function) at crates/ragent-server/tests/test_integration.rs:23-63
+  - test_state (function) at crates/ragent-server/tests/test_memory_api.rs:23-63
+
+Group 168 (fingerprint: 2db4a2e13a2ad0e9, 2 members):
+  - test_git_status_modified (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:74-92
+  - test_git_status_untracked (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:95-113
+
+Group 169 (fingerprint: 32fa95c2d8c24ba5, 2 members):
+  - rejects_starting_with_digit (function) at crates/ragent-research/src/research_name.rs:334-339
+  - rejects_starting_with_hyphen (function) at crates/ragent-research/src/research_name.rs:342-347
+
+Group 170 (fingerprint: 3382390814d471f4, 2 members):
+  - SkillRegistry::list_user_invocable (method) at crates/ragent-agent/src/skill/mod.rs:328-333
+  - SkillRegistry::list_agent_invocable (method) at crates/ragent-agent/src/skill/mod.rs:337-342
+
+Group 171 (fingerprint: 346d68a5fb198cf6, 2 members):
+  - test_api_type_openai_accepted (function) at crates/ragent-llm/tests/test_azure_resource_parser.rs:271-288
+  - test_api_type_anthropic_accepted (function) at crates/ragent-llm/tests/test_azure_resource_parser.rs:291-308
+
+Group 172 (fingerprint: 3553d87454b9c4ee, 2 members):
+  - add_allowlist (function) at crates/ragent-config/src/bash_lists.rs:127-144
+  - add_denylist (function) at crates/ragent-config/src/bash_lists.rs:165-182
+
+Group 173 (fingerprint: 36c34eb656a6b5a6, 2 members):
+  - test_detect_content_type_heuristic_json (function) at crates/ragent-agent/tests/inline/compression_pipeline.rs:39-48
+  - test_detect_content_type_heuristic_diff (function) at crates/ragent-agent/tests/inline/compression_pipeline.rs:51-60
+
+Group 174 (fingerprint: 37367091d0fdd029, 2 members):
+  - spawn_extracted_to_core_forwarder (function) at crates/ragent-agent/src/tool/mod.rs:426-438
+  - spawn_extracted_extended_to_core_forwarder (function) at crates/ragent-agent/src/tool/mod.rs:889-901
+
+Group 175 (fingerprint: 376fab5637ec3ec5, 2 members):
+  - test_team_shutdown_teammate_graceful_marks_shutting_down (function) at crates/ragent-team/tests/test_m3_lifecycle.rs:259-277
+  - test_team_shutdown_teammate_immediate_marks_stopped (function) at crates/ragent-team/tests/test_m3_lifecycle.rs:280-298
+
+Group 176 (fingerprint: 3b9b3f528977d4c5, 2 members):
+  - format_size (function) at crates/ragent-agent/src/reference/resolve.rs:405-413
+  - format_size (function) at crates/ragent-tools-core/src/list.rs:157-165
+
+Group 177 (fingerprint: 3baf231bfb9de5f0, 2 members):
+  - Message::user_text (method) at crates/ragent-types/src/message/mod.rs:212-218
+  - Message::assistant_text (method) at crates/ragent-types/src/message/mod.rs:221-227
+
+Group 178 (fingerprint: 3c32d48bc798175c, 2 members):
+  - ResearchCliCommand::parse_open (method) at crates/ragent-research/src/cli.rs:234-245
+  - ResearchCliCommand::parse_show (method) at crates/ragent-research/src/cli.rs:247-258
+
+Group 179 (fingerprint: 3cdfa4ff59ac052c, 2 members):
+  - count_keywords (function) at crates/ragent-llm/src/providers/router_classifier.rs:879-887
+  - count_keywords_lower (function) at crates/ragent-llm/src/providers/router_classifier.rs:890-898
+
+Group 180 (fingerprint: 3e443f0b7452b79d, 2 members):
+  - render_app_to_string (function) at crates/ragent-tui/tests/test_memory_panel.rs:158-176
+  - render_app_to_string (function) at crates/ragent-tui/tests/test_todo_panel.rs:26-44
+
+Group 181 (fingerprint: 40da9bdcc7278e2c, 2 members):
+  - <ThinkingConfig as Default>::default (trait impl block) at crates/ragent-types/src/thinking.rs:70-77
+  - ThinkingConfig::off (method) at crates/ragent-types/src/thinking.rs:92-99
+
+Group 182 (fingerprint: 4124f45e5e964dd9, 2 members):
+  - test_percent_decode_non_utf8_bytes (function) at crates/ragent-tui/tests/test_clipboard_tempfile.rs:108-115
+  - test_percent_decode_latin1_sequence (function) at crates/ragent-tui/tests/test_clipboard_tempfile.rs:119-126
+
+Group 183 (fingerprint: 41621c704c707733, 2 members):
+  - IncrementalSnapshot::to_full (method) at crates/ragent-agent/src/snapshot/mod.rs:71-103
+  - IncrementalSnapshot::to_full (method) at crates/ragent-storage/src/snapshot.rs:71-103
+
+Group 184 (fingerprint: 416d119536bbb84f, 2 members):
+  - make_app_with_storage (function) at crates/ragent-tui/tests/test_configured_provider_selection.rs:31-76
+  - make_app_with_storage (function) at crates/ragent-tui/tests/test_slash_commands.rs:33-78
+
+Group 185 (fingerprint: 41eb2d7c52f8651f, 2 members):
+  - test_invoke_no_args_no_context (function) at crates/ragent-agent/src/skill/invoke.rs:427-434
+  - test_invoke_session_id_substitution (function) at crates/ragent-agent/src/skill/invoke.rs:437-444
+
+Group 186 (fingerprint: 4241d6c894d81c27, 2 members):
+  - test_toggle_memory_mutually_excludes_todo_panel (function) at crates/ragent-tui/tests/test_memory_panel.rs:521-539
+  - test_toggle_memory_mutually_excludes_profile_panel (function) at crates/ragent-tui/tests/test_memory_panel.rs:542-565
+
+Group 187 (fingerprint: 42476f0098dae1e7, 2 members):
+  - test_substring_match (function) at crates/ragent-agent/src/reference/fuzzy.rs:209-217
+  - test_path_match (function) at crates/ragent-agent/src/reference/fuzzy.rs:220-228
+
+Group 188 (fingerprint: 434a2d8001396aa3, 2 members):
+  - rejects_path_traversal (function) at crates/ragent-research/src/research_name.rs:352-357
+  - test_spec_id_invalid (function) at crates/ragent-specs/src/spec.rs:385-390
+
+Group 189 (fingerprint: 445768da4b3ba8b5, 2 members):
+  - seed_secrets (function) at crates/ragent-agent/src/sanitize.rs:106-114
+  - seed_secrets (function) at crates/ragent-types/src/sanitize.rs:106-114
+
+Group 190 (fingerprint: 445b079d85e7f54c, 2 members):
+  - estimate_context_window (function) at crates/ragent-llm/src/providers/ollama.rs:149-165
+  - estimate_context_window (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:208-224
+
+Group 191 (fingerprint: 451d764aa9d58c95, 2 members):
+  - bench_estimate_request_bytes (function) at crates/ragent-bench/benches/agent_loop.rs:187-197
+  - bench_estimate_tool_definition_bytes (function) at crates/ragent-bench/benches/agent_loop.rs:199-209
+
+Group 192 (fingerprint: 4606abf5554b8f1b, 2 members):
+  - test_todo_update_includes_status_metadata (function) at crates/ragent-tools-extended/tests/test_todo_status_change.rs:148-169
+  - test_todo_complete_includes_status_metadata (function) at crates/ragent-tools-extended/tests/test_todo_status_change.rs:172-192
+
+Group 193 (fingerprint: 477c2edde878dc54, 2 members):
+  - parse_anthropic_rate_limit_headers (function) at crates/ragent-llm/src/providers/anthropic.rs:611-652
+  - parse_openai_rate_limit_headers (function) at crates/ragent-llm/src/providers/openai.rs:547-586
+
+Group 194 (fingerprint: 4c05fddc1fbfd962, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/src/layout.rs:3005 (closure) at crates/ragent-tui/src/layout.rs:3005-3011
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/src/layout.rs:3012 (closure) at crates/ragent-tui/src/layout.rs:3012-3018
+
+Group 195 (fingerprint: 4db8a0ced0e1505f, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/benches/agent_loop.rs:241 (closure) at crates/ragent-bench/benches/agent_loop.rs:241-257
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/benches/agent_loop.rs:261 (closure) at crates/ragent-bench/benches/agent_loop.rs:261-281
+
+Group 196 (fingerprint: 4fbe82346342b9d7, 2 members):
+  - <FixedSearch as WebSearchTool>::search (trait impl block) at crates/ragent-research/benches/researchext_bench.rs:17-23
+  - <RecordingSearch as WebSearchTool>::search (trait impl block) at crates/ragent-research/src/session.rs:1300-1310
+
+Group 197 (fingerprint: 50862811d166cead, 2 members):
+  - test_edit_schema_declares_canonical_params (function) at crates/ragent-agent/tests/test_editrenewal_aliases.rs:100-115
+  - test_multi_edit_schema_declares_canonical_params (function) at crates/ragent-agent/tests/test_editrenewal_aliases.rs:118-133
+
+Group 198 (fingerprint: 5100aeff4126593b, 2 members):
+  - test_render_markdown_no_prefix_passthrough (function) at crates/ragent-tui/tests/test_markdown_table.rs:11-17
+  - test_normalize_tables_non_table_passthrough (function) at crates/ragent-tui/tests/test_markdown_table.rs:69-74
+
+Group 199 (fingerprint: 510d72e866772cfd, 2 members):
+  - extract_interface (function) at crates/ragent-codeindex/src/parser/gradle.rs:158-191
+  - extract_enum (function) at crates/ragent-codeindex/src/parser/gradle.rs:196-229
+
+Group 200 (fingerprint: 517edc5f463d2cd1, 2 members):
+  - test_scroll_up_increments_offset (function) at crates/ragent-tui/tests/test_scrolling.rs:94-99
+  - test_log_scroll_up_increments (function) at crates/ragent-tui/tests/test_scrolling.rs:120-125
+
+Group 201 (fingerprint: 52207a5ae1fbb54e, 2 members):
+  - test_responsive_mode_sequential_widths (function) at crates/ragent-tui/tests/test_statusbar_layout.rs:111-121
+  - test_responsive_mode_sequential_widths_full (function) at crates/ragent-tui/tests/test_statusbar_layout.rs:124-134
+
+Group 202 (fingerprint: 52281cd9b4986724, 2 members):
+  - test_edits_across_two_files (function) at crates/ragent-tools-core/tests/test_multiedit.rs:65-84
+  - test_multi_edit_mixed_param_names_across_edits (function) at crates/ragent-tools-core/tests/test_multiedit.rs:371-390
+
+Group 203 (fingerprint: 54448e5318b60761, 2 members):
+  - test_normal_command_reference (function) at crates/ragent-codeindex/src/parser/cmake.rs:471-477
+  - test_module_call_reference (function) at crates/ragent-codeindex/src/parser/openscad.rs:432-438
+
+Group 204 (fingerprint: 5472b11e242f4739, 2 members):
+  - test_extract_host (function) at crates/ragent-llm/src/providers/bedrock_sigv4.rs:321-331
+  - test_extract_explicit_agent_type (function) at crates/ragent-team/tests/test_team_classify.rs:13-23
+
+Group 205 (fingerprint: 55a45d45e9ab8659, 2 members):
+  - GitLabClient::post (method) at crates/ragent-tools-vcs/src/gitlab/client.rs:67-80
+  - GitLabClient::put (method) at crates/ragent-tools-vcs/src/gitlab/client.rs:83-96
+
+Group 206 (fingerprint: 5615124b446dc8f4, 2 members):
+  - CoordinatorCluster::start_job_sync (method) at crates/ragent-agent/src/orchestrator/leader.rs:205-211
+  - CoordinatorCluster::start_job_async (method) at crates/ragent-agent/src/orchestrator/leader.rs:218-224
+
+Group 207 (fingerprint: 568e70d88b44eb3e, 2 members):
+  - terminal_predicate (function) at crates/ragent-research/src/status.rs:159-164
+  - finished_predicate (function) at crates/ragent-research/src/status.rs:167-172
+
+Group 208 (fingerprint: 5785c6f1946a5cdf, 2 members):
+  - test_slash_spec_task_lists_tasks (function) at crates/ragent-tui/tests/test_slash_commands.rs:2271-2284
+  - test_slash_spec_validate_all (function) at crates/ragent-tui/tests/test_slash_commands.rs:2287-2300
+
+Group 209 (fingerprint: 57906d28fa78e136, 2 members):
+  - test_extracts_from_json_ld_array (function) at crates/ragent-research/src/web_date.rs:301-308
+  - test_prefers_json_ld_over_meta (function) at crates/ragent-research/src/web_date.rs:366-373
+
+Group 210 (fingerprint: 57c9cb31fcb5c8a6, 2 members):
+  - Mailbox::mark_read_blocking (method) at crates/ragent-agent/src/team/mailbox.rs:665-673
+  - Mailbox::mark_all_read_blocking (method) at crates/ragent-agent/src/team/mailbox.rs:677-685
+
+Group 211 (fingerprint: 58fc7a792e27e184, 2 members):
+  - check_stale_file (function) at crates/ragent-tools-core/src/edit.rs:315-355
+  - check_stale_file (function) at crates/ragent-tools-core/src/multiedit.rs:417-455
+
+Group 212 (fingerprint: 5d479d1407c39bb5, 2 members):
+  - BlockScope::as_str (method) at crates/ragent-tools-extended/src/memory/block.rs:29-34
+  - ThemeMode::display_name (method) at crates/ragent-tui/src/theme.rs:149-154
+
+Group 213 (fingerprint: 606cc3df7cf7258b, 2 members):
+  - test_multiedit_alias_description_marks_deprecation (function) at crates/ragent-agent/tests/test_editrenewal_aliases.rs:50-62
+  - test_edit_description_states_uniqueness_and_context (function) at crates/ragent-agent/tests/test_editrenewal_aliases.rs:85-97
+
+Group 214 (fingerprint: 60789b3486a11eb6, 2 members):
+  - test_memory_forget_not_found (function) at crates/ragent-server/tests/test_memory_api.rs:209-219
+  - test_memory_block_delete_not_found (function) at crates/ragent-server/tests/test_memory_api.rs:236-246
+
+Group 215 (fingerprint: 62cd09ec51631401, 2 members):
+  - test_simple_function (function) at crates/ragent-codeindex/src/parser/python.rs:448-453
+  - test_function_declaration (function) at crates/ragent-codeindex/src/parser/typescript.rs:671-676
+
+Group 216 (fingerprint: 6321558b2ac8b663, 2 members):
+  - test_extract_single_line (function) at crates/ragent-tui/tests/test_text_selection.rs:584-590
+  - test_extract_partial_single_line (function) at crates/ragent-tui/tests/test_text_selection.rs:606-612
+
+Group 217 (fingerprint: 64b74d6800439028, 2 members):
+  - <AutoExtractConfig as Default>::default (trait impl block) at crates/ragent-config/src/config.rs:1699-1704
+  - <DecayConfig as Default>::default (trait impl block) at crates/ragent-config/src/config.rs:1748-1753
+
+Group 218 (fingerprint: 684837cd1e65f696, 2 members):
+  - test_script_file_path_powershell_extension (function) at crates/ragent-tools-core/tests/inline/bash.rs:283-289
+  - test_script_file_path_gitbash_extension (function) at crates/ragent-tools-core/tests/inline/bash.rs:292-298
+
+Group 219 (fingerprint: 693e390ce3583f2f, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/src/sanitize.rs:16 (closure) at crates/ragent-agent/src/sanitize.rs:16-43
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-types/src/sanitize.rs:16 (closure) at crates/ragent-types/src/sanitize.rs:16-43
+
+Group 220 (fingerprint: 6a08a101b52fcea0, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:186 (closure) at crates/ragent-agent/benches/agent_loop.rs:186-191
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:192 (closure) at crates/ragent-agent/benches/agent_loop.rs:192-197
+
+Group 221 (fingerprint: 6b9e6cf459841e99, 2 members):
+  - test_slash_modifier_fully_stripped (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:434-441
+  - test_bracket_modifier_fully_stripped (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:444-451
+
+Group 222 (fingerprint: 6ce537d129c73c2f, 2 members):
+  - remove_trailing_commas (function) at crates/ragent-agent/src/team/swarm.rs:164-182
+  - remove_trailing_commas (function) at crates/ragent-research/src/web_gatherer.rs:316-333
+
+Group 223 (fingerprint: 6f6b86c709c2eb69, 2 members):
+  - extract_struct (function) at crates/ragent-codeindex/src/parser/rust.rs:292-334
+  - extract_enum (function) at crates/ragent-codeindex/src/parser/rust.rs:372-409
+
+Group 224 (fingerprint: 709b00fec5951e30, 2 members):
+  - test_session_created (function) at crates/ragent-server/tests/test_event_to_sse.rs:22-28
+  - test_session_updated (function) at crates/ragent-server/tests/test_event_to_sse.rs:31-37
+
+Group 225 (fingerprint: 7195b9e10085988f, 2 members):
+  - SelectableList::new (method) at crates/ragent-tui/src/widgets/selectable_list.rs:35-45
+  - SelectableList::new_focus_list (method) at crates/ragent-tui/src/widgets/selectable_list.rs:51-61
+
+Group 226 (fingerprint: 72eee542907f3c08, 2 members):
+  - extract_function_def (function) at crates/ragent-codeindex/src/parser/cmake.rs:115-156
+  - extract_macro_def (function) at crates/ragent-codeindex/src/parser/cmake.rs:161-201
+
+Group 227 (fingerprint: 7435011d5dde5144, 2 members):
+  - is_token_overflow_error_message (function) at crates/ragent-agent/src/session/history.rs:348-355
+  - is_token_overflow_error (function) at crates/ragent-agent/src/team/manager.rs:54-64
+
+Group 228 (fingerprint: 75145378ca96274a, 2 members):
+  - test_enum_with_constants (function) at crates/ragent-codeindex/src/parser/java.rs:557-572
+  - test_trait_with_methods (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:76-89
+
+Group 229 (fingerprint: 7584971ed103aaa0, 2 members):
+  - test_context_length_parses_top_level_string_fields (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:875-883
+  - test_context_length_parses_alternate_model_info_keys (function) at crates/ragent-llm/src/providers/ollama_cloud.rs:886-896
+
+Group 230 (fingerprint: 760069d917fc2f09, 2 members):
+  - ToolRegistry::list (method) at crates/ragent-tools-core/src/lib.rs:205-215
+  - ToolRegistry::list (method) at crates/ragent-tools-vcs/src/lib.rs:127-137
+
+Group 231 (fingerprint: 764e9f55a10b93b0, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tools-extended/src/office_info.rs:118 (closure) at crates/ragent-tools-extended/src/office_info.rs:118-125
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tools-extended/src/office_info.rs:131 (closure) at crates/ragent-tools-extended/src/office_info.rs:131-138
+
+Group 232 (fingerprint: 796fbb631788db65, 2 members):
+  - test_tool_result_redacts_api_key (function) at crates/ragent-server/tests/test_event_to_sse.rs:496-513
+  - test_tool_result_redacts_key_prefix (function) at crates/ragent-server/tests/test_event_to_sse.rs:536-553
+
+Group 233 (fingerprint: 7b8185e4221c5af6, 2 members):
+  - <LlmPlanner as std::fmt::Debug>::fmt (trait impl block) at crates/ragent-research/src/planner.rs:153-159
+  - <LlmQueryDecomposer as std::fmt::Debug>::fmt (trait impl block) at crates/ragent-research/src/web_gatherer.rs:149-155
+
+Group 234 (fingerprint: 7bb1ac06e55f30e6, 2 members):
+  - test_serialised_default_omits_code_index_enabled (function) at crates/ragent-config/tests/test_code_index_config.rs:128-143
+  - test_serialised_tool_visibility_omits_default_codeindex (function) at crates/ragent-config/tests/test_code_index_config.rs:146-159
+
+Group 235 (fingerprint: 7bb7bac69be40c26, 2 members):
+  - test_teams_alias_show_loads_named_team_details (function) at crates/ragent-tui/tests/test_teams_tui.rs:233-255
+  - test_teams_alias_show_no_name_lists_all_registered_teams (function) at crates/ragent-tui/tests/test_teams_tui.rs:258-279
+
+Group 236 (fingerprint: 7c509a1f2ffdeab7, 2 members):
+  - test_parse_aws_credentials_ini_comments (function) at crates/ragent-llm/src/providers/bedrock_credentials.rs:346-360
+  - test_parse_ini_unknown_keys_ignored (function) at crates/ragent-llm/src/providers/bedrock_credentials.rs:411-424
+
+Group 237 (fingerprint: 7dd20b04140b995e, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/tests/test_config_write.rs:183 (closure) at crates/ragent-tui/tests/test_config_write.rs:183-193
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/tests/test_config_write.rs:195 (closure) at crates/ragent-tui/tests/test_config_write.rs:195-205
+
+Group 238 (fingerprint: 7f101bd587b0b90f, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/src/reference/resolve.rs:361 (closure) at crates/ragent-agent/src/reference/resolve.rs:361-369
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tools-core/src/list.rs:109 (closure) at crates/ragent-tools-core/src/list.rs:109-117
+
+Group 239 (fingerprint: 7f773aa9724fc125, 2 members):
+  - stopper_halts_at_max_iterations (function) at crates/ragent-research/src/adaptive.rs:132-137
+  - stopper_continues_when_improving (function) at crates/ragent-research/src/adaptive.rs:149-154
+
+Group 240 (fingerprint: 7f9048b298f6d98b, 2 members):
+  - test_git_remote_list_empty (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:394-409
+  - test_git_tag_list_empty (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:476-491
+
+Group 241 (fingerprint: 8172463520c56493, 2 members):
+  - test_highest_task_in_full_plan (function) at crates/ragent-specs/src/id_scanner.rs:193-205
+  - test_no_false_positives (function) at crates/ragent-specs/src/id_scanner.rs:208-214
+
+Group 242 (fingerprint: 81a6c471f3ebcfe9, 2 members):
+  - test_batch_skill (function) at crates/ragent-agent/src/skill/bundled.rs:320-326
+  - test_loop_skill (function) at crates/ragent-agent/src/skill/bundled.rs:338-344
+
+Group 243 (fingerprint: 820ffefc493d17e1, 2 members):
+  - format_skill_message (function) at crates/ragent-agent/src/skill/invoke.rs:166-171
+  - format_forked_result (function) at crates/ragent-agent/src/skill/invoke.rs:312-317
+
+Group 244 (fingerprint: 8449cc955e3e8e16, 2 members):
+  - test_history_round_trip (function) at crates/ragent-tui/tests/test_history.rs:245-267
+  - test_history_round_trip_unicode (function) at crates/ragent-tui/tests/test_history.rs:371-391
+
+Group 245 (fingerprint: 85983550067a7e1c, 2 members):
+  - SpecCommand::build_add_message (method) at crates/ragent-specs/src/commands.rs:327-338
+  - SpecCommand::build_add_log (method) at crates/ragent-specs/src/commands.rs:341-346
+
+Group 246 (fingerprint: 8754424da7273ad7, 2 members):
+  - system_prompt_cache_field_is_parking_lot_rwlock (function) at crates/ragent-agent/tests/test_cross_await_mutex.rs:84-94
+  - system_prompt_cache_field_is_exposed (function) at crates/ragent-agent/tests/test_system_prompt_cache.rs:126-132
+
+Group 247 (fingerprint: 87fec04760f0597a, 2 members):
+  - TaskStore::claim_specific_blocking (method) at crates/ragent-agent/src/team/task.rs:786-793
+  - TaskStore::complete_blocking (method) at crates/ragent-agent/src/team/task.rs:796-803
+
+Group 248 (fingerprint: 89f35d5fc9557996, 2 members):
+  - with_temp_config_home (function) at crates/ragent-config/tests/test_default_config_creation.rs:7-14
+  - with_temp_xdg_config_home (function) at crates/ragent-tui/tests/test_init_config.rs:22-29
+
+Group 249 (fingerprint: 8a4788ec35829a90, 2 members):
+  - test_result_summary_write_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:214-235
+  - test_result_summary_task_complete_with_summary (function) at crates/ragent-tui/tests/test_tool_display.rs:499-515
+
+Group 250 (fingerprint: 8aafdab886d073fd, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/benches/agent_loop.rs:242 (closure) at crates/ragent-bench/benches/agent_loop.rs:242-256
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-bench/benches/agent_loop.rs:262 (closure) at crates/ragent-bench/benches/agent_loop.rs:262-280
+
+Group 251 (fingerprint: 8c4b2ec42a32f8b0, 2 members):
+  - test_slash_all_medium_aliases (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:254-263
+  - test_slash_all_complex_aliases (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:266-280
+
+Group 252 (fingerprint: 8e34a61c049a0f24, 2 members):
+  - <DemoStorage as StorageBackend>::create_todo (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:46-66
+  - <MockStorage as StorageBackend>::create_todo (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:70-90
+
+Group 253 (fingerprint: 9207db2c6363b164, 2 members):
+  - write_odt (function) at crates/ragent-tools-extended/src/libreoffice_write.rs:272-302
+  - write_odp (function) at crates/ragent-tools-extended/src/libreoffice_write.rs:550-579
+
+Group 254 (fingerprint: 93aae4cf04ace6a5, 2 members):
+  - test_mbpp_registry_lists_multilingual_full_dataset_languages (function) at crates/ragent-bench/tests/test_bench_core.rs:212-222
+  - test_humaneval_registry_lists_humanevalpack_languages (function) at crates/ragent-bench/tests/test_bench_core.rs:225-239
+
+Group 255 (fingerprint: 945ebcd1b084b6ca, 2 members):
+  - test_terraform_block (function) at crates/ragent-codeindex/src/parser/hcl.rs:422-434
+  - test_simple_pom (function) at crates/ragent-codeindex/src/parser/maven.rs:452-466
+
+Group 256 (fingerprint: 94715fab6243ce73, 2 members):
+  - test_thinking_level_serde_roundtrip (function) at crates/ragent-types/tests/test_thinking.rs:4-11
+  - test_thinking_display_serde_roundtrip (function) at crates/ragent-types/tests/test_thinking.rs:68-76
+
+Group 257 (fingerprint: 95b53681781e5ae6, 2 members):
+  - test_git_tag_show (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:544-563
+  - test_git_checkout_branch (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:725-741
+
+Group 258 (fingerprint: 961786c7c74081d4, 2 members):
+  - test_classify_with_image_sets_requires_vision (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:400-417
+  - test_classify_with_video_sets_requires_vision (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:420-437
+
+Group 259 (fingerprint: 96d8cd8deeff1c66, 2 members):
+  - make_unified_diff (function) at crates/ragent-agent/src/snapshot/mod.rs:257-274
+  - make_unified_diff (function) at crates/ragent-storage/src/snapshot.rs:257-274
+
+Group 260 (fingerprint: 97051cf90b92e530, 2 members):
+  - <GitlabRetryPipelineTool as Tool>::execute (trait impl block) at crates/ragent-tools-vcs/src/gitlab/gitlab_pipelines.rs:639-658
+  - <GitlabCancelPipelineTool as Tool>::execute (trait impl block) at crates/ragent-tools-vcs/src/gitlab/gitlab_pipelines.rs:693-712
+
+Group 261 (fingerprint: 981088d2fab8b55c, 2 members):
+  - test_foreach_loop (function) at crates/ragent-codeindex/src/parser/cmake.rs:496-504
+  - test_modules (function) at crates/ragent-codeindex/src/parser/maven.rs:488-498
+
+Group 262 (fingerprint: 9aa118e1fd774697, 2 members):
+  - test_team_tool_summary_includes_args (function) at crates/ragent-tui/src/widgets/message_widget.rs:2631-2641
+  - test_unknown_tool_summary_includes_args (function) at crates/ragent-tui/src/widgets/message_widget.rs:2662-2670
+
+Group 263 (fingerprint: 9c1e9b60e610cdd4, 2 members):
+  - test_drag_to_top_scrolls_to_top_of_content (function) at crates/ragent-tui/tests/test_scrolling.rs:329-339
+  - test_drag_to_middle_scrolls_to_midpoint (function) at crates/ragent-tui/tests/test_scrolling.rs:356-366
+
+Group 264 (fingerprint: 9d98657d7bdb3d2b, 2 members):
+  - test_load_history_reads_entries (function) at crates/ragent-tui/tests/test_history.rs:135-146
+  - test_load_history_filters_empty_lines (function) at crates/ragent-tui/tests/test_history.rs:149-160
+
+Group 265 (fingerprint: 9da45f46e25c1507, 2 members):
+  - extract_method_invocation (function) at crates/ragent-codeindex/src/parser/gradle.rs:462-476
+  - extract_annotation (function) at crates/ragent-codeindex/src/parser/gradle.rs:481-495
+
+Group 266 (fingerprint: 9f1401f6530e9c9e, 2 members):
+  - test_slash_help_executes_in_chat_screen (function) at crates/ragent-tui/tests/test_slash_commands.rs:249-258
+  - test_slash_opt_help_stays_in_chat (function) at crates/ragent-tui/tests/test_slash_commands.rs:1894-1904
+
+Group 267 (fingerprint: 9fb17a8cf2cb4d45, 2 members):
+  - <CParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/c_cpp.rs:31-58
+  - <CppParser as LanguageParser>::parse (trait impl block) at crates/ragent-codeindex/src/parser/c_cpp.rs:80-107
+
+Group 268 (fingerprint: a1072e65c22ffbd6, 2 members):
+  - test_all_models_support_tool_use (function) at crates/ragent-llm/tests/inline/xai.rs:63-72
+  - test_all_models_support_streaming (function) at crates/ragent-llm/tests/inline/xai.rs:75-84
+
+Group 269 (fingerprint: a20fcf5c2da775a9, 2 members):
+  - test_remove_char_range_middle_unicode (function) at crates/ragent-tui/tests/test_input_unicode.rs:208-216
+  - test_remove_char_range_beyond_bounds (function) at crates/ragent-tui/tests/test_input_unicode.rs:228-236
+
+Group 270 (fingerprint: a22be4a1e7c5d02e, 2 members):
+  - test_search_by_name (function) at crates/ragent-codeindex/tests/test_codeindex.rs:119-127
+  - test_enum_found_via_search (function) at crates/ragent-codeindex/tests/test_codeindex.rs:405-413
+
+Group 271 (fingerprint: a2bd89a64dfeacd6, 2 members):
+  - <ToolOutput as Default>::default (trait impl block) at crates/ragent-agent/src/tool/mod.rs:199-204
+  - CcrStoreHandle::in_memory (method) at crates/ragent-agent/src/compression/ccr_store.rs:157-162
+
+Group 272 (fingerprint: a3671c4d74fa1f61, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:142 (closure) at crates/ragent-agent/benches/agent_loop.rs:142-147
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:149 (closure) at crates/ragent-agent/benches/agent_loop.rs:149-154
+
+Group 273 (fingerprint: a3e2caeebbf36c7c, 2 members):
+  - test_select_tier_zero_score (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:141-147
+  - test_select_tier_max_score (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:150-156
+
+Group 274 (fingerprint: a46df09233c3e3cd, 2 members):
+  - detect_repo (function) at crates/ragent-tools-vcs/src/github/github_issues.rs:16-23
+  - detect_project (function) at crates/ragent-tools-vcs/src/gitlab/gitlab_issues.rs:20-27
+
+Group 275 (fingerprint: a4bb4665ad80a7f7, 2 members):
+  - Scope::config_path (method) at crates/ragent-config/src/bash_lists.rs:115-123
+  - Scope::config_path (method) at crates/ragent-config/src/dir_lists.rs:267-275
+
+Group 276 (fingerprint: a867842c2081809b, 2 members):
+  - detect (function) at crates/ragent-tools-vcs/src/gitlab/gitlab_mrs.rs:12-22
+  - detect (function) at crates/ragent-tools-vcs/src/gitlab/gitlab_pipelines.rs:13-23
+
+Group 277 (fingerprint: aa1f1d0a9d0e9cb9, 2 members):
+  - Storage::get_setting (method) at crates/ragent-storage/src/storage.rs:1068-1075
+  - Storage::get_discovered_models (method) at crates/ragent-storage/src/storage.rs:1099-1107
+
+Group 278 (fingerprint: aa4e261da933616c, 2 members):
+  - test_acquire_and_release_permit (function) at crates/ragent-types/tests/test_resource.rs:13-20
+  - test_tool_permit_acquire_release (function) at crates/ragent-types/tests/test_resource.rs:38-45
+
+Group 279 (fingerprint: ab36ebda3bee4b25, 2 members):
+  - App::cut_kb_selection (method) at crates/ragent-tui/src/app/session_ops.rs:635-642
+  - InputField::cut_selection (method) at crates/ragent-tui/src/input_field.rs:273-280
+
+Group 280 (fingerprint: ada5836133d0ba51, 2 members):
+  - get_compiled_allowlist (function) at crates/ragent-config/src/dir_lists.rs:228-233
+  - get_compiled_denylist (function) at crates/ragent-config/src/dir_lists.rs:240-245
+
+Group 281 (fingerprint: af530e70ecba21f2, 2 members):
+  - <GenericOpenAiProvider as Provider>::create_client (trait impl block) at crates/ragent-llm/src/providers/generic_openai.rs:36-58
+  - <AzureFoundryProvider as Provider>::create_client (trait impl block) at crates/ragent-llm/src/providers/azure_foundry.rs:108-131
+
+Group 282 (fingerprint: afc8a0f76fe389f4, 2 members):
+  - recompile_allowlist (function) at crates/ragent-config/src/dir_lists.rs:128-137
+  - recompile_denylist (function) at crates/ragent-config/src/dir_lists.rs:140-149
+
+Group 283 (fingerprint: afe4ad755b48d1ea, 2 members):
+  - test_simplify_skill (function) at crates/ragent-agent/src/skill/bundled.rs:311-317
+  - test_debug_skill (function) at crates/ragent-agent/src/skill/bundled.rs:329-335
+
+Group 284 (fingerprint: b0114d8c6a3f4a52, 2 members):
+  - xml_escape (function) at crates/ragent-tools-extended/src/libreoffice_write.rs:648-654
+  - xml_escape (function) at crates/ragent-tools-extended/src/office_write.rs:691-697
+
+Group 285 (fingerprint: b25cbc3729a0ce75, 2 members):
+  - Storage::set_setting (method) at crates/ragent-storage/src/storage.rs:1020-1028
+  - Storage::set_discovered_models (method) at crates/ragent-storage/src/storage.rs:1084-1092
+
+Group 286 (fingerprint: b33604f43be1e941, 2 members):
+  - test_git_log_author_filter (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:183-198
+  - test_git_show_stat_false (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:372-387
+
+Group 287 (fingerprint: b3a01b6ffcb2cd01, 2 members):
+  - acquire_process_permit (function) at crates/ragent-types/src/resource.rs:50-56
+  - acquire_tool_permit (function) at crates/ragent-types/src/resource.rs:86-92
+
+Group 288 (fingerprint: b4d5d575758a3d45, 2 members):
+  - AnthropicClient::build_request_body (method) at crates/ragent-llm/src/providers/anthropic.rs:329-418
+  - BedrockAnthropicClient::build_request_body (method) at crates/ragent-llm/src/providers/bedrock.rs:419-510
+
+Group 289 (fingerprint: b4dc052821596c77, 2 members):
+  - validate_rejects_too_short_step_budget (function) at crates/ragent-config/tests/test_agent_perf_config.rs:19-27
+  - validate_rejects_zero_concurrent_tools (function) at crates/ragent-config/tests/test_agent_perf_config.rs:30-38
+
+Group 290 (fingerprint: b62a031cc2120697, 2 members):
+  - test_livecodebench_skips_unsupported_scenario (function) at crates/ragent-bench/tests/test_bench_core.rs:871-898
+  - test_swebench_lite_skips_unsupported_scenario (function) at crates/ragent-bench/tests/test_bench_core.rs:1013-1043
+
+Group 291 (fingerprint: b705d4cdafefcbea, 2 members):
+  - Source::title (method) at crates/ragent-research/src/source.rs:142-149
+  - Source::path_or_url (method) at crates/ragent-research/src/source.rs:152-159
+
+Group 292 (fingerprint: b752aadc8cb3a276, 2 members):
+  - test_message_start (function) at crates/ragent-server/tests/test_event_to_sse.rs:42-50
+  - test_text_delta (function) at crates/ragent-server/tests/test_event_to_sse.rs:53-61
+
+Group 293 (fingerprint: b7d57d789887e7ed, 2 members):
+  - register_secret (function) at crates/ragent-agent/src/sanitize.rs:68-75
+  - register_secret (function) at crates/ragent-types/src/sanitize.rs:68-75
+
+Group 294 (fingerprint: ba031de4a991108f, 2 members):
+  - restore_config_home (function) at crates/ragent-config/tests/test_default_config_creation.rs:16-24
+  - restore_xdg_config_home (function) at crates/ragent-tui/tests/test_init_config.rs:31-39
+
+Group 295 (fingerprint: bc9d859d36d2ceef, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:164 (closure) at crates/ragent-agent/benches/agent_loop.rs:164-169
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/benches/agent_loop.rs:170 (closure) at crates/ragent-agent/benches/agent_loop.rs:170-175
+
+Group 296 (fingerprint: bf187a5c0756a114, 2 members):
+  - bench_event_to_sse (function) at crates/ragent-server/benches/bench_sse.rs:84-97
+  - bench_event_to_parts (function) at crates/ragent-server/benches/bench_sse.rs:110-123
+
+Group 297 (fingerprint: c09a8d24636cc92a, 2 members):
+  - test_extract_known_languages (function) at crates/ragent-agent/src/memory/knowledge_graph.rs:552-561
+  - test_extract_known_tools (function) at crates/ragent-agent/src/memory/knowledge_graph.rs:564-569
+
+Group 298 (fingerprint: c0cb8c78e103eb35, 2 members):
+  - ctx (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:19-26
+  - ctx (function) at crates/ragent-tools-core/tests/test_multiedit.rs:15-22
+
+Group 299 (fingerprint: c28d18223ce57235, 2 members):
+  - write_file (function) at crates/ragent-tools-core/tests/test_edit_integration.rs:28-35
+  - write_file (function) at crates/ragent-tools-core/tests/test_multiedit.rs:25-32
+
+Group 300 (fingerprint: c45b155625f9e2fc, 2 members):
+  - <DemoStorage as StorageBackend>::search_memories_by_embedding (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:131-139
+  - <MockStorage as StorageBackend>::search_memories_by_embedding (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:155-163
+
+Group 301 (fingerprint: c89d5d0b310d44fe, 2 members):
+  - test_git_diff_stat (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:246-262
+  - test_git_checkout_restore_paths (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:765-781
+
+Group 302 (fingerprint: c9205c4edfb999f9, 2 members):
+  - <DemoStorage as StorageBackend>::get_todos (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:33-44
+  - <MockStorage as StorageBackend>::get_todos (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:57-68
+
+Group 303 (fingerprint: ca94a45381047367, 2 members):
+  - spawn_core_to_extracted_forwarder (function) at crates/ragent-agent/src/tool/mod.rs:440-456
+  - spawn_core_to_extracted_extended_forwarder (function) at crates/ragent-agent/src/tool/mod.rs:903-919
+
+Group 304 (fingerprint: ccc0d68813af5648, 2 members):
+  - test_inject_failing_command (function) at crates/ragent-agent/tests/inline/skill_context.rs:106-115
+  - test_inject_nonexistent_command (function) at crates/ragent-agent/tests/inline/skill_context.rs:164-173
+
+Group 305 (fingerprint: cd0cca334d9a4d73, 2 members):
+  - extract_cited_source_indices (function) at crates/ragent-research/src/document.rs:295-305
+  - KeywordVerifier::cited_indices (method) at crates/ragent-research/src/verify.rs:57-67
+
+Group 306 (fingerprint: ce8432b0e755fc50, 2 members):
+  - test_humaneval_executes_rust_native_tests (function) at crates/ragent-bench/tests/test_bench_core.rs:504-581
+  - test_run_target_executes_mbpp_rust_native_harness (function) at crates/ragent-bench/tests/test_bench_core.rs:682-759
+
+Group 307 (fingerprint: cfe7743c5e84451b, 2 members):
+  - simplify_skill (function) at crates/ragent-agent/src/skill/bundled.rs:107-123
+  - batch_skill (function) at crates/ragent-agent/src/skill/bundled.rs:127-143
+
+Group 308 (fingerprint: d1344a1080cb8280, 2 members):
+  - render_app_to_string (function) at crates/ragent-tui/tests/test_permission_countdown.rs:67-85
+  - render_app_to_string (function) at crates/ragent-tui/tests/test_question_multiple_choice.rs:64-82
+
+Group 309 (fingerprint: d1ebf5f089112ec9, 2 members):
+  - centered_rect (function) at crates/ragent-tui/src/utils.rs:78-96
+  - PermissionDialog::centered_rect (method) at crates/ragent-tui/src/widgets/permission_dialog.rs:39-57
+
+Group 310 (fingerprint: d713ac8e53eefea1, 2 members):
+  - test_team_close_clears_active_team_state (function) at crates/ragent-tui/tests/test_teams_tui.rs:357-371
+  - test_team_cleanup_clears_state (function) at crates/ragent-tui/tests/test_teams_tui.rs:705-723
+
+Group 311 (fingerprint: d7df616d2a2a4c4a, 2 members):
+  - test_mailbox_corruption_recovery_peek_unread (function) at crates/ragent-team/tests/test_m6_resilience.rs:222-235
+  - test_mailbox_corruption_recovery_drain_unread (function) at crates/ragent-team/tests/test_m6_resilience.rs:238-251
+
+Group 312 (fingerprint: dad0c892c804a51d, 2 members):
+  - test_result_summary_grep_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:238-250
+  - test_result_summary_edit_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:295-307
+
+Group 313 (fingerprint: db24cda2d6f97646, 2 members):
+  - take_snapshot (function) at crates/ragent-agent/src/snapshot/mod.rs:124-141
+  - take_snapshot (function) at crates/ragent-storage/src/snapshot.rs:124-141
+
+Group 314 (fingerprint: dc523d2318d13377, 2 members):
+  - Storage::deserialise_embedding_owned (method) at crates/ragent-storage/src/storage.rs:1768-1783
+  - deserialise_embedding (function) at crates/ragent-tools-extended/src/memory/embedding.rs:205-220
+
+Group 315 (fingerprint: dec1d96f5148956b, 2 members):
+  - restore_snapshot (function) at crates/ragent-agent/src/snapshot/mod.rs:162-170
+  - restore_snapshot (function) at crates/ragent-storage/src/snapshot.rs:162-170
+
+Group 316 (fingerprint: e733cd2eed16cd52, 2 members):
+  - test_overlap_detection_rejects (function) at crates/ragent-tools-core/tests/test_multiedit.rs:89-117
+  - test_multiple_matches_error_reports_count (function) at crates/ragent-tools-core/tests/test_multiedit.rs:287-315
+
+Group 317 (fingerprint: e875e7847f83d8bd, 2 members):
+  - <CrossCodeEvalAdapter as BenchSuiteAdapter>::summarize (trait impl block) at crates/ragent-bench/src/suites/crosscodeeval.rs:46-81
+  - <RepoBenchAdapter as BenchSuiteAdapter>::summarize (trait impl block) at crates/ragent-bench/src/suites/repobench.rs:55-90
+
+Group 318 (fingerprint: e9592be6bb2c8ff6, 2 members):
+  - test_left_click_starts_selection_in_log (function) at crates/ragent-tui/tests/test_text_selection.rs:132-141
+  - test_left_click_starts_selection_in_input (function) at crates/ragent-tui/tests/test_text_selection.rs:144-154
+
+Group 319 (fingerprint: ea10ab12eee68f57, 2 members):
+  - <DemoStorage as StorageBackend>::clear_todos (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:99-104
+  - <MockStorage as StorageBackend>::clear_todos (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:123-128
+
+Group 320 (fingerprint: ea196649347d5a44, 2 members):
+  - bench_delete_prev_char (function) at crates/ragent-tui/benches/bench_cursor.rs:122-138
+  - bench_delete_next_char (function) at crates/ragent-tui/benches/bench_cursor.rs:140-156
+
+Group 321 (fingerprint: ea992f3f67f6f554, 2 members):
+  - remove_allowlist (function) at crates/ragent-config/src/bash_lists.rs:147-162
+  - remove_denylist (function) at crates/ragent-config/src/bash_lists.rs:185-200
+
+Group 322 (fingerprint: edcb4e4cd4f0fecc, 2 members):
+  - error_response (function) at crates/ragent-server/src/routes/memory.rs:534-539
+  - error_response (function) at crates/ragent-server/src/routes/mod.rs:897-902
+
+Group 323 (fingerprint: eef9975a6f6d2aa7, 2 members):
+  - <DemoStorage as StorageBackend>::update_todo (trait impl block) at crates/ragent-tools-extended/examples/todo_cycle.rs:68-92
+  - <MockStorage as StorageBackend>::update_todo (trait impl block) at crates/ragent-tools-extended/tests/support/mock_storage.rs:92-116
+
+Group 324 (fingerprint: f158dde3d31b2bbc, 2 members):
+  - StatusHistory::by_category (method) at crates/ragent-tui/src/theme.rs:564-569
+  - Report::count_by_severity (method) at crates/ragent-specs/src/validate.rs:191-196
+
+Group 325 (fingerprint: f260d2633d7c3b21, 2 members):
+  - test_git_commit_basic (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:626-643
+  - test_git_reset_unstage_paths (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:676-693
+
+Group 326 (fingerprint: f2c4aba550e116f8, 2 members):
+  - OptMethod::name (method) at crates/ragent-prompt_opt/src/lib.rs:79-94
+  - OptMethod::description (method) at crates/ragent-prompt_opt/src/lib.rs:97-112
+
+Group 327 (fingerprint: f2c90959761c8538, 2 members):
+  - <BigCodeBenchAdapter as BenchSuiteAdapter>::evaluate_case (trait impl block) at crates/ragent-bench/src/suites/bigcodebench.rs:29-38
+  - <Ds1000Adapter as BenchSuiteAdapter>::evaluate_case (trait impl block) at crates/ragent-bench/src/suites/ds1000.rs:27-36
+
+Group 328 (fingerprint: f3d293e647cb3501, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-codeindex/benches/bench_indexing.rs:181 (closure) at crates/ragent-codeindex/benches/bench_indexing.rs:181-186
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-codeindex/benches/bench_indexing.rs:187 (closure) at crates/ragent-codeindex/benches/bench_indexing.rs:187-192
+
+Group 329 (fingerprint: f47f7eef72a106ef, 2 members):
+  - ExtractedCoreToolAdapter::new (method) at crates/ragent-agent/src/tool/mod.rs:344-349
+  - ExtractedExtendedToolAdapter::new (method) at crates/ragent-agent/src/tool/mod.rs:816-821
+
+Group 330 (fingerprint: f575354790c65324, 2 members):
+  - TaskManager::suspend_task (method) at crates/ragent-agent/src/task/mod.rs:570-579
+  - TaskManager::resume_task (method) at crates/ragent-agent/src/task/mod.rs:582-588
+
+Group 331 (fingerprint: f655684a1528e4be, 2 members):
+  - extract_dependency_import (function) at crates/ragent-codeindex/src/parser/maven.rs:212-230
+  - extract_parent_import (function) at crates/ragent-codeindex/src/parser/maven.rs:248-266
+
+Group 332 (fingerprint: f65fb9b5c9bae620, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-research/src/local_gatherer.rs:549 (closure) at crates/ragent-research/src/local_gatherer.rs:549-555
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-research/src/local_gatherer.rs:567 (closure) at crates/ragent-research/src/local_gatherer.rs:567-573
+
+Group 333 (fingerprint: f6d67092f55d9f82, 2 members):
+  - exact_replacement_helper_multiple_matches (function) at crates/ragent-tools-core/tests/test_replace.rs:76-82
+  - multiple_matches_returns_err (function) at crates/ragent-tools-core/tests/test_replace.rs:103-109
+
+Group 334 (fingerprint: fabfae917d3e7866, 2 members):
+  - test_detect_language_rust (function) at crates/ragent-codeindex/src/scanner.rs:331-336
+  - test_detect_language_python (function) at crates/ragent-codeindex/src/scanner.rs:339-344
+
+Group 335 (fingerprint: fb5dde5f1a8c5f92, 2 members):
+  - incremental_save (function) at crates/ragent-agent/src/snapshot/mod.rs:193-254
+  - incremental_save (function) at crates/ragent-storage/src/snapshot.rs:193-254
+
+Group 336 (fingerprint: fc31c75d7b61929a, 2 members):
+  - test_format_model_display_name (function) at crates/ragent-llm/tests/inline/huggingface.rs:39-53
+  - test_slugify_heading (function) at crates/ragent-tools-extended/src/memory/migrate.rs:225-233
+
+Group 337 (fingerprint: fcc743f9e5fb9f62, 2 members):
+  - test_parse_decomposition_keeps_explicit_agent_type (function) at crates/ragent-team/tests/test_swarm_agent_assignment.rs:23-30
+  - test_parse_decomposition_unknown_explicit_falls_back_to_inference (function) at crates/ragent-team/tests/test_swarm_agent_assignment.rs:33-39
+
+Group 338 (fingerprint: fd19a5d665bd0c6a, 2 members):
+  - apply_unified_diff (function) at crates/ragent-agent/src/snapshot/mod.rs:281-326
+  - apply_unified_diff (function) at crates/ragent-storage/src/snapshot.rs:281-326
+
+Group 339 (fingerprint: fd423b4066e0035b, 2 members):
+  - StepStatus::icon (method) at crates/ragent-tui/src/research_progress.rs:39-45
+  - Depth::as_str (method) at crates/ragent-research/src/run_config.rs:80-86
+
+Group 340 (fingerprint: fdb5764a42237887, 2 members):
+  - test_validate_allowed_command (function) at crates/ragent-agent/tests/inline/skill_context.rs:178-184
+  - test_validate_rejected_command (function) at crates/ragent-agent/tests/inline/skill_context.rs:187-193
+
+Near Duplicates
+===============
+
+Group 1 (fingerprint: 941eabc3e13591cd, similarity: 85%, 9 members):
+  - test_message_end (function) at crates/ragent-server/tests/test_event_to_sse.rs:74-84
+  - test_tool_call_end_error (function) at crates/ragent-server/tests/test_event_to_sse.rs:130-140
+  - test_permission_requested (function) at crates/ragent-server/tests/test_event_to_sse.rs:202-213
+  - test_agent_switch_requested (function) at crates/ragent-server/tests/test_event_to_sse.rs:267-277
+  - test_subagent_start (function) at crates/ragent-server/tests/test_event_to_sse.rs:376-389
+  - test_subagent_complete (function) at crates/ragent-server/tests/test_event_to_sse.rs:392-404
+  - test_teammate_spawned (function) at crates/ragent-server/tests/test_event_to_sse.rs:419-430
+  - test_teammate_message (function) at crates/ragent-server/tests/test_event_to_sse.rs:433-446
+  - test_teammate_idle (function) at crates/ragent-server/tests/test_event_to_sse.rs:449-457
+
+Group 2 (fingerprint: d9e4e166bc42307e, similarity: 85%, 7 members):
+  - Tier::from_str_insensitive (method) at crates/ragent-llm/src/providers/router_config.rs:65-73
+  - App::parse_thinking_level_setting (method) at crates/ragent-tui/src/app/models.rs:232-241
+  - RoleMode::from_str (method) at crates/ragent-tui/src/app/state.rs:1522-1531
+  - Depth::parse (method) at crates/ragent-research/src/run_config.rs:70-77
+  - Effort::parse (method) at crates/ragent-specs/src/plan_parser.rs:26-33
+  - Priority::parse (method) at crates/ragent-specs/src/plan_parser.rs:68-76
+  - TaskStatus::parse (method) at crates/ragent-specs/src/spec.rs:201-209
+
+Group 3 (fingerprint: 392fb291b4d489aa, similarity: 88%, 5 members):
+  - EntityType::as_str (method) at crates/ragent-agent/src/memory/knowledge_graph.rs:69-78
+  - MemberStatus::as_str (method) at crates/ragent-agent/src/team/config.rs:122-134
+  - StopDecision::as_str (method) at crates/ragent-research/src/adaptive.rs:30-38
+  - SessionPhase::as_str (method) at crates/ragent-research/src/session.rs:112-122
+  - SpecStatus::as_str (method) at crates/ragent-specs/src/spec.rs:93-103
+
+Group 4 (fingerprint: dd67b07c315b11b9, similarity: 85%, 5 members):
+  - test_run_target_no_exec_marks_mbpp_as_skipped (function) at crates/ragent-bench/tests/test_bench_core.rs:619-648
+  - test_apps_adapter_emits_accuracy_and_codebleu (function) at crates/ragent-bench/tests/test_bench_core.rs:799-834
+  - test_bigcodebench_emits_pass_at_k_and_codebleu (function) at crates/ragent-bench/tests/test_bench_core.rs:901-937
+  - test_swebench_lite_emits_resolution_metrics (function) at crates/ragent-bench/tests/test_bench_core.rs:941-977
+  - test_swebench_verified_no_exec_marks_resolution_skipped (function) at crates/ragent-bench/tests/test_bench_core.rs:980-1010
+
+Group 5 (fingerprint: 9d195bfb8a6dd9f5, similarity: 92%, 4 members):
+  - PromptClassifier::score_ambiguity_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:466-486
+  - PromptClassifier::score_reasoning_depth_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:530-555
+  - PromptClassifier::score_multimodality_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:621-647
+  - PromptClassifier::score_knowledge_recency_lower (method) at crates/ragent-llm/src/providers/router_classifier.rs:684-708
+
+Group 6 (fingerprint: 120d3d4dfc24849d, similarity: 90%, 4 members):
+  - <Tier as std::fmt::Display>::fmt (trait impl block) at crates/ragent-llm/src/providers/router_config.rs:77-84
+  - <FinishReason as fmt::Display>::fmt (trait impl block) at crates/ragent-types/src/event/mod.rs:970-978
+  - <ToolCallStatus as fmt::Display>::fmt (trait impl block) at crates/ragent-types/src/message/mod.rs:58-65
+  - <Category as fmt::Display>::fmt (trait impl block) at crates/ragent-specs/src/validate.rs:99-108
+
+Group 7 (fingerprint: 5673c8c405411f41, similarity: 87%, 4 members):
+  - test_help_table (function) at crates/ragent-prompt_opt/tests/basic.rs:40-45
+  - test_posix_wrapper_structure (function) at crates/ragent-tools-core/tests/inline/bash.rs:264-269
+  - test_build_progress_update (function) at crates/ragent-specs/src/impl_runner.rs:685-690
+  - test_build_completion_summary (function) at crates/ragent-specs/src/impl_runner.rs:700-705
+
+Group 8 (fingerprint: 790092934904f263, similarity: 86%, 4 members):
+  - test_concat_joins_all (function) at crates/ragent-agent/src/orchestrator/policy.rs:197-204
+  - test_first_success_skips_errors (function) at crates/ragent-agent/src/orchestrator/policy.rs:207-214
+  - test_last_response_returns_last (function) at crates/ragent-agent/src/orchestrator/policy.rs:224-234
+  - test_human_review_uses_fallback (function) at crates/ragent-agent/src/orchestrator/policy.rs:264-270
+
+Group 9 (fingerprint: b8ea4941063babf2, similarity: 86%, 4 members):
+  - test_mouse_scroll_down_on_messages (function) at crates/ragent-tui/tests/test_scrolling.rs:149-156
+  - test_drag_starts_on_message_scrollbar_column (function) at crates/ragent-tui/tests/test_scrolling.rs:296-304
+  - test_drag_does_not_start_without_scrollable_content (function) at crates/ragent-tui/tests/test_scrolling.rs:307-314
+  - test_drag_ignored_when_no_active_drag (function) at crates/ragent-tui/tests/test_scrolling.rs:418-426
+
+Group 10 (fingerprint: 02abd7ccd438ae59, similarity: 86%, 4 members):
+  - test_toolcall_duration_displayed_when_completed (function) at crates/ragent-tui/src/widgets/message_widget.rs:2695-2729
+  - test_toolcall_duration_not_displayed_when_running (function) at crates/ragent-tui/src/widgets/message_widget.rs:2733-2769
+  - test_toolcall_duration_not_displayed_when_none (function) at crates/ragent-tui/src/widgets/message_widget.rs:2772-2809
+  - test_toolcall_duration_with_inline_diff (function) at crates/ragent-tui/src/widgets/message_widget.rs:2850-2887
+
+Group 11 (fingerprint: 8edc9c3c07013ab6, similarity: 85%, 4 members):
+  - test_bracket_case_insensitive (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:350-362
+  - test_word_all_tiers_with_colon (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:382-396
+  - test_word_all_tiers_with_comma (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:399-414
+  - test_word_case_insensitive (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:417-429
+
+Group 12 (fingerprint: a3128c91484e6fc0, similarity: 93%, 3 members):
+  - parse_create_with_use_local_flag (function) at crates/ragent-research/src/cli.rs:698-715
+  - parse_create_with_use_specs_flag (function) at crates/ragent-research/src/cli.rs:718-735
+  - parse_implicit_create_when_unknown_subcommand (function) at crates/ragent-research/src/cli.rs:848-865
+
+Group 13 (fingerprint: f05d8e88a6692525, similarity: 93%, 3 members):
+  - <Entity as From>::from (trait impl block) at crates/ragent-agent/src/memory/knowledge_graph.rs:173-182
+  - <Relationship as From>::from (trait impl block) at crates/ragent-agent/src/memory/knowledge_graph.rs:187-197
+  - <SessionResponse as From>::from (trait impl block) at crates/ragent-server/src/routes/mod.rs:207-216
+
+Group 14 (fingerprint: a63a84631b45798b, similarity: 92%, 3 members):
+  - test_spec_read_happy_path (function) at crates/ragent-agent/tests/test_spec_tools.rs:76-98
+  - test_spec_search_happy_path (function) at crates/ragent-agent/tests/test_spec_tools.rs:155-176
+  - test_spec_search_no_results (function) at crates/ragent-agent/tests/test_spec_tools.rs:179-201
+
+Group 15 (fingerprint: 6a65f8db52c25806, similarity: 91%, 3 members):
+  - test_slash_model_show_without_selected_model_uses_agent_model (function) at crates/ragent-tui/tests/test_slash_commands.rs:581-595
+  - test_slash_opt_no_args_shows_help (function) at crates/ragent-tui/tests/test_slash_commands.rs:1907-1917
+  - test_slash_config_no_args_shows_usage (function) at crates/ragent-tui/tests/test_slash_commands.rs:2377-2389
+
+Group 16 (fingerprint: e9900aaca5d39e98, similarity: 91%, 3 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/benches/bench_cursor.rs:82 (closure) at crates/ragent-tui/benches/bench_cursor.rs:82-89
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/benches/bench_cursor.rs:91 (closure) at crates/ragent-tui/benches/bench_cursor.rs:91-98
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-tui/benches/bench_cursor.rs:110 (closure) at crates/ragent-tui/benches/bench_cursor.rs:110-117
+
+Group 17 (fingerprint: 3114599c1a5f82d8, similarity: 89%, 3 members):
+  - test_parse_grep_output (function) at crates/ragent-agent/src/research_adapter.rs:584-592
+  - test_find_multiple_patterns (function) at crates/ragent-agent/tests/inline/skill_context.rs:22-29
+  - test_find_pattern_multiline_text (function) at crates/ragent-agent/tests/inline/skill_context.rs:39-45
+
+Group 18 (fingerprint: a0b4b63ac69f1969, similarity: 88%, 3 members):
+  - MessageWidget::new (method) at crates/ragent-tui/src/widgets/message_widget.rs:2256-2266
+  - ResearchSession::new (method) at crates/ragent-research/src/session.rs:327-339
+  - WebGatherer::new (method) at crates/ragent-research/src/web_gatherer.rs:464-470
+
+Group 19 (fingerprint: 00136b93801fb54b, similarity: 88%, 3 members):
+  - test_resolve_project_block_when_cross_disabled (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:277-292
+  - test_resolve_project_overrides_global (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:328-343
+  - test_resolve_no_override_coexists (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:346-361
+
+Group 20 (fingerprint: 42d91dd51cbb5743, similarity: 87%, 3 members):
+  - test_is_forked (function) at crates/ragent-agent/tests/inline/skill_loader.rs:256-267
+  - test_is_not_forked (function) at crates/ragent-agent/tests/inline/skill_loader.rs:270-281
+  - test_empty_body (function) at crates/ragent-agent/tests/inline/skill_loader.rs:284-295
+
+Group 21 (fingerprint: 2e7e84f5b5cf3b22, similarity: 87%, 3 members):
+  - assemble_document_appends_sources_list_for_citations (function) at crates/ragent-research/src/document.rs:1000-1033
+  - assemble_document_notes_undated_web_sources_in_date_range (function) at crates/ragent-research/src/document.rs:1125-1146
+  - assemble_document_skips_sources_list_when_finding_already_has_one (function) at crates/ragent-research/src/document.rs:1159-1186
+
+Group 22 (fingerprint: 53bc629c9bc7dca7, similarity: 87%, 3 members):
+  - test_normalize_tables_adds_borders (function) at crates/ragent-tui/tests/test_markdown_table.rs:100-113
+  - test_render_markdown_code_block (function) at crates/ragent-tui/tests/test_markdown_table.rs:127-135
+  - test_render_markdown_list (function) at crates/ragent-tui/tests/test_markdown_table.rs:138-150
+
+Group 23 (fingerprint: aa1516b53f91890f, similarity: 86%, 3 members):
+  - parse_status_transition (function) at crates/ragent-specs/src/commands.rs:530-538
+  - parse_task_show (function) at crates/ragent-specs/src/commands.rs:558-567
+  - parse_task_update (function) at crates/ragent-specs/src/commands.rs:570-579
+
+Group 24 (fingerprint: 0da77a5936659495, similarity: 85%, 3 members):
+  - extract_struct (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:247-280
+  - extract_class (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:438-474
+  - extract_method (function) at crates/ragent-codeindex/src/parser/typescript.rs:482-509
+
+Group 25 (fingerprint: cb651a74e9a21625, similarity: 85%, 3 members):
+  - test_default_thinking_level_defaults_to_off_when_unconfigured (function) at crates/ragent-tui/src/app/tests.rs:150-171
+  - test_default_thinking_level_falls_back_to_off_for_nonthinking_models (function) at crates/ragent-tui/src/app/tests.rs:174-195
+  - test_default_thinking_level_uses_explicit_entry_config (function) at crates/ragent-tui/src/app/tests.rs:198-224
+
+Group 26 (fingerprint: 600b374f931a3e0a, similarity: 85%, 3 members):
+  - test_toggle_memory_mutually_excludes_log_panel (function) at crates/ragent-tui/tests/test_memory_panel.rs:496-518
+  - test_toggle_todo_mutually_excludes_log_panel (function) at crates/ragent-tui/tests/test_todo_panel.rs:78-98
+  - test_toggle_todo_mutually_excludes_profile_panel (function) at crates/ragent-tui/tests/test_todo_panel.rs:101-119
+
+Group 27 (fingerprint: 65587d8f72cb4663, similarity: 85%, 3 members):
+  - test_slash_help_shows_commands (function) at crates/ragent-tui/tests/test_slash_commands.rs:223-246
+  - test_slash_opt_help_shows_markdown_table (function) at crates/ragent-tui/tests/test_slash_commands.rs:1864-1891
+  - test_slash_config_show_displays_paths (function) at crates/ragent-tui/tests/test_slash_commands.rs:2342-2374
+
+Group 28 (fingerprint: 0935deab61143dcf, similarity: 85%, 3 members):
+  - render_frontmatter_round_trips_with_special_chars_in_title (function) at crates/ragent-research/src/item.rs:568-574
+  - render_frontmatter_round_trips_with_queries (function) at crates/ragent-research/src/item.rs:577-583
+  - render_frontmatter_round_trips_with_quote_in_query (function) at crates/ragent-research/src/item.rs:586-592
+
+Group 29 (fingerprint: 1c6ca840fa648071, similarity: 100%, 2 members):
+  - <CoreStorageAdapter as ragent_tools_extended::storage::StorageBackend>::create_todo (trait impl block) at crates/ragent-agent/src/tool/mod.rs:657-667
+  - <CoreStorageAdapter as ragent_tools_extended::storage::StorageBackend>::update_todo (trait impl block) at crates/ragent-agent/src/tool/mod.rs:669-679
+
+Group 30 (fingerprint: 79e38462534e2faa, similarity: 100%, 2 members):
+  - Storage::update_memory_confidence (method) at crates/ragent-storage/src/storage.rs:1653-1661
+  - Storage::update_memory_content (method) at crates/ragent-storage/src/storage.rs:1694-1704
+
+Group 31 (fingerprint: eec4aef6c834b0c3, similarity: 99%, 2 members):
+  - patch_config (function) at crates/ragent-config/src/bash_lists.rs:206-247
+  - patch_config (function) at crates/ragent-config/src/dir_lists.rs:373-413
+
+Group 32 (fingerprint: 884baf7ec388abe5, similarity: 99%, 2 members):
+  - test_slash_all_simple_aliases (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:242-251
+  - test_slash_all_reasoning_aliases (function) at crates/ragent-llm/tests/inline/router_modifiers.rs:283-297
+
+Group 33 (fingerprint: c112da4c4eb13d9a, similarity: 99%, 2 members):
+  - extract_function (function) at crates/ragent-codeindex/src/parser/go.rs:97-126
+  - extract_method (function) at crates/ragent-codeindex/src/parser/java.rs:252-281
+
+Group 34 (fingerprint: cac21b1a36da9ff2, similarity: 98%, 2 members):
+  - show_returns_not_found_with_suggestions_for_close_match (function) at crates/ragent-research/src/manager.rs:637-650
+  - not_found_suggests_closest_match_per_fr018 (function) at crates/ragent-research/tests/test_research_integration.rs:129-140
+
+Group 35 (fingerprint: b2a55d17c77bd37c, similarity: 98%, 2 members):
+  - render_agents_window_overlay (function) at crates/ragent-tui/src/layout.rs:2672-2713
+  - render_teams_window_overlay (function) at crates/ragent-tui/src/layout.rs:2715-2756
+
+Group 36 (fingerprint: a5127c3d0fbb20fd, similarity: 98%, 2 members):
+  - create_rejects_duplicate_with_fr016_error (function) at crates/ragent-research/src/manager.rs:621-634
+  - create_rejects_duplicate_with_fr016_error (function) at crates/ragent-research/tests/test_research_integration.rs:45-58
+
+Group 37 (fingerprint: f16fefa18bbf272f, similarity: 98%, 2 members):
+  - test_git_status_clean (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:56-71
+  - test_git_checkout_create_branch (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:744-762
+
+Group 38 (fingerprint: 707646d1a086bd4d, similarity: 98%, 2 members):
+  - test_result_summary_bash_success (function) at crates/ragent-tui/tests/test_tool_display.rs:180-197
+  - test_result_summary_multiedit_tool (function) at crates/ragent-tui/tests/test_tool_display.rs:279-292
+
+Group 39 (fingerprint: 6addaaf359e11965, similarity: 97%, 2 members):
+  - test_invoke_preserves_fork_metadata (function) at crates/ragent-agent/src/skill/invoke.rs:394-412
+  - test_invoke_forked_skill_sets_metadata (function) at crates/ragent-agent/src/skill/invoke.rs:520-539
+
+Group 40 (fingerprint: ae5db2f8be49f3e5, similarity: 97%, 2 members):
+  - test_default_models_have_correct_provider_id (function) at crates/ragent-llm/tests/inline/huggingface.rs:22-27
+  - test_default_models_provider_id (function) at crates/ragent-llm/tests/inline/xai.rs:42-47
+
+Group 41 (fingerprint: 3ff81e4d17536fc2, similarity: 97%, 2 members):
+  - format_elapsed (function) at crates/ragent-tui/src/layout_active_agents.rs:21-30
+  - format_elapsed (function) at crates/ragent-tui/src/layout_teams.rs:27-36
+
+Group 42 (fingerprint: 4e7587fc230bde5a, similarity: 97%, 2 members):
+  - extract_type_decl (function) at crates/ragent-codeindex/src/parser/go.rs:170-177
+  - extract_var_declaration (function) at crates/ragent-codeindex/src/parser/openscad.rs:189-199
+
+Group 43 (fingerprint: 065c987bcf2431c8, similarity: 96%, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/anthropic.rs:233 (closure) at crates/ragent-llm/src/providers/anthropic.rs:233-238
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-llm/src/providers/gemini.rs:273 (closure) at crates/ragent-llm/src/providers/gemini.rs:273-278
+
+Group 44 (fingerprint: 6ecddf02f9b43ab1, similarity: 96%, 2 members):
+  - test_registry_scope_priority_higher_wins (function) at crates/ragent-agent/tests/inline/skill_mod.rs:25-42
+  - test_registry_scope_priority_lower_rejected (function) at crates/ragent-agent/tests/inline/skill_mod.rs:45-62
+
+Group 45 (fingerprint: 751c31eab15531f6, similarity: 96%, 2 members):
+  - test_resolve_forked_skill_agent_inherits_active_model (function) at crates/ragent-agent/tests/test_skill_invoke.rs:65-89
+  - test_resolve_forked_skill_agent_prefers_explicit_skill_model (function) at crates/ragent-agent/tests/test_skill_invoke.rs:92-116
+
+Group 46 (fingerprint: d87b64f8e575cbea, similarity: 96%, 2 members):
+  - test_resolve_inline_skill_agent_inherits_active_model_for_unpinned_agent (function) at crates/ragent-agent/tests/test_skill_invoke.rs:20-30
+  - test_resolve_inline_skill_agent_prefers_explicit_skill_model (function) at crates/ragent-agent/tests/test_skill_invoke.rs:51-62
+
+Group 47 (fingerprint: 982932d8cca068a6, similarity: 95%, 2 members):
+  - Storage::list_entities (method) at crates/ragent-storage/src/storage.rs:1927-1945
+  - Storage::list_relationships (method) at crates/ragent-storage/src/storage.rs:1952-1971
+
+Group 48 (fingerprint: 27be0af8fa9bfc2b, similarity: 95%, 2 members):
+  - collapsed_tie_still_errors (function) at crates/ragent-tools-core/tests/test_replace.rs:232-239
+  - memory_replace_errors_on_multiple_matches (function) at crates/ragent-tools-extended/src/memory_write.rs:669-676
+
+Group 49 (fingerprint: 5cfbce8be5a078e3, similarity: 95%, 2 members):
+  - split_frontmatter_extracts_yaml_block (function) at crates/ragent-research/src/io.rs:417-422
+  - split_frontmatter_handles_missing_block (function) at crates/ragent-research/src/io.rs:425-430
+
+Group 50 (fingerprint: a65772cde94ea0e8, similarity: 95%, 2 members):
+  - test_c_struct (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:632-647
+  - test_class_with_methods (function) at crates/ragent-codeindex/src/parser/typescript.rs:692-712
+
+Group 51 (fingerprint: 9cfa683d47c3474e, similarity: 95%, 2 members):
+  - StreamBuffer::push_text (method) at crates/ragent-agent/src/session/stream_buffer.rs:71-78
+  - StreamBuffer::push_reasoning (method) at crates/ragent-agent/src/session/stream_buffer.rs:81-88
+
+Group 52 (fingerprint: bccccb0e1d0fd5fe, similarity: 95%, 2 members):
+  - test_doc_comments_extracted (function) at crates/ragent-codeindex/tests/test_parse_store_integration.rs:370-388
+  - test_signature_extracted (function) at crates/ragent-codeindex/tests/test_parse_store_integration.rs:391-413
+
+Group 53 (fingerprint: d9a6b1936eaf2e8c, similarity: 95%, 2 members):
+  - list_recursive (function) at crates/ragent-agent/src/reference/resolve.rs:345-402
+  - list_recursive (function) at crates/ragent-tools-core/src/list.rs:92-155
+
+Group 54 (fingerprint: 128a387e35c804b1, similarity: 95%, 2 members):
+  - test_parse_single_allowed_tool (function) at crates/ragent-agent/tests/inline/skill_loader.rs:75-86
+  - test_parse_name_override (function) at crates/ragent-agent/tests/inline/skill_loader.rs:120-131
+
+Group 55 (fingerprint: d08bfcb67fab3dc6, similarity: 95%, 2 members):
+  - test_registry_scope_priority_equal_replaces (function) at crates/ragent-agent/tests/inline/skill_mod.rs:65-80
+  - test_registry_bundled_overridden_by_project (function) at crates/ragent-agent/tests/inline/skill_mod.rs:83-99
+
+Group 56 (fingerprint: b3b810f1cff488f3, similarity: 95%, 2 members):
+  - test_abbreviations_label_full_mode (function) at crates/ragent-tui/tests/test_statusbar_layout.rs:281-288
+  - test_abbreviations_service (function) at crates/ragent-tui/tests/test_statusbar_layout.rs:315-321
+
+Group 57 (fingerprint: d84d02fe933772ae, similarity: 94%, 2 members):
+  - test_parse_bench_init_all_command (function) at crates/ragent-bench/tests/test_bench_core.rs:70-82
+  - test_parse_bench_init_full_command (function) at crates/ragent-bench/tests/test_bench_core.rs:85-97
+
+Group 58 (fingerprint: 7ad7bbae943e8f91, similarity: 94%, 2 members):
+  - <JsonReplyClient as LlmClient>::chat (trait impl block) at crates/ragent-research/src/web_gatherer.rs:1157-1171
+  - <BadJsonClient as LlmClient>::chat (trait impl block) at crates/ragent-research/src/web_gatherer.rs:1230-1244
+
+Group 59 (fingerprint: 3571c9e038c2adb0, similarity: 94%, 2 members):
+  - extract_method (function) at crates/ragent-codeindex/src/parser/gradle.rs:236-270
+  - extract_function (function) at crates/ragent-codeindex/src/parser/gradle.rs:309-349
+
+Group 60 (fingerprint: 3ade7607793abc8f, similarity: 93%, 2 members):
+  - test_find_dependents (function) at crates/ragent-specs/src/impl_runner.rs:723-766
+  - test_find_dependents_transitive (function) at crates/ragent-specs/tests/test_spec_impl.rs:183-232
+
+Group 61 (fingerprint: b68320e3fe71160b, similarity: 93%, 2 members):
+  - test_git_cherry_pick_basic (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:875-917
+  - test_git_cherry_pick_no_commit (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:920-961
+
+Group 62 (fingerprint: 30e60c54ddf4e0b4, similarity: 93%, 2 members):
+  - test_class_with_method (function) at crates/ragent-codeindex/src/parser/java.rs:525-541
+  - test_const_and_static (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:144-160
+
+Group 63 (fingerprint: 5a939d861dc13c61, similarity: 93%, 2 members):
+  - test_invalid_json_shows_line_and_column (function) at crates/ragent-config/tests/test_config_parse_errors.rs:10-69
+  - test_type_mismatch_shows_clear_error (function) at crates/ragent-config/tests/test_config_parse_errors.rs:108-143
+
+Group 64 (fingerprint: a6ad4cc4cf26b7b1, similarity: 93%, 2 members):
+  - test_list_labels_cross_project (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:364-375
+  - test_list_labels_disabled_only_project (function) at crates/ragent-tools-extended/src/memory/cross_project.rs:378-391
+
+Group 65 (fingerprint: e656218b9988e03f, similarity: 93%, 2 members):
+  - test_bench_init_full_reports_gated_support (function) at crates/ragent-tui/tests/test_bench_command.rs:136-150
+  - test_bench_run_missing_data_fails_fast_with_init_hint (function) at crates/ragent-tui/tests/test_bench_command.rs:382-396
+
+Group 66 (fingerprint: 4802e54dc8327fe0, similarity: 93%, 2 members):
+  - test_enter_is_ignored_while_processing (function) at crates/ragent-tui/tests/test_busy_send_guard.rs:19-29
+  - test_plain_char_is_ignored_while_processing (function) at crates/ragent-tui/tests/test_busy_send_guard.rs:45-61
+
+Group 67 (fingerprint: d824182dad731091, similarity: 93%, 2 members):
+  - test_consensus_met (function) at crates/ragent-agent/src/orchestrator/policy.rs:237-252
+  - test_consensus_not_met_returns_all_tagged (function) at crates/ragent-agent/src/orchestrator/policy.rs:255-261
+
+Group 68 (fingerprint: 7f2b35a3a321d899, similarity: 93%, 2 members):
+  - test_multiple_permits (function) at crates/ragent-types/tests/test_resource.rs:24-34
+  - test_tool_permit_concurrent_limit (function) at crates/ragent-types/tests/test_resource.rs:49-59
+
+Group 69 (fingerprint: d3f6f56e5069542e, similarity: 93%, 2 members):
+  - test_rate_limiter_allows_under_limit (function) at crates/ragent-server/tests/test_integration.rs:129-152
+  - test_rate_limiter_rejects_over_limit (function) at crates/ragent-server/tests/test_integration.rs:155-176
+
+Group 70 (fingerprint: fc0324ca6fa1a0ed, similarity: 93%, 2 members):
+  - test_boundary_validation_out_of_range (function) at crates/ragent-llm/src/providers/router_config.rs:565-572
+  - test_boundary_validation_not_ascending (function) at crates/ragent-llm/src/providers/router_config.rs:575-582
+
+Group 71 (fingerprint: 679bc857caf91d72, similarity: 92%, 2 members):
+  - test_cursor_byte_pos_emoji (function) at crates/ragent-tui/tests/test_input_unicode.rs:20-28
+  - test_cursor_byte_pos_accented (function) at crates/ragent-tui/tests/test_input_unicode.rs:31-40
+
+Group 72 (fingerprint: f2023d1810c9f7c2, similarity: 92%, 2 members):
+  - test_mouse_scroll_down_on_log (function) at crates/ragent-tui/tests/test_scrolling.rs:172-180
+  - test_drag_starts_on_log_scrollbar_column (function) at crates/ragent-tui/tests/test_scrolling.rs:317-326
+
+Group 73 (fingerprint: 6c8cc6f66d66136a, similarity: 92%, 2 members):
+  - test_two_edits_one_file (function) at crates/ragent-tools-core/tests/test_multiedit.rs:37-60
+  - test_strict_match_accepts_exact_batch_edit (function) at crates/ragent-tools-core/tests/test_multiedit.rs:208-228
+
+Group 74 (fingerprint: 4236b856b2325856, similarity: 92%, 2 members):
+  - test_git_remote_add_and_list (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:412-440
+  - test_git_tag_create_and_list (function) at crates/ragent-tools-vcs/tests/test_git_tools.rs:494-519
+
+Group 75 (fingerprint: c50bce64324dd13f, similarity: 92%, 2 members):
+  - TeamConfig::migrate (method) at crates/ragent-agent/src/team/config.rs:377-384
+  - TaskList::migrate (method) at crates/ragent-agent/src/team/task.rs:205-212
+
+Group 76 (fingerprint: f9dd9bb86a4b433f, similarity: 92%, 2 members):
+  - test_strict_match_rejects_whitespace_mismatch (function) at crates/ragent-tools-core/tests/test_multiedit.rs:171-203
+  - test_overlap_rejection_leaves_file_unchanged (function) at crates/ragent-tools-core/tests/test_multiedit.rs:458-488
+
+Group 77 (fingerprint: 8c4f53549b779fa5, similarity: 92%, 2 members):
+  - test_include_use (function) at crates/ragent-codeindex/src/parser/openscad.rs:422-429
+  - test_type_alias (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:180-186
+
+Group 78 (fingerprint: 776be3f25a473b2a, similarity: 92%, 2 members):
+  - test_cosine_similarity_identical (function) at crates/ragent-tools-extended/src/memory/embedding.rs:266-271
+  - test_cosine_similarity_opposite (function) at crates/ragent-tools-extended/src/memory/embedding.rs:282-287
+
+Group 79 (fingerprint: 56ed61c411dee6a5, similarity: 92%, 2 members):
+  - parse_status_show (function) at crates/ragent-specs/src/commands.rs:519-527
+  - parse_task_list (function) at crates/ragent-specs/src/commands.rs:546-555
+
+Group 80 (fingerprint: e0f4af85baa71b4a, similarity: 92%, 2 members):
+  - debug_skill (function) at crates/ragent-agent/src/skill/bundled.rs:147-156
+  - loop_skill (function) at crates/ragent-agent/src/skill/bundled.rs:160-169
+
+Group 81 (fingerprint: b8a6a46b8e968bb5, similarity: 92%, 2 members):
+  - detect_python_sections (function) at crates/ragent-tools-core/src/read.rs:446-459
+  - detect_go_sections (function) at crates/ragent-tools-core/src/read.rs:585-598
+
+Group 82 (fingerprint: fa179a815f128157, similarity: 92%, 2 members):
+  - InProcessRouter::new (method) at crates/ragent-agent/src/orchestrator/router.rs:25-30
+  - ConflictResolver::new (method) at crates/ragent-agent/src/orchestrator/policy.rs:100-105
+
+Group 83 (fingerprint: 6a6499c49d10728a, similarity: 91%, 2 members):
+  - test_content_type_display (function) at crates/ragent-agent/tests/inline/compression_pipeline.rs:29-36
+  - test_ears_template_as_str (function) at crates/ragent-specs/src/spec.rs:476-482
+
+Group 84 (fingerprint: bf8a25b5c521c00b, similarity: 91%, 2 members):
+  - test_log_scroll_down_on_memory_does_not_underflow_below_zero (function) at crates/ragent-tui/tests/test_memory_panel.rs:840-856
+  - test_log_scroll_up_on_memory_increments_offset (function) at crates/ragent-tui/tests/test_memory_panel.rs:859-875
+
+Group 85 (fingerprint: 089da6027b1ac9e5, similarity: 91%, 2 members):
+  - App::delete_prev_word (method) at crates/ragent-tui/src/app/session_ops.rs:660-668
+  - InputField::delete_prev_word (method) at crates/ragent-tui/src/input_field.rs:446-455
+
+Group 86 (fingerprint: 0ae7aaf20e19b23d, similarity: 91%, 2 members):
+  - test_resolve_directory (function) at crates/ragent-agent/src/reference/resolve.rs:441-457
+  - test_resolve_fuzzy (function) at crates/ragent-agent/src/reference/resolve.rs:460-476
+
+Group 87 (fingerprint: 3c16c605d3d09387, similarity: 91%, 2 members):
+  - <Cached as Default>::default (trait impl block) at crates/ragent-agent/src/session/cache.rs:46-52
+  - <WorkerConfig as Default>::default (trait impl block) at crates/ragent-codeindex/src/worker.rs:28-34
+
+Group 88 (fingerprint: 9403eb1d8cc7c6af, similarity: 91%, 2 members):
+  - test_context_window (function) at crates/ragent-llm/tests/inline/xai.rs:87-96
+  - test_max_output (function) at crates/ragent-llm/tests/inline/xai.rs:99-109
+
+Group 89 (fingerprint: 00d50c32cfdbc469, similarity: 91%, 2 members):
+  - test_render_memory_panel_hidden_clears_memory_area (function) at crates/ragent-tui/tests/test_memory_panel.rs:690-707
+  - test_render_memory_panel_does_not_panic_with_no_home_dir (function) at crates/ragent-tui/tests/test_memory_panel.rs:769-782
+
+Group 90 (fingerprint: 19a4ac0c018af47c, similarity: 90%, 2 members):
+  - test_invocation_default_agent_fallback (function) at crates/ragent-agent/src/skill/invoke.rs:542-555
+  - test_invocation_agent_specified (function) at crates/ragent-agent/src/skill/invoke.rs:558-570
+
+Group 91 (fingerprint: 2ddd1a307a2b2203, similarity: 90%, 2 members):
+  - test_anthropic_payload_prefers_budget_tokens (function) at crates/ragent-llm/src/providers/thinking.rs:392-408
+  - test_gemini_thinking_config_maps_omitted_to_minimal (function) at crates/ragent-llm/src/providers/thinking.rs:411-427
+
+Group 92 (fingerprint: cc690fa50faab9c1, similarity: 90%, 2 members):
+  - convert_extracted_event (function) at crates/ragent-agent/src/tool/mod.rs:359-400
+  - convert_extracted_extended_event (function) at crates/ragent-agent/src/tool/mod.rs:831-872
+
+Group 93 (fingerprint: d95fdcf896795a5d, similarity: 90%, 2 members):
+  - LlmPlanner::new (method) at crates/ragent-research/src/planner.rs:164-177
+  - LlmQueryDecomposer::new (method) at crates/ragent-research/src/web_gatherer.rs:160-173
+
+Group 94 (fingerprint: 409246b32901915c, similarity: 90%, 2 members):
+  - <LibreReadTool as Tool>::execute (trait impl block) at crates/ragent-tools-extended/src/libreoffice_read.rs:80-107
+  - <OfficeReadTool as Tool>::execute (trait impl block) at crates/ragent-tools-extended/src/office_read.rs:67-102
+
+Group 95 (fingerprint: cee433122531339c, similarity: 90%, 2 members):
+  - test_entity_type_roundtrip (function) at crates/ragent-agent/src/memory/knowledge_graph.rs:600-612
+  - test_relation_type_roundtrip (function) at crates/ragent-agent/src/memory/knowledge_graph.rs:615-626
+
+Group 96 (fingerprint: d0587d8662728d4b, similarity: 90%, 2 members):
+  - format_strict_error_not_found_includes_edit_and_path (function) at crates/ragent-tools-core/tests/test_multiedit_helpers.rs:46-58
+  - format_strict_error_multiple_includes_count (function) at crates/ragent-tools-core/tests/test_multiedit_helpers.rs:61-73
+
+Group 97 (fingerprint: eaecf02c82764f25, similarity: 90%, 2 members):
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/src/agent/mod.rs:1683 (closure) at crates/ragent-agent/src/agent/mod.rs:1683-1695
+  - closure at /home/thawkins/Projects/ragent/crates/ragent-agent/tests/test_instruction_file_priority.rs:175 (closure) at crates/ragent-agent/tests/test_instruction_file_priority.rs:175-187
+
+Group 98 (fingerprint: 5580778266863d54, similarity: 90%, 2 members):
+  - test_right_click_uses_home_input_geometry_for_file_menu_popup (function) at crates/ragent-tui/tests/test_text_selection.rs:714-740
+  - test_left_click_outside_file_menu_closes_popup (function) at crates/ragent-tui/tests/test_text_selection.rs:743-766
+
+Group 99 (fingerprint: 8cc7e8c58f66af73, similarity: 90%, 2 members):
+  - gemini_default_models (function) at crates/ragent-llm/src/providers/gemini.rs:26-149
+  - xai_default_models (function) at crates/ragent-llm/src/providers/xai.rs:51-174
+
+Group 100 (fingerprint: 7e1f003f5e7bc08c, similarity: 89%, 2 members):
+  - evaluate_humaneval_hidden_tests (function) at crates/ragent-bench/src/suites/humaneval.rs:175-231
+  - evaluate_humaneval_native_tests (function) at crates/ragent-bench/src/suites/humaneval.rs:233-291
+
+Group 101 (fingerprint: d4c1c173d1922c9d, similarity: 89%, 2 members):
+  - test_bedrock_claude_models_have_reasoning (function) at crates/ragent-llm/tests/test_bedrock_provider.rs:144-160
+  - test_bedrock_nova_models_capabilities (function) at crates/ragent-llm/tests/test_bedrock_provider.rs:164-176
+
+Group 102 (fingerprint: ff911f657eadb56e, similarity: 89%, 2 members):
+  - test_spec_template_has_ears_examples (function) at crates/ragent-specs/src/templates.rs:256-264
+  - test_plan_template_contains_sections (function) at crates/ragent-specs/src/templates.rs:267-277
+
+Group 103 (fingerprint: 58d12f03918f3bb1, similarity: 89%, 2 members):
+  - <GithubCloseIssueTool as Tool>::execute (trait impl block) at crates/ragent-tools-vcs/src/github/github_issues.rs:409-440
+  - <GitlabCloseIssueTool as Tool>::execute (trait impl block) at crates/ragent-tools-vcs/src/gitlab/gitlab_issues.rs:414-444
+
+Group 104 (fingerprint: 760873966a5940a2, similarity: 89%, 2 members):
+  - test_validate_plan_empty (function) at crates/ragent-specs/tests/inline/validate.rs:319-331
+  - test_validate_unknown_requirement_reference (function) at crates/ragent-specs/tests/inline/validate.rs:349-377
+
+Group 105 (fingerprint: 2ead069be5b3c1f4, similarity: 89%, 2 members):
+  - test_imports (function) at crates/ragent-codeindex/src/parser/typescript.rs:745-763
+  - test_use_statements (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:205-224
+
+Group 106 (fingerprint: 2caaa4a298b2e46b, similarity: 88%, 2 members):
+  - codeindex_guidance_caches_active_state (function) at crates/ragent-agent/tests/test_system_prompt_cache.rs:99-109
+  - codeindex_guidance_distinguishes_states (function) at crates/ragent-agent/tests/test_system_prompt_cache.rs:112-123
+
+Group 107 (fingerprint: 5e11faa5f7146a15, similarity: 88%, 2 members):
+  - test_multiple_choice_question_shows_selected_option (function) at crates/ragent-tui/tests/test_question_multiple_choice.rs:115-130
+  - test_free_text_question_does_not_show_options (function) at crates/ragent-tui/tests/test_question_multiple_choice.rs:157-173
+
+Group 108 (fingerprint: 44bf72bf8e49eebc, similarity: 88%, 2 members):
+  - walk (function) at crates/ragent-codeindex/src/parser/gradle_kts.rs:87-104
+  - walk (function) at crates/ragent-codeindex/src/parser/java.rs:79-98
+
+Group 109 (fingerprint: 8ad94b71eadb67b9, similarity: 88%, 2 members):
+  - test_detailed_tool_reference_includes_schemas_and_required_flags (function) at crates/ragent-agent/tests/session_processor.rs:331-346
+  - test_spec_template_contains_sections (function) at crates/ragent-specs/src/templates.rs:218-230
+
+Group 110 (fingerprint: 0d4a24fa7820d2c3, similarity: 88%, 2 members):
+  - test_toggle_memory_status_message_reflects_state (function) at crates/ragent-tui/tests/test_memory_panel.rs:482-489
+  - test_toggle_todo_status_message_reflects_state (function) at crates/ragent-tui/tests/test_todo_panel.rs:122-128
+
+Group 111 (fingerprint: eab34f0965349a80, similarity: 88%, 2 members):
+  - test_toggle_memory_flips_show_memory_flag (function) at crates/ragent-tui/tests/test_memory_panel.rs:467-479
+  - test_toggle_todo_flips_show_todo_flag (function) at crates/ragent-tui/tests/test_todo_panel.rs:66-75
+
+Group 112 (fingerprint: 6faa8371489d6d66, similarity: 88%, 2 members):
+  - escape_pipe (function) at crates/ragent-research/src/document.rs:408-418
+  - sanitize_inline (function) at crates/ragent-research/src/io.rs:304-315
+
+Group 113 (fingerprint: 8f337740bab1cde4, similarity: 88%, 2 members):
+  - InputField::cursor_byte_pos (method) at crates/ragent-tui/src/input_field.rs:71-80
+  - InputField::byte_pos_at_char (method) at crates/ragent-tui/src/input_field.rs:82-91
+
+Group 114 (fingerprint: be07ca8c1190c45c, similarity: 88%, 2 members):
+  - test_right_click_with_memory_selection_enables_copy (function) at crates/ragent-tui/tests/test_memory_panel.rs:418-433
+  - test_right_click_with_selection_in_other_pane_disables_copy_for_clicked_pane (function) at crates/ragent-tui/tests/test_text_selection.rs:536-552
+
+Group 115 (fingerprint: d08430837efb68f8, similarity: 88%, 2 members):
+  - test_truncate_content_single_omission (function) at crates/ragent-tools-core/tests/test_truncate.rs:45-52
+  - template_substitution_replaces_known_placeholders (function) at crates/ragent-research/src/document.rs:856-862
+
+Group 116 (fingerprint: 845a98df0927cd60, similarity: 88%, 2 members):
+  - test_not_found_error_names_edit_and_path (function) at crates/ragent-tools-core/tests/test_multiedit.rs:257-282
+  - test_memory_replace_dropped_leading_indent (function) at crates/ragent-tools-extended/tests/test_memory_replace_whitespace.rs:119-148
+
+Group 117 (fingerprint: 22cbcc67165ab4f7, similarity: 88%, 2 members):
+  - extract_class (function) at crates/ragent-codeindex/src/parser/typescript.rs:198-238
+  - extract_interface (function) at crates/ragent-codeindex/src/parser/typescript.rs:242-280
+
+Group 118 (fingerprint: 9afcd0c65f3f8c58, similarity: 88%, 2 members):
+  - AttachmentInfo::new (method) at crates/ragent-llm/src/providers/router_classifier.rs:27-32
+  - ButtonRender::new (method) at crates/ragent-tui/src/widgets/button.rs:476-481
+
+Group 119 (fingerprint: 9e5cb092f6356ea5, similarity: 87%, 2 members):
+  - Storage::create_session (method) at crates/ragent-storage/src/storage.rs:509-517
+  - Storage::update_session (method) at crates/ragent-storage/src/storage.rs:679-687
+
+Group 120 (fingerprint: 630185e407e1fc52, similarity: 87%, 2 members):
+  - parse_accepts_common_aliases (function) at crates/ragent-research/src/status.rs:124-149
+  - test_effort_parse (function) at crates/ragent-specs/src/plan_parser.rs:432-439
+
+Group 121 (fingerprint: 78d667cb4b6d4443, similarity: 87%, 2 members):
+  - parse_llm_questions_extracts_json_array (function) at crates/ragent-research/src/planner.rs:335-341
+  - test_parse_skips_malformed_rows (function) at crates/ragent-specs/src/plan_parser.rs:520-534
+
+Group 122 (fingerprint: 649ac7120f2d9f5b, similarity: 87%, 2 members):
+  - McpClient::list_tools (method) at crates/ragent-agent/src/mcp/mod.rs:392-398
+  - App::assistant_output_lines (method) at crates/ragent-tui/src/app/session_ops.rs:1521-1527
+
+Group 123 (fingerprint: c401e9b6b4f4d24c, similarity: 87%, 2 members):
+  - test_compress_text_short_content (function) at crates/ragent-agent/tests/inline/compression_pipeline.rs:426-434
+  - test_compress_text_empty (function) at crates/ragent-agent/tests/inline/compression_pipeline.rs:437-442
+
+Group 124 (fingerprint: 9451a8f1553bf203, similarity: 87%, 2 members):
+  - test_pane_at_returns_memory_when_click_inside_memory_area (function) at crates/ragent-tui/tests/test_memory_panel.rs:218-229
+  - test_pane_at_returns_none_for_memory_when_panel_hidden (function) at crates/ragent-tui/tests/test_memory_panel.rs:232-246
+
+Group 125 (fingerprint: 3abbfead634bf61a, similarity: 86%, 2 members):
+  - AgentLoopProfiler::scope (method) at crates/ragent-agent/src/session/profiler.rs:111-116
+  - AgentLoopProfiler::scope_with (method) at crates/ragent-agent/src/session/profiler.rs:125-133
+
+Group 126 (fingerprint: 70cbad095d5bc5c2, similarity: 86%, 2 members):
+  - extract_module_item (function) at crates/ragent-codeindex/src/parser/openscad.rs:111-146
+  - extract_function_item (function) at crates/ragent-codeindex/src/parser/openscad.rs:153-181
+
+Group 127 (fingerprint: 5854b62a7445bcf2, similarity: 86%, 2 members):
+  - assemble_document_renders_cross_reference_table (function) at crates/ragent-research/src/document.rs:808-821
+  - assemble_document_escapes_pipes_in_cross_reference_relevance (function) at crates/ragent-research/src/document.rs:824-836
+
+Group 128 (fingerprint: 59be9a896805eee1, similarity: 86%, 2 members):
+  - test_read_end_line_smaller_than_start_line_gives_actionable_error (function) at crates/ragent-tools-core/tests/test_read_tool.rs:185-212
+  - test_read_end_line_smaller_than_start_line_with_explicit_num_lines_still_errors (function) at crates/ragent-tools-core/tests/test_read_tool.rs:215-238
+
+Group 129 (fingerprint: 5de07af133b849af, similarity: 86%, 2 members):
+  - evaluate_mbpp_python_tests (function) at crates/ragent-bench/src/suites/mbpp.rs:106-161
+  - evaluate_mbpp_native (function) at crates/ragent-bench/src/suites/mbpp.rs:163-220
+
+Group 130 (fingerprint: 0011b512d04b59fc, similarity: 86%, 2 members):
+  - test_file_menu_mode_supports_cursor_movement_and_delete (function) at crates/ragent-tui/tests/test_slash_commands.rs:1234-1256
+  - test_file_menu_mode_supports_ctrl_word_actions (function) at crates/ragent-tui/tests/test_slash_commands.rs:1259-1281
+
+Group 131 (fingerprint: edc4782c02cbaf5f, similarity: 86%, 2 members):
+  - test_try_extract_research_code_block_handles_skills_output (function) at crates/ragent-tui/src/app/tests.rs:344-356
+  - test_try_extract_research_code_block_handles_help_output (function) at crates/ragent-tui/src/app/tests.rs:359-371
+
+Group 132 (fingerprint: aa9b937badfba712, similarity: 86%, 2 members):
+  - test_classify_with_image_attachment_requires_vision (function) at crates/ragent-llm/tests/inline/router_classifier.rs:417-434
+  - test_classify_safe_preserves_requires_vision_on_error (function) at crates/ragent-llm/tests/inline/router_classifier_extended.rs:440-454
+
+Group 133 (fingerprint: f829c45f863346af, similarity: 86%, 2 members):
+  - test_invoke_with_dynamic_context (function) at crates/ragent-agent/src/skill/invoke.rs:363-371
+  - test_invoke_skips_dynamic_context_when_disabled (function) at crates/ragent-agent/src/skill/invoke.rs:415-424
+
+Group 134 (fingerprint: 1c0972bdb0e74a91, similarity: 86%, 2 members):
+  - test_supports_chat_completions_uses_endpoint_metadata (function) at crates/ragent-llm/src/providers/copilot.rs:1688-1704
+  - test_supports_chat_completions_filters_codex_without_metadata (function) at crates/ragent-llm/src/providers/copilot.rs:1707-1723
+
+Group 135 (fingerprint: 32543fdd529b5211, similarity: 86%, 2 members):
+  - test_load_nonexistent (function) at crates/ragent-tools-extended/src/memory/storage.rs:226-235
+  - test_list_empty (function) at crates/ragent-tools-extended/src/memory/storage.rs:238-245
+
+Group 136 (fingerprint: 6db5b719da50b4d1, similarity: 86%, 2 members):
+  - Storage::delete_todo (method) at crates/ragent-storage/src/storage.rs:1257-1264
+  - Storage::store_memory_embedding (method) at crates/ragent-storage/src/storage.rs:1733-1740
+
+Group 137 (fingerprint: 7327993f2c0e184f, similarity: 86%, 2 members):
+  - SpecCommand::build_create_message (method) at crates/ragent-specs/src/commands.rs:266-276
+  - SpecCommand::build_create_prompt (method) at crates/ragent-specs/src/commands.rs:287-314
+
+Group 138 (fingerprint: fbd6d55b4b8d0b0f, similarity: 86%, 2 members):
+  - canonical_tool_name (function) at crates/ragent-tui/src/widgets/message_widget.rs:93-99
+  - service (function) at crates/ragent-tui/src/layout_statusbar.rs:137-143
+
+Group 139 (fingerprint: a7a563dc73164375, similarity: 86%, 2 members):
+  - test_cpp_namespace (function) at crates/ragent-codeindex/src/parser/c_cpp.rs:702-715
+  - test_module (function) at crates/ragent-codeindex/tests/inline/codeindex_rust_parser.rs:163-177
+
+Group 140 (fingerprint: aee0ba8f8a6c7549, similarity: 85%, 2 members):
+  - IndexStore::get_file_imports (method) at crates/ragent-codeindex/src/store.rs:607-629
+  - IndexStore::find_references (method) at crates/ragent-codeindex/src/store.rs:684-710
+
+Group 141 (fingerprint: 707b490e00e9169c, similarity: 85%, 2 members):
+  - extract_interface (function) at crates/ragent-codeindex/src/parser/java.rs:148-184
+  - extract_trait (function) at crates/ragent-codeindex/src/parser/rust.rs:450-492
+
+Group 142 (fingerprint: 26823e4b2f014deb, similarity: 85%, 2 members):
+  - render_supporting_file_produces_web_block (function) at crates/ragent-research/src/document.rs:897-910
+  - render_bibliography_includes_source_preview (function) at crates/ragent-research/src/document.rs:964-977
+
+Group 143 (fingerprint: 71f5bc5319584ab6, similarity: 85%, 2 members):
+  - byte_offset_to_line_basic (function) at crates/ragent-tools-core/tests/test_edit.rs:45-50
+  - test_highest_fr_in_full_spec (function) at crates/ragent-specs/src/id_scanner.rs:169-190
+
+Group 144 (fingerprint: 46fd4a813aa764ec, similarity: 85%, 2 members):
+  - test_ollama_sends_binary_think_field (function) at crates/ragent-llm/tests/test_thinking_adapters.rs:284-304
+  - test_ollama_cloud_sends_think_field_when_configured (function) at crates/ragent-llm/tests/test_thinking_adapters.rs:307-335
+

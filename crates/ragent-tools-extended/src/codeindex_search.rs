@@ -4,24 +4,12 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::codeindex_not_available;
 use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Search the codebase index for symbols, functions, types, and documentation
 /// using full-text search with optional structured filters.
 pub struct CodeIndexSearchTool;
-
-/// Build a "not available" response when the code index is disabled.
-fn not_available() -> ToolOutput {
-    ToolOutput {
-        content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `grep` or `glob` as fallback tools for code search."
-            .to_string(),
-        metadata: Some(json!({
-            "error": "codeindex_disabled",
-            "fallback_tools": ["grep", "glob"]
-        })),
-    }
-}
 
 #[async_trait::async_trait]
 impl Tool for CodeIndexSearchTool {
@@ -76,7 +64,12 @@ impl Tool for CodeIndexSearchTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let idx = match &ctx.code_index {
             Some(idx) => idx,
-            None => return Ok(not_available()),
+            None => {
+                return Ok(codeindex_not_available(
+                    "Use `grep` or `glob` as fallback tools for code search.",
+                    &["grep", "glob"],
+                ));
+            }
         };
 
         let query_str = input["query"]

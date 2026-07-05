@@ -13,7 +13,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for Maven POM (XML) files.
 pub struct MavenParser {
@@ -26,23 +26,11 @@ impl MavenParser {
         Self { _private: () }
     }
 
-    /// Create a tree-sitter parser configured for XML.
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_xml::LANGUAGE_XML;
-        parser
-            .set_language(&language.into())
-            .context("failed to load XML grammar")?;
-        Ok(parser)
-    }
-
-    /// Parse source code into a tree-sitter Tree.
-    fn parse_tree(source: &[u8]) -> Result<Tree> {
-        let mut parser = Self::create_parser()?;
-        parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None for XML source")
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_xml::LANGUAGE_XML,
+        "failed to load XML grammar",
+        "tree-sitter parse returned None for XML source"
+    );
 }
 
 impl LanguageParser for MavenParser {

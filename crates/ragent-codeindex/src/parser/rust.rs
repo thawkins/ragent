@@ -7,7 +7,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for the Rust programming language.
 pub struct RustParser {
@@ -20,23 +20,11 @@ impl RustParser {
         Self { _private: () }
     }
 
-    /// Create a tree-sitter parser configured for Rust.
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_rust::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .context("failed to load Rust grammar")?;
-        Ok(parser)
-    }
-
-    /// Parse source code into a tree-sitter Tree.
-    fn parse_tree(source: &[u8]) -> Result<Tree> {
-        let mut parser = Self::create_parser()?;
-        parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None")
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_rust::LANGUAGE,
+        "failed to load Rust grammar",
+        "tree-sitter parse returned None"
+    );
 }
 
 impl LanguageParser for RustParser {
@@ -875,12 +863,11 @@ fn has_test_attribute(ctx: &ExtractionContext, node: Node) -> bool {
 }
 
 /// Build a qualified name from scope segments and a name.
+///
+/// Delegates to [`super::util::build_qname`] with the `::` separator.
+#[inline]
 fn build_qualified_name(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}::{}", scope.join("::"), name)
-    }
+    super::util::build_qname(scope, name, "::")
 }
 
 /// Extend a scope with a new segment.

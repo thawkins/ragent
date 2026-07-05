@@ -10,12 +10,9 @@
 
 use ragent_team::team::{Mailbox, MailboxMessage, MessageType, TeamStore};
 
-fn setup_workspace() -> (tempfile::TempDir, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let dir = tmp.path().to_path_buf();
-    std::fs::create_dir_all(dir.join(".ragent/teams")).expect("create .ragent/teams");
-    (tmp, dir)
-}
+#[path = "support/mod.rs"]
+mod support;
+use support::setup_workspace;
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
     dir.join(".ragent/teams").join(name)

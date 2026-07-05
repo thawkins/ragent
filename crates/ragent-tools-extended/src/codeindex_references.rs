@@ -4,22 +4,11 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::codeindex_utils::codeindex_not_available;
 use crate::codeindex_utils::{busy_output, with_retry};
 
 /// Find all references to a named symbol across the codebase.
 pub struct CodeIndexReferencesTool;
-
-fn not_available() -> ToolOutput {
-    ToolOutput {
-        content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `grep` as a fallback tool."
-            .to_string(),
-        metadata: Some(json!({
-            "error": "codeindex_disabled",
-            "fallback_tools": ["grep"]
-        })),
-    }
-}
 
 #[async_trait::async_trait]
 impl Tool for CodeIndexReferencesTool {
@@ -58,7 +47,12 @@ impl Tool for CodeIndexReferencesTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let idx = match &ctx.code_index {
             Some(idx) => idx,
-            None => return Ok(not_available()),
+            None => {
+                return Ok(codeindex_not_available(
+                    "Use `grep` as a fallback tool.",
+                    &["grep"],
+                ));
+            }
         };
 
         let symbol = input["symbol"]

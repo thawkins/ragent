@@ -14,7 +14,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for the CMake build language.
 pub struct CmakeParser {
@@ -27,23 +27,11 @@ impl CmakeParser {
         Self { _private: () }
     }
 
-    /// Create a tree-sitter parser configured for CMake.
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_cmake::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .context("failed to load CMake grammar")?;
-        Ok(parser)
-    }
-
-    /// Parse source code into a tree-sitter Tree.
-    fn parse_tree(source: &[u8]) -> Result<Tree> {
-        let mut parser = Self::create_parser()?;
-        parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None for CMake source")
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_cmake::LANGUAGE,
+        "failed to load CMake grammar",
+        "tree-sitter parse returned None for CMake source"
+    );
 }
 
 impl LanguageParser for CmakeParser {

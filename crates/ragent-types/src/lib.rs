@@ -11,6 +11,7 @@
 
 pub mod error;
 pub mod event;
+pub mod html;
 pub mod id;
 pub mod llm;
 pub mod message;

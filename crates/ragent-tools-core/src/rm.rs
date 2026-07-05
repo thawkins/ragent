@@ -5,9 +5,9 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::path_util::resolve_path;
 
 /// Deletes a single file. Rejects wildcards and glob patterns.
 pub struct RmTool;
@@ -84,15 +84,5 @@ impl Tool for RmTool {
                 "deleted": true,
             })),
         })
-    }
-}
-
-/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
-fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
-    let p = PathBuf::from(path_str);
-    if p.is_absolute() {
-        p
-    } else {
-        working_dir.join(p)
     }
 }

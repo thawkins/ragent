@@ -22,6 +22,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use regex::Regex;
 
+use ragent_types::html::strip_tags;
+
 /// Extract the most likely publication date from a raw HTML document.
 ///
 /// Returns `None` when no parseable date can be found. The returned
@@ -171,28 +173,10 @@ fn extract_from_visible_text(html: &str) -> Option<DateTime<Utc>> {
     None
 }
 
-/// Crude tag stripper for the visible-text fallback. Inserts a single space
-/// at each tag boundary so words from adjacent elements don't run together
-/// (e.g. `"<h1>Report</h1><p>January..."` becomes `"Report January..."`),
-/// which keeps word-boundary anchors in the date regexes functional.
-fn strip_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => {
-                in_tag = true;
-                result.push(' ');
-            }
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(ch),
-            _ => {}
-        }
-    }
-    result
-}
-
 /// Parse a date or datetime string into a UTC `DateTime`.
+///
+/// Uses [`ragent_types::html::strip_tags`] to remove HTML markup before
+/// attempting date extraction (DUPPLAN.md Milestone F).
 ///
 /// Tries, in order:
 ///

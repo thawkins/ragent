@@ -11,7 +11,7 @@
 use super::{LanguageParser, ParsedFile};
 use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser, Tree};
+use tree_sitter::Node;
 
 /// Tree-sitter parser for the OpenSCAD language.
 pub struct OpenScadParser {
@@ -24,23 +24,11 @@ impl OpenScadParser {
         Self { _private: () }
     }
 
-    /// Create a tree-sitter parser configured for OpenSCAD.
-    fn create_parser() -> Result<Parser> {
-        let mut parser = Parser::new();
-        let language = tree_sitter_openscad::LANGUAGE;
-        parser
-            .set_language(&language.into())
-            .context("failed to load OpenSCAD grammar")?;
-        Ok(parser)
-    }
-
-    /// Parse source code into a tree-sitter Tree.
-    fn parse_tree(source: &[u8]) -> Result<Tree> {
-        let mut parser = Self::create_parser()?;
-        parser
-            .parse(source, None)
-            .context("tree-sitter parse returned None for OpenSCAD source")
-    }
+    super::util::tree_sitter_parser!(
+        tree_sitter_openscad::LANGUAGE,
+        "failed to load OpenSCAD grammar",
+        "tree-sitter parse returned None for OpenSCAD source"
+    );
 }
 
 impl LanguageParser for OpenScadParser {
@@ -367,12 +355,11 @@ fn child_text_by_kind(ctx: &Ctx, node: Node, kind: &str) -> Option<String> {
 }
 
 /// Build a qualified name from the current scope and a local name.
+///
+/// Delegates to [`super::util::build_qname`] with the `::` separator.
+#[inline]
 fn build_qname(scope: &[String], name: &str) -> String {
-    if scope.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}::{}", scope.join("::"), name)
-    }
+    super::util::build_qname(scope, name, "::")
 }
 
 /// Extend the scope with one more level.
