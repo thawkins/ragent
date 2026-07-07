@@ -94,6 +94,16 @@ impl SpecManager {
         Ok(())
     }
 
+    /// Delete a spec directory from the workspace.
+    pub async fn delete_spec(&self, id: &SpecId) -> Result<(), SpecError> {
+        let dir = self.specs_root.join(id.dir_name());
+        if !dir.is_dir() {
+            return Err(SpecError::NotFound(id.as_str().to_string()));
+        }
+        tokio::fs::remove_dir_all(&dir).await?;
+        Ok(())
+    }
+
     // ── Transitions ─────────────────────────────────────────────────────────
 
     /// Transition a spec to a new status.

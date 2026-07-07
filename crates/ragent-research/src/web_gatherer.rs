@@ -477,6 +477,38 @@ impl WebGatherer {
         self
     }
 
+    /// Fetch a single URL and return it as a [`Source::Web`] plus the raw
+    /// [`WebFetchedPage`].
+    ///
+    /// Used by `--from-url` to capture a user-supplied page as the primary
+    /// research subject *before* the normal web-search phase runs. The body is
+    /// fenced via [`fence_captured_body`] so it stays within the same byte
+    /// budget as pages captured during gathering. The `body_path` is set to
+    /// `web-01.md` (index 0); the manager renumbers supporting files by
+    /// position at write time, so this is purely a metadata hint.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying fetch error when the page cannot be retrieved.
+    pub async fn fetch_url_as_source(&self, url: &str) -> anyhow::Result<(Source, WebFetchedPage)> {
+        let page = self.fetch.fetch(url).await?;
+        let body = fence_captured_body(&page.body);
+        let title = if page.title.is_empty() {
+            url.to_string()
+        } else {
+            page.title.clone()
+        };
+        let source = Source::Web {
+            url: page.url.clone(),
+            title,
+            captured_at: chrono::Utc::now(),
+            published_at: page.published_at,
+            body_path: web_body_path(0),
+            body,
+        };
+        Ok((source, page))
+    }
+
     /// Gather up to `max_results` web sources for `topic`.
     ///
     /// Returns an empty `Vec` (not an error) when:

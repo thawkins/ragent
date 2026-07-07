@@ -10,12 +10,18 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> <topic> [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
-        /// Free-form topic description.
+        /// Free-form topic description. Optional when `--from-url` is supplied;
+        /// in that case the fetched page content becomes the research subject.
         topic: String,
+        /// `--from-url <URL>`: fetch the URL and use its content as the research
+        /// subject in place of (or alongside) an explicit topic. The fetched
+        /// page is captured as the primary web source; the normal web-search
+        /// phase still runs using the derived topic.
+        from_url: Option<String>,
         /// Optional FR-010 `--iterations N` override.
         iterations: Option<u32>,
         /// Optional FR-011 `--depth shallow|standard|deep`.
@@ -114,6 +120,7 @@ impl ResearchCliCommand {
                     Self::Create {
                         name,
                         topic,
+                        from_url: None,
                         iterations: None,
                         depth: None,
                         format: None,
@@ -128,12 +135,13 @@ impl ResearchCliCommand {
     }
 
     fn parse_create(rest: &[&str]) -> Self {
-        // Parse: ragent research create <name> <topic> [--iterations N]
-        //        [--depth shallow|standard|deep] [--format <artifact>]
+        // Parse: ragent research create <name> <topic> [--from-url <URL>]
+        //        [--iterations N] [--depth shallow|standard|deep] [--format <artifact>]
         //        [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
+        let mut from_url: Option<String> = None;
         let mut iterations: Option<u32> = None;
         let mut depth: Option<String> = None;
         let mut format: Option<String> = None;
@@ -144,6 +152,14 @@ impl ResearchCliCommand {
         while i < rest.len() {
             let arg = rest[i];
             match arg {
+                "--from-url" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        from_url = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
                 "--iterations" => {
                     if let Some(v) = rest.get(i + 1) {
                         iterations = v.parse().ok();
@@ -209,6 +225,7 @@ impl ResearchCliCommand {
         Self::Create {
             name,
             topic,
+            from_url,
             iterations,
             depth,
             format,
@@ -279,15 +296,18 @@ impl ResearchCliCommand {
                  ragent research <SUBCOMMAND> [ARGS]\n\
                \n\
                SUBCOMMANDS:\n\
-                                create <name> <topic> [--iterations N] [--depth shallow|standard|deep]\n\
-                                      [--format report|executive-summary|comparison-table|source-bibliography]\n\
-                                      [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]\n\
-                                      Run an information-gathering session and write RESEARCH.md.\n\
-                                      --iterations  Override the default maximum number of iterations.\n\
-                                      --depth       Choose a preset: shallow, standard, or deep.\n\
-                                      --format      Select the output artifact format.\n\
-                                      --use-local   Enable local-file scanning (in-project + extras).\n\
-                                      --use-specs   Enable prior-spec cross-referencing.\n\
+                                 create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
+                                       [--format report|executive-summary|comparison-table|source-bibliography]\n\
+                                       [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]\n\
+                                       Run an information-gathering session and write RESEARCH.md.\n\
+                                       --from-url    Fetch the URL and use its content as the research subject\n\
+                                                     in place of an explicit topic. The page is captured as\n\
+                                                     the primary source; web search still runs.\n\
+                                       --iterations  Override the default maximum number of iterations.\n\
+                                       --depth       Choose a preset: shallow, standard, or deep.\n\
+                                       --format      Select the output artifact format.\n\
+                                       --use-local   Enable local-file scanning (in-project + extras).\n\
+                                       --use-specs   Enable prior-spec cross-referencing.\n\
                    continue <name> [message] Resume an in-progress research item.\n\
                    list [--all]                  List every research item.\n\
                  open <name>                   Print the absolute path of RESEARCH.md.\n\
@@ -862,6 +882,70 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+    #[test]
+    fn parse_create_with_from_url_and_no_topic() {
+        let cmd = ResearchCliCommand::parse("create myitem --from-url https://example.com/article");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_url,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "");
+                assert_eq!(from_url.as_deref(), Some("https://example.com/article"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_create_with_from_url_and_topic() {
+        let cmd = ResearchCliCommand::parse(
+            "create myitem rust async --from-url https://example.com/article",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_url,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "rust async");
+                assert_eq!(from_url.as_deref(), Some("https://example.com/article"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_create_with_from_url_before_other_flags() {
+        let cmd = ResearchCliCommand::parse(
+            "create myitem --from-url https://example.com --use-local --iterations 3",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_url,
+                use_local,
+                iterations,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "");
+                assert_eq!(from_url.as_deref(), Some("https://example.com"));
+                assert!(use_local);
+                assert_eq!(iterations, Some(3));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn help_message_documents_from_url_flag() {
+        let h = ResearchCliCommand::build_help_message();
+        assert!(h.contains("--from-url"), "help missing `--from-url`: {h}");
     }
     #[test]
     fn help_message_contains_documented_subcommands() {

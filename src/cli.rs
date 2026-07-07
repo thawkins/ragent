@@ -59,9 +59,16 @@ pub enum ResearchCommands {
         /// Research name (URL-safe identifier)
         #[arg(value_name = "NAME")]
         name: String,
-        /// Topic description (everything after the name)
+        /// Topic description (everything after the name). Optional when
+        /// `--from-url` is supplied; in that case the fetched page content
+        /// becomes the research subject.
         #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
         topic: Vec<String>,
+        /// Fetch the URL and use its content as the research subject in
+        /// place of an explicit topic. The page is captured as the primary
+        /// source; web search still runs.
+        #[arg(long, value_name = "URL")]
+        from_url: Option<String>,
         /// Number of gathering iterations
         #[arg(long)]
         iterations: Option<u32>,
@@ -137,6 +144,7 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
         ResearchCommands::Create {
             name,
             topic,
+            from_url,
             iterations,
             depth,
             format,
@@ -146,13 +154,16 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             use_specs,
         } => {
             let topic = topic.join(" ");
-            if topic.is_empty() {
-                eprintln!("ragent-research: usage: ragent research create <name> <topic...>");
+            if topic.is_empty() && from_url.is_none() {
+                eprintln!(
+                    "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>]"
+                );
                 std::process::exit(2);
             }
             ResearchCliCommand::Create {
                 name,
                 topic,
+                from_url,
                 iterations,
                 depth,
                 format,
@@ -251,6 +262,7 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
         ResearchCliCommand::Create {
             name,
             topic,
+            from_url,
             iterations: _,
             depth: _,
             format: _,
@@ -267,19 +279,27 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                     println!("{}", ragent_research::render_session_event_json(&event));
                 }
             }
+            // When --from-url is given without a topic, use the URL as the
+            // item title; the session derives the real topic from the fetched
+            // page.
+            let title = if topic.is_empty() {
+                from_url.clone().unwrap_or_else(|| "Research".to_string())
+            } else {
+                topic
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(&topic)
+                    .to_string()
+            };
             let config = SessionConfig {
                 topic: topic.clone(),
+                from_url,
                 sources_dir: sources_dir.map(std::path::PathBuf::from),
                 template,
                 disable_local: !use_local,
                 disable_specs: !use_specs,
                 ..SessionConfig::default()
             };
-            let title = topic
-                .split_whitespace()
-                .next()
-                .unwrap_or(&topic)
-                .to_string();
 
             // Build a full research session backed by the default tool
             // registry so the CLI can capture web sources when a search API

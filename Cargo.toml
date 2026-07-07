@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.138"
+version = "0.1.0-alpha.139"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -177,6 +177,7 @@ dirs = "6"
 html2text = "0.16"
 similar = "2"
 regex = "1"
+readability-rs = "0.5"
 base64 = "0.22"
 rand = "0.9"
 

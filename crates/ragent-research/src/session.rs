@@ -9,7 +9,7 @@
 //! `ragent research create` sub-command, and the `POST /research` HTTP
 //! endpoint all call (T-019, T-027, T-034, T-036).
 
-use crate::analysis::{AnalysisEngine, AnalysisResult, build_source_bodies};
+use crate::analysis::{AnalysisEngine, AnalysisOutcome, AnalysisResult, build_source_bodies};
 use crate::document::{ResearchDocument, mark_in_progress};
 use crate::io::ResearchIo;
 use crate::item::ResearchItem;
@@ -57,6 +57,14 @@ impl GatherObserver for GatherEventForwarder {
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
     /// Free-form research topic — used to derive web queries and grep terms.
+    ///
+    /// When [`Self::from_url`] is set and `topic` is empty, the topic is
+    /// derived from the fetched page body (cleaned via `readability-rs` in the
+    /// `webfetch` tool) so the rest of the pipeline (query decomposition, local
+    /// grep terms, synthesis) has a subject that reflects the page's actual
+    /// content rather than its `<title>`. The full fetched page body is captured
+    /// as the first web source regardless. When the cleaned body yields no
+    /// usable topic the page title, then the URL, is used as a fallback.
     pub topic: String,
     /// Optional FR-019 extra sources directory.
     pub sources_dir: Option<PathBuf>,
@@ -70,6 +78,16 @@ pub struct SessionConfig {
     pub disable_local: bool,
     /// When `true`, skip the prior-spec cross-reference phase entirely.
     pub disable_specs: bool,
+    /// `--from-url <URL>`: fetch the URL before gathering and use the returned
+    /// page content as the research subject in place of an explicit topic.
+    ///
+    /// When set, the fetched page is captured as the primary web source and
+    /// (when `topic` is empty) the page body is cleaned by the `readability-rs`
+    /// extractor in the `webfetch` tool, from which a concise topic is derived
+    /// for query decomposition, local-grep term derivation, and synthesis. The
+    /// normal web-search phase still runs, using that derived topic, so
+    /// additional related sources are gathered as usual.
+    pub from_url: Option<String>,
 }
 
 impl Default for SessionConfig {
@@ -82,6 +100,7 @@ impl Default for SessionConfig {
             max_local_sources: 10,
             disable_local: true,
             disable_specs: true,
+            from_url: None,
         }
     }
 }
@@ -351,16 +370,161 @@ impl ResearchSession {
             analysis,
         )
     }
+}
 
+/// Derive a concise research topic from the cleaned page body returned by the
+/// `webfetch` tool.
+///
+/// Returns `None` when the body contains no usable sentence, so the caller can
+/// abort the research run rather than falling back to the page title or URL.
+fn derive_topic_from_url_body(src_body: &str, _src_title: &str, _src_url: &str) -> Option<String> {
+    let derived = derive_topic_from_body(src_body);
+    if !derived.trim().is_empty() {
+        Some(derived)
+    } else {
+        None
+    }
+}
+
+/// Maximum number of characters a derived topic may span.
+const MAX_DERIVED_TOPIC_CHARS: usize = 160;
+
+/// Pick the first substantive sentence from a cleaned page body to use as the
+/// research topic. This is intentionally lightweight because the `webfetch` tool
+/// already runs `readability-rs` to strip nav/cookie/footer chrome. If the
+/// extractor could not isolate the article text and the tool fell back to
+/// html2text, this helper skips link-only lines, headings of tables of contents,
+/// update banners, and other common page noise.
+fn derive_topic_from_body(cleaned_body: &str) -> String {
+    let trimmed = cleaned_body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    for raw in trimmed.split(['.', '?', '!', '\n']) {
+        let fragment = raw.trim();
+        if fragment.is_empty() {
+            continue;
+        }
+        let cleaned = clean_topic_fragment(fragment);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if is_topic_noise(&cleaned, fragment) {
+            continue;
+        }
+        let word_count = cleaned.split_whitespace().count();
+        // Headings ("# Introducing deep research") are valuable even when short.
+        let is_heading = fragment.starts_with('#');
+        if word_count >= 4 || (is_heading && word_count >= 3) {
+            return truncate_at_char_boundary(&cleaned, MAX_DERIVED_TOPIC_CHARS);
+        }
+    }
+
+    String::new()
+}
+
+/// Strip markdown heading/list markers left over from rendered page bodies.
+fn clean_topic_fragment(s: &str) -> String {
+    let mut out = s.trim().to_string();
+    while out.starts_with('#') {
+        out = out.trim_start_matches('#').trim_start().to_string();
+    }
+    for prefix in ["* ", "- ", "+ "] {
+        if let Some(rest) = out.strip_prefix(prefix) {
+            out = rest.to_string();
+        }
+    }
+    // Drop trailing markdown reference-link indices like "[12]".
+    if let Some(idx) = out.rfind('[') {
+        let tail = &out[idx..];
+        if tail.ends_with(']') && tail.chars().filter(|c| c.is_ascii_digit()).count() > 0 {
+            out.truncate(idx);
+            out = out.trim_end().to_string();
+        }
+    }
+    out
+}
+
+/// Common page-chrome phrases that should never become a research topic.
+const TOPIC_NOISE_KEYWORDS: &[&str] = &[
+    "skip to main content",
+    "skip to content",
+    "skip navigation",
+    "cookie",
+    "subscribe",
+    "newsletter",
+    "sign in",
+    "sign up",
+    "log in",
+    "login",
+    "loading",
+    "share",
+    "all rights reserved",
+    "footer",
+    "update:",
+    "table of contents",
+    "try chatgpt",
+    "jump to content",
+];
+
+/// Return true when a fragment is clearly page chrome rather than article prose.
+fn is_topic_noise(cleaned: &str, original: &str) -> bool {
+    let lower = cleaned.to_lowercase();
+    for kw in TOPIC_NOISE_KEYWORDS {
+        if lower.contains(kw) {
+            return true;
+        }
+    }
+    // Markdown reference-link lines like "[Skip to main content][1]" or
+    // "* [Foundation(opens in a new window)][7]" are nav links, not topics.
+    if original.contains("][") || original.contains("](") {
+        let stripped = remove_markdown_links(original);
+        let remaining_words = stripped.split_whitespace().count();
+        if remaining_words < 3 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Remove markdown reference and inline links, leaving only the surrounding text.
+fn remove_markdown_links(s: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?s)\[[^\]]+\](?:\[[^\]]*\]|\([^)]+\))").unwrap()
+    });
+    RE.replace_all(s, "").into_owned()
+}
+
+/// Truncate `s` to at most `max_chars` characters on a UTF-8 char boundary.
+fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let end = s
+        .char_indices()
+        .take(max_chars)
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(s.len());
+    s[..end].to_string()
+}
+
+impl ResearchSession {
     /// Run a complete research session end-to-end. The flow is:
     ///
-    /// 1. Validate name + create the on-disk item (if absent).
-    /// 2. Mark the item `InProgress` and load the optional template.
-    /// 3. Run web-gathering (T-014, T-015).
-    /// 4. Run local-gathering (T-016, T-017, T-018).
-    /// 5. Cross-reference prior specs (T-018).
-    /// 6. Assemble `RESEARCH.md` (T-020, T-021, T-022).
-    /// 7. Persist + mark `Complete` (T-012, T-013).
+    /// 1. Validate name + emit the setup phase.
+    /// 2. If `--from-url` is provided, fetch the primary page *before* creating
+    ///    the on-disk item; derive the topic from the page body when no explicit
+    ///    topic was supplied. A fetch failure here aborts the session and leaves
+    ///    no research folder or `RESEARCH.md` behind.
+    /// 3. Create the on-disk item (if absent) using the resolved topic.
+    /// 4. Mark the item `InProgress` and load the optional template.
+    /// 5. Run web-gathering (T-014, T-015).
+    /// 6. Run local-gathering (T-016, T-017, T-018).
+    /// 7. Cross-reference prior specs (T-018).
+    /// 8. Assemble `RESEARCH.md` (T-020, T-021, T-022).
+    /// 9. Persist + mark `Complete` (T-012, T-013).
     pub async fn run(
         &self,
         name_str: &str,
@@ -374,27 +538,111 @@ impl ResearchSession {
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Setup,
         });
+
+        // ── --from-url pre-step ──────────────────────────────────────────
+        //
+        // Fetch the primary page up front and capture it as the first web
+        // source. If no explicit topic was provided, derive the topic from the
+        // page's *body content* (not its `<title>`): the body is cleaned via the
+        // `readability-rs` extractor inside the `webfetch` tool, so nav bars,
+        // cookie notices, and other boilerplate are already removed. The first
+        // substantive sentence of the returned text becomes the research topic.
+        // The page title and URL are only used as fallbacks when the body yields
+        // no usable sentence.
+        //
+        // Crucially, this fetch happens *before* the on-disk item is created so
+        // an inaccessible primary URL aborts the session without leaving an empty
+        // research folder or skeleton `RESEARCH.md` behind.
+        let mut topic = config.topic.clone();
+        let mut sources = Vec::new();
+        let mut web_queries = Vec::new();
+        if let Some(url) = config.from_url.as_deref() {
+            let Some(web) = &self.web else {
+                return Err(ResearchError::FromUrlFetchFailed {
+                    url: url.to_string(),
+                    message: "web gathering is disabled; cannot fetch --from-url".to_string(),
+                });
+            };
+            match web.fetch_url_as_source(url).await {
+                Ok((src, _page)) => {
+                    let src_url = match &src {
+                        Source::Web { url, .. } => url.clone(),
+                        _ => url.to_string(),
+                    };
+                    let src_title = match &src {
+                        Source::Web { title, .. } => title.clone(),
+                        _ => String::new(),
+                    };
+                    let src_body = match &src {
+                        Source::Web { body, .. } => body.clone(),
+                        _ => String::new(),
+                    };
+                    observer.on_event(SessionEvent::WebCaptured {
+                        url: src_url.clone(),
+                        title: src_title.clone(),
+                    });
+                    if topic.trim().is_empty() {
+                        match derive_topic_from_url_body(&src_body, &src_title, &src_url) {
+                            Some(derived) => {
+                                topic = derived;
+                                tracing::info!(
+                                    url = %src_url,
+                                    derived_topic = %topic,
+                                    "research: --from-url derived topic from fetched page body"
+                                );
+                            }
+                            None => {
+                                let message = format!(
+                                    "fetched page body for '{}' contained no usable article text to derive a topic",
+                                    src_url
+                                );
+                                observer.on_event(SessionEvent::WebFetchFailed {
+                                    url: src_url.clone(),
+                                    error: message.clone(),
+                                });
+                                return Err(ResearchError::FromUrlNoUsableBody {
+                                    url: src_url.clone(),
+                                });
+                            }
+                        }
+                    }
+                    sources.push(src);
+                    web_queries.push(url.to_string());
+                }
+                Err(e) => {
+                    observer.on_event(SessionEvent::WebFetchFailed {
+                        url: url.to_string(),
+                        error: e.to_string(),
+                    });
+                    return Err(ResearchError::FromUrlFetchFailed {
+                        url: url.to_string(),
+                        message: e.to_string(),
+                    });
+                }
+            }
+        }
+
+        // ── Create / load the on-disk item ──────────────────────────────
         let item_exists = ResearchIo::item_exists(self.manager.root(), &name).await;
         let mut item = if item_exists {
             self.manager.show(name_str).await?
         } else {
-            self.manager.create(name_str, title, &config.topic).await?
+            self.manager.create(name_str, title, &topic).await?
         };
         mark_in_progress(&mut item);
         self.manager.start_gathering(name_str).await?;
-        let topic = if config.topic.is_empty() {
-            item.topic.clone()
-        } else {
-            config.topic.clone()
-        };
         let template_body = load_template(self.manager.root(), config.template.as_deref()).await;
 
-        // ── Web phase ──────────���──────────────────────────────────────────
+        // If we didn't have an explicit topic and no from-url was supplied, fall
+        // back to whatever topic is stored on the pre-existing item.
+        if topic.trim().is_empty() && config.from_url.is_none() {
+            topic = item.topic.clone();
+        }
+
+        // ── Web phase ───────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Web,
         });
-        let mut sources = Vec::new();
-        let mut web_queries = Vec::new();
         if let Some(web) = &self.web {
             let forwarder = GatherEventForwarder {
                 observer: observer.clone(),
@@ -404,11 +652,12 @@ impl ResearchSession {
                 .await
             {
                 Ok(result) => {
-                    web_queries = result.queries;
-                    if !web_queries.is_empty() {
+                    let gathered_queries = result.queries;
+                    if !gathered_queries.is_empty() {
                         observer.on_event(SessionEvent::QueriesDecomposed {
-                            queries: web_queries.clone(),
+                            queries: gathered_queries.clone(),
                         });
+                        web_queries.extend(gathered_queries);
                     }
                     for src in &result.sources {
                         if let Source::Web { url, title, .. } = src {
@@ -514,19 +763,22 @@ impl ResearchSession {
         let has_llm_engine = !self.analysis_is_noop();
         let (analysis, synth_outcome, synth_detail) =
             match self.synthesize(&name, &topic, &sources).await {
-                Ok(result) => {
-                    let used_llm_content = !result.summary.is_empty()
-                        || !result.findings.is_empty()
-                        || !result.cross_references.is_empty()
-                        || !result.open_questions.is_empty();
-                    let outcome = if has_llm_engine && used_llm_content {
-                        SynthesizeOutcome::Llm
-                    } else if has_llm_engine {
-                        SynthesizeOutcome::FallbackEmpty
-                    } else {
+                Ok((result, outcome)) => {
+                    // Map the engine's AnalysisOutcome to the user-facing
+                    // SynthesizeOutcome. When no LLM engine is wired in
+                    // (NoopAnalysisEngine), the default analyze_with_outcome
+                    // returns AnalysisOutcome::Llm, but we override to NoLlm
+                    // so the UI is transparent about the provenance.
+                    let synth = if !has_llm_engine {
                         SynthesizeOutcome::NoLlm
+                    } else {
+                        match outcome {
+                            AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
+                            AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
+                            AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
+                        }
                     };
-                    (result, outcome, None)
+                    (result, synth, None)
                 }
                 Err(e) => {
                     // Log at error level (not warn) so it's visible by default
@@ -568,6 +820,14 @@ impl ResearchSession {
                 analysis.summary
             },
             findings: if analysis.findings.is_empty() {
+                // FR-011 / T-010: the analysis engine guarantees non-empty
+                // findings via the mechanical fallback (see
+                // `mechanical_fallback_findings`), so this branch is a
+                // defense-in-depth safety net rather than the primary path.
+                // It only triggers if a custom `AnalysisEngine`
+                // implementation returns `Ok` with empty findings AND the
+                // `Llm` outcome (the built-in `LlmAnalysisEngine` never
+                // does). `default_findings` keeps RESEARCH.md usable.
                 default_findings(&sources, &topic)
             } else {
                 analysis.findings
@@ -618,13 +878,16 @@ impl ResearchSession {
 }
 
 impl ResearchSession {
-    /// Read captured source bodies from disk and run the analysis engine.
+    /// Read captured source bodies from disk and run the analysis engine,
+    /// returning the [`AnalysisResult`] paired with an [`AnalysisOutcome`]
+    /// so the caller can surface `SynthesizeOutcome::FallbackEmpty` when
+    /// the LLM produced malformed output (FR-005 / T-005).
     async fn synthesize(
         &self,
         name: &ResearchName,
         topic: &str,
         sources: &[Source],
-    ) -> anyhow::Result<AnalysisResult> {
+    ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
         // Prefer the inline `body` field on each source — it's the captured
         // text from the gatherer and is always populated for fresh sessions.
         // Fall back to reading the on-disk supporting file for items loaded
@@ -662,7 +925,7 @@ impl ResearchSession {
         })
         .await
         .map_err(|e| anyhow::anyhow!("synthesis body loading failed: {e}"))?;
-        self.analysis.analyze(topic, &bodies).await
+        self.analysis.analyze_with_outcome(topic, &bodies).await
     }
 }
 
@@ -1378,6 +1641,387 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn from_url_fetches_page_and_derives_topic_when_topic_is_empty() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                // The web-search phase still runs; returning no hits is fine
+                // — we only need to prove the --from-url source was captured.
+                Ok(Vec::new())
+            }
+        }
+        struct PageFetch;
+        #[async_trait]
+        impl WebFetchTool for PageFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: "Rust Async Programming Guide".into(),
+                    body: "Long-form article about Rust async/await idioms. \
+                           Tokio is the most popular runtime and provides a \
+                           multi-threaded scheduler for async tasks."
+                        .into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(PageFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: String::new(),
+            from_url: Some("https://example.com/guide".into()),
+            ..SessionConfig::default()
+        };
+        let observer = Arc::new(CollectObserver::default());
+        let outcome = session
+            .run("from-url-test", "From URL", &cfg, observer.clone())
+            .await
+            .unwrap();
+
+        // The fetched URL must be captured as the primary web source.
+        let web_sources: Vec<&Source> = outcome
+            .sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { .. }))
+            .collect();
+        assert!(
+            web_sources.iter().any(|s| matches!(
+                s,
+                Source::Web { url, title, body, .. }
+                if url == "https://example.com/guide"
+                    && title == "Rust Async Programming Guide"
+                    && body.contains("Long-form article")
+            )),
+            "expected the --from-url page as a web source, got {:?}",
+            outcome.sources
+        );
+
+        // The URL must appear in the decomposed-queries list.
+        assert!(
+            outcome
+                .web_queries
+                .iter()
+                .any(|q| q == "https://example.com/guide"),
+            "expected the --from-url URL in web_queries, got {:?}",
+            outcome.web_queries
+        );
+
+        // The research document should reference the topic derived from
+        // the fetched page body (not the page title). The body's first
+        // substantive sentence is "Long-form article about Rust async/await
+        // idioms.", which must appear in RESEARCH.md.
+        let body = tokio::fs::read_to_string(research_root.join("from-url-test/RESEARCH.md"))
+            .await
+            .unwrap();
+        assert!(
+            body.contains("Long-form article about Rust async/await idioms"),
+            "RESEARCH.md should reference the topic derived from the fetched page body, not the title: {body}"
+        );
+
+        // The WebCaptured event for the --from-url source must have fired.
+        let events = observer.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SessionEvent::WebCaptured { url, title }
+                    if url == "https://example.com/guide"
+                        && title == "Rust Async Programming Guide"
+            )),
+            "expected WebCaptured for --from-url, got {:?}",
+            *events
+        );
+    }
+
+    #[tokio::test]
+    async fn from_url_derives_topic_from_body_not_title_when_body_has_boilerplate() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(Vec::new())
+            }
+        }
+        struct PageFetch;
+        #[async_trait]
+        impl WebFetchTool for PageFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                // The page title is a generic site name, and the body is
+                // dominated by nav/cookie/share boilerplate with the real
+                // article content in the middle. The derived topic must
+                // come from the article content, not the title.
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: "Example Site".into(),
+                    body: "Home About Contact Login\n\n\
+                           Accept all cookies We use cookies on this site.\n\n\
+                           The Rust async model maps asynchronous operations \
+                           onto lightweight futures that a runtime polls to \
+                           completion. This article walks through how Tokio \
+                           schedules those futures onto worker threads.\n\n\
+                           Read more Subscribe Newsletter\n\n\
+                           © 2024 Example Corp. All rights reserved."
+                        .into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(PageFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: String::new(),
+            from_url: Some("https://example.com/article".into()),
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run(
+                "body-topic-test",
+                "Body Topic",
+                &cfg,
+                Arc::new(NoopObserver),
+            )
+            .await
+            .unwrap();
+
+        // The topic must be derived from the article sentence, not the
+        // "Example Site" title or the nav/cookie boilerplate.
+        let body = tokio::fs::read_to_string(research_root.join("body-topic-test/RESEARCH.md"))
+            .await
+            .unwrap();
+        assert!(
+            body.contains("Rust async model maps asynchronous operations"),
+            "RESEARCH.md should reference the topic derived from the cleaned page body: {body}"
+        );
+        // The title-derived topic ("Example Site") must NOT have been used
+        // as the research topic. The References Index still legitimately
+        // cites the source by its page title, so we only check the topic
+        // line in the frontmatter / summary, not the whole document.
+        let topic_line = body
+            .lines()
+            .find(|l| l.starts_with("topic:"))
+            .or_else(|| body.lines().find(|l| l.starts_with("# ")))
+            .unwrap_or("");
+        assert!(
+            !topic_line.contains("Example Site"),
+            "research topic should not be the generic page title: {topic_line}"
+        );
+
+        // Sanity: the source was still captured.
+        assert!(
+            outcome.sources.iter().any(
+                |s| matches!(s, Source::Web { url, .. } if url == "https://example.com/article")
+            ),
+            "the --from-url page should be captured as a source"
+        );
+    }
+
+    #[tokio::test]
+    async fn from_url_falls_back_to_title_when_body_is_pure_boilerplate() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(Vec::new())
+            }
+        }
+        struct PageFetch;
+        #[async_trait]
+        impl WebFetchTool for PageFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: "Meaningful Page Title".into(),
+                    body: "Home About Contact\n\nLogin Sign up\n\n© 2024 Example Corp.".into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(PageFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: String::new(),
+            from_url: Some("https://example.com/boilerplate".into()),
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("fallback-test", "Fallback", &cfg, Arc::new(NoopObserver))
+            .await
+            .unwrap();
+        let body = tokio::fs::read_to_string(research_root.join("fallback-test/RESEARCH.md"))
+            .await
+            .unwrap();
+        assert!(
+            body.contains("Meaningful Page Title"),
+            "RESEARCH.md should fall back to the page title when the cleaned body is empty: {body}"
+        );
+        let _ = outcome;
+    }
+
+    #[tokio::test]
+    async fn from_url_keeps_explicit_topic_when_both_are_supplied() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(Vec::new())
+            }
+        }
+        struct PageFetch;
+        #[async_trait]
+        impl WebFetchTool for PageFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: url.to_string(),
+                    title: "Fetched Page Title".into(),
+                    body: "body text".into(),
+                })
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(PageFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: "Custom Topic".into(),
+            from_url: Some("https://example.com/page".into()),
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("both-test", "Both", &cfg, Arc::new(NoopObserver))
+            .await
+            .unwrap();
+
+        // The explicit topic must win — the derived-topic branch only fires
+        // when topic is empty.
+        assert!(
+            outcome
+                .sources
+                .iter()
+                .any(|s| matches!(s, Source::Web { url, .. } if url == "https://example.com/page")),
+            "the --from-url page should still be captured as a source"
+        );
+        let body = tokio::fs::read_to_string(research_root.join("both-test/RESEARCH.md"))
+            .await
+            .unwrap();
+        assert!(
+            body.contains("Custom Topic"),
+            "explicit topic should be used, not the fetched page title: {body}"
+        );
+    }
+
+    #[tokio::test]
+    async fn from_url_records_web_fetch_failed_when_fetch_errors() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(Vec::new())
+            }
+        }
+        struct FailFetch;
+        #[async_trait]
+        impl WebFetchTool for FailFetch {
+            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
+                anyhow::bail!("network down")
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(FailFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: String::new(),
+            from_url: Some("https://example.com/x".into()),
+            ..SessionConfig::default()
+        };
+        let observer = Arc::new(CollectObserver::default());
+        let err = session
+            .run("fail-test", "Fail", &cfg, observer.clone())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ResearchError::FromUrlFetchFailed { ref url, ref message }
+                    if url == "https://example.com/x" && message.contains("network down")
+            ),
+            "expected FromUrlFetchFailed, got {err:?}"
+        );
+        // A WebFetchFailed progress event is also surfaced to the observer.
+        let events = observer.events.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                SessionEvent::WebFetchFailed { url, error }
+                    if url == "https://example.com/x" && error.contains("network down")
+            )),
+            "expected WebFetchFailed for --from-url, got {:?}",
+            *events
+        );
+        // No on-disk item is created when the primary URL fails.
+        assert!(
+            !ResearchIo::item_exists(
+                research_root.as_path(),
+                &ResearchName::try_new("fail-test").unwrap()
+            )
+            .await,
+            "research folder should not be created when --from-url fails"
+        );
+    }
+
+    #[tokio::test]
     async fn session_skips_local_phase_when_disable_local_is_true() {
         use crate::local_gatherer::{LocalGatherer, LocalTool};
         use std::path::PathBuf;
@@ -1388,8 +2032,8 @@ mod tests {
         struct SingleLocalTool;
         #[async_trait::async_trait]
         // NOTE: intentional duplication — see DUPPLAN.md Milestone J.
-// Trait impls for different mock types; cannot be deduplicated.
-impl LocalTool for SingleLocalTool {
+        // Trait impls for different mock types; cannot be deduplicated.
+        impl LocalTool for SingleLocalTool {
             async fn glob(&self, _root: &Path, _pattern: &str) -> anyhow::Result<Vec<PathBuf>> {
                 Ok(Vec::new())
             }

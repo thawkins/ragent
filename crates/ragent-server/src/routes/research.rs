@@ -98,6 +98,10 @@ struct CreateResearchRequest {
     title: Option<String>,
     sources_dir: Option<String>,
     template: Option<String>,
+    /// `--from-url <URL>`: fetch the URL and use its content as the research
+    /// subject in place of an explicit topic. The page is captured as the
+    /// primary source; web search still runs.
+    from_url: Option<String>,
     #[serde(default)]
     use_local: bool,
     #[serde(default)]
@@ -111,6 +115,7 @@ async fn create_research(
     let manager = ResearchManager::new(research_root());
     let config = SessionConfig {
         topic: req.topic.clone(),
+        from_url: req.from_url.clone(),
         sources_dir: req.sources_dir.map(PathBuf::from),
         template: req.template,
         disable_local: !req.use_local,
@@ -118,11 +123,17 @@ async fn create_research(
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {
-        req.topic
-            .split_whitespace()
-            .next()
-            .unwrap_or("Research")
-            .to_string()
+        if req.topic.is_empty() {
+            req.from_url
+                .clone()
+                .unwrap_or_else(|| "Research".to_string())
+        } else {
+            req.topic
+                .split_whitespace()
+                .next()
+                .unwrap_or("Research")
+                .to_string()
+        }
     });
 
     // Stream every gathering event as a server-sent response. The HTTP

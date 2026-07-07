@@ -18,6 +18,28 @@ const MAX_REDIRECTS: usize = 5;
 const TEXT_WIDTH: usize = 120;
 const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
+/// Extract the article text from HTML using the `readability-rs` crate, which
+/// removes navigation, ads, footers and other page chrome before converting the
+/// main content to plain text.
+fn extract_article_text(html: &str, url: &str) -> Option<(String, String)> {
+    let parsed_url = url::Url::parse(url).ok()?;
+    let mut input = std::io::Cursor::new(html.as_bytes());
+    let readable = readability::extract(
+        &mut input,
+        &parsed_url,
+        readability::ExtractOptions::default(),
+    )
+    .ok()?;
+    let text = readable.text.trim().to_string();
+    let title = readable.title.trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some((text, title))
+}
+
+const MIN_READABILITY_TEXT_LEN: usize = 500;
+
 #[async_trait::async_trait]
 impl Tool for WebFetchTool {
     fn name(&self) -> &'static str {
@@ -128,10 +150,28 @@ impl Tool for WebFetchTool {
         let is_html =
             content_type.contains("text/html") || content_type.contains("application/xhtml");
 
-        let processed = if is_html && format != "raw" {
-            html_to_text(&body)
+        let (processed, extracted_title) = if is_html && format != "raw" {
+            match extract_article_text(&body, url) {
+                Some((text, title)) if text.len() >= MIN_READABILITY_TEXT_LEN => {
+                    (text, Some(title))
+                }
+                Some((_, title)) => {
+                    tracing::debug!(
+                        url,
+                        "readability extraction produced very short text; falling back to html2text"
+                    );
+                    (html_to_text(&body), Some(title))
+                }
+                None => {
+                    tracing::debug!(
+                        url,
+                        "readability extraction failed; falling back to html2text"
+                    );
+                    (html_to_text(&body), None)
+                }
+            }
         } else {
-            body
+            (body, None)
         };
 
         // Truncate at a char boundary
@@ -152,16 +192,21 @@ impl Tool for WebFetchTool {
         let line_count = truncated.lines().count();
         let byte_count = truncated.len();
 
+        let mut metadata = json!({
+            "url": url,
+            "http_status": status,
+            "content_type": content_type,
+            "content_length": content_length,
+            "line_count": line_count,
+            "byte_count": byte_count,
+        });
+        if let Some(title) = extracted_title {
+            metadata["title"] = json!(title);
+        }
+
         Ok(ToolOutput {
             content: truncated,
-            metadata: Some(json!({
-                "url": url,
-                "http_status": status,
-                "content_type": content_type,
-                "content_length": content_length,
-                "line_count": line_count,
-                "byte_count": byte_count,
-            })),
+            metadata: Some(metadata),
         })
     }
 }
@@ -170,6 +215,7 @@ impl Tool for WebFetchTool {
 ///
 /// `html2text` can panic on some real-world HTML documents, so we isolate it in
 /// `catch_unwind` and fall back to a simple tag stripper if it panics or errors.
+/// This is the legacy fallback when `readability-rs` cannot extract an article.
 fn html_to_text(html: &str) -> String {
     let result = std::panic::catch_unwind(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH));
     match result {

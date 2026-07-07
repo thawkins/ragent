@@ -667,7 +667,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "spec",
-        description: "Specification management: /spec create|add|list|search|validate|status|task|help",
+        description: "Specification management: /spec create|add|delete|list|search|validate|status|task|help",
     },
     SlashCommandDef {
         trigger: "research",

@@ -1318,6 +1318,7 @@ Every `RESEARCH.md` contains:
 |---------|---------|
   | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
   | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
+  | `/research create <name> --from-url <URL>` | Fetch the URL, use its content as the research subject (in place of a topic), and capture it as the primary source; web search still runs |
   | `/research continue <name> [message]` | Resume an in-progress research item |
   | `/research list` | List research items |
   | `/research open <name>` | Show the path to `RESEARCH.md` |
@@ -2074,3 +2075,49 @@ All documentation markdown files are located in `docs/` except for these root fi
 - **Research System** (`/research` slash command, `ragent research` CLI, `GET/POST/DELETE /research` HTTP endpoints, with spec linkage via `--from-research` and `research:` lines in `PLAN.md`)
 
 ---
+
+## Research Configuration
+
+The `/research create` synthesis prompt (in `crates/ragent-research/src/analysis.rs`)
+honours two optional `ragent.json` keys under a top-level `research` object. Both
+are opt-in and default to the legacy behaviour, so existing configurations continue
+to work unchanged.
+
+### `research.few_shot` (boolean, default `false`)
+
+When `true`, the synthesis prompt appends up to two short exemplar findings
+after the output-template instructions so the model can calibrate the exact
+label structure, `[#N]` citations, and **Sources Cited / Date Spread**
+paragraph. Exemplars are format-calibration only — the prompt instructs the
+model not to copy their content into its answer and to derive findings from
+the supplied sources. Keep this `false` on small-context models to avoid
+consuming the context window.
+
+### `research.analysis_persona` (string, optional)
+
+When present, replaces the default `system` message persona
+(`"You are a careful research analyst. ..."`) verbatim. Use this to tailor
+voice, audience, and domain framing, e.g.
+`"You are a senior security research analyst for a venture-capital audience."`.
+When absent, the default analyst persona is used.
+
+### Example stanza
+
+```jsonc
+{
+  "research": {
+    "few_shot": true,
+    "analysis_persona": "You are a senior research analyst for a venture-capital audience. Read the provided sources and produce a structured markdown analysis. Use only the evidence in the sources; do not invent facts."
+  }
+}
+```
+
+### Implementation status
+
+The prompt-builder knobs (`SynthesisPromptConfig.few_shot_examples`,
+`SynthesisPromptConfig.persona`) and the `LlmAnalysisEngine::with_persona`
+builder are implemented in `crates/ragent-research/src/analysis.rs`. Wiring
+the `ragent.json` keys through to the engine (reading the config at session
+construction and calling `with_persona` / populating `few_shot_examples`) is
+tracked as a follow-up; until that wiring lands, the keys are documented so
+callers and integrators know the intended surface.

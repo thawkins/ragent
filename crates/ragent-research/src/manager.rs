@@ -57,6 +57,23 @@ pub enum ResearchError {
     /// A duplicate create attempt (FR-016).
     #[error("research item '{0}' already exists; use `/research open {0}` to view it")]
     AlreadyExists(String),
+    /// The primary `--from-url` page could not be fetched.
+    #[error("failed to fetch --from-url '{url}': {message}")]
+    FromUrlFetchFailed {
+        /// URL that could not be fetched.
+        url: String,
+        /// Underlying error message.
+        message: String,
+    },
+    /// The `--from-url` page was fetched, but its body did not contain enough
+    /// usable text to derive a research topic.
+    #[error(
+        "--from-url '{url}' returned a page with no usable article body; cannot derive a topic"
+    )]
+    FromUrlNoUsableBody {
+        /// URL that produced an empty or chrome-only body.
+        url: String,
+    },
 }
 
 /// Result alias for [`ResearchManager`].

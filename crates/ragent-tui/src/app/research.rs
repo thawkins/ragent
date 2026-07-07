@@ -51,6 +51,7 @@ impl App {
             ResearchCliCommand::Create {
                 name,
                 topic,
+                from_url,
                 iterations: _,
                 depth: _,
                 format: _,
@@ -62,7 +63,14 @@ impl App {
                 self.status = format!("research: writing research/{name}/RESEARCH.md…");
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!("research: create '{name}' for topic: {topic}"),
+                    if from_url.is_some() {
+                        format!(
+                            "research: create '{name}' from URL: {from_url}",
+                            from_url = from_url.as_deref().unwrap_or("")
+                        )
+                    } else {
+                        format!("research: create '{name}' for topic: {topic}")
+                    },
                 );
                 // Seed the live progress tracker so the message window shows
                 // a log list of each phase as it runs.
@@ -70,19 +78,27 @@ impl App {
                     &name, &topic,
                 ));
                 self.refresh_research_progress_message();
+                // When --from-url is given without a topic, use the URL as
+                // the item title; the session derives the real topic from
+                // the fetched page.
+                let title = if topic.is_empty() {
+                    from_url.clone().unwrap_or_else(|| "Research".to_string())
+                } else {
+                    topic
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or(&topic)
+                        .to_string()
+                };
                 let config = SessionConfig {
                     topic: topic.clone(),
+                    from_url,
                     sources_dir: sources_dir.map(std::path::PathBuf::from),
                     template,
                     disable_local: !use_local,
                     disable_specs: !use_specs,
                     ..SessionConfig::default()
                 };
-                let title = topic
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(&topic)
-                    .to_string();
                 let session = crate::research_adapter::build_research_session(
                     &self.session_processor.tool_registry,
                     manager.clone(),
@@ -102,6 +118,7 @@ impl App {
                 });
                 let name_for_spawn = name.clone();
                 let topic_for_assistant = topic.clone();
+                let from_url_for_msg = config.from_url.clone();
                 let event_bus_for_spawn = self.event_bus.clone();
                 let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
@@ -123,8 +140,13 @@ impl App {
                         }),
                     }
                 });
+                let subject_line = if topic_for_assistant.is_empty() {
+                    format!("URL: {}", from_url_for_msg.as_deref().unwrap_or(""))
+                } else {
+                    format!("Topic: {topic_for_assistant}")
+                };
                 let rendered = format!(
-                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\nTopic: {topic_for_assistant}\n\nWatch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
+                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\n{subject_line}\n\nWatch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
                 );
                 self.append_assistant_text(&rendered);
             }

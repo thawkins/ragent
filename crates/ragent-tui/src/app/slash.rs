@@ -4215,6 +4215,59 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.status = "spec: no active spec".to_string();
                         }
                     }
+                    SpecCommand::Delete { spec_id, yes } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+                        let mgr = SpecManager::new(&specs_root);
+                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec delete\n\n**Error:** invalid spec ID: {}",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+                        if !yes {
+                            self.append_assistant_text(&format!(
+                                "From: /spec delete\n\nRefusing to delete specs/{} without confirmation. Re-run with `--yes` to skip this prompt.",
+                                spec_id
+                            ));
+                            return;
+                        }
+                        self.status = format!("spec: deleting '{}'…", spec_id);
+                        let event_bus = self.event_bus.clone();
+                        let session_id = self.session_id.clone().unwrap_or_default();
+                        tokio::spawn(async move {
+                            let session_id_for_notice = session_id.clone();
+                            match mgr.delete_spec(&id).await {
+                                Ok(()) => {
+                                    event_bus.publish(ragent_agent::event::Event::TextDelta {
+                                        session_id,
+                                        text: format!(
+                                            "From: /spec delete\n\n✅ Deleted specs/{}.",
+                                            spec_id
+                                        ),
+                                    });
+                                    event_bus.publish(ragent_agent::event::Event::AgentNotice {
+                                        session_id: session_id_for_notice,
+                                        message: format!("spec: deleted specs/{}", spec_id),
+                                    });
+                                }
+                                Err(e) => {
+                                    event_bus.publish(ragent_agent::event::Event::TextDelta {
+                                        session_id,
+                                        text: format!(
+                                            "From: /spec delete\n\n**Error:** {}",
+                                            e
+                                        ),
+                                    });
+                                }
+                            }
+                        });
+                    }
                     SpecCommand::Coverage { spec_id } => {
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let specs_root = working_dir.join("specs");
@@ -4510,7 +4563,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "activate"
                             || sub == "coverage"
                             || sub == "impl"
-                            || sub == "add" =>
+                            || sub == "add"
+                            || sub == "delete" =>
                     {
                         self.status = format!("Usage: /spec {} — try /spec help", sub);
                     }

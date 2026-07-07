@@ -860,6 +860,7 @@ Run any of these from the TUI prompt:
 ```text
 /research rust-async async/await idioms in stable Rust
 /research create rust-async async/await idioms --depth deep --iterations 5
+/research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
 /spec create async-await Add async/await ergonomics --from-research rust-async
 ```
@@ -869,6 +870,7 @@ Or from the CLI:
 ```bash
 ragent research create rust-async "async/await idioms in stable Rust"
 ragent research create rust-async "async/await idioms" --depth deep --format executive-summary
+ragent research create rust-async --from-url https://example.com/article
 ragent research continue rust-async "focus on io_uring integration"
 ragent research list
 ragent research open rust-async
@@ -1133,3 +1135,31 @@ curl http://localhost:3000/orchestrator/metrics \
 ---
 
 For full details, see [README.md](README.md) and [SPEC.md](SPEC.md).
+
+## Research prompt configuration
+
+The `/research create` synthesis prompt accepts two optional `ragent.json`
+keys under a top-level `research` object (see SPEC.md → "Research
+Configuration" for the full schema):
+
+- `research.few_shot` (bool, default `false`) — append up to two exemplar
+  findings to the synthesis prompt so the model calibrates the required label
+  structure, `[#N]` citations, and **Sources Cited / Date Spread** paragraph.
+- `research.analysis_persona` (string, optional) — override the default
+  `"You are a careful research analyst..."` system persona to tailor voice,
+  audience, and domain framing.
+
+```jsonc
+{
+  "research": {
+    "few_shot": true,
+    "analysis_persona": "You are a senior research analyst for a venture-capital audience."
+  }
+}
+```
+
+Both keys are opt-in; existing configs are unchanged. The prompt builder also
+enforces a fifth **Sources Cited / Date Spread** paragraph and a
+recency-weighting rule when the corresponding knobs are enabled, and falls
+back to a deterministic mechanical extraction when the LLM response cannot be
+parsed into the required structure (FR-005/FR-006).

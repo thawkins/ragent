@@ -289,25 +289,40 @@ const DATE_EXTRACTION_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkin
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
     async fn fetch(&self, url: &str) -> Result<WebFetchedPage> {
-        // First, fetch the rendered text body via the existing webfetch tool so
-        // the research system gets the same content it always has.
+        // Fetch the rendered text body via the existing webfetch tool so
+        // the research system gets the same content it always has, and so
+        // tool permission rules still apply.
         let input = json!({
             "url": url,
             "format": "text",
         });
         let output = self.tool.execute(input, &self.ctx).await?;
-        let title = output
-            .content
-            .lines()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or(url)
-            .to_string();
 
-        // Second, opportunistically fetch the raw HTML head to extract a
-        // publication date from the page's embedded metadata. This is a
-        // best-effort step: any failure (network error, non-HTML content,
-        // missing date) simply leaves `published_at` as `None` so the
-        // research run is never aborted by a date-extraction failure.
+        // The webfetch tool now uses readability-rs to extract the article
+        // title and main content from HTML. Prefer the metadata title over
+        // the legacy first-line-of-body heuristic.
+        let title = output
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get("title"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(|| {
+                output
+                    .content
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or(url)
+                    .to_string()
+            });
+
+        // Opportunistically fetch the raw HTML head to extract a publication
+        // date from the page's embedded metadata. This is a best-effort step:
+        // any failure (network error, non-HTML content, missing date) simply
+        // leaves `published_at` as `None` so the research run is never aborted
+        // by a date-extraction failure.
         let published_at = extract_published_at_for_url(url).await.unwrap_or(None);
 
         Ok(WebFetchedPage {

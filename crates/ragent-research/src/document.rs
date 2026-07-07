@@ -143,6 +143,15 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 
     // FR-020: if a template body was supplied, use it as the skeleton after
     // substituting the standard placeholders.
+    //
+    // FR-007 / T-006: the template is MERGED with the standard sections, not
+    // a replacement for them. The substituted template body is prepended, and
+    // the eight FR-010 sections (Topic, Search Queries, Summary, Findings,
+    // In-Project Cross-References, Open Questions, References Index) are
+    // always appended below in their canonical order. In particular, the
+    // Findings section and its four required labeled paragraphs (Observation,
+    // Analysis, Cross-reference / Dependencies, Implication) remain mandatory
+    // regardless of what the template provides.
     if let Some(template) = &doc.template_body {
         body.push_str(&apply_template(template, &title, &topic));
         body.push_str("\n\n");

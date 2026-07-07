@@ -1,5 +1,43 @@
 # Changelog
 
+## Version: 0.1.0-alpha.139
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.139`. Updates the `/research`
+  subsystem: analysis prompts are rebuilt on the evidence-based
+  `research/researchanalysis` guidance, the `--from-url` seed now uses the
+  `readability-rs` crate for HTML extraction, and a new `FromUrlNoUsableBody`
+  outcome prevents unrelated topics from nav links.
+
+### Added — `/research` improvements
+
+- **`--from-url` uses `readability-rs` for HTML extraction.** The custom
+  ARC90-style readability module in `crates/ragent-research/src/readability.rs`
+  has been removed. The `webfetch` tool now runs `readability::extract` on HTML
+  responses; if the crate cannot produce a substantive article body, it falls
+  back to `html2text`. The extracted page title is still captured in source
+  metadata, but it is **never** used as the research topic.
+- **Improved `/research create` synthesis prompt.** The analysis prompt (in
+  `crates/ragent-research/src/analysis.rs`) now applies the evidence-based
+  prompt-engineering guidance from `research/researchanalysis` (20 synthesized
+  findings from 91 web sources): a versioned, composable
+  `SynthesisPromptBuilder` replaces the monolithic `build_synthesis_prompt`;
+  a mandatory `Sources Cited / Date Spread` paragraph; recency-weighting
+  rules; deterministic mechanical fallback via `analyze_with_outcome` /
+  `AnalysisOutcome`; and `--template` merge clarification in `document.rs`.
+- **New tests** — `crates/ragent-research/tests/test_research_create_synthesis.rs`
+  and `crates/ragent-research/tests/test_template_merge.rs`.
+
+### Fixed
+
+- **Research `--from-url` no longer derives unrelated topics from nav links.**
+  The topic is now derived only from the fetched page body. If the body
+  contains no usable article text, the session stops and reports
+  `FromUrlNoUsableBody` instead of falling back to the page title or URL.
+  This prevents cases like an OpenAI deep-research URL producing
+  Foundation-framework queries.
+
 ## Version: 0.1.0-alpha.138
 
 ### Changed
@@ -1565,3 +1603,102 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 ### Added
 - **Initial commit** — Project created.
 
+## [Unreleased]
+
+### researchprompt — improved `/research create` synthesis prompt
+
+The `/research create` analysis prompt (in `crates/ragent-research/src/analysis.rs`)
+now applies the evidence-based prompt-engineering guidance from
+`research/researchanalysis` (20 synthesized findings from 91 web sources):
+
+- **Versioned, composable prompt builder** (`SynthesisPromptBuilder` +
+  `SynthesisPromptConfig`) replaces the monolithic `build_synthesis_prompt`
+  string concatenation. The legacy free function is preserved as a thin
+  wrapper with byte-identical default output, so existing callers are
+  unchanged (FR-001, T-002).
+- **Mandatory `Sources Cited / Date Spread` paragraph** (FR-003, T-003). When
+  enabled, every finding must end with a fifth labeled paragraph listing its
+  `[#N]` citations and the earliest/latest publication dates among the cited
+  web sources, plus a sentence on how the date range affects confidence. The
+  per-source block in the prompt gains a `Published (UTC):` line so the model
+  can quote real dates instead of inventing them.
+- **Recency-weighting rule** (FR-004, T-004). When enabled, the prompt
+  instructs the model to prefer more recently published sources, note
+  conflicts between older and newer sources, and down-weight anonymous/undated
+  pages.
+- **Deterministic mechanical fallback** (FR-005, FR-006, T-005, T-010). The
+  `AnalysisEngine` trait now exposes `analyze_with_outcome` returning
+  `(AnalysisResult, AnalysisOutcome)`. When the LLM response is empty,
+  unparseable, missing required labels, or missing citations, the parser
+  returns `AnalysisOutcome::FallbackEmpty` and a mechanically-extracted set
+  of findings that always contains at least one finding (with the spec's
+  `(findings could not be structured — see below)` placeholder wording and
+  the raw model output preserved in a fenced block). `session.rs` maps
+  `AnalysisOutcome` to the user-facing `SynthesizeOutcome`, and provider
+  errors still surface as `SynthesizeOutcome::FallbackError`.
+- **Template merge** (FR-007, T-006). `document.rs::assemble_document`
+  clarifies that a `--template` body is MERGED with the standard sections
+  (prepended), never a replacement for the Findings section or its four
+  required labeled paragraphs. The prompt builder also carries a
+  `template_body` knob so the model is told template sections augment the
+  structured findings rather than replace them.
+- **Few-shot exemplars** (FR-008, T-007). The prompt builder appends up to
+  two short exemplar findings (gated on `config.few_shot_examples`) to
+  calibrate the exact label structure, `[#N]` citations, and
+  `Sources Cited / Date Spread` paragraph.
+- **Configurable persona** (FR-009, T-008). `LlmAnalysisEngine::with_persona`
+  overrides the default `"You are a careful research analyst..."` system
+  message verbatim.
+- **Citation/date validation** (FR-010, T-009). On a clean LLM parse, every
+  `[#N]` citation is cross-checked against the captured source indices; out
+  of-range citations are rewritten inline to `[#N?] (out of range — not in
+  source list)` and logged via `tracing::warn`. Explicit publication dates
+  inside a `Sources Cited / Date Spread` paragraph that don't match any
+  cited source's `published_at` are rewritten to `(unsupported date)`.
+
+### Added — researchprompt configuration surface
+
+- `SynthesisPromptConfig` (`pub(crate)`) with `audience_scope`, `recency_rule`,
+  `date_spread_paragraph`, `few_shot_examples`, `persona`, and
+  `template_body` knobs.
+- `AnalysisOutcome` enum (`Llm`, `FallbackEmpty`, `FallbackError`) re-exported
+  from `ragent_research`.
+- `SourceBody.published_at: Option<DateTime<Utc>>` field, populated by
+  `build_source_bodies` from `Source::published_at`, so the synthesis prompt
+  can quote real publication dates.
+- `LlmAnalysisEngine::with_persona(Option<String>)` builder.
+- `ragent.json` keys documented (SPEC.md → "Research Configuration",
+  QUICKSTART.md → "Research prompt configuration"):
+  `research.few_shot` (bool) and `research.analysis_persona` (string). Both
+  are opt-in; wiring them from config into the engine is tracked as a
+  follow-up.
+
+### Tests
+
+- `crates/ragent-research/src/analysis.rs` (inline `mod tests`): +14 tests
+  covering the builder (default byte-identity, four required labels,
+  date-spread paragraph, recency rule, few-shot append, few-shot cap),
+  `parse_analysis_response_with_outcome` (clean Llm, empty/no-findings/
+  missing-labels fallback), `mechanical_fallback_findings` (non-empty
+  guarantee, placeholder wording), and `validate_citations_and_dates`
+  (out-of-range citation, unsupported date, valid-finding untouched).
+- `crates/ragent-research/tests/test_template_merge.rs`: 3 tests for FR-007
+  template merge (template + standard sections coexist; required labels
+  survive merge; no-template regression guard).
+- `crates/ragent-research/tests/test_research_create_synthesis.rs`: 3
+  integration tests for FR-005/FR-006 (malformed → FallbackEmpty +
+  placeholder findings; well-formed → Llm + verbatim findings; Noop → NoLlm
+  + mechanical findings).
+- `crates/ragent-research/tests/test_research_create_synthesis.rs` (T-012)
+  exercises the full `ResearchSession::run` pipeline with mock
+  `AnalysisEngine` implementations (no real LLM provider required).
+
+### Verification
+
+- `cargo check --workspace` — green.
+- `cargo test -p ragent-research` — 298 lib + 3 template-merge + 3 synthesis
+  integration + 1 doc test pass.
+- `cargo clippy -p ragent-research --lib` — clean.
+- `cargo fmt -p ragent-research -- --check` — clean.
+- Default-config prompt is byte-identical to the pre-refactor
+  `build_synthesis_prompt` output (regression guard).

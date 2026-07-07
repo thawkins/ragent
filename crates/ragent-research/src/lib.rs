@@ -64,8 +64,8 @@ pub mod web_gatherer;
 
 pub use adaptive::{AdaptiveStopper, StopDecision};
 pub use analysis::{
-    AnalysisEngine, AnalysisResult, LlmAnalysisEngine, NoopAnalysisEngine, SourceBody,
-    build_source_bodies,
+    AnalysisEngine, AnalysisOutcome, AnalysisResult, LlmAnalysisEngine, NoopAnalysisEngine,
+    SourceBody, build_source_bodies,
 };
 pub use cli::{
     FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,

@@ -74,6 +74,13 @@ pub enum SpecCommand {
         /// Free-text feature description for the new requirements.
         feature: String,
     },
+    /// Delete a spec directory from the workspace.
+    Delete {
+        /// Spec identifier.
+        spec_id: String,
+        /// If true, skip the confirmation prompt.
+        yes: bool,
+    },
     /// Unknown subcommand (preserves the raw name for error messages).
     Unknown(String),
 }
@@ -215,6 +222,17 @@ impl SpecCommand {
                     }
                 }
             }
+            "delete" => {
+                let trimmed = rest.trim();
+                if trimmed.is_empty() {
+                    Self::Unknown("delete".to_string())
+                } else {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    let spec_id = parts[0].to_string();
+                    let yes = parts.iter().any(|p| *p == "--yes");
+                    Self::Delete { spec_id, yes }
+                }
+            }
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -231,6 +249,7 @@ impl SpecCommand {
                 || s == "coverage"
                 || s == "impl"
                 || s == "add"
+                || s == "delete"
         )
     }
 
@@ -243,6 +262,7 @@ impl SpecCommand {
                     | `/spec help` | none | Show this command reference table. |\n\
                     | `/spec create <specname> <feature description> [--from-research <name>]` | required `specname` + `feature description`, optional `--from-research` | Generate `specs/<specname>/SPEC.md` (EARS spec) and `specs/<specname>/PLAN.md` (implementation plan). `--from-research` pre-populates a `## Related Research` section. |\n\
                     | `/spec add <spec-id> <feature description>` | required `spec-id` + `feature description` | Incrementally add requirements to an existing spec and update its plan. |\n\
+                    | `/spec delete <spec-id> [--yes]` | required `spec-id`, optional `--yes` | Delete a spec directory. Use `--yes` to skip the confirmation prompt. |\n\
                     | `/spec validate [specname]` | optional `specname` | Validate EARS compliance. Without argument, validates all specs. |\n\
                     | `/spec list [--status <status>] [--prefix <prefix>]` | optional filters | List all specs with optional filtering by status or ID prefix. |\n\
                     | `/spec search <query>` | required `query` | Full-text search across all specs. |\n\
@@ -746,6 +766,39 @@ mod tests {
             SpecCommand::parse("implement"),
             SpecCommand::Unknown(s) if s == "impl"
         ));
+    }
+
+    #[test]
+    fn parse_delete() {
+        let cmd = SpecCommand::parse("delete my-spec --yes");
+        assert!(
+            matches!(cmd, SpecCommand::Delete { spec_id, yes } if spec_id == "my-spec" && yes)
+        );
+    }
+
+    #[test]
+    fn parse_delete_without_yes() {
+        let cmd = SpecCommand::parse("delete my-spec");
+        assert!(
+            matches!(cmd, SpecCommand::Delete { spec_id, yes } if spec_id == "my-spec" && !yes)
+        );
+    }
+
+    #[test]
+    fn parse_delete_missing_spec_id() {
+        assert!(matches!(SpecCommand::parse("delete"), SpecCommand::Unknown(s) if s == "delete"));
+    }
+
+    #[test]
+    fn parse_delete_is_usage_error() {
+        let cmd = SpecCommand::Unknown("delete".to_string());
+        assert!(cmd.is_usage_error());
+    }
+
+    #[test]
+    fn help_message_contains_delete() {
+        let help = SpecCommand::build_help_message();
+        assert!(help.contains("/spec delete"));
     }
 
     #[test]
