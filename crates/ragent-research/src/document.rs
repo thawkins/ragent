@@ -100,6 +100,8 @@ pub struct ResearchDocument {
     /// Sub-queries the web-gathering phase issued to the search tool. Empty
     /// when web gathering was disabled or no decomposer was configured.
     pub decomposed_queries: Vec<String>,
+    /// Output artifact this document was requested as.
+    pub output_format: crate::run_config::OutputFormat,
 }
 
 /// One in-project cross-reference row (FR-009).
@@ -121,6 +123,82 @@ pub struct AssembledDocument {
     pub frontmatter: String,
     /// Just the body text (without the frontmatter).
     pub body: String,
+}
+
+/// Extract the headline for a finding and return the finding body with the
+/// Headline paragraph removed.
+///
+/// If the finding contains a `**Headline:**` paragraph, its body is used as the
+/// headline. Otherwise a fallback headline is derived from the first 15 words
+/// of the `**Observation:**` paragraph (or the first sentence if shorter). The
+/// returned headline is trimmed and never empty — it falls back to
+/// "Finding {n}" when nothing else is available.
+fn extract_headline(finding: &str, finding_number: usize) -> (String, String) {
+    const LABEL: &str = "**Headline:**";
+    let mut remainder = finding.to_string();
+    let headline = if let Some(start) = finding.find(LABEL) {
+        let after_label = &finding[start + LABEL.len()..];
+        let (body, after_headline) = if let Some(next_pos) = after_label.find("\n\n**") {
+            (
+                &after_label[..next_pos],
+                // Skip the blank line that separates Headline from the next label.
+                &finding[start + LABEL.len() + next_pos + 2..],
+            )
+        } else {
+            (after_label, "")
+        };
+        let extracted = body.trim().to_string();
+        // Preserve any text that appeared before the Headline label.
+        remainder = format!("{}{}", &finding[..start], after_headline)
+            .trim()
+            .to_string();
+        if !extracted.is_empty() {
+            Some(extracted)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let headline =
+        headline.unwrap_or_else(|| derive_headline_from_observation(finding, finding_number));
+    (headline, remainder)
+}
+
+/// Derive a short headline from the **Observation:** paragraph.
+///
+/// The derivation strips citations and backticks, takes the first 15 words,
+/// and trims trailing punctuation. If there is no Observation paragraph, the
+/// entire finding body is used as a last resort.
+pub(crate) fn make_headline_from_observation(observation: &str) -> String {
+    let cleaned = observation
+        .replace("[#", " ")
+        .replace([']', '`'], " ")
+        .replace("**", " ");
+    let words: Vec<&str> = cleaned.split_whitespace().take(15).collect();
+    if words.is_empty() {
+        return String::from("(no headline available)");
+    }
+    words
+        .join(" ")
+        .trim_end_matches(|c: char| c.is_ascii_punctuation())
+        .to_string()
+}
+
+fn derive_headline_from_observation(finding: &str, finding_number: usize) -> String {
+    let observation_body = finding
+        .find("**Observation:**")
+        .map(|start| {
+            let after = &finding[start + "**Observation:**".len()..];
+            let end = after.find("\n\n**").unwrap_or(after.len());
+            &after[..end]
+        })
+        .unwrap_or(finding);
+    let headline = make_headline_from_observation(observation_body);
+    if headline.is_empty() || headline == "(no headline available)" {
+        return format!("Finding {}", finding_number);
+    }
+    headline
 }
 
 /// Assemble a `RESEARCH.md` document from the supplied [`ResearchDocument`].
@@ -149,8 +227,8 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     // the eight FR-010 sections (Topic, Search Queries, Summary, Findings,
     // In-Project Cross-References, Open Questions, References Index) are
     // always appended below in their canonical order. In particular, the
-    // Findings section and its four required labeled paragraphs (Observation,
-    // Analysis, Cross-reference / Dependencies, Implication) remain mandatory
+    // Findings section and its five required labeled paragraphs (Headline,
+    // Observation, Analysis, Cross-reference / Dependencies, Implication) remain mandatory
     // regardless of what the template provides.
     if let Some(template) = &doc.template_body {
         body.push_str(&apply_template(template, &title, &topic));
@@ -194,24 +272,23 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
         body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
-            body.push_str(&format!("### Finding {}\n\n", idx + 1));
-            // Findings contain at least the four required bold-labeled paragraphs.
+            let n = idx + 1;
+            // Findings contain at least the five required bold-labeled paragraphs.
             // Ensure the required labels start on their own line and are separated
             // by a blank line. Preserve any additional labeled paragraphs beyond
-            // the four required ones.
-            let mut normalized = normalize_finding_labels(finding.trim());
+            // the five required ones.
+            let normalized = normalize_finding_labels(finding.trim());
+            let (headline, mut remainder) = extract_headline(&normalized, n);
             // Append a Sources list for any [#N] citations present in the finding.
             // This makes the evidence backing each finding explicit without
             // requiring the LLM to also emit a separate Sources paragraph.
-            if let Some(sources_list) = render_finding_sources(&normalized, &doc.item.sources) {
-                normalized.push_str("\n\n");
-                normalized.push_str(&sources_list);
+            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+                remainder.push_str("\n\n");
+                remainder.push_str(&sources_list);
             }
-            body.push_str(&normalized);
-            body.push_str("\n\n");
+            body.push_str(&format!("### Finding {n} — {headline}\n\n{remainder}\n\n"));
         }
     }
-
     // ── In-Project Cross-References ─────────────────────────────────────
     body.push_str("## In-Project Cross-References\n\n");
     if doc.cross_references.is_empty() {
@@ -272,6 +349,7 @@ pub fn render_skeleton(name: &ResearchName, title: &str, topic: &str) -> String 
         open_questions: Vec::new(),
         template_body: None,
         decomposed_queries: Vec::new(),
+        output_format: crate::run_config::OutputFormat::Report,
     };
     assemble_document(&doc).content
 }
@@ -466,13 +544,15 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             captured_at,
             published_at,
             body,
+            relevance,
             ..
         } => Some(format!(
             "# Web source\n\n\
              - URL: {url}\n\
              - Title: {title}\n\
              - Published (UTC): {published}\n\
-             - Captured (UTC): {captured}\n\n\
+             - Captured (UTC): {captured}\n\
+             - Relevance: {relevance}\n\n\
              ```text\n{body}\n```\n",
             url = url,
             title = title,
@@ -480,6 +560,11 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
                 .map(|dt| dt.to_rfc3339())
                 .unwrap_or_else(|| "—".to_string()),
             captured = captured_at.to_rfc3339(),
+            relevance = if relevance.is_empty() {
+                "—"
+            } else {
+                relevance.as_str()
+            },
             body = if body.is_empty() {
                 "(no body captured for this source)"
             } else {
@@ -645,6 +730,11 @@ pub fn render_bibliography(sources: &[Source]) -> String {
         out.push_str(&format!(
             "## [{n}] {title}\n\n- **Type:** {kind}\n- **Path/URL:** {path}\n- **Captured:** {captured}\n"
         ));
+        if let Some(rel) = source.relevance()
+            && !rel.is_empty()
+        {
+            out.push_str(&format!("- **Relevance:** {rel}\n"));
+        }
         if let Some(body) = source.body() {
             let preview = if body.chars().count() > 240 {
                 format!("{}…", body.chars().take(240).collect::<String>())
@@ -685,6 +775,7 @@ mod tests {
             open_questions: Vec::new(),
             template_body: None,
             decomposed_queries: Vec::new(),
+            output_format: crate::run_config::OutputFormat::Report,
         }
     }
 
@@ -756,11 +847,17 @@ mod tests {
     fn assemble_document_splits_run_on_finding_into_paragraphs() {
         let mut doc = sample_doc(sample_item());
         doc.findings = vec![
-            "**Observation:** obs **Analysis:** analysis **Cross-reference / Dependencies:** none **Implication:** impl **Caveat:** caveat".into(),
+            "**Headline:** Observation summary
+
+**Observation:** obs **Analysis:** analysis **Cross-reference / Dependencies:** none **Implication:** impl **Caveat:** caveat".into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
-        // After "### Finding 1\n\n" the labels should be separated by blank lines.
+        let finding = assembled
+            .body
+            .split("### Finding 1 — Observation summary\n\n")
+            .nth(1)
+            .unwrap();
+        // After "### Finding N — headline\n\n" the required labels should be separated by blank lines.
         assert!(
             finding.contains("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
             "labels should be separated by blank lines: {}",
@@ -789,26 +886,26 @@ mod tests {
     fn assemble_document_emits_one_finding_block_per_entry() {
         let mut doc = sample_doc(sample_item());
         doc.findings = vec![
-            "**Observation:** first observation\n\n**Analysis:** first analysis\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** first implication\n\n**Related work:** extra context for finding one.".into(),
-            "**Observation:** second observation\n\n**Analysis:** second analysis\n\n**Cross-reference / Dependencies:** Related to Finding 1.\n\n**Implication:** second implication".into(),
+            "**Headline:** Observation summary
+
+**Observation:** first observation\n\n**Analysis:** first analysis\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** first implication\n\n**Related work:** extra context for finding one.".into(),
+            "**Headline:** Observation summary
+
+**Observation:** second observation\n\n**Analysis:** second analysis\n\n**Cross-reference / Dependencies:** Related to Finding 1.\n\n**Implication:** second implication".into(),
         ];
         let assembled = assemble_document(&doc);
-        assert!(
-            assembled
-                .body
-                .contains("### Finding 1\n\n**Observation:**\nfirst observation")
-        );
-        assert!(
-            assembled
-                .body
-                .contains("### Finding 2\n\n**Observation:**\nsecond observation")
-        );
+        assert!(assembled.body.contains(
+            "### Finding 1 — Observation summary\n\n**Observation:**\nfirst observation"
+        ));
+        assert!(assembled.body.contains(
+            "### Finding 2 — Observation summary\n\n**Observation:**\nsecond observation"
+        ));
         assert!(assembled.body.contains("Related to Finding 1."));
         assert!(
             assembled
                 .body
                 .contains("**Related work:**\nextra context for finding one."),
-            "extra labeled paragraph beyond the four required ones should be preserved: {}",
+            "extra labeled paragraph beyond the five required ones should be preserved: {}",
             assembled.body
         );
     }
@@ -910,6 +1007,7 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "page body content".into(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
@@ -926,6 +1024,7 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: String::new(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
@@ -977,6 +1076,7 @@ mod tests {
             title: "Example".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "page body content".into(),
         };
         let out = render_bibliography(&[source]);
@@ -1014,11 +1114,14 @@ mod tests {
             title: "Example Article".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
-            "**Observation:** Something important [#1].
+            "**Headline:** Observation summary
+
+**Observation:** Something important [#1].
 
 **Analysis:** Why it matters.
 
@@ -1050,6 +1153,7 @@ mod tests {
             title: "A".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         item.add_source(Source::Web {
@@ -1058,6 +1162,7 @@ mod tests {
             title: "B".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-02.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         let mut doc = sample_doc(item);
@@ -1089,6 +1194,7 @@ mod tests {
             title: "A".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         item.add_source(Source::Web {
@@ -1101,6 +1207,7 @@ mod tests {
             title: "B".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-02.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         item.add_source(Source::Web {
@@ -1109,10 +1216,16 @@ mod tests {
             title: "C".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-03.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         let mut doc = sample_doc(item);
-        doc.findings = vec!["**Observation:** spans [#1], [#2], and [#3].".into()];
+        doc.findings = vec![
+            "**Headline:** Observation summary
+
+**Observation:** spans [#1], [#2], and [#3]."
+                .into(),
+        ];
         let assembled = assemble_document(&doc);
         let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
         assert!(
@@ -1139,10 +1252,16 @@ mod tests {
             title: "A".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         let mut doc = sample_doc(item);
-        doc.findings = vec!["**Observation:** only [#1].".into()];
+        doc.findings = vec![
+            "**Headline:** Observation summary
+
+**Observation:** only [#1]."
+                .into(),
+        ];
         let assembled = assemble_document(&doc);
         let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
         assert!(
@@ -1173,12 +1292,15 @@ mod tests {
             title: "Example Article".into(),
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
             body: "body".into(),
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.
         doc.findings = vec![
-            "**Observation:** Something important [#1].
+            "**Headline:** Observation summary
+
+**Observation:** Something important [#1].
 
 **Sources:**
 - Article A — https://a"
@@ -1198,7 +1320,9 @@ mod tests {
     fn assemble_document_puts_cross_reference_label_on_own_line() {
         let mut doc = sample_doc(sample_item());
         doc.findings = vec![
-            "**Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
+            "**Headline:** Observation summary
+
+**Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
         ];
         let assembled = assemble_document(&doc);
         let finding = assembled.body.split("### Finding 1").nth(1).unwrap();

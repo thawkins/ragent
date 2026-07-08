@@ -87,7 +87,7 @@ impl TaskCacheFixture {
 }
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    dir.join(".ragent/teams").join(name)
+    dir.join(name)
 }
 
 fn add_member(store: &mut TeamStore, name: &str, agent_id: &str, status: MemberStatus) {

@@ -26,7 +26,9 @@ use crate::routes::AppState;
 
 use ragent_agent::research_adapter::build_research_session;
 
-use ragent_research::{ResearchManager, SearchHit, SessionConfig, SessionEvent, SessionObserver};
+use ragent_research::{
+    Depth, OutputFormat, ResearchManager, SearchHit, SessionConfig, SessionEvent, SessionObserver,
+};
 
 /// Build the `/research` sub-router.
 pub fn research_routes() -> Router<AppState> {
@@ -106,6 +108,20 @@ struct CreateResearchRequest {
     use_local: bool,
     #[serde(default)]
     use_specs: bool,
+    /// Override the maximum number of candidate pages fetched in parallel
+    /// during the web-gathering phase. When `None` the engine default
+    /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
+    fetch_concurrency: Option<usize>,
+    /// `--depth shallow|standard|deep`. When omitted the engine behaves as
+    /// `Depth::Standard` and stays single-pass.
+    #[serde(default)]
+    depth: Option<String>,
+    /// `--iterations N` override. When supplied the iterative branch is used.
+    #[serde(default)]
+    iterations: Option<u32>,
+    /// `--format report|executive-summary|comparison-table|source-bibliography`.
+    #[serde(default)]
+    format: Option<String>,
 }
 
 async fn create_research(
@@ -120,6 +136,16 @@ async fn create_research(
         template: req.template,
         disable_local: !req.use_local,
         disable_specs: !req.use_specs,
+        fetch_concurrency: req
+            .fetch_concurrency
+            .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
+        depth: req.depth.as_deref().and_then(Depth::parse),
+        iterations: req.iterations,
+        output_format: req
+            .format
+            .as_deref()
+            .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
+            .unwrap_or(OutputFormat::Report),
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {

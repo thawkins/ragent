@@ -1,44 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.139
+## Current Version: 0.1.0-alpha.141
 
 ### Changed
 
-- **Workspace version** — Bumped to `0.1.0-alpha.139`. Updates the `/research`
-  subsystem: analysis prompts are rebuilt on the evidence-based
-  `research/researchanalysis` guidance, the `--from-url` seed now uses the
-  `readability-rs` crate for HTML extraction, and a new `FromUrlNoUsableBody`
-  outcome prevents unrelated topics from nav links.
+- **Workspace version** — Bumped to `0.1.0-alpha.141`. Update research to add titles to findings.
 
-### Added — `/research` improvements
-
-- **`--from-url` uses `readability-rs` for HTML extraction.** The custom
-  ARC90-style readability module in `crates/ragent-research/src/readability.rs`
-  has been removed. The `webfetch` tool now runs `readability::extract` on HTML
-  responses; if the crate cannot produce a substantive article body, it falls
-  back to `html2text`. The extracted page title is still captured in source
-  metadata, but it is **never** used as the research topic.
-- **Improved `/research create` synthesis prompt.** The analysis prompt (in
-  `crates/ragent-research/src/analysis.rs`) now applies the evidence-based
-  prompt-engineering guidance from `research/researchanalysis` (20 synthesized
-  findings from 91 web sources): a versioned, composable
-  `SynthesisPromptBuilder` replaces the monolithic `build_synthesis_prompt`;
-  a mandatory `Sources Cited / Date Spread` paragraph; recency-weighting
-  rules; deterministic mechanical fallback via `analyze_with_outcome` /
-  `AnalysisOutcome`; and `--template` merge clarification in `document.rs`.
-- **New tests** — `crates/ragent-research/tests/test_research_create_synthesis.rs`
-  and `crates/ragent-research/tests/test_template_merge.rs`.
-
-### Fixed
-
-- **Research `--from-url` no longer derives unrelated topics from nav links.**
-  The topic is now derived only from the fetched page body. If the body
-  contains no usable article text, the session stops and reports
-  `FromUrlNoUsableBody` instead of falling back to the page title or URL.
-  This prevents cases like an OpenAI deep-research URL producing
-  Foundation-framework queries.
-
-## Previous Version: 0.1.0-alpha.138
+## Previous Version: 0.1.0-alpha.140
 
 ### Changed
 

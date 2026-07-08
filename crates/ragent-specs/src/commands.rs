@@ -229,7 +229,7 @@ impl SpecCommand {
                 } else {
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     let spec_id = parts[0].to_string();
-                    let yes = parts.iter().any(|p| *p == "--yes");
+                    let yes = parts.contains(&"--yes");
                     Self::Delete { spec_id, yes }
                 }
             }
@@ -771,9 +771,7 @@ mod tests {
     #[test]
     fn parse_delete() {
         let cmd = SpecCommand::parse("delete my-spec --yes");
-        assert!(
-            matches!(cmd, SpecCommand::Delete { spec_id, yes } if spec_id == "my-spec" && yes)
-        );
+        assert!(matches!(cmd, SpecCommand::Delete { spec_id, yes } if spec_id == "my-spec" && yes));
     }
 
     #[test]

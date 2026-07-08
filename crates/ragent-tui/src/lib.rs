@@ -21,7 +21,7 @@ pub mod tracing_layer;
 pub mod utils;
 pub mod widgets;
 
-pub use app::App;
+pub use app::{App, sanitize_for_display};
 
 use std::sync::Arc;
 

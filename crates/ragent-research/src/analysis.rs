@@ -14,6 +14,7 @@
 //! the legacy mechanical fallback.
 
 use crate::document::CrossReference;
+use crate::run_config::OutputFormat;
 use crate::source::Source;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
@@ -154,6 +155,8 @@ pub struct LlmAnalysisEngine {
     /// domain framing (e.g. `"You are a senior security research analyst for
     /// a venture-capital audience."`).
     persona: Option<String>,
+    /// Optional output format requested via `--format`.
+    output_format: Option<OutputFormat>,
 }
 
 impl std::fmt::Debug for LlmAnalysisEngine {
@@ -183,6 +186,7 @@ impl LlmAnalysisEngine {
             model_id: model_id.into(),
             base_url: None,
             persona: None,
+            output_format: None,
         }
     }
 
@@ -204,6 +208,12 @@ impl LlmAnalysisEngine {
     /// prompt verbatim. Pass `None` (or never call this) to keep the default.
     pub fn with_persona(mut self, persona: Option<String>) -> Self {
         self.persona = persona;
+        self
+    }
+
+    /// Set the output format requested via `--format`.
+    pub fn with_output_format(mut self, fmt: Option<OutputFormat>) -> Self {
+        self.output_format = fmt;
         self
     }
 }
@@ -258,7 +268,10 @@ impl LlmAnalysisEngine {
                 )
             })?;
 
-        let prompt = build_synthesis_prompt(topic, sources);
+        let prompt = SynthesisPromptBuilder::new(topic)
+            .sources(sources)
+            .output_format(self.output_format.unwrap_or(OutputFormat::Report))
+            .build();
         // T-008 / FR-009: allow a configurable analysis persona. When
         // `config.persona` is supplied via `ragent.json`
         // (`research.analysis_persona`), it overrides the default
@@ -329,6 +342,9 @@ pub(crate) struct SynthesisPromptConfig {
     /// Optional template body merged with the structured synthesis
     /// requirements (FR-007 / T-006).
     pub template_body: Option<String>,
+    /// Output artifact requested via `--format`. Governs the volume and
+    /// emphasis instructions in `render_output_template`.
+    pub output_format: Option<OutputFormat>,
 }
 
 /// Versioned, composable synthesis-prompt builder.
@@ -375,6 +391,12 @@ impl<'a> SynthesisPromptBuilder<'a> {
     #[allow(dead_code)] // exercised by T-003..T-008
     pub fn config(mut self, config: SynthesisPromptConfig) -> Self {
         self.config = config;
+        self
+    }
+
+    /// Set the output artifact for this prompt (FR-012).
+    pub fn output_format(mut self, fmt: OutputFormat) -> Self {
+        self.config.output_format = Some(fmt);
         self
     }
 
@@ -426,30 +448,88 @@ fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
 /// default (both `false`) path is unchanged.
 fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
-    out.push_str("## Summary\n");
-    out.push_str(
-        "A concise one-paragraph summary of what the sources collectively say about the topic.\n\n",
-    );
-    out.push_str("## Findings\n");
-    out.push_str(
-                "A numbered list of concrete findings. Aim for around 20 distinct findings when the sources have enough breadth and depth to support that many; for narrower topics, include every worthwhile point rather than padding. Each finding must contain at least \
-                      **four markdown paragraphs** with these bold labels, in this order:\n\n\
+    match config.output_format {
+        Some(OutputFormat::ExecutiveSummary) => {
+            out.push_str("## Summary\n");
+            out.push_str("A very concise executive summary in 2-3 sentences.\n\n");
+            out.push_str("## Findings\n");
+            out.push_str(
+                "At most 5 high-level findings. Keep each finding to one compact paragraph per required label. \
+                 Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
+                 Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
+                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
+                 **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
+                 **Analysis:** Explain why the observation matters for the topic.\n\n\
+                 **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
+                 **Implication:** Summarize the practical consequence or follow-up action.\n\n\
+                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
+            );
+        }
+        Some(OutputFormat::ComparisonTable) => {
+            out.push_str("## Summary\n");
+            out.push_str("One-paragraph overview of the entities being compared.\n\n");
+            out.push_str("## Comparison Table\n");
+            out.push_str(
+                "A markdown table with columns: Entity | Key strengths | Key weaknesses | Best for | Sources. \
+                 Cite web sources with `[#N]` in the Sources column.\n\n",
+            );
+            out.push_str("## Findings\n");
+            out.push_str(
+                "3-7 findings that explain the comparison and cite sources with `[#N]`. \
+                 Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
+                 Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
+                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
+                 **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
+                 **Analysis:** Explain why the observation matters for the comparison.\n\n\
+                 **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
+                 **Implication:** Summarize the practical consequence or follow-up action.\n\n\
+                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
+            );
+        }
+        Some(OutputFormat::SourceBibliography) => {
+            out.push_str("## Summary\n");
+            out.push_str("One paragraph summarizing the corpus.\n\n");
+            out.push_str("## Findings\n");
+            out.push_str(
+                "An annotated bibliography: one entry per major source, describing its contribution and citing `[#N]`. \
+                 Begin each entry with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
+                 Each entry must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
+                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
+                 **Observation:** State the concrete evidence or fact from the source, including at least one `[#N]` citation.\n\n\
+                 **Analysis:** Explain the source's contribution to the topic.\n\n\
+                 **Cross-reference / Dependencies:** Name any other source or finding this one relates to, or write \"No direct dependencies.\"\n\n\
+                 **Implication:** Summarize how this source should influence conclusions.\n\n\
+                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
+            );
+        }
+        _ => {
+            out.push_str("## Summary\n");
+            out.push_str(
+                "A concise one-paragraph summary of what the sources collectively say about the topic.\n\n",
+            );
+            out.push_str("## Findings\n");
+            out.push_str(
+                "A numbered list of concrete findings. Aim for around 20 distinct findings when the sources have enough breadth and depth to support that many; for narrower topics, include every worthwhile point rather than padding. Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. Each finding must contain at least \
+                      **five markdown paragraphs** with these bold labels, in this order:\n\n\
+                      **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                       **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation. You may cite multiple sources in a finding if several support the same point.\n\n\
                       **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question.\n\n\
                       **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, contradicts, or is prerequisite to, using `Finding N` references. If there are no dependencies, write \"No direct dependencies.\"\n\n\
                       **Implication:** Summarize the practical consequence, open risk, or recommended follow-up action.\n\n\
                       Put each label on its own line, and separate every paragraph with a blank line. \
-                      You may add additional paragraphs after the four required ones (for example, \
+                      You may add additional paragraphs after the five required ones (for example, \
                       extra evidence, related work, caveats, or implementation notes). Each additional \
                       paragraph must also begin with a bold label such as **Label:** so it is easy to \
                       parse. Put each finding on its own line starting with `1. `, `2. `, etc.\n\n"
             );
-    // T-003 (FR-003): require a fifth **Sources Cited / Date Spread**
+        }
+    }
+    // T-003 (FR-003): require a sixth **Sources Cited / Date Spread**
     // paragraph in every finding. Gated on `config.date_spread_paragraph` so
     // the default-config output stays byte-identical to the legacy prompt.
     if config.date_spread_paragraph {
         out.push_str(
-            "In addition to the four required paragraphs above, every finding must end with a fifth paragraph labeled:\n\n\
+            "In addition to the five required paragraphs above, every finding must end with a sixth paragraph labeled:\n\n\
             **Sources Cited / Date Spread:**\n\
             List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). Add one sentence explaining how the date range — and the recency of the evidence — affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
             Example: `**Sources Cited / Date Spread:** [#3] [#7] — published 2024-01-05..2026-04-07; the finding relies on 2026 sources, so recency weighting increases confidence in current behavior.`\n\n"
@@ -491,9 +571,9 @@ fn render_output_template(config: &SynthesisPromptConfig) -> String {
             Populate every placeholder the template defines (for example \
             {{title}}, {{topic}}, {{date}}, or any custom `{{section}}` markers), \
             but do NOT let the template replace the required Findings structure: \
-            every finding must still contain the four required labeled paragraphs \
-            (Observation, Analysis, Cross-reference / Dependencies, Implication) \
-            and, when requested, the fifth **Sources Cited / Date Spread** \
+            every finding must still contain the five required labeled paragraphs \
+            (Headline, Observation, Analysis, Cross-reference / Dependencies, Implication) \
+            and, when requested, the sixth **Sources Cited / Date Spread** \
             paragraph. Treat template sections as additional output, not as a \
             substitute for the structured findings.\n\n",
         );
@@ -506,12 +586,12 @@ fn render_output_template(config: &SynthesisPromptConfig) -> String {
     // body; we render up to two to keep the context-window cost low.
     if !config.few_shot_examples.is_empty() {
         out.push_str(
-            "Few-shot exemplar findings (for format calibration only — do NOT \
-            copy their content into your answer; derive findings from the \
-            supplied sources):\n\n",
+            "Few-shot exemplar findings (for format calibration only — do NOT \\
+            copy their content into your answer; derive findings from the \\
+            supplied sources):\\n\\n",
         );
         for (idx, example) in config.few_shot_examples.iter().take(2).enumerate() {
-            out.push_str(&format!("### Exemplar Finding {}\n\n", idx + 1));
+            out.push_str(&format!("### Exemplar Finding {}\\n\\n", idx + 1));
             out.push_str(example.trim());
             if !example.ends_with('\n') {
                 out.push('\n');
@@ -567,10 +647,10 @@ fn render_closing(_config: &SynthesisPromptConfig) -> String {
         "\nNow produce only the four sections above. Do not include a title or any other preamble. ",
     );
     out.push_str(
-        "Within Findings, always include the four required paragraphs (Observation, Analysis, ",
+        "Within Findings, always begin with a **Headline:** paragraph (maximum 15 words) and include the four required paragraphs (Observation, Analysis, ",
     );
     out.push_str(
-        "Cross-reference / Dependencies, Implication) and feel free to add more labeled paragraphs if the sources support it.",
+        "Cross-reference / Dependencies, Implication) after it. Feel free to add more labeled paragraphs if the sources support it.",
     );
     out
 }
@@ -582,8 +662,12 @@ fn render_closing(_config: &SynthesisPromptConfig) -> String {
 /// point. It delegates to [`SynthesisPromptBuilder`] with the default config,
 /// so its output is byte-identical to the pre-refactor implementation. Callers
 /// that need the extended knobs (T-003..T-008) should use the builder directly.
+#[allow(dead_code)] // preserved for backward-compat tests; use the builder directly
 fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
-    SynthesisPromptBuilder::new(topic).sources(sources).build()
+    SynthesisPromptBuilder::new(topic)
+        .sources(sources)
+        .output_format(OutputFormat::Report)
+        .build()
 }
 
 /// Parse the LLM response into an [`AnalysisResult`]. We look for the four
@@ -809,7 +893,8 @@ fn mechanical_fallback_findings(text: &str) -> Vec<String> {
         let raw = text.trim();
         if raw.is_empty() {
             findings.push(
-                "**Observation:** (findings could not be structured — see below)\n\n\
+                "**Headline:** Findings could not be structured\n\n\
+                 **Observation:** (findings could not be structured — see below)\n\n\
                  (no model response was returned)\n\n\
                  **Analysis:** (missing)\n\n\
                  **Cross-reference / Dependencies:** No direct dependencies.\n\n\
@@ -820,7 +905,8 @@ fn mechanical_fallback_findings(text: &str) -> Vec<String> {
         } else {
             let truncated = truncate_body(raw, 2000);
             findings.push(format!(
-                "**Observation:** (findings could not be structured — see below)\n\n\
+                "**Headline:** Model response could not be parsed\n\n\
+                 **Observation:** (findings could not be structured — see below)\n\n\
                  The raw model response (truncated) is preserved for manual review:\n\n\
                  ```text\n{raw}\n```\n\n\
                  **Analysis:** (extracted mechanically — the model output did not \
@@ -1238,7 +1324,7 @@ mod tests {
 
     #[test]
     fn parse_analysis_response_reorders_findings_by_dependency() {
-        let text = "## Findings\n\n1. **Observation:** two. **Analysis:** a. **Cross-reference / Dependencies:** Depends on Finding 2. **Implication:** i.\n2. **Observation:** one. **Analysis:** b. **Cross-reference / Dependencies:** No direct dependencies. **Implication:** j.\n";
+        let text = "## Findings\n\n1. **Headline:** Two\n\n**Observation:** two. **Analysis:** a. **Cross-reference / Dependencies:** Depends on Finding 2. **Implication:** i.\n2. **Headline:** One\n\n**Observation:** one. **Analysis:** b. **Cross-reference / Dependencies:** No direct dependencies. **Implication:** j.\n";
         let result = parse_analysis_response(text);
         assert_eq!(result.findings.len(), 2);
         assert!(
@@ -1312,6 +1398,38 @@ mod tests {
     }
 
     #[test]
+    fn output_format_executive_summary_shortens_instructions() {
+        let sources = vec![src_body(1, None)];
+        let prompt = SynthesisPromptBuilder::new("topic")
+            .sources(&sources)
+            .output_format(OutputFormat::ExecutiveSummary)
+            .build();
+        assert!(prompt.contains("very concise executive summary"));
+        assert!(prompt.contains("At most 5 high-level findings"));
+    }
+
+    #[test]
+    fn output_format_comparison_table_includes_table_request() {
+        let sources = vec![src_body(1, None)];
+        let prompt = SynthesisPromptBuilder::new("topic")
+            .sources(&sources)
+            .output_format(OutputFormat::ComparisonTable)
+            .build();
+        assert!(prompt.contains("## Comparison Table"));
+        assert!(prompt.contains("markdown table"));
+    }
+
+    #[test]
+    fn output_format_source_bibliography_annotated_entries() {
+        let sources = vec![src_body(1, None)];
+        let prompt = SynthesisPromptBuilder::new("topic")
+            .sources(&sources)
+            .output_format(OutputFormat::SourceBibliography)
+            .build();
+        assert!(prompt.contains("annotated bibliography"));
+    }
+
+    #[test]
     fn builder_default_is_byte_identical_to_legacy() {
         // The default-config builder must produce the same bytes the legacy
         // build_synthesis_prompt produced — this is the backward-compat
@@ -1325,11 +1443,12 @@ mod tests {
     }
 
     #[test]
-    fn builder_emits_four_required_labels() {
+    fn builder_emits_five_required_labels() {
         let sources = vec![src_body(1, None)];
         let prompt = SynthesisPromptBuilder::new("topic")
             .sources(&sources)
             .build();
+        assert!(prompt.contains("**Headline:**"));
         assert!(prompt.contains("**Observation:**"));
         assert!(prompt.contains("**Analysis:**"));
         assert!(prompt.contains("**Cross-reference / Dependencies:**"));
@@ -1337,7 +1456,7 @@ mod tests {
     }
 
     #[test]
-    fn builder_date_spread_paragraph_adds_fifth_label_and_published_line() {
+    fn builder_date_spread_paragraph_adds_sixth_label_and_published_line() {
         let sources = vec![
             src_body(
                 1,
@@ -1440,7 +1559,8 @@ mod tests {
     #[test]
     fn parse_with_outcome_clean_response_returns_llm() {
         let text = "## Summary\n\nA summary.\n\n## Findings\n\n\
-             1. **Observation:** obs [#1].\n\n**Analysis:** a.\n\n\
+             1. **Headline:** Observation summary\n\n**Observation:** obs [#1].\n\n\
+             **Analysis:** a.\n\n\
              **Cross-reference / Dependencies:** No direct dependencies.\n\n\
              **Implication:** i.\n";
         let sources = vec![src_body(1, None)];
@@ -1458,6 +1578,7 @@ mod tests {
         // FR-011 / T-010: fallback always produces >=1 finding.
         assert!(!result.findings.is_empty());
         assert!(result.findings[0].contains("**Observation:**"));
+        assert!(result.findings[0].contains("**Analysis:**"));
         assert!(result.findings[0].contains("**Analysis:**"));
         assert!(result.findings[0].contains("**Cross-reference / Dependencies:**"));
         assert!(result.findings[0].contains("**Implication:**"));

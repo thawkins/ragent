@@ -18,7 +18,7 @@ use crate::app::state::{App, LogLevel};
 impl App {
     pub(crate) fn handle_research_command(&mut self, args: &str) {
         use ragent_research::cli::ResearchCliCommand;
-        use ragent_research::{ResearchManager, SessionConfig};
+        use ragent_research::{Depth, OutputFormat, ResearchManager, SessionConfig};
         use std::sync::Arc;
 
         let cmd = ResearchCliCommand::parse(args);
@@ -52,11 +52,12 @@ impl App {
                 name,
                 topic,
                 from_url,
-                iterations: _,
-                depth: _,
-                format: _,
+                iterations,
+                depth,
+                format,
                 sources_dir,
                 template,
+                fetch_concurrency,
                 use_local,
                 use_specs,
             } => {
@@ -73,11 +74,13 @@ impl App {
                     },
                 );
                 // Seed the live progress tracker so the message window shows
-                // a log list of each phase as it runs.
-                self.research_progress = Some(crate::research_progress::ResearchProgress::new(
-                    &name, &topic,
-                ));
-                self.refresh_research_progress_message();
+                // a log list of each phase as it runs. Each `/research
+                // create` gets its own tracker so older runs stay visible.
+                self.research_progress
+                    .push(crate::research_progress::ResearchProgress::new(
+                        &name, &topic,
+                    ));
+                self.refresh_research_progress_message(&name);
                 // When --from-url is given without a topic, use the URL as
                 // the item title; the session derives the real topic from
                 // the fetched page.
@@ -97,6 +100,14 @@ impl App {
                     template,
                     disable_local: !use_local,
                     disable_specs: !use_specs,
+                    fetch_concurrency: fetch_concurrency
+                        .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
+                    depth: depth.as_deref().and_then(Depth::parse),
+                    iterations,
+                    output_format: format
+                        .as_deref()
+                        .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
+                        .unwrap_or(OutputFormat::Report),
                     ..SessionConfig::default()
                 };
                 let session = crate::research_adapter::build_research_session(
@@ -194,6 +205,7 @@ impl App {
                 self.status = format!("research: opening '{name}'…");
                 let mgr = manager.clone();
                 let event_bus = self.event_bus.clone();
+                let app_event_bus = self.event_bus.clone();
                 let session_id = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
                     match mgr.show(&name).await {
@@ -201,16 +213,27 @@ impl App {
                             let root = mgr.root().to_path_buf();
                             let path =
                                 ragent_research::ResearchIo::research_md_path(&root, &item.name);
-                            event_bus.publish(Event::TextDelta {
-                                session_id,
-                                text: format!(
-                                    "From: /research open\n\n• Name: `{}`\n• Title: {}\n• Status: {}\n• Path: `{}`",
-                                    item.name,
-                                    item.title,
-                                    item.status.as_str(),
-                                    path.display(),
-                                ),
-                            });
+                            match ragent_research::ResearchIo::read_file(&path).await {
+                                Ok(content) => {
+                                    let (_frontmatter, body) =
+                                        ragent_research::ResearchIo::split_frontmatter(&content);
+                                    app_event_bus.publish(
+                                        ragent_agent::event::Event::OpenResearchView {
+                                            name: item.name.to_string(),
+                                            path,
+                                            markdown: body,
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    event_bus.publish(Event::TextDelta {
+                                        session_id,
+                                        text: format!(
+                                            "From: /research open\n\n**Error:** failed to read RESEARCH.md: {e}"
+                                        ),
+                                    });
+                                }
+                            }
                         }
                         Err(e) => {
                             event_bus.publish(Event::TextDelta {

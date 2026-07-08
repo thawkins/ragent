@@ -234,6 +234,9 @@ impl ResearchIo {
                 Source::Spec { relevance, .. } if !relevance.is_empty() => {
                     sanitize_inline(relevance)
                 }
+                Source::Web { relevance, .. } if !relevance.is_empty() => {
+                    sanitize_inline(relevance)
+                }
                 _ => "—".to_string(),
             };
             let captured = source.captured_at().to_rfc3339();
@@ -442,12 +445,14 @@ mod tests {
                 label: "first".into(),
                 captured_at: Utc::now(),
                 body_path: PathBuf::from("sources/other-01.md"),
+
                 body: String::new(),
             },
             Source::Other {
                 label: "second".into(),
                 captured_at: Utc::now(),
                 body_path: PathBuf::from("sources/other-02.md"),
+
                 body: String::new(),
             },
         ];
@@ -479,6 +484,8 @@ mod tests {
                 captured_at: Utc::now(),
                 published_at: Some(published),
                 body_path: PathBuf::from("sources/web-01.md"),
+                relevance: String::new(),
+
                 body: String::new(),
             },
             Source::Web {
@@ -487,6 +494,8 @@ mod tests {
                 captured_at: Utc::now(),
                 published_at: None,
                 body_path: PathBuf::from("sources/web-02.md"),
+                relevance: String::new(),
+
                 body: String::new(),
             },
         ];

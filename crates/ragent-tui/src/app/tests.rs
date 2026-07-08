@@ -1,6 +1,6 @@
 //! Inline tests for the TUI app module.
 #[cfg(test)]
-mod tests {
+mod app_tests {
     use crate::app::helpers::{is_discovery_notice, try_extract_research_code_block};
     use crate::app::{App, ModelPickerEntry};
     use ragent_agent::{
@@ -10,7 +10,7 @@ mod tests {
     use ragent_types::{ThinkingConfig, ThinkingLevel};
     use std::sync::Arc;
 
-    pub(crate) fn test_app() -> App {
+    pub fn test_app() -> App {
         let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
         let event_bus = Arc::new(EventBus::default());
         let provider_registry = Arc::new(provider::create_default_registry());
@@ -61,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_format_thinking_levels_handles_empty_and_full_lists() {
+    pub fn test_format_thinking_levels_handles_empty_and_full_lists() {
         assert_eq!(App::format_thinking_levels(&[]), "—");
         assert_eq!(
             App::format_thinking_levels(&[
@@ -76,7 +76,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_models_for_provider_sorts_case_insensitively() {
+    pub fn test_models_for_provider_sorts_case_insensitively() {
         let app = test_app();
 
         // Anthropic defaults are static; ensure they are returned and sorted.
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_huggingface_models_fallback_to_defaults_without_key() {
+    pub fn test_huggingface_models_fallback_to_defaults_without_key() {
         let app = test_app();
 
         // Ensure no HuggingFace credential is stored in the in-memory storage.
@@ -127,7 +127,7 @@ mod tests {
         }
     }
     #[test]
-    pub(crate) fn test_picker_entries_sort_case_insensitively() {
+    pub fn test_picker_entries_sort_case_insensitively() {
         // openai defaults include "GPT-4o" and "GPT-4o-mini", which would sort
         // incorrectly with case-sensitive ASCII.
         let app = test_app();
@@ -147,7 +147,7 @@ mod tests {
         );
     }
     #[test]
-    pub(crate) fn test_default_thinking_level_defaults_to_off_when_unconfigured() {
+    pub fn test_default_thinking_level_defaults_to_off_when_unconfigured() {
         let entry = ModelPickerEntry {
             id: "model".to_string(),
             name: "Model".to_string(),
@@ -171,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_default_thinking_level_falls_back_to_off_for_nonthinking_models() {
+    pub fn test_default_thinking_level_falls_back_to_off_for_nonthinking_models() {
         let entry = ModelPickerEntry {
             id: "model".to_string(),
             name: "Model".to_string(),
@@ -195,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_default_thinking_level_uses_explicit_entry_config() {
+    pub fn test_default_thinking_level_uses_explicit_entry_config() {
         let entry = ModelPickerEntry {
             id: "model".to_string(),
             name: "Model".to_string(),
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_picker_entries_from_models_sorts_unsorted_input() {
+    pub fn test_picker_entries_from_models_sorts_unsorted_input() {
         let app = test_app();
         let unsorted = vec![
             ragent_agent::provider::ModelInfo {
@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_load_persisted_thinking_level_ignores_legacy_auto_default() {
+    pub fn test_load_persisted_thinking_level_ignores_legacy_auto_default() {
         let storage = Storage::open_in_memory().expect("in-memory storage");
         storage
             .set_setting("thinking_level", "auto")
@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_load_persisted_thinking_level_keeps_explicit_auto() {
+    pub fn test_load_persisted_thinking_level_keeps_explicit_auto() {
         let storage = Storage::open_in_memory().expect("in-memory storage");
         storage
             .set_setting("thinking_level", "auto")
@@ -310,14 +310,14 @@ mod tests {
     // ────────────────────────────────────────────────────────────────────
 
     #[test]
-    pub(crate) fn test_is_discovery_notice_matches_canonical_heading() {
+    pub fn test_is_discovery_notice_matches_canonical_heading() {
         let msg =
             "📋 Instruction File Discovery\n  Searched for: AGENTS.md\n  Working directory: /tmp\n";
         assert!(is_discovery_notice(msg));
     }
 
     #[test]
-    pub(crate) fn test_is_discovery_notice_matches_with_dash_variant() {
+    pub fn test_is_discovery_notice_matches_with_dash_variant() {
         // Loader may pass either the heading line on its own or as the
         // first line of a multi-line summary; both should be detected.
         let heading_only = "📋 Instruction File Discovery";
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_try_extract_research_code_block_preserves_preformatted_tables() {
+    pub fn test_try_extract_research_code_block_preserves_preformatted_tables() {
         let text = "From: /research list\n\n```\nNAME                 TITLE                            STATUS      CREATED                  MODIFIED                 \n------------------------------------------------------------------------------------------------------------------------\nagentassign          agentassign                      draft       2026-06-20T05:13:16Z   2026-06-20T05:13:16Z   \n```";
         let extracted = try_extract_research_code_block(text).expect("research code block");
         assert!(extracted.contains("From: /research list"));
@@ -335,13 +335,13 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_try_extract_research_code_block_returns_none_for_plain_research_response() {
+    pub fn test_try_extract_research_code_block_returns_none_for_plain_research_response() {
         let text = "From: /research create\n\nGathering sources…";
         assert!(try_extract_research_code_block(text).is_none());
     }
 
     #[test]
-    pub(crate) fn test_try_extract_research_code_block_handles_skills_output() {
+    pub fn test_try_extract_research_code_block_handles_skills_output() {
         let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Access  Description\n  -------   -----  ------  -----------\n  /simplify         both    Reviews recently changed files\n  /debug            both    Troubleshoots current session\n```\n";
         let extracted = try_extract_research_code_block(text).expect("skills code block");
         assert!(extracted.contains("From: /skills"));
@@ -356,7 +356,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_try_extract_research_code_block_handles_help_output() {
+    pub fn test_try_extract_research_code_block_handles_help_output() {
         let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
         let extracted = try_extract_research_code_block(text).expect("help code block");
         assert!(extracted.contains("From: /help"));
@@ -371,13 +371,13 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_try_extract_research_code_block_returns_none_for_non_slash_text() {
+    pub fn test_try_extract_research_code_block_returns_none_for_non_slash_text() {
         let text = "Hello world\n\n```\nsome code\n```";
         assert!(try_extract_research_code_block(text).is_none());
     }
 
     #[test]
-    pub(crate) fn test_render_markdown_to_ascii_bypasses_research_code_blocks() {
+    pub fn test_render_markdown_to_ascii_bypasses_research_code_blocks() {
         let mut app = test_app();
         let text = "From: /research show\n\n```\nResearch item: x\n```";
         let rendered = app.render_markdown_to_ascii(text);
@@ -386,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_render_markdown_to_ascii_preserves_skills_table_lines() {
+    pub fn test_render_markdown_to_ascii_preserves_skills_table_lines() {
         let mut app = test_app();
         let text = "From: /skills\nRegistered Skills:\n\n```\n  Command   Scope  Description\n  -------   -----  -----------\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
         let rendered = app.render_markdown_to_ascii(text);
@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    pub(crate) fn test_render_markdown_to_ascii_preserves_help_command_lines() {
+    pub fn test_render_markdown_to_ascii_preserves_help_command_lines() {
         let mut app = test_app();
         let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";
         let rendered = app.render_markdown_to_ascii(text);

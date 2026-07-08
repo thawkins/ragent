@@ -8,6 +8,7 @@ mod state;
 pub use self::state::*;
 
 mod helpers;
+pub use helpers::{image_dimensions_or_placeholder, sanitize_for_display};
 
 mod bench;
 mod compress;

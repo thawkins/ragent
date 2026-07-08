@@ -121,6 +121,18 @@ pub enum InputAction {
     ToggleMemory,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
+    /// Scroll the research markdown viewer up.
+    ResearchViewPageUp,
+    /// Scroll the research markdown viewer down.
+    ResearchViewPageDown,
+    /// Jump the research markdown viewer to the start.
+    ResearchViewToStart,
+    /// Jump the research markdown viewer to the end.
+    ResearchViewToEnd,
+    /// Scroll the research markdown viewer up by one line.
+    ResearchViewLineUp,
+    /// Scroll the research markdown viewer down by one line.
+    ResearchViewLineDown,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -542,6 +554,27 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => return None,
         }
+    }
+
+    // Research markdown viewer: intercept scroll/close keys.
+    if app.research_view.is_some() {
+        return match key.code {
+            KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::ResearchViewToStart)
+            }
+            KeyCode::PageDown if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::ResearchViewToEnd)
+            }
+            KeyCode::PageUp => Some(InputAction::ResearchViewPageUp),
+            KeyCode::PageDown => Some(InputAction::ResearchViewPageDown),
+            KeyCode::Up => Some(InputAction::ResearchViewLineUp),
+            KeyCode::Down => Some(InputAction::ResearchViewLineDown),
+            KeyCode::Esc => {
+                app.research_view = None;
+                None
+            }
+            _ => None,
+        };
     }
 
     if app.output_view.is_some() {

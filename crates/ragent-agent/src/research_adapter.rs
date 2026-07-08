@@ -27,9 +27,10 @@ use crate::{
     tool::{Tool as AgentTool, ToolContext as AgentToolContext, ToolRegistry},
 };
 use ragent_research::{
-    AnalysisEngine, GrepMatch, HeuristicQueryDecomposer, LlmAnalysisEngine, LlmQueryDecomposer,
-    LocalGatherer, LocalTool, NoopAnalysisEngine, QueryDecomposer, ResearchManager,
-    ResearchSession, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    AnalysisEngine, Critic, GrepMatch, HeuristicPlanner, HeuristicQueryDecomposer,
+    LlmAnalysisEngine, LlmPlanner, LlmQueryDecomposer, LocalGatherer, LocalTool,
+    NoopAnalysisEngine, Planner, QueryDecomposer, ResearchManager, ResearchSession, SimpleCritic,
+    WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
 };
 
 /// Build a [`ResearchSession`] backed by the agent tool `registry`.
@@ -71,7 +72,8 @@ pub fn build_research_session(
         storage.clone(),
         config.clone(),
     );
-    let analysis: Arc<dyn AnalysisEngine> = match (provider_registry, active_model) {
+    let analysis: Arc<dyn AnalysisEngine> = match (provider_registry.clone(), active_model.clone())
+    {
         (Some(registry), Some(model_ref)) => {
             let base_url = resolve_base_url(
                 &model_ref.provider_id,
@@ -89,7 +91,26 @@ pub fn build_research_session(
         }
         _ => Arc::new(NoopAnalysisEngine),
     };
+
+    let planner: Arc<dyn Planner> = match (provider_registry.clone(), active_model.clone()) {
+        (Some(reg), Some(m)) => {
+            let api_key = storage
+                .as_deref()
+                .and_then(|s| s.get_provider_auth(&m.provider_id).ok().flatten());
+            let base_url = resolve_base_url(&m.provider_id, storage.as_deref(), config.as_deref());
+            Arc::new(
+                LlmPlanner::new(reg, &m.provider_id, &m.model_id)
+                    .with_api_key(api_key)
+                    .with_base_url(base_url),
+            )
+        }
+        _ => Arc::new(HeuristicPlanner::new()),
+    };
+    let critic: Arc<dyn Critic> = Arc::new(SimpleCritic);
+
     ResearchSession::new(manager, web, local, analysis)
+        .with_planner(planner)
+        .with_critic(critic)
 }
 
 /// Resolve a provider-specific base URL from storage/config/env, mirroring the
@@ -260,6 +281,7 @@ impl WebSearchTool for AgentWebSearchTool {
                         title: r.title,
                         url: r.url,
                         snippet: r.snippet,
+                        matched_query: String::new(),
                     })
                     .collect();
             if !from_json.is_empty() {
@@ -472,6 +494,7 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
                         title,
                         url,
                         snippet: current_snippet.trim().to_string(),
+                        matched_query: String::new(),
                     });
                 }
                 current_snippet.clear();
@@ -496,6 +519,7 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
             title,
             url,
             snippet: current_snippet.trim().to_string(),
+            matched_query: String::new(),
         });
     }
 
@@ -573,6 +597,7 @@ mod tests {
                 title: r.title,
                 url: r.url,
                 snippet: r.snippet,
+                matched_query: String::new(),
             })
             .collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);

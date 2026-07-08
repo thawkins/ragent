@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ragent_research::{
-    AnalysisEngine, AnalysisOutcome, AnalysisResult, NoopAnalysisEngine, ResearchManager,
-    ResearchSession, SessionConfig, SessionEvent, SessionObserver, SourceBody, SynthesizeOutcome,
-    WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    AnalysisEngine, AnalysisOutcome, AnalysisResult, NoopAnalysisEngine, OutputFormat,
+    ResearchManager, ResearchSession, SessionConfig, SessionEvent, SessionObserver, SourceBody,
+    SynthesizeOutcome, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
 };
 use tempfile::TempDir;
 
@@ -58,7 +58,8 @@ impl AnalysisEngine for MalformedMockEngine {
                  were extracted mechanically and may be incomplete)"
                 .to_string(),
             findings: vec![
-                "**Observation:** (findings could not be structured — see below)\n\n\
+                "**Headline:** Findings could not be structured\n\n\
+                 **Observation:** (findings could not be structured — see below)\n\n\
                  The raw model response was unparseable.\n\n\
                  **Analysis:** (extracted mechanically)\n\n\
                  **Cross-reference / Dependencies:** No direct dependencies.\n\n\
@@ -74,7 +75,7 @@ impl AnalysisEngine for MalformedMockEngine {
 
 /// A mock [`AnalysisEngine`] that overrides `analyze_with_outcome` to return
 /// a well-formed [`AnalysisResult`] tagged [`AnalysisOutcome::Llm`]. The
-/// finding carries all four required labels and a `[#1]` citation so it
+/// finding carries the four required labels and a `[#1]` citation so it
 /// passes the malformed check and the citation/date validation.
 struct WellFormedMockEngine;
 
@@ -177,6 +178,7 @@ fn session_with_engine(
                 url: "https://example.com/async".into(),
                 title: "Rust Async Guide".into(),
                 snippet: "async/await idioms".into(),
+                matched_query: "Rust async".into(),
             }],
         }),
         Arc::new(FakeFetch {
@@ -216,18 +218,19 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
     // FR-005: the SynthesizeResult event must surface FallbackEmpty (the
     // mock returned Ok with empty findings; session.rs attributes it to the
     // fallback path because there is no LLM content).
-    let outcomes = observer.outcomes.lock().unwrap();
+    let has_fallback;
+    {
+        let outcomes = observer.outcomes.lock().unwrap();
+        has_fallback = outcomes.contains(&SynthesizeOutcome::FallbackEmpty);
+    }
     assert!(
-        outcomes
-            .iter()
-            .any(|&o| o == SynthesizeOutcome::FallbackEmpty),
+        has_fallback,
         "expected at least one FallbackEmpty outcome, got {:?}",
-        *outcomes
+        observer.outcomes.lock().unwrap()
     );
 
     // FR-006: the final RESEARCH.md still contains findings (from the
-    // session-level mechanical fallback — default_findings — because the
-    // engine returned empty findings).
+    // engine's fallback finding).
     let body = tokio::fs::read_to_string(research_root.join("malformed-test/RESEARCH.md"))
         .await
         .unwrap();
@@ -236,8 +239,8 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
         "RESEARCH.md must still contain a Findings section, got:\n{body}"
     );
     assert!(
-        body.contains("**Observation:**"),
-        "RESEARCH.md findings must carry the four required labels, got:\n{body}"
+        body.contains("### Finding 1 — Findings could not be structured"),
+        "RESEARCH.md findings must have a headline heading, got:\n{body}"
     );
     assert!(
         body.contains("**Implication:**"),
@@ -271,11 +274,15 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
 
     // The well-formed mock returns AnalysisOutcome::Llm, so session.rs must
     // surface SynthesizeOutcome::Llm.
-    let outcomes = observer.outcomes.lock().unwrap();
+    let has_llm;
+    {
+        let outcomes = observer.outcomes.lock().unwrap();
+        has_llm = outcomes.contains(&SynthesizeOutcome::Llm);
+    }
     assert!(
-        outcomes.iter().any(|&o| o == SynthesizeOutcome::Llm),
+        has_llm,
         "expected at least one Llm outcome, got {:?}",
-        *outcomes
+        observer.outcomes.lock().unwrap()
     );
 
     // RESEARCH.md must contain the LLM finding verbatim, including the
@@ -292,10 +299,53 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
         "RESEARCH.md must contain the LLM summary verbatim, got:\n{body}"
     );
     assert!(body.contains("## Findings"));
+    assert!(
+        body.contains("### Finding 1 — The source describes async/await idioms"),
+        "RESEARCH.md findings must have a headline heading, got:\n{body}"
+    );
     assert!(body.contains("**Observation:**"));
     assert!(body.contains("**Analysis:**"));
     assert!(body.contains("**Cross-reference / Dependencies:**"));
     assert!(body.contains("**Implication:**"));
+}
+
+#[tokio::test]
+async fn executive_summary_format_writes_shorter_summary_instruction() {
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let session = session_with_engine(&research_root, Arc::new(WellFormedMockEngine));
+
+    let cfg = SessionConfig {
+        topic: "Rust async".into(),
+        output_format: OutputFormat::ExecutiveSummary,
+        max_web_results: 5,
+        max_local_sources: 5,
+        disable_local: true,
+        disable_specs: true,
+        ..SessionConfig::default()
+    };
+    let _outcome = session
+        .run(
+            "exec-summary-test",
+            "Exec Summary",
+            &cfg,
+            Arc::new(CaptureSynthesize::default()),
+        )
+        .await
+        .unwrap();
+
+    let body = tokio::fs::read_to_string(research_root.join("exec-summary-test/RESEARCH.md"))
+        .await
+        .unwrap();
+    // Non-default formats are persisted in the frontmatter.
+    assert!(
+        body.contains("requested_format: executive-summary"),
+        "frontmatter should record requested format, got:\n{body}"
+    );
+    assert!(body.contains("## Summary"));
+    assert!(body.contains("## Findings"));
 }
 
 #[tokio::test]
@@ -319,11 +369,15 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
         .await
         .unwrap();
 
-    let outcomes = observer.outcomes.lock().unwrap();
+    let has_no_llm;
+    {
+        let outcomes = observer.outcomes.lock().unwrap();
+        has_no_llm = outcomes.contains(&SynthesizeOutcome::NoLlm);
+    }
     assert!(
-        outcomes.iter().any(|&o| o == SynthesizeOutcome::NoLlm),
+        has_no_llm,
         "expected a NoLlm outcome when no LLM engine is wired in, got {:?}",
-        *outcomes
+        observer.outcomes.lock().unwrap()
     );
 
     // RESEARCH.md still gets mechanical findings derived from the captured
@@ -332,6 +386,10 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
         .await
         .unwrap();
     assert!(body.contains("## Findings"));
+    assert!(
+        body.contains("### Finding 1 —"),
+        "RESEARCH.md findings must have a headline heading, got:\n{body}"
+    );
     assert!(body.contains("**Observation:**"));
     assert!(body.contains("**Implication:**"));
     assert!(body.contains("https://example.com/async"));

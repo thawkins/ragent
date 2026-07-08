@@ -72,6 +72,7 @@ async fn write_document_persists_supports_files_and_index() {
         captured_at: chrono::Utc::now(),
         body_path: PathBuf::from("sources/web-01.md"),
         body: "page text".into(),
+        relevance: "User-supplied seed URL".into(),
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -92,6 +93,7 @@ async fn write_document_persists_supports_files_and_index() {
         open_questions: vec!["What about errors?".into()],
         template_body: None,
         decomposed_queries: Vec::new(),
+        output_format: ragent_research::OutputFormat::Report,
     };
     mgr.write_document(&doc).await.unwrap();
 
@@ -256,6 +258,8 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
     let config = SessionConfig {
         topic: "Rust async".into(),
         max_local_sources: 5,
+        depth: Some(ragent_research::Depth::Shallow),
+        output_format: ragent_research::OutputFormat::Report,
         disable_local: false,
         ..SessionConfig::default()
     };
@@ -322,6 +326,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 url: "https://example.com/page".into(),
                 title: "Example Page".into(),
                 snippet: String::new(),
+                matched_query: "Rust lifetimes".into(),
             }])
         }
     }

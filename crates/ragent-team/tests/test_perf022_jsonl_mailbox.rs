@@ -15,7 +15,7 @@ mod support;
 use support::setup_workspace;
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    dir.join(".ragent/teams").join(name)
+    dir.join(name)
 }
 
 fn mailbox_path(team_dir: &std::path::Path, agent_id: &str) -> std::path::PathBuf {

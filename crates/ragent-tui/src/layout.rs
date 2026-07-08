@@ -7,6 +7,11 @@
 //! - Line 1: Session, agent, working directory, git branch, and status message
 //! - Line 2: Provider, token usage, active tasks, code index, and log indicator
 
+use pulldown_cmark::{Event as MdEvent, Options, Parser, Tag, TagEnd};
+use std::path::Path;
+
+use crate::app::{image_dimensions_or_placeholder, sanitize_for_display};
+
 use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
 use ratatui::{
@@ -1874,6 +1879,331 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     } else {
         app.output_view_area = Rect::default();
     }
+
+    // Research markdown viewer overlay (above output view).
+    if app.research_view.is_some() {
+        render_research_view_overlay(frame, app);
+    } else {
+        app.research_view_area = Rect::default();
+    }
+}
+
+/// Render the `/research open` markdown viewer overlay.
+fn render_research_view_overlay(frame: &mut Frame, app: &mut App) {
+    let area = centered_rect(90, 80, frame.area());
+    app.research_view_area = area;
+    frame.render_widget(Clear, area);
+
+    let Some(view) = app.research_view.as_mut() else {
+        return;
+    };
+
+    let title = format!(" /research open: {} ", sanitize_for_display(&view.name));
+    let base = view.base_dir.clone();
+    let lines = markdown_to_lines(
+        &view.markdown,
+        &base,
+        frame.area().width.saturating_sub(4) as usize,
+    );
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
+
+    let total = paragraph.line_count(inner.width) as u16;
+    let visible = inner.height;
+    view.max_scroll = total.saturating_sub(visible);
+    view.scroll_offset = view.scroll_offset.min(view.max_scroll);
+
+    frame.render_widget(paragraph.scroll((view.scroll_offset, 0)), area);
+
+    if total > visible {
+        let mut sb_state =
+            ScrollbarState::new(view.max_scroll as usize).position(view.scroll_offset as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut sb_state,
+        );
+    }
+}
+
+/// Convert a RESEARCH.md body into styled ratatui lines.
+fn markdown_to_lines<'a>(
+    markdown: &'a str,
+    base_dir: &'a Path,
+    wrap_width: usize,
+) -> Vec<Line<'a>> {
+    let sanitized = sanitize_for_display(markdown);
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(&sanitized, opts);
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    let mut current_spans: Vec<Span> = Vec::new();
+    let mut list_stack: Vec<u8> = Vec::new();
+    let mut in_code_block: Option<String> = None;
+    let mut code_buffer = String::new();
+    let mut pending_text = String::new();
+    // Inline link/image state: (url, accumulated_visible_text)
+    let mut link_state: Option<(String, String)> = None;
+    let mut image_state: Option<(String, String)> = None;
+    // Inline emphasis state stack.
+    let mut style_stack: Vec<TextStyle> = Vec::new();
+
+    for event in parser {
+        match event {
+            MdEvent::Start(tag) => match tag {
+                Tag::CodeBlock(lang) => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    let lang_str = match lang {
+                        pulldown_cmark::CodeBlockKind::Fenced(l) => l.to_string(),
+                        pulldown_cmark::CodeBlockKind::Indented => String::new(),
+                    };
+                    in_code_block = Some(lang_str);
+                    code_buffer.clear();
+                }
+                Tag::List(start) => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    list_stack.push(start.unwrap_or(1) as u8);
+                }
+                Tag::Item => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                }
+                Tag::Link { dest_url, .. } => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    link_state = Some((dest_url.to_string(), String::new()));
+                }
+                Tag::Image { dest_url, .. } => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    image_state = Some((dest_url.to_string(), String::new()));
+                }
+                Tag::Emphasis => style_stack.push(TextStyle::Italic),
+                Tag::Strong => style_stack.push(TextStyle::Bold),
+                _ => {}
+            },
+            MdEvent::End(tag_end) => match tag_end {
+                TagEnd::CodeBlock => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                    if let Some(ref lang) = in_code_block {
+                        let is_mermaid = lang.eq_ignore_ascii_case("mermaid");
+                        let label = if is_mermaid {
+                            "[Mermaid diagram — rendered as text below]"
+                        } else {
+                            ""
+                        };
+                        if is_mermaid && !code_buffer.trim().is_empty() {
+                            lines.push(Line::from(Span::styled(
+                                label.to_string(),
+                                Style::default()
+                                    .fg(Color::Magenta)
+                                    .add_modifier(Modifier::BOLD),
+                            )));
+                        }
+                        for raw in code_buffer.lines() {
+                            let line = sanitize_for_display(raw);
+                            lines.push(Line::from(Span::styled(
+                                format!("  {line}"),
+                                if is_mermaid {
+                                    Style::default().fg(Color::Cyan)
+                                } else {
+                                    Style::default().fg(Color::DarkGray)
+                                },
+                            )));
+                        }
+                    }
+                    in_code_block = None;
+                    code_buffer.clear();
+                }
+                TagEnd::List(_) => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                    list_stack.pop();
+                }
+                TagEnd::Heading(level) => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                    let idx = lines.len().saturating_sub(1);
+                    if let Some(line) = lines.get_mut(idx) {
+                        let style = match level {
+                            pulldown_cmark::HeadingLevel::H1 => Style::default()
+                                .fg(Color::White)
+                                .bg(Color::Blue)
+                                .add_modifier(Modifier::BOLD),
+                            pulldown_cmark::HeadingLevel::H2 => Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                            _ => Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        };
+                        for span in &mut line.spans {
+                            span.style = style;
+                        }
+                    }
+                }
+                TagEnd::Paragraph => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                }
+                TagEnd::BlockQuote(_) => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                }
+                TagEnd::Link => {
+                    if let Some((url, text)) = link_state.take() {
+                        flush_text_spans(&mut pending_text, &mut current_spans);
+                        current_spans.push(Span::styled(
+                            format!("[{text}]"),
+                            Style::default().fg(Color::White),
+                        ));
+                        current_spans.push(Span::styled(
+                            format!("({url})"),
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::UNDERLINED),
+                        ));
+                    }
+                }
+                TagEnd::Image => {
+                    if let Some((url, alt)) = image_state.take() {
+                        flush_text_spans(&mut pending_text, &mut current_spans);
+                        let placeholder = image_dimensions_or_placeholder(&alt, &url, base_dir);
+                        current_spans.push(Span::styled(
+                            placeholder,
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::ITALIC),
+                        ));
+                    }
+                }
+                TagEnd::Emphasis | TagEnd::Strong => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    style_stack.pop();
+                }
+                _ => {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                }
+            },
+            MdEvent::Text(text) => {
+                if in_code_block.is_some() {
+                    code_buffer.push_str(&text);
+                } else if link_state.is_some() {
+                    link_state.as_mut().unwrap().1.push_str(&text);
+                } else if image_state.is_some() {
+                    image_state.as_mut().unwrap().1.push_str(&text);
+                } else {
+                    let prefix = list_prefix(&list_stack);
+                    if !prefix.is_empty() && pending_text.is_empty() && current_spans.is_empty() {
+                        pending_text.push_str(&prefix);
+                    }
+                    pending_text.push_str(&text);
+                }
+            }
+            MdEvent::Code(code) => {
+                if in_code_block.is_none() {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    current_spans.push(Span::styled(
+                        format!(" `{code}` "),
+                        Style::default()
+                            .fg(Color::Green)
+                            .bg(Color::Black)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    code_buffer.push_str(&code);
+                }
+            }
+            MdEvent::Html(html) => {
+                if in_code_block.is_none() {
+                    pending_text.push_str(&html);
+                }
+            }
+            MdEvent::SoftBreak | MdEvent::HardBreak => {
+                if in_code_block.is_none() {
+                    flush_text_spans(&mut pending_text, &mut current_spans);
+                    flush_line(&mut lines, &mut current_spans);
+                } else {
+                    code_buffer.push('\n');
+                }
+            }
+            MdEvent::Rule => {
+                flush_text_spans(&mut pending_text, &mut current_spans);
+                flush_line(&mut lines, &mut current_spans);
+                lines.push(Line::from(Span::styled(
+                    "─".repeat(wrap_width.min(80)),
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
+            _ => {}
+        }
+    }
+
+    flush_text_spans(&mut pending_text, &mut current_spans);
+    flush_line(&mut lines, &mut current_spans);
+
+    // Footer note about terminal limitations for images and links.
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "[Esc to close · images shown as placeholders · links are plain text]".to_string(),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    lines
+}
+
+/// Testable wrapper for the private `markdown_to_lines` renderer.
+pub fn markdown_to_lines_testable<'a>(
+    markdown: &'a str,
+    base_dir: &'a std::path::Path,
+    wrap_width: usize,
+) -> Vec<Line<'a>> {
+    markdown_to_lines(markdown, base_dir, wrap_width)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextStyle {
+    Bold,
+    Italic,
+}
+
+fn flush_text_spans(text: &mut String, spans: &mut Vec<Span>) {
+    if !text.is_empty() {
+        spans.push(Span::raw(std::mem::take(text)));
+    }
+}
+
+fn flush_line<'a>(lines: &mut Vec<Line<'a>>, spans: &mut Vec<Span<'a>>) {
+    if !spans.is_empty() {
+        lines.push(Line::from(std::mem::take(spans)));
+    }
+}
+
+fn list_prefix(list_stack: &[u8]) -> String {
+    let depth = list_stack.len();
+    if depth == 0 {
+        return String::new();
+    }
+    let indent = "  ".repeat(depth.saturating_sub(1));
+    let marker = if list_stack.last().copied().unwrap_or(1) == 0 {
+        "• "
+    } else {
+        "• "
+    };
+    format!("{indent}{marker}")
 }
 
 /// Render a small centered popup with a spinner while a provider loads its model list.

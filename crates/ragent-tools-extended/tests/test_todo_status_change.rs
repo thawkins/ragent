@@ -13,7 +13,6 @@ mod mock_storage;
 use mock_storage::MockStorage;
 
 /// In-memory mock storage for testing.
-
 fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     ToolContext {
         session_id: "sess-1".to_string(),

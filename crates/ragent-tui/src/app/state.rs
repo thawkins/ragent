@@ -1166,6 +1166,8 @@ pub struct App {
     pub teams_area: Rect,
     /// Cached area of the output overlay.
     pub output_view_area: Rect,
+    /// Cached area of the research markdown viewer overlay.
+    pub research_view_area: Rect,
     /// Cached area of the Agents button beside chat input.
     pub agents_button_area: Rect,
     /// Cached area of the Teams button beside chat input.
@@ -1300,6 +1302,8 @@ pub struct App {
     pub bench_result: Arc<std::sync::Mutex<Option<Result<ragent_bench::BenchRunOutcome, String>>>>,
     /// Active output overlay state.
     pub output_view: Option<OutputViewState>,
+    /// Active `/research open` markdown viewer overlay state.
+    pub research_view: Option<ResearchViewState>,
     /// Active benchmark task ID.
     pub active_bench_task_id: Option<String>,
     /// Human-readable summary for the active benchmark task.
@@ -1410,10 +1414,28 @@ pub struct App {
     pub router_current_tier: Option<String>,
 
     // ── Research progress (`/research create`) ───────────────────────────────
-    /// Live progress tracker for the currently running `/research create` run.
-    /// `None` when no research session is in progress. The TUI renders this as
-    /// a self-updating log list in the message window.
-    pub research_progress: Option<crate::research_progress::ResearchProgress>,
+    /// Live progress trackers for all running/completed `/research create`
+    /// runs. Each `/research create` invocation pushes a new tracker here so
+    /// the results of older research runs remain visible in the message
+    /// window instead of being overwritten by the latest run.
+    pub research_progress: Vec<crate::research_progress::ResearchProgress>,
+}
+
+/// State for the `/research open` markdown viewer overlay.
+#[derive(Debug, Clone)]
+pub struct ResearchViewState {
+    /// Research item name displayed in the title.
+    pub name: String,
+    /// Absolute path to the RESEARCH.md file (for resolving relative images).
+    pub path: std::path::PathBuf,
+    /// Base directory for resolving relative image/link paths.
+    pub base_dir: std::path::PathBuf,
+    /// Full markdown text (frontmatter stripped).
+    pub markdown: String,
+    /// Vertical scroll offset from top.
+    pub scroll_offset: u16,
+    /// Maximum scroll value computed during render.
+    pub max_scroll: u16,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

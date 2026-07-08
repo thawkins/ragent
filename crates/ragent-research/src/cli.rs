@@ -10,7 +10,7 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
@@ -32,6 +32,13 @@ pub enum ResearchCliCommand {
         sources_dir: Option<String>,
         /// Optional FR-020 `--template <name>`.
         template: Option<String>,
+        /// `--fetch-concurrently N` — override the maximum number of candidate
+        /// pages fetched in parallel during the web-gathering phase. The
+        /// default is `ragent_research::DEFAULT_FETCH_CONCURRENCY` (10); `0`
+        /// is clamped up to `1`. Larger values reduce wall-clock latency when
+        /// a search returns many hits, at the cost of more in-flight HTTP
+        /// connections.
+        fetch_concurrency: Option<usize>,
         /// `--use-local` — enable the local-file scanning phase.
         use_local: bool,
         /// `--use-specs` — enable the prior-spec cross-reference phase.
@@ -126,6 +133,7 @@ impl ResearchCliCommand {
                         format: None,
                         sources_dir: None,
                         template: None,
+                        fetch_concurrency: None,
                         use_local: false,
                         use_specs: false,
                     }
@@ -137,7 +145,8 @@ impl ResearchCliCommand {
     fn parse_create(rest: &[&str]) -> Self {
         // Parse: ragent research create <name> <topic> [--from-url <URL>]
         //        [--iterations N] [--depth shallow|standard|deep] [--format <artifact>]
-        //        [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]
+        //        [--sources-dir <path>] [--template <name>] [--fetch-concurrently N]
+        //        [--use-local] [--use-specs]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
@@ -147,6 +156,7 @@ impl ResearchCliCommand {
         let mut format: Option<String> = None;
         let mut sources_dir: Option<String> = None;
         let mut template: Option<String> = None;
+        let mut fetch_concurrency: Option<usize> = None;
         let mut use_local = false;
         let mut use_specs = false;
         while i < rest.len() {
@@ -200,6 +210,14 @@ impl ResearchCliCommand {
                         i += 1;
                     }
                 }
+                "--fetch-concurrently" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        fetch_concurrency = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
                 "--use-local" => {
                     use_local = true;
                     i += 1;
@@ -231,6 +249,7 @@ impl ResearchCliCommand {
             format,
             sources_dir,
             template,
+            fetch_concurrency,
             use_local,
             use_specs,
         }
@@ -296,18 +315,20 @@ impl ResearchCliCommand {
                  ragent research <SUBCOMMAND> [ARGS]\n\
                \n\
                SUBCOMMANDS:\n\
-                                 create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
-                                       [--format report|executive-summary|comparison-table|source-bibliography]\n\
-                                       [--sources-dir <path>] [--template <name>] [--use-local] [--use-specs]\n\
-                                       Run an information-gathering session and write RESEARCH.md.\n\
-                                       --from-url    Fetch the URL and use its content as the research subject\n\
-                                                     in place of an explicit topic. The page is captured as\n\
-                                                     the primary source; web search still runs.\n\
-                                       --iterations  Override the default maximum number of iterations.\n\
-                                       --depth       Choose a preset: shallow, standard, or deep.\n\
-                                       --format      Select the output artifact format.\n\
-                                       --use-local   Enable local-file scanning (in-project + extras).\n\
-                                       --use-specs   Enable prior-spec cross-referencing.\n\
+                                   create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
+                                         [--format report|executive-summary|comparison-table|source-bibliography]\n\
+                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]\n\
+                                         Run an information-gathering session and write RESEARCH.md.\n\
+                                         --from-url            Fetch the URL and use its content as the research subject\n\
+                                                               in place of an explicit topic. The page is captured as\n\
+                                                               the primary source; web search still runs.\n\
+                                         --iterations          Override the default maximum number of iterations.\n\
+                                         --depth               Choose a preset: shallow, standard, or deep (default: standard).\n\
+                                         --format              Select the output artifact format (default: report).\n\
+                                         --fetch-concurrently  Override the maximum number of candidate pages fetched\n\
+                                                               in parallel during the web-gathering phase (default 10).\n\
+                                         --use-local           Enable local-file scanning (in-project + extras).\n\
+                                         --use-specs           Enable prior-spec cross-referencing.\n\
                    continue <name> [message] Resume an in-progress research item.\n\
                    list [--all]                  List every research item.\n\
                  open <name>                   Print the absolute path of RESEARCH.md.\n\
@@ -341,6 +362,10 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
         SessionEvent::WebCaptured { url, title } => {
             ("web", serde_json::json!({ "url": url, "title": title }))
         }
+        SessionEvent::FromUrlBodyPreview { url, body_preview } => (
+            "from_url_body_preview",
+            serde_json::json!({ "url": url, "body_preview": body_preview }),
+        ),
         SessionEvent::LocalCaptured { path, score } => {
             ("local", serde_json::json!({ "path": path, "score": score }))
         }
@@ -834,6 +859,57 @@ mod tests {
                 assert_eq!(iterations, Some(5));
                 assert_eq!(depth.as_deref(), Some("deep"));
                 assert_eq!(format.as_deref(), Some("executive-summary"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_fetch_concurrently() {
+        let cmd = ResearchCliCommand::parse("create foo topic words --fetch-concurrently 20");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                fetch_concurrency,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "topic words");
+                assert_eq!(fetch_concurrency, Some(20));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_without_fetch_concurrently_defaults_to_none() {
+        let cmd = ResearchCliCommand::parse("create foo topic words");
+        match cmd {
+            ResearchCliCommand::Create {
+                fetch_concurrency, ..
+            } => {
+                assert_eq!(fetch_concurrency, None);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_ignores_non_numeric_fetch_concurrently() {
+        // A non-numeric value leaves fetch_concurrency as None and is
+        // consumed as the flag's argument (not pushed into the topic).
+        let cmd = ResearchCliCommand::parse("create foo topic words --fetch-concurrently abc");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                fetch_concurrency,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "topic words");
+                assert_eq!(fetch_concurrency, None);
             }
             other => panic!("unexpected variant: {other:?}"),
         }

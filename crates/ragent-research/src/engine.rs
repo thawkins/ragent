@@ -159,6 +159,14 @@ impl GatherObserver for StateGatherForwarder {
                     error: "".into(),
                 });
             }
+            GatherEvent::QueriesDecomposed { queries } => {
+                self.observer
+                    .on_event(SessionEvent::QueriesDecomposed { queries });
+            }
+            GatherEvent::SourceCaptured { url, title } => {
+                self.observer
+                    .on_event(SessionEvent::WebCaptured { url, title });
+            }
             _ => {}
         }
     }
@@ -522,6 +530,7 @@ mod tests {
             url: "https://rust-lang.org".to_string(),
             title: "Rust".to_string(),
             snippet: "snip".to_string(),
+            matched_query: "".to_string(),
         }]];
         let engine = engine_with_fake(hits);
         let state = engine.run("Rust", Arc::new(NoopObserver)).await.unwrap();

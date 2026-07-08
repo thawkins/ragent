@@ -1,5 +1,125 @@
 # Changelog
 
+## Unreleased
+
+## Version: 0.1.0-alpha.141
+
+### Added — Research findings now render with a headline
+
+- **Finding headings combine number and a short headline.** `RESEARCH.md` findings
+  now render as `### Finding N — <headline>` instead of a bare `### Finding N`.
+- **Headline comes from a new `**Headline:**` paragraph.** The synthesis prompt now
+  asks the LLM to start each finding with a `**Headline:**` paragraph of at most
+  15 words summarising the observation. If the LLM omits the headline, the
+  assembler falls back to the first 15 words of the observation.
+- **Backward compatibility.** Old findings without a `**Headline:**` paragraph
+  still produce a sensible heading from the observation text.
+- **Files changed:** `crates/ragent-research/src/analysis.rs`,
+  `crates/ragent-research/src/document.rs`,
+  `crates/ragent-research/src/session.rs`, plus updated tests in
+  `crates/ragent-research/src/document.rs`,
+  `crates/ragent-research/src/analysis.rs`,
+  `crates/ragent-research/src/session.rs`,
+  `crates/ragent-research/tests/test_research_create_synthesis.rs`,
+  `crates/ragent-research/tests/test_template_merge.rs`.
+
+## Version: 0.1.0-alpha.140
+
+### Added — `/research open` markdown viewer panel
+
+- **TUI panel renders RESEARCH.md content.** Running `/research open <name>`
+  now opens a full-screen overlay that reads the item's `RESEARCH.md` (minus
+  YAML frontmatter), strips control characters, and renders the markdown body
+  directly in the TUI instead of only printing metadata to the chat log.
+- **Mermaid diagram support.** Fenced ` ```mermaid ` blocks are detected and
+  rendered with a header label (`[Mermaid diagram — rendered as text below]`)
+  so the user knows the diagram source is present even though the terminal
+  cannot draw vector graphics.
+- **Image placeholders.** Markdown image syntax (`![alt](src)`) is converted
+  into a colored placeholder such as `[Image: alt (100x50)]`. Local PNG/JPEG
+  files are inspected for dimensions without decoding pixels; remote images
+  and missing files still show the alt text and path/URL.
+- **Link rendering.** Inline links are shown as `[text](url)` with the URL
+  styled underlined/cyan. The panel footer notes that terminal links are plain
+  text (browsers/terminals with OSC-8 are not yet supported).
+- **Navigation.** The panel supports scrolling with `PageUp` / `PageDown`
+  and jumps to start/end with `Ctrl+PageUp` / `Ctrl+PageDown`. `Esc` closes
+  the viewer.
+- **Mouse support.** The panel responds to mouse-wheel scroll and closes when
+  clicking outside its bounds.
+- **Files changed:** `crates/ragent-tui/src/app/{state,init,event_handler,
+  input_handler,research,helpers}.rs`, `crates/ragent-tui/src/{input,layout}.rs`,
+  `crates/ragent-tui/src/app.rs`, `crates/ragent-types/src/event/mod.rs`,
+  `crates/ragent-server/src/sse.rs`.
+- **New tests** — `crates/ragent-tui/tests/test_research_viewer.rs` (18 tests)
+  covering headings, code blocks, mermaid labels, image placeholders, link
+  rendering, bullet lists, the footer note, `Esc`/click close, keyboard
+  scrolling, and mouse-wheel scrolling.
+
+### Added — `/research` parallel web capture
+
+### Fixed — `/research` TUI screen corruption
+
+- **Sanitize external strings before display.** URL, page title, error, and
+  `--from-url` body-preview text are now passed through `sanitize_for_display`
+  in `crates/ragent-tui/src/research_progress.rs` and
+  `crates/ragent-tui/src/app/event_handler.rs`. This strips ANSI escape
+  sequences and control characters (`\x00`–`\x1F` except `\n` and `\t`) that
+  could leak into the TUI from fetched page content or HTTP errors and appear
+  as garbage glyphs (e.g. `%???`) on the left side of the research progress
+  panel.
+- **Bypass lossy markdown→HTML→text pipeline for research progress.** Messages
+  starting with `🔬 Research Progress` are now rendered as plain text in
+  `crates/ragent-tui/src/app/models.rs` instead of being converted by
+  `pulldown_cmark` + `html2text`. This prevents the converter from replacing
+  valid Unicode icons and line indentation with artifacts and keeps the
+  pre-formatted log list intact.
+- **New tests** — `test_research_progress_sanitize.rs` (7 tests) covering ANSI
+  stripping, control-char removal, newline/tab preservation, sanitized
+  `WebCaptured`/`WebFetchFailed` encoding, and the research-progress
+  plain-text bypass.
+
+### Added — `/research` parallel web capture
+
+- **Concurrent page fetching in `/research create`.** The web-gathering
+  fetch phase in `crates/ragent-research/src/web_gatherer.rs` now issues
+  candidate page fetches concurrently via `futures::stream::buffer_unordered`
+  instead of sequentially `await`-ing each URL in turn. The default
+  concurrency limit is **10** (`DEFAULT_FETCH_CONCURRENCY`), configurable per
+  run with the new `--fetch-concurrently N` CLI flag (and the matching
+  `fetch_concurrency` field on `SessionConfig`, the `fetch_concurrency` JSON
+  body field on `POST /research`, and the
+  `WebGatherer::with_fetch_concurrency` builder).
+- **Ordering preserved.** `SourceCaptured` / `FetchFailed` observer events
+  still fire in fetch-completion order (so the TUI renders pages as they
+  arrive), but the returned `sources` vector is re-sorted into the original
+  search-ranking order so `web-NN.md` supporting-file names keep tracking
+  hit position rather than completion timing.
+- **New tests** — `gather_fetches_pages_concurrently_up_to_fetch_concurrency`
+  (proves the high-water mark of in-flight fetches matches
+  `fetch_concurrency`), `with_fetch_concurrency_clamps_zero_to_one`, and
+  `default_fetch_concurrency_is_ten` in
+  `crates/ragent-research/src/web_gatherer.rs`; plus CLI parse tests for
+  `--fetch-concurrently` in `crates/ragent-research/src/cli.rs`.
+
+### Fixed — `/research --from-url` topic derivation
+
+- **Prefer cleaned page titles, fall back to cleaned body.** When
+  `/research create --from-url <URL>` is used, the research topic is now
+  derived from the extracted page title first. Site-brand tokens (e.g.
+  `InfoQ`), common nav words (`Homepage`, `Articles`), title-tag separators
+  (`|`, `-`, `/`), and glued-together words (`HomepageArticlesLarge`) are
+  stripped, so titles like `InfoQ HomepageArticlesLarge Concept Models: a
+  Paradigm Shift in AI Reasoning` become `Large Concept Models: a Paradigm
+  Shift in AI Reasoning`. If the title is missing or too generic, the first
+  substantive sentence of the cleaned page body is used. This fixes sparse
+  or concatenated topics without falling back to a bare URL.
+- **New unit tests** — `clean_site_title_strips_site_brand_and_nav_prefixes`,
+  `derive_topic_prefers_cleaned_title_over_body`,
+  `derive_topic_falls_back_to_body_when_title_is_generic`, and
+  `split_glued_words_splits_camel_case_and_acronyms` in
+  `crates/ragent-research/src/session.rs`.
+
 ## Version: 0.1.0-alpha.139
 
 ### Changed
@@ -37,6 +157,34 @@
   `FromUrlNoUsableBody` instead of falling back to the page title or URL.
   This prevents cases like an OpenAI deep-research URL producing
   Foundation-framework queries.
+
+### Fixed — `/research` TUI progress widget
+
+- **Each `/research create` run now gets its own progress widget.** Previously
+  the TUI held a single `Option<ResearchProgress>` tracker, so starting a new
+  research run overwrote the progress log of any earlier run, making it
+  impossible to see the results of older requests. The state field is now a
+  `Vec<ResearchProgress>` and each run is matched by name, so every run keeps
+  its own self-updating `🔬 Research Progress — \`<name>\`` message in the
+  window and older runs stay visible alongside the latest one.
+- **`--from-url` body preview in the progress widget.** When
+  `/research create --from-url <URL>` is used, the progress widget now shows
+  the first ~200 characters of the extracted article body (via a new
+  `SessionEvent::FromUrlBodyPreview` event emitted right after the primary
+  fetch succeeds), so you can see exactly what content the topic was derived
+  from.
+- **Decomposed queries render as soon as they are generated.** The
+  `GatherEvent::QueriesDecomposed` event is now forwarded immediately by
+  `GatherEventForwarder` (previously it was dropped and the session re-emitted
+  `QueriesDecomposed` only after the whole web gather returned). The
+  duplicated post-gather emission has been removed. Sub-queries now appear in
+  the progress widget before the parallel searches complete.
+- **Successfully retrieved URLs render inline during the gather.** A new
+  `GatherEvent::SourceCaptured { url, title }` event is emitted by
+  `WebGatherer` each time a page fetch succeeds, and is forwarded as
+  `SessionEvent::WebCaptured` so the progress widget shows each captured URL
+  as it arrives. Previously only `WebFetchFailed` events were surfaced during
+  the gather; successful captures were only shown in a batch at the end.
 
 ## Version: 0.1.0-alpha.138
 

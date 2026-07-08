@@ -71,7 +71,13 @@ impl App {
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                if self.output_view.is_some()
+                if self.research_view.is_some()
+                    && self
+                        .research_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    self.scroll_research_view_by(-3);
+                } else if self.output_view.is_some()
                     && self
                         .output_view_area
                         .contains((event.column, event.row).into())
@@ -93,7 +99,13 @@ impl App {
                 }
             }
             MouseEventKind::ScrollDown => {
-                if self.output_view.is_some()
+                if self.research_view.is_some()
+                    && self
+                        .research_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    self.scroll_research_view_by(3);
+                } else if self.output_view.is_some()
                     && self
                         .output_view_area
                         .contains((event.column, event.row).into())
@@ -160,6 +172,13 @@ impl App {
                         self.memory_browser = None;
                         return;
                     }
+                }
+                if self.research_view.is_some() {
+                    if self.research_view_area.contains(pos.into()) {
+                        return;
+                    }
+                    self.research_view = None;
+                    return;
                 }
                 if self.output_view.is_some()
                     && self
@@ -975,6 +994,24 @@ impl App {
                 }
                 InputAction::OutputViewToEnd => {
                     self.jump_output_view_end();
+                }
+                InputAction::ResearchViewPageUp => {
+                    self.scroll_research_view_by(-5);
+                }
+                InputAction::ResearchViewPageDown => {
+                    self.scroll_research_view_by(5);
+                }
+                InputAction::ResearchViewToStart => {
+                    self.jump_research_view_start();
+                }
+                InputAction::ResearchViewToEnd => {
+                    self.jump_research_view_end();
+                }
+                InputAction::ResearchViewLineUp => {
+                    self.scroll_research_view_by(-1);
+                }
+                InputAction::ResearchViewLineDown => {
+                    self.scroll_research_view_by(1);
                 }
                 InputAction::HistoryUp => {
                     // Within a multiline input, Up moves to the previous logical line.

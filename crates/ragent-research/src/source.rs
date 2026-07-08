@@ -83,6 +83,11 @@ pub enum Source {
         /// Empty when the source was loaded from a pre-body-field `RESEARCH.md`.
         #[serde(default)]
         body: String,
+        /// One-line note describing how relevant the page is to the search
+        /// query that discovered it. Empty when the source predates this
+        /// field or was supplied directly via `--from-url`.
+        #[serde(default)]
+        relevance: String,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -180,11 +185,13 @@ impl Source {
         }
     }
 
-    /// Optional relevance note for local and spec sources.
+    /// Optional relevance note for local, spec, and web sources.
     pub fn relevance(&self) -> Option<&str> {
         match self {
-            Self::Local { relevance, .. } | Self::Spec { relevance, .. } => Some(relevance),
-            _ => None,
+            Self::Local { relevance, .. }
+            | Self::Spec { relevance, .. }
+            | Self::Web { relevance, .. } => Some(relevance),
+            Self::Other { .. } => None,
         }
     }
 
@@ -229,6 +236,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: "page text".into(),
+            relevance: String::new(),
         };
         assert_eq!(web.type_str(), "web");
 
@@ -277,6 +285,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
+            relevance: String::new(),
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -311,6 +320,7 @@ mod tests {
             captured_at: now,
             body_path: PathBuf::from("x"),
             body: String::new(),
+            relevance: String::new(),
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -324,6 +334,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: "page text".into(),
+            relevance: String::new(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -415,6 +426,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("x"),
             body: "hello".into(),
+            relevance: String::new(),
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -426,6 +438,7 @@ mod tests {
             captured_at: dt(),
             body_path: PathBuf::from("x"),
             body: String::new(),
+            relevance: String::new(),
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -442,5 +455,36 @@ mod tests {
     #[test]
     fn local_source_kind_default() {
         assert_eq!(LocalSourceKind::default(), LocalSourceKind::InProject);
+    }
+
+    #[test]
+    fn serde_round_trip_web_with_relevance() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
+            relevance: "High — title matches query terms".into(),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let back: Source = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, s);
+        assert_eq!(back.relevance(), Some("High — title matches query terms"));
+    }
+
+    #[test]
+    fn web_relevance_returns_empty_as_some() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
+            relevance: String::new(),
+        };
+        assert_eq!(s.relevance(), Some(""));
     }
 }

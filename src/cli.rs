@@ -84,6 +84,10 @@ pub enum ResearchCommands {
         /// Optional template name (FR-020)
         #[arg(long)]
         template: Option<String>,
+        /// Override the maximum number of candidate pages fetched in
+        /// parallel during the web-gathering phase (default 10).
+        #[arg(long, value_name = "N")]
+        fetch_concurrently: Option<usize>,
         /// Include the local-file scanning phase
         #[arg(long)]
         use_local: bool,
@@ -134,7 +138,9 @@ pub enum ResearchCommands {
 /// sources (T-035).
 pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
-    use ragent_research::{ResearchManager, SessionConfig, SessionEvent, SessionObserver};
+    use ragent_research::{
+        Depth, OutputFormat, ResearchManager, SessionConfig, SessionEvent, SessionObserver,
+    };
     use std::sync::Arc;
     let working_dir = std::env::current_dir()?;
     let research_root = working_dir.join("research");
@@ -150,6 +156,7 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             format,
             sources_dir,
             template,
+            fetch_concurrently,
             use_local,
             use_specs,
         } => {
@@ -169,6 +176,7 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 format,
                 sources_dir,
                 template,
+                fetch_concurrency: fetch_concurrently,
                 use_local,
                 use_specs,
             }
@@ -263,11 +271,12 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
             name,
             topic,
             from_url,
-            iterations: _,
-            depth: _,
-            format: _,
+            iterations,
+            depth,
+            format,
             sources_dir,
             template,
+            fetch_concurrency,
             use_local,
             use_specs,
         } => {
@@ -298,6 +307,14 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 template,
                 disable_local: !use_local,
                 disable_specs: !use_specs,
+                fetch_concurrency: fetch_concurrency
+                    .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
+                depth: depth.as_deref().and_then(Depth::parse),
+                iterations,
+                output_format: format
+                    .as_deref()
+                    .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
+                    .unwrap_or(OutputFormat::Report),
                 ..SessionConfig::default()
             };
 

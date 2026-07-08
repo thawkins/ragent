@@ -18,7 +18,7 @@ use ragent_team::team::{
 // State types from app/state.rs
 use crate::app::state::{
     App, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState, OutputViewState,
-    OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest,
+    OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest, ResearchViewState,
 };
 
 // Helpers
@@ -177,6 +177,18 @@ impl App {
             } if self.is_current_session(session_id) => {
                 self.stream_in_bytes += text.len() as u64;
                 self.append_assistant_text(text);
+            }
+            Event::OpenResearchView {
+                ref name,
+                ref path,
+                ref markdown,
+            } => {
+                let md = markdown.clone();
+                let p = path.clone();
+                let n = name.clone();
+                self.status = format!("research: viewing {n}");
+                self.open_research_view(n, p, md);
+                self.needs_redraw = true;
             }
             Event::ReasoningDelta {
                 ref session_id,
@@ -642,22 +654,42 @@ impl App {
                     };
                     self.push_log_no_agent(
                         level,
-                        format!("research: {} — {}", decoded.phase.as_str(), decoded.detail),
+                        format!(
+                            "research: {} — {}",
+                            decoded.phase.as_str(),
+                            crate::app::helpers::sanitize_for_display(&decoded.detail)
+                        ),
                     );
-                    if decoded.status == crate::research_progress::StepStatus::Error {
+                    if decoded.status == crate::research_progress::StepStatus::Error
+                        && decoded.phase != crate::research_progress::SessionPhase::Web
+                    {
                         self.status = format!("⚠ research: {}", decoded.detail);
                     }
-                    let progress = self.research_progress.get_or_insert_with(|| {
-                        crate::research_progress::ResearchProgress::new(
-                            decoded.name.clone(),
-                            decoded.topic.clone(),
-                        )
-                    });
+                    let progress = if let Some(existing) = self
+                        .research_progress
+                        .iter_mut()
+                        .find(|p| p.name == decoded.name)
+                    {
+                        existing
+                    } else {
+                        // First event for this run arrived before the
+                        // `/research create` handler seeded the tracker (or
+                        // the run was started through a non-TUI path). Create
+                        // it on demand so progress is never lost.
+                        self.research_progress.push(
+                            crate::research_progress::ResearchProgress::new(
+                                decoded.name.clone(),
+                                decoded.topic.clone(),
+                            ),
+                        );
+                        self.research_progress.last_mut().expect("just pushed")
+                    };
                     progress.apply(decoded.phase, decoded.status, decoded.detail);
                     if let Some(total) = decoded.total_sources {
                         progress.finish(total);
                     }
-                    self.refresh_research_progress_message();
+                    let name_for_refresh = decoded.name.clone();
+                    self.refresh_research_progress_message(&name_for_refresh);
                     return;
                 }
                 self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
@@ -1485,6 +1517,48 @@ impl App {
         }
     }
 
+    pub(crate) fn jump_research_view_start(&mut self) {
+        if let Some(ref mut view) = self.research_view {
+            view.scroll_offset = 0;
+        }
+    }
+
+    pub(crate) fn jump_research_view_end(&mut self) {
+        if let Some(ref mut view) = self.research_view {
+            view.scroll_offset = view.max_scroll;
+        }
+    }
+
+    pub(crate) fn scroll_research_view_by(&mut self, delta: i16) {
+        if let Some(ref mut view) = self.research_view {
+            if delta >= 0 {
+                view.scroll_offset = (view.scroll_offset + delta as u16).min(view.max_scroll);
+            } else {
+                view.scroll_offset = view.scroll_offset.saturating_sub((-delta) as u16);
+            }
+        }
+    }
+
+    pub(crate) fn open_research_view(
+        &mut self,
+        name: String,
+        path: std::path::PathBuf,
+        markdown: String,
+    ) {
+        let base_dir = path
+            .parent()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_default();
+        self.research_view = Some(ResearchViewState {
+            name,
+            path,
+            base_dir,
+            markdown,
+            scroll_offset: 0,
+            max_scroll: 0,
+        });
+    }
+
     pub(crate) fn cycle_focused_teammate(&mut self, forward: bool) {
         if self.team_members.is_empty() {
             self.focused_teammate = None;
@@ -1633,27 +1707,41 @@ impl App {
         self.session_id.as_deref() == Some(session_id)
     }
 
-    pub(crate) fn refresh_research_progress_message(&mut self) {
-        let Some(progress) = self.research_progress.as_ref() else {
+    pub(crate) fn refresh_research_progress_message(&mut self, name: &str) {
+        let Some(progress) = self
+            .research_progress
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
+        else {
             return;
         };
         let rendered = self.render_markdown_to_ascii(&progress.render());
         const HEADER: &str = "🔬 Research Progress";
+        // Each research run gets its own message in the window, tagged with
+        // the run name so older runs stay visible alongside the latest one.
+        // We look for an existing assistant message whose first text part
+        // starts with the header AND carries this run's name on its first
+        // line, replacing it in place; otherwise we insert a new message.
+        let header_line = format!("{HEADER} — `{}`", name);
 
-        // Replace the existing progress message in place, if present.
         for msg in self.messages.iter_mut() {
             if msg.role != Role::Assistant {
                 continue;
             }
             if let Some(MessagePart::Text { text }) = msg.parts.first_mut()
                 && text.starts_with(HEADER)
+                && text
+                    .lines()
+                    .next()
+                    .map(|l| l == header_line)
+                    .unwrap_or(false)
             {
                 *text = rendered;
                 return;
             }
         }
 
-        // Otherwise insert a new assistant message carrying the progress log.
         if let Some(ref sid) = self.session_id {
             self.force_new_message = false;
             self.messages.push(Message::new(

@@ -23,7 +23,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::try_extract_research_code_block;
+use crate::app::helpers::{sanitize_for_display, try_extract_research_code_block};
 
 // Re-export status types from theme
 
@@ -147,9 +147,16 @@ impl App {
         if let Some(research) = try_extract_research_code_block(text) {
             return research;
         }
+        // Research progress messages are already formatted as plain-text log
+        // lists (icons, phase labels, continuation indents).  Sending them
+        // through `pulldown_cmark` + `html2text` replaces valid Unicode icons
+        // and line structures with garbage glyphs, so preserve them verbatim.
+        if text.starts_with("🔬 Research Progress") {
+            return sanitize_for_display(text);
+        }
         // Only convert markdown-like slash output; preserve plain runtime text.
         if !text.starts_with("From: /") {
-            return text.to_string();
+            return sanitize_for_display(text);
         }
 
         // Check cache using FNV-1a hash of input.
@@ -175,10 +182,10 @@ impl App {
 
         let rendered =
             match std::panic::catch_unwind(|| html2text::from_read(html_buf.as_bytes(), 120)) {
-                Ok(Ok(text)) => text,
+                Ok(Ok(text)) => sanitize_for_display(&text),
                 _ => {
-                    // Fallback to original text when markdown conversion panics or fails.
-                    text.to_string()
+                    // Fallback to sanitized text when markdown conversion panics or fails.
+                    sanitize_for_display(text)
                 }
             };
         let cleaned = rendered

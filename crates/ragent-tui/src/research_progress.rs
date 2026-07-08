@@ -11,8 +11,11 @@
 //! specs, synthesize, assemble, finalize) and its progress instead of a stream
 //! of raw JSON lines.
 
-use ragent_research::session::{SessionEvent, SessionPhase, SynthesizeOutcome};
+pub use ragent_research::session::SessionPhase;
 
+use ragent_research::session::{SessionEvent, SynthesizeOutcome};
+
+use crate::app::sanitize_for_display;
 /// Sentinel prefix marking an [`Event::AgentNotice`] message as a research
 /// progress update. The remainder of the message is a JSON payload produced by
 /// [`encode_progress_event`].
@@ -69,6 +72,10 @@ pub struct ResearchProgress {
     pub total_sources: Option<usize>,
     /// Whether the run has finished (final `Done` event received).
     pub done: bool,
+    /// Number of URLs/pages successfully fetched in the web phase.
+    pub fetched_count: usize,
+    /// Number of URLs/pages that failed to fetch in the web phase.
+    pub failed_count: usize,
 }
 
 impl ResearchProgress {
@@ -80,12 +87,33 @@ impl ResearchProgress {
             steps: Vec::new(),
             total_sources: None,
             done: false,
+            fetched_count: 0,
+            failed_count: 0,
         }
     }
 
     /// Apply a parsed step update, appending or completing a step.
+    ///
+    /// Web-capture and web-fetch-failure events are accumulated as counts so
+    /// the rendered log stays compact; a totals line is shown at the end of the
+    /// web phase instead of one line per failed URL.
     pub fn apply(&mut self, phase: SessionPhase, status: StepStatus, detail: impl Into<String>) {
         let detail = detail.into();
+
+        // Accumulate per-URL web results as counts rather than log lines.
+        if phase == SessionPhase::Web
+            && status == StepStatus::Done
+            && detail.starts_with("captured ")
+        {
+            self.fetched_count += 1;
+        } else if phase == SessionPhase::Web
+            && status == StepStatus::Error
+            && detail.starts_with("fetch failed for ")
+        {
+            self.failed_count += 1;
+            return;
+        }
+
         // If the last step is the same phase and now we're marking it done,
         // update it in place rather than appending a duplicate line.
         if status == StepStatus::Done
@@ -142,6 +170,12 @@ impl ResearchProgress {
                 "✅ Complete — {total} source(s). Use `/research open {}` to view the result.",
                 self.name
             ));
+        } else if self.fetched_count > 0 || self.failed_count > 0 {
+            out.push('\n');
+            out.push_str(&format!(
+                "📊 Web fetch totals: {} fetched, {} failed",
+                self.fetched_count, self.failed_count
+            ));
         }
         out
     }
@@ -182,31 +216,49 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
         SessionEvent::WebSearchFailed { error } => (
             SessionPhase::Web,
             "error",
-            format!("web search failed: {error}"),
+            format!("web search failed: {}", sanitize_for_display(error)),
             None,
         ),
         SessionEvent::WebFetchFailed { url, error } => (
             SessionPhase::Web,
-            "error",
-            format!("fetch failed for {url}: {error}"),
+            "failed_url",
+            format!(
+                "fetch failed for {}: {}",
+                sanitize_for_display(url),
+                sanitize_for_display(error)
+            ),
             None,
         ),
         SessionEvent::WebCaptured { url, title } => (
             SessionPhase::Web,
             "captured",
-            format!("captured {} — {}", url, title),
+            format!(
+                "captured {} — {}",
+                sanitize_for_display(url),
+                sanitize_for_display(title)
+            ),
+            None,
+        ),
+        SessionEvent::FromUrlBodyPreview { url, body_preview } => (
+            SessionPhase::Setup,
+            "preview",
+            format!(
+                "--from-url body preview for {}:\n{}",
+                sanitize_for_display(url),
+                sanitize_for_display(body_preview)
+            ),
             None,
         ),
         SessionEvent::LocalCaptured { path, score } => (
             SessionPhase::Local,
             "captured",
-            format!("captured {path} (score {score})"),
+            format!("captured {} (score {})", sanitize_for_display(path), score),
             None,
         ),
         SessionEvent::SpecCaptured { spec_id } => (
             SessionPhase::Specs,
             "captured",
-            format!("referenced spec {spec_id}"),
+            format!("referenced spec {}", sanitize_for_display(spec_id)),
             None,
         ),
         SessionEvent::SynthesizeResult { outcome, detail } => {
@@ -286,8 +338,8 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
     let phase = parse_phase(&payload.phase)?;
     let status = match payload.status.as_str() {
         "started" => StepStatus::Started,
-        "captured" | "done" | "queries" => StepStatus::Done,
-        "error" => StepStatus::Error,
+        "captured" | "done" | "queries" | "preview" => StepStatus::Done,
+        "failed_url" | "error" => StepStatus::Error,
         _ => return None,
     };
     Some(DecodedProgress {
@@ -346,6 +398,33 @@ mod tests {
                 decoded.detail
             );
         }
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip_from_url_body_preview() {
+        let encoded = encode_progress_event(
+            "rust-async",
+            "async rust",
+            &SessionEvent::FromUrlBodyPreview {
+                url: "https://example.com/guide".into(),
+                body_preview: "Long-form article about Rust async/await idioms.".into(),
+            },
+        );
+        let decoded = decode_progress_event(&encoded).expect("decode");
+        assert_eq!(decoded.phase, SessionPhase::Setup);
+        assert_eq!(decoded.status, StepStatus::Done);
+        assert!(
+            decoded.detail.contains("https://example.com/guide"),
+            "detail should mention the URL: {}",
+            decoded.detail
+        );
+        assert!(
+            decoded
+                .detail
+                .contains("Long-form article about Rust async/await"),
+            "detail should include the body preview: {}",
+            decoded.detail
+        );
     }
 
     #[test]
@@ -506,4 +585,92 @@ mod tests {
             lines[first_idx + 1]
         );
     }
+}
+
+#[test]
+fn test_failed_urls_rolled_into_totals_line() {
+    let mut p = ResearchProgress::new("rust-async", "async rust");
+    p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Done,
+        "captured https://a.com — A",
+    );
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Error,
+        "fetch failed for https://b.com: 403",
+    );
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Done,
+        "captured https://c.com — C",
+    );
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Error,
+        "fetch failed for https://d.com: timeout",
+    );
+
+    let rendered = p.render();
+    assert!(
+        !rendered.contains("fetch failed for"),
+        "rendered output should not contain per-URL failure lines:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("📊 Web fetch totals: 2 fetched, 2 failed"),
+        "rendered output should show the totals line:\n{rendered}"
+    );
+    assert_eq!(
+        p.steps.len(),
+        2,
+        "start step is folded into the first captured URL; only captured lines logged"
+    );
+}
+
+#[test]
+fn test_complete_message_replaces_totals_line() {
+    let mut p = ResearchProgress::new("rust-async", "async rust");
+    p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Done,
+        "captured https://a.com — A",
+    );
+    p.apply(
+        SessionPhase::Web,
+        StepStatus::Error,
+        "fetch failed for https://b.com: 403",
+    );
+    p.finish(1);
+
+    let rendered = p.render();
+    assert!(
+        !rendered.contains("fetch failed for"),
+        "rendered output should not contain per-URL failure lines:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("Web fetch totals"),
+        "totals line should be replaced by the complete line:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("✅ Complete — 1 source(s)"),
+        "rendered output should show the final complete line:\n{rendered}"
+    );
+}
+
+#[test]
+fn test_failed_url_status_decoded_as_error() {
+    let encoded = encode_progress_event(
+        "foo",
+        "bar",
+        &SessionEvent::WebFetchFailed {
+            url: "https://x.com".into(),
+            error: "403".into(),
+        },
+    );
+    let decoded = decode_progress_event(&encoded).expect("decode");
+    assert_eq!(decoded.phase, SessionPhase::Web);
+    assert_eq!(decoded.status, StepStatus::Error);
+    assert!(decoded.detail.contains("fetch failed for https://x.com"));
 }

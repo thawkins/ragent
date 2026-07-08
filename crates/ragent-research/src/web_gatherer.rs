@@ -52,7 +52,17 @@ pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
 /// earlier 15-source cap was too restrictive for broad topics; a larger
 /// default lets the decomposer's parallel queries surface a much wider
 /// set of candidate URLs before the synthesis phase.
-pub(crate) const DEFAULT_MAX_WEB_RESULTS: usize = 100;
+/// Default cap on the number of web sources captured when the caller does not
+/// supply an explicit `max_web_results` (FR-011).
+pub const DEFAULT_MAX_WEB_RESULTS: usize = 100;
+
+/// Default upper bound on the number of concurrent page fetches issued during
+/// the capture phase of [`WebGatherer::gather_with_observer`]. 10 is a safe
+/// middle ground: fast enough to keep wall-clock latency low when a search
+/// returns many candidate URLs, while staying well clear of OS file-descriptor
+/// limits and typical search-provider rate ceilings.  Override with the
+/// `--fetch-concurrently N` CLI flag or [`WebGatherer::with_fetch_concurrency`].
+pub const DEFAULT_FETCH_CONCURRENCY: usize = 10;
 
 /// Cap a captured web body at the same byte budget used by the supporting
 /// file renderer so the body stored on the `Source` matches what ends up on
@@ -90,42 +100,150 @@ impl QueryDecomposer for HeuristicQueryDecomposer {
             return Ok(Vec::new());
         }
 
-        // Split on common conjunctions / punctuation while keeping phrases.
-        let separators = [" and ", " & ", " + ", ", ", "; "];
-        let mut parts: Vec<String> = vec![trimmed.to_string()];
-        for sep in &separators {
-            let mut next = Vec::new();
-            for part in &parts {
-                for chunk in part.split(sep) {
-                    let chunk = chunk.trim();
-                    if !chunk.is_empty() {
-                        next.push(chunk.to_string());
-                    }
-                }
-            }
-            parts = next;
+        // 1. Split on sentence boundaries first. Long prose topics often
+        //    contain commas inside a single sentence; splitting on those commas
+        //    first produces nonsensical fragments.
+        let mut queries: Vec<String> = Vec::new();
+        for sentence in split_into_sentence_chunks(trimmed) {
+            // 2. Within each sentence, split on explicit conjunctions of short
+            //    noun phrases (e.g. "Rust async and Tokio runtime"). Only split
+            //    when every resulting chunk is short enough to be a focused query.
+            let mut sentence_queries = split_short_conjunctions(&sentence);
+            queries.append(&mut sentence_queries);
+        }
+
+        // 3. If the whole topic is a short comma-separated list (no sentence
+        //    punctuation), treat the comma-separated items as distinct queries.
+        if queries.len() == 1
+            && let Some(list_queries) = split_comma_list(trimmed)
+        {
+            queries = list_queries;
         }
 
         // Deduplicate preserving order; keep the full topic last so it acts
         // as a catch-all when earlier sub-queries returned nothing.
         let mut seen = HashSet::new();
-        let mut queries: Vec<String> = Vec::new();
-        for q in parts {
-            let lower = q.to_lowercase();
+        let mut deduped: Vec<String> = Vec::new();
+        for q in queries {
+            let normalized = collapse_whitespace(&q);
+            if normalized.is_empty() {
+                continue;
+            }
+            let lower = normalized.to_lowercase();
             if seen.insert(lower) {
-                queries.push(q);
+                deduped.push(normalized);
             }
         }
         let full_lower = trimmed.to_lowercase();
         if seen.insert(full_lower) {
-            queries.push(trimmed.to_string());
+            deduped.push(trimmed.to_string());
         }
 
         // Cap the number of sub-queries to avoid hammering the search
         // provider while still giving broad topics enough coverage.
-        queries.truncate(MAX_DECOMPOSED_QUERIES);
-        Ok(queries)
+        deduped.truncate(MAX_DECOMPOSED_QUERIES);
+        Ok(deduped)
     }
+}
+
+/// Split a topic on sentence boundaries, keeping parenthesised text intact.
+fn split_into_sentence_chunks(topic: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0usize;
+    let chars: Vec<char> = topic.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        current.push(c);
+        match c {
+            '(' | '[' | '{' => paren_depth += 1,
+            ')' | ']' | '}' if paren_depth > 0 => paren_depth -= 1,
+            _ => {}
+        }
+        if paren_depth == 0 && matches!(c, '.' | '?' | '!') {
+            // End of a sentence only if followed by whitespace or end of text.
+            if i + 1 == chars.len() || chars[i + 1].is_whitespace() {
+                let chunk = current.trim().to_string();
+                if !chunk.is_empty() {
+                    out.push(chunk);
+                }
+                current.clear();
+            }
+        }
+        i += 1;
+    }
+    let remainder = current.trim().to_string();
+    if !remainder.is_empty() {
+        out.push(remainder);
+    }
+    if out.is_empty() {
+        out.push(topic.to_string());
+    }
+    out
+}
+
+/// Split a sentence on " and ", " & ", " + " and "; " only when every
+/// resulting chunk is short enough to be a useful focused query. This keeps
+/// long prose sentences intact while expanding short conjunctions like
+/// "Rust async and Tokio runtime".
+fn split_short_conjunctions(sentence: &str) -> Vec<String> {
+    const MAX_CHUNK_WORDS: usize = 8;
+    let separators = [" and ", " & ", " + ", "; "];
+
+    // First try splitting on each separator.
+    let mut best: Option<Vec<String>> = None;
+    for sep in &separators {
+        let parts: Vec<String> = sentence
+            .split(sep)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(collapse_whitespace)
+            .collect();
+        if parts.len() > 1
+            && parts
+                .iter()
+                .all(|p| p.split_whitespace().count() <= MAX_CHUNK_WORDS)
+            && best.as_ref().is_none_or(|b| parts.len() > b.len())
+        {
+            best = Some(parts);
+        }
+    }
+
+    if let Some(parts) = best {
+        return parts;
+    }
+    vec![collapse_whitespace(sentence)]
+}
+
+/// If `topic` looks like a short comma-separated list of distinct phrases,
+/// return those phrases. Returns `None` for long prose or single-sentence
+/// topics so they are not over-split.
+fn split_comma_list(topic: &str) -> Option<Vec<String>> {
+    let comma_chunks: Vec<&str> = topic
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if comma_chunks.len() < 2 || comma_chunks.len() > 5 {
+        return None;
+    }
+    if topic.contains('.') || topic.contains('?') || topic.contains('!') || topic.contains(';') {
+        return None;
+    }
+    let total_words: usize = comma_chunks
+        .iter()
+        .map(|s| s.split_whitespace().count())
+        .sum();
+    if total_words > 25 {
+        return None;
+    }
+    Some(comma_chunks.into_iter().map(collapse_whitespace).collect())
+}
+
+/// Collapse runs of whitespace into a single space and trim.
+fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// LLM-backed query decomposer.
@@ -361,6 +479,10 @@ pub struct WebSearchHit {
     pub title: String,
     /// One- or two-line snippet (may be empty).
     pub snippet: String,
+    /// The actual sub-query string that returned this hit. Used by the
+    /// gatherer to compute a deterministic relevance note and to annotate the
+    /// source in the RESEARCH.md References Index.
+    pub matched_query: String,
 }
 
 /// Page body returned by a [`WebFetchTool`].
@@ -418,6 +540,16 @@ pub enum GatherEvent {
         /// Sub-queries that will be issued to the search tool.
         queries: Vec<String>,
     },
+    /// A single candidate page was fetched and captured as a source.
+    /// Emitted inline as each fetch succeeds so the UI can show
+    /// successfully retrieved URLs as they arrive, rather than only
+    /// seeing failures during the gather and successes at the end.
+    SourceCaptured {
+        /// URL of the captured page.
+        url: String,
+        /// Page title (may be empty).
+        title: String,
+    },
     /// The underlying search tool returned an error.
     SearchFailed {
         /// Error message from the search tool.
@@ -449,23 +581,32 @@ pub struct WebGatherer {
     search: Arc<dyn WebSearchTool>,
     fetch: Arc<dyn WebFetchTool>,
     decomposer: Option<Arc<dyn QueryDecomposer>>,
+    /// Upper bound on the number of concurrent page fetches issued during the
+    /// capture phase of [`gather_with_observer`]. Defaults to
+    /// [`DEFAULT_FETCH_CONCURRENCY`]; override via [`with_fetch_concurrency`].
+    fetch_concurrency: usize,
 }
 
 impl std::fmt::Debug for WebGatherer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebGatherer")
             .field("has_decomposer", &self.decomposer.is_some())
+            .field("fetch_concurrency", &self.fetch_concurrency)
             .finish_non_exhaustive()
     }
 }
 
 impl WebGatherer {
     /// Construct a new gatherer from a search tool and a fetch tool.
+    ///
+    /// The fetch-phase concurrency defaults to [`DEFAULT_FETCH_CONCURRENCY`]
+    /// (10); override it with [`WebGatherer::with_fetch_concurrency`].
     pub fn new(search: Arc<dyn WebSearchTool>, fetch: Arc<dyn WebFetchTool>) -> Self {
         Self {
             search,
             fetch,
             decomposer: None,
+            fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
         }
     }
 
@@ -474,6 +615,20 @@ impl WebGatherer {
     /// combined results.
     pub fn with_decomposer(mut self, decomposer: Arc<dyn QueryDecomposer>) -> Self {
         self.decomposer = Some(decomposer);
+        self
+    }
+
+    /// Override the fetch-phase concurrency limit.
+    ///
+    /// Controls how many candidate page fetches are issued in parallel during
+    /// [`gather_with_observer`].  Values of `0` are clamped up to `1` so the
+    /// stream always makes progress.  Larger values reduce wall-clock latency
+    /// when a search returns many hits, at the cost of more in-flight HTTP
+    /// connections and memory.  The default is [`DEFAULT_FETCH_CONCURRENCY`]
+    /// (10).
+    #[must_use]
+    pub fn with_fetch_concurrency(mut self, n: usize) -> Self {
+        self.fetch_concurrency = n.max(1);
         self
     }
 
@@ -505,6 +660,7 @@ impl WebGatherer {
             published_at: page.published_at,
             body_path: web_body_path(0),
             body,
+            relevance: "User-supplied seed URL".into(),
         };
         Ok((source, page))
     }
@@ -533,9 +689,15 @@ impl WebGatherer {
     ///
     /// When a decomposer is configured the topic is first split into focused
     /// sub-queries; each sub-query is issued in parallel, results are
-    /// deduplicated by URL, and up to `max_results` unique pages are
-    /// fetched.  The returned [`GatherResult`] lists the sub-queries that
-    /// were used so the caller can persist them in `RESEARCH.md`.
+    /// deduplicated by URL, and up to `max_results` unique pages are fetched
+    /// **concurrently** up to [`WebGatherer::fetch_concurrency`] at a time
+    /// (default [`DEFAULT_FETCH_CONCURRENCY`], 10).  [`GatherEvent`]
+    /// diagnostics (`SourceCaptured` / `FetchFailed`) fire in fetch-completion
+    /// order so the UI can render each page as soon as it arrives; the returned
+    /// `sources` vector is re-sorted into the original search-ranking order so
+    /// the `web-NN.md` supporting-file names track hit position.  The returned
+    /// [`GatherResult`] lists the sub-queries that were used so the caller can
+    /// persist them in `RESEARCH.md`.
     pub async fn gather_with_observer(
         &self,
         topic: &str,
@@ -604,9 +766,10 @@ impl WebGatherer {
                 .unwrap_or_else(|| topic.to_string());
             match result {
                 Ok(hits) => {
-                    for hit in hits {
+                    for mut hit in hits {
                         let url_key = hit.url.to_lowercase();
                         if seen_urls.insert(url_key) {
+                            hit.matched_query = query.clone();
                             hits_by_url.push((query.clone(), hit));
                         }
                     }
@@ -639,10 +802,31 @@ impl WebGatherer {
             });
         }
 
-        // Fetch each unique candidate in order until we have `max_results`.
-        let mut sources = Vec::with_capacity(hits_by_url.len().min(max_results));
-        for (index, (query, hit)) in hits_by_url.into_iter().enumerate().take(max_results) {
-            match self.fetch.fetch(&hit.url).await {
+        // Fetch each unique candidate concurrently up to `fetch_concurrency`
+        // at a time.  `SourceCaptured` / `FetchFailed` events fire in
+        // completion order (so the UI renders pages as they arrive); the
+        // collected `(index, Option<Source>)` pairs are re-sorted into the
+        // original search-ranking order afterwards so `web-NN.md` supporting
+        // file names track hit position rather than completion timing.
+        let fetch_concurrency = self.fetch_concurrency.max(1);
+        let fetch_tool = self.fetch.clone();
+        let candidates: Vec<(usize, String, WebSearchHit)> = hits_by_url
+            .into_iter()
+            .take(max_results)
+            .enumerate()
+            .map(|(index, (query, hit))| (index, query, hit))
+            .collect();
+        let fetch_futures = candidates.into_iter().map(|(index, query, hit)| {
+            let fetch_tool = fetch_tool.clone();
+            async move {
+                let result = fetch_tool.fetch(&hit.url).await;
+                (index, query, hit, result)
+            }
+        });
+        let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
+        let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
+        while let Some((index, query, hit, result)) = stream.next().await {
+            match result {
                 Ok(page) => {
                     let title = if page.title.is_empty() {
                         hit.title
@@ -651,22 +835,34 @@ impl WebGatherer {
                     };
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
+                    let relevance = compute_relevance_note(&query, &title, &hit.snippet, &page.url);
                     tracing::info!(
                         query = %query,
                         url = %page.url,
                         title = %title,
                         body_path = %body_path.display(),
                         body_chars = body.chars().count(),
+                        relevance = %relevance,
                         "research: captured web source"
                     );
-                    sources.push(Source::Web {
-                        url: page.url,
-                        title,
-                        captured_at: Utc::now(),
-                        published_at: page.published_at,
-                        body_path,
-                        body,
-                    });
+                    if let Some(obs) = observer {
+                        obs.on_event(GatherEvent::SourceCaptured {
+                            url: page.url.clone(),
+                            title: title.clone(),
+                        });
+                    }
+                    collected.push((
+                        index,
+                        Some(Source::Web {
+                            url: page.url,
+                            title,
+                            captured_at: Utc::now(),
+                            published_at: page.published_at,
+                            body_path,
+                            body,
+                            relevance,
+                        }),
+                    ));
                 }
                 Err(e) => {
                     if let Some(obs) = observer {
@@ -676,9 +872,14 @@ impl WebGatherer {
                         });
                     }
                     tracing::warn!(query = %query, url = %hit.url, error = %e, "research: webfetch failed; skipping");
+                    collected.push((index, None));
                 }
             }
         }
+        // Restore search-ranking order so `web-NN.md` numbers track hit
+        // position rather than fetch-completion timing.
+        collected.sort_by_key(|(index, _)| *index);
+        let sources: Vec<Source> = collected.into_iter().filter_map(|(_, src)| src).collect();
 
         tracing::info!(
             count = sources.len(),
@@ -686,6 +887,72 @@ impl WebGatherer {
         );
         Ok(GatherResult { queries, sources })
     }
+}
+
+/// Compute a deterministic relevance note for a captured web source.
+///
+/// The score is based only on the search query that produced the hit and the
+/// hit's title, snippet, and URL domain, so it adds zero LLM cost and is fully
+/// reproducible. It returns a short human-readable string like:
+///
+/// - "High — title + snippet match query"
+/// - "Medium — snippet matches query"
+/// - "Low — weak match"
+/// - "Very high — exact title match"
+fn compute_relevance_note(query: &str, title: &str, snippet: &str, url: &str) -> String {
+    let query_lc = query.to_lowercase();
+    let query_terms: Vec<String> = query_lc
+        .split_whitespace()
+        .filter(|t| t.len() > 2 || t.chars().any(|c| c.is_alphabetic()))
+        .map(|t| t.to_string())
+        .collect();
+    if query_terms.is_empty() {
+        return "Match score unavailable".into();
+    }
+
+    let hay = format!(
+        "{} {} {}",
+        title.to_lowercase(),
+        snippet.to_lowercase(),
+        url.to_lowercase()
+    );
+    let mut hits = 0usize;
+    let mut title_hits = 0usize;
+    let mut snippet_hits = 0usize;
+    let title_lc = title.to_lowercase();
+    let snippet_lc = snippet.to_lowercase();
+    for term in &query_terms {
+        if hay.contains(term) {
+            hits += 1;
+            if title_lc.contains(term) {
+                title_hits += 1;
+            }
+            if snippet_lc.contains(term) {
+                snippet_hits += 1;
+            }
+        }
+    }
+    let ratio = hits as f64 / query_terms.len() as f64;
+
+    if !title.is_empty() && title_lc == query.to_lowercase() {
+        return "Very high — exact title match".into();
+    }
+    if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
+        return "High — title + snippet match query".into();
+    }
+    if ratio >= 0.6 && title_hits > 0 {
+        return "High — title matches query".into();
+    }
+    if ratio >= 0.6 && snippet_hits > 0 {
+        return "Medium-high — snippet matches query".into();
+    }
+    if ratio >= 0.45 {
+        return "Medium — partial query match".into();
+    }
+    if ratio >= 0.2 {
+        return "Low — weak query match".into();
+    }
+    "Very low — no clear query match".into()
 }
 
 /// Compute the zero-padded supporting-file path for the Nth web source.
@@ -716,7 +983,13 @@ mod tests {
             _max_results: usize,
         ) -> anyhow::Result<Vec<WebSearchHit>> {
             self.calls.lock().unwrap().push(query.to_string());
-            Ok(self.hits.clone())
+            // Tag each returned hit with the query that produced it so the
+            // gatherer's relevance computation has realistic metadata.
+            let mut out = self.hits.clone();
+            for hit in &mut out {
+                hit.matched_query = query.to_string();
+            }
+            Ok(out)
         }
     }
 
@@ -803,16 +1076,19 @@ mod tests {
                 url: "https://a.example".into(),
                 title: "A".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://b.example".into(),
                 title: "B".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://c.example".into(),
                 title: "C".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -878,11 +1154,13 @@ mod tests {
                 url: "https://ok".into(),
                 title: "OK".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -913,16 +1191,19 @@ mod tests {
                 url: "https://1".into(),
                 title: "1".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://2".into(),
                 title: "2".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://3".into(),
                 title: "3".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1050,11 +1331,13 @@ mod tests {
                 url: "https://ok".into(),
                 title: "OK".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
                 snippet: "".into(),
+                matched_query: "".into(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1129,6 +1412,7 @@ mod tests {
                     url: "https://a.example".into(),
                     title: "A".into(),
                     snippet: "".into(),
+                    matched_query: "".into(),
                 }],
             ),
             (
@@ -1138,11 +1422,13 @@ mod tests {
                         url: "https://a.example".into(), // duplicate URL
                         title: "A2".into(),
                         snippet: "".into(),
+                        matched_query: "".into(),
                     },
                     WebSearchHit {
                         url: "https://b.example".into(),
                         title: "B".into(),
                         snippet: "".into(),
+                        matched_query: "".into(),
                     },
                 ],
             ),
@@ -1314,5 +1600,140 @@ mod tests {
         assert!(queries.contains(&"Rust async".to_string()));
         assert!(queries.contains(&"Tokio runtime".to_string()));
         assert!(queries.contains(&"Rust async and Tokio runtime".to_string()));
+    }
+
+    /// A fetch tool that sleeps for a fixed duration before returning, and
+    /// tracks the maximum number of concurrently in-flight `fetch` calls via
+    /// an [`AtomicUsize`].
+    struct ConcurrencyTrackingFetch {
+        delay: std::time::Duration,
+        in_flight: Arc<std::sync::atomic::AtomicUsize>,
+        max_in_flight: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WebFetchTool for ConcurrencyTrackingFetch {
+        async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
+            let prev = self
+                .in_flight
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Track the high-water mark of concurrent in-flight fetches.
+            let now = prev + 1;
+            let mut max = self.max_in_flight.load(std::sync::atomic::Ordering::SeqCst);
+            while now > max {
+                match self.max_in_flight.compare_exchange(
+                    max,
+                    now,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(actual) => max = actual,
+                }
+            }
+            tokio::time::sleep(self.delay).await;
+            self.in_flight
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(WebFetchedPage {
+                published_at: None,
+                url: _url.to_string(),
+                title: format!("title-{_url}"),
+                body: format!("body-{_url}"),
+            })
+        }
+    }
+
+    /// `with_fetch_concurrency(0)` is clamped up to `1` so the stream always
+    /// makes progress; the field reflects the clamped value.
+    #[test]
+    fn with_fetch_concurrency_clamps_zero_to_one() {
+        let search: Arc<dyn WebSearchTool> = Arc::new(FakeSearch::default());
+        let fetch: Arc<dyn WebFetchTool> = Arc::new(ConcurrencyTrackingFetch {
+            delay: std::time::Duration::ZERO,
+            in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            max_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        let g = WebGatherer::new(search, fetch).with_fetch_concurrency(0);
+        assert_eq!(g.fetch_concurrency, 1);
+        let g = g.with_fetch_concurrency(7);
+        assert_eq!(g.fetch_concurrency, 7);
+    }
+
+    /// The fetch phase of [`WebGatherer::gather_with_observer`] issues up to
+    /// `fetch_concurrency` page fetches concurrently. With 6 candidate URLs
+    /// and `fetch_concurrency = 6`, all six fetches should be in flight at
+    /// once (high-water mark == 6); with `fetch_concurrency = 2` the
+    /// high-water mark is capped at 2.
+    #[tokio::test]
+    async fn gather_fetches_pages_concurrently_up_to_fetch_concurrency() {
+        let hits: Vec<WebSearchHit> = (0..6)
+            .map(|i| WebSearchHit {
+                url: format!("https://h{i}.example"),
+                title: format!("H{i}"),
+                snippet: String::new(),
+                matched_query: String::new(),
+            })
+            .collect();
+
+        // fetch_concurrency = 6 → high-water mark should reach 6.
+        let in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let max_in_flight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let search: Arc<dyn WebSearchTool> = Arc::new(FakeSearch {
+            hits: hits.clone(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let fetch: Arc<dyn WebFetchTool> = Arc::new(ConcurrencyTrackingFetch {
+            delay: std::time::Duration::from_millis(40),
+            in_flight,
+            max_in_flight: max_in_flight.clone(),
+        });
+        let g = WebGatherer::new(search, fetch).with_fetch_concurrency(6);
+        let sources = g.gather("topic", 6).await.unwrap();
+        assert_eq!(sources.len(), 6, "all six hits should be captured");
+        assert_eq!(
+            max_in_flight.load(std::sync::atomic::Ordering::SeqCst),
+            6,
+            "all 6 fetches should have been in flight simultaneously"
+        );
+
+        // fetch_concurrency = 2 → high-water mark should be capped at 2.
+        let in_flight2 = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let max_in_flight2 = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let search2: Arc<dyn WebSearchTool> = Arc::new(FakeSearch {
+            hits,
+            calls: Mutex::new(Vec::new()),
+        });
+        let fetch2: Arc<dyn WebFetchTool> = Arc::new(ConcurrencyTrackingFetch {
+            delay: std::time::Duration::from_millis(40),
+            in_flight: in_flight2,
+            max_in_flight: max_in_flight2.clone(),
+        });
+        let g2 = WebGatherer::new(search2, fetch2).with_fetch_concurrency(2);
+        let sources2 = g2.gather("topic", 6).await.unwrap();
+        assert_eq!(sources2.len(), 6);
+        let max2 = max_in_flight2.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            max2 <= 2,
+            "fetch_concurrency=2 should cap in-flight at 2, got {max2}"
+        );
+        assert_eq!(
+            max2, 2,
+            "with 6 hits and concurrency 2 the high-water mark should reach 2"
+        );
+    }
+
+    /// The default `fetch_concurrency` on a freshly-constructed
+    /// [`WebGatherer`] is [`DEFAULT_FETCH_CONCURRENCY`].
+    #[test]
+    fn default_fetch_concurrency_is_ten() {
+        let search: Arc<dyn WebSearchTool> = Arc::new(FakeSearch::default());
+        let fetch: Arc<dyn WebFetchTool> = Arc::new(ConcurrencyTrackingFetch {
+            delay: std::time::Duration::ZERO,
+            in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            max_in_flight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        });
+        let g = WebGatherer::new(search, fetch);
+        assert_eq!(g.fetch_concurrency, DEFAULT_FETCH_CONCURRENCY);
+        assert_eq!(DEFAULT_FETCH_CONCURRENCY, 10);
     }
 }

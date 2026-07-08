@@ -13,6 +13,7 @@ use serde_json::json;
 mod mock_storage;
 use mock_storage::MockStorage;
 
+/// In-memory mock storage for testing.
 fn ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
     ToolContext {
         storage: Some(storage),

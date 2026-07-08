@@ -333,6 +333,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::ModelDownloadFinished { .. } => "model_download_finished",
         Event::CompressionStarted { .. } => "compression_started",
         Event::CompressionFinished { .. } => "compression_finished",
+        Event::OpenResearchView { .. } => "open_research_view",
     }
 }
 // ── Public API ───────────────────────────────────────────────────────────
@@ -932,6 +933,15 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "compressed_tokens": compressed_tokens,
             "compression_ratio": compression_ratio,
             "did_compress": did_compress,
+        })),
+        Event::OpenResearchView {
+            name,
+            path,
+            markdown,
+        } => to_data(&serde_json::json!({
+            "name": name,
+            "path": path,
+            "markdown": markdown,
         })),
     };
     (name, data)

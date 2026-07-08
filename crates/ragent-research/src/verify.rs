@@ -166,6 +166,7 @@ mod tests {
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: body.to_string(),
+            relevance: String::new(),
         }
     }
 

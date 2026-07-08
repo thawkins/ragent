@@ -23,7 +23,7 @@ use support::setup_workspace;
 // ── Helpers ───────────────────────────────────────────────────────────────
 
 fn team_dir_for(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    dir.join(".ragent/teams").join(name)
+    dir.join(name)
 }
 
 fn make_ctx(
@@ -155,7 +155,7 @@ async fn test_team_assign_task_pushs_notification_to_assignee_mailbox() {
     // `{team_dir}/tasks.json`, so we must pass the *team* directory, not the
     // workspace root.
     use ragent_team::team::{Task, TaskStore};
-    let team_dir = dir.join(".ragent/teams").join("assign-team");
+    let team_dir = dir.join("assign-team");
     let task_store = TaskStore::open(&team_dir).expect("open task store");
     task_store
         .add_task(Task::new("task-001", "Write tests"))
@@ -195,7 +195,7 @@ async fn test_team_assign_task_rejects_dead_assignee() {
     add_member(&mut store, "ghost", "tm-001", MemberStatus::Stopped);
 
     use ragent_team::team::{Task, TaskStore};
-    let team_dir = dir.join(".ragent/teams").join("assign-dead-team");
+    let team_dir = dir.join("assign-dead-team");
     let task_store = TaskStore::open(&team_dir).expect("open task store");
     task_store
         .add_task(Task::new("task-001", "Ghost work"))

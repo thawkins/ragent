@@ -206,6 +206,7 @@ impl App {
             input_area: Rect::default(),
             teams_area: Rect::default(),
             output_view_area: Rect::default(),
+            research_view_area: Rect::default(),
             agents_button_area: Rect::default(),
             teams_button_area: Rect::default(),
             show_agents_window: false,
@@ -257,6 +258,7 @@ impl App {
             swarm_result: Arc::new(std::sync::Mutex::new(None)),
             bench_result: Arc::new(std::sync::Mutex::new(None)),
             output_view: None,
+            research_view: None,
             active_bench_task_id: None,
             active_bench_summary: None,
             active_bench_started_at: None,
@@ -311,7 +313,7 @@ impl App {
             config_paths: app_config.config_paths.clone(),
             router_enabled: false,
             router_current_tier: None,
-            research_progress: None,
+            research_progress: Vec::new(),
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {

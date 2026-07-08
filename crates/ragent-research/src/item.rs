@@ -50,6 +50,7 @@ use crate::status::ResearchStatus;
 ///   "created/modified" frontmatter fields.
 /// - `sources` — the FR-011 References Index rows (empty until gathering
 ///   has captured at least one source).
+/// - `output_format` — the output artifact requested via `--format` (FR-012).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResearchItem {
     /// Validated URL-safe identifier; also the directory name under `research/`.
@@ -70,6 +71,10 @@ pub struct ResearchItem {
     /// the `RESEARCH.md` Search Queries section survives reloads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queries: Vec<String>,
+    /// Output artifact requested via `--format` (FR-012). Persisted in frontmatter
+    /// so the rendered document reflects the original request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
 }
 
 impl ResearchItem {
@@ -90,6 +95,7 @@ impl ResearchItem {
             modified_at: now,
             sources: Vec::new(),
             queries: Vec::new(),
+            output_format: None,
         }
     }
 
@@ -191,6 +197,9 @@ impl ResearchItem {
                     q.replace(['\n', '\r'], " ").replace('\"', "\\\"")
                 ));
             }
+        }
+        if let Some(fmt) = &self.output_format {
+            out.push_str(&format!("requested_format: {fmt}\n"));
         }
         out.push_str("---\n\n");
         out
@@ -323,6 +332,7 @@ impl ResearchItem {
         };
         // `sources` is count-only; the IO layer loads the real list.
         let _ = fields.remove("sources");
+        let output_format = fields.remove("requested_format");
 
         Ok(Self {
             name,
@@ -333,6 +343,7 @@ impl ResearchItem {
             modified_at,
             sources: Vec::new(),
             queries,
+            output_format,
         })
     }
 }

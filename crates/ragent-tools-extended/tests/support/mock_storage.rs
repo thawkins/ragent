@@ -32,6 +32,7 @@ impl MockStorage {
     ///
     /// Convenience method used by tests that need pre-populated state without
     /// going through the `create_todo` trait method.
+    #[allow(dead_code)]
     pub fn seed(&self, id: &str, session_id: &str, title: &str, status: &str) {
         let now = chrono::Utc::now().to_rfc3339();
         let row = TodoRow {

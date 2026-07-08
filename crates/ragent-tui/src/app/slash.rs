@@ -4259,10 +4259,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 Err(e) => {
                                     event_bus.publish(ragent_agent::event::Event::TextDelta {
                                         session_id,
-                                        text: format!(
-                                            "From: /spec delete\n\n**Error:** {}",
-                                            e
-                                        ),
+                                        text: format!("From: /spec delete\n\n**Error:** {}", e),
                                     });
                                 }
                             }

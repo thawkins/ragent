@@ -20,8 +20,8 @@
 //! background tasks.
 
 use crate::document::{
-    AssembledDocument, ResearchDocument, assemble_document, mark_complete, mark_in_progress,
-    render_skeleton, render_supporting_file,
+    AssembledDocument, ResearchDocument, assemble_document, mark_in_progress, render_skeleton,
+    render_supporting_file,
 };
 use crate::io::{IndexEntry, ResearchIo, ResearchIoError};
 use crate::item::ResearchItem;
@@ -74,6 +74,9 @@ pub enum ResearchError {
         /// URL that produced an empty or chrome-only body.
         url: String,
     },
+    /// The iterative research engine failed during a multi-iteration pass.
+    #[error("iterative research engine failed: {0}")]
+    EngineRunFailed(String),
 }
 
 /// Result alias for [`ResearchManager`].
@@ -339,9 +342,20 @@ impl ResearchManager {
 
     /// Mark the item `Complete` and persist.
     pub async fn complete_gathering(&self, name: &str) -> Result<()> {
-        let mut item = self.show(name).await?;
-        mark_complete(&mut item);
-        self.persist_frontmatter(&item).await?;
+        let name = ResearchName::try_new(name)?;
+        let path = ResearchIo::research_md_path(&self.research_root, &name);
+        let content = ResearchIo::read_file(&path).await?;
+        // Preserve the full frontmatter block that `write_document` produced;
+        // only replace the status line. Re-rendering from a re-read item would
+        // drop the `sources` count because `from_frontmatter` treats it as a
+        // count-only hint and initialises `sources` to an empty vec.
+        let new_content = replace_frontmatter_status_line(&content, ResearchStatus::Complete);
+        ResearchIo::atomic_write(&path, &new_content).await?;
+        tracing::info!(
+            name = %name,
+            status = %ResearchStatus::Complete.as_str(),
+            "research: marked item complete"
+        );
         self.refresh_index().await?;
         Ok(())
     }
@@ -484,6 +498,49 @@ pub fn suggest_closest_from(candidates: &[String], target: &str) -> String {
     picks.join(", ")
 }
 
+/// Replace the `status:` line inside an existing `RESEARCH.md` frontmatter
+/// block while keeping every other line (including the `sources:` count and
+/// `queries:` list) intact. Falls back to rendering a fresh frontmatter if the
+/// file has no frontmatter block.
+fn replace_frontmatter_status_line(content: &str, status: ResearchStatus) -> String {
+    let (fm_block, body) = ResearchIo::split_frontmatter(content);
+    if fm_block.is_empty() {
+        let mut placeholder = ResearchItem::new(
+            ResearchName::new("unknown").unwrap_or(ResearchName::new("x").unwrap()),
+            "",
+            "",
+        );
+        placeholder.set_status(status);
+        return format!("{}{}", placeholder.render_frontmatter(), body);
+    }
+
+    let status_line = format!("status: {}", status.as_str());
+    let mut replaced = false;
+    let updated_fm: Vec<String> = fm_block
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("status:") {
+                replaced = true;
+                // Preserve any inline comment that might follow the status value.
+                let rest = trimmed.trim_start_matches("status:").trim_start();
+                let comment_start = rest.find('#').unwrap_or(rest.len());
+                let comment = &rest[comment_start..];
+                if comment.is_empty() {
+                    status_line.clone()
+                } else {
+                    format!("{} {}", status_line, comment.trim())
+                }
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    let updated_fm = updated_fm.join("\n");
+    format!("---\n{}\n---\n\n{}", updated_fm, body)
+}
+
 /// Levenshtein distance implemented locally so we don't pull in extra deps
 /// just for one helper.
 fn lev(a: &str, b: &str) -> usize {
@@ -569,6 +626,7 @@ pub fn render_document_for(
         open_questions: Vec::new(),
         template_body: None,
         decomposed_queries: queries.to_vec(),
+        output_format: crate::run_config::OutputFormat::Report,
     };
     assemble_document(&doc)
 }
@@ -834,6 +892,7 @@ mod tests {
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
+            relevance: String::new(),
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -869,6 +928,7 @@ mod tests {
             captured_at: Utc::now(),
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
+            relevance: String::new(),
         });
         let doc = ResearchDocument {
             item,
@@ -878,6 +938,7 @@ mod tests {
             open_questions: Vec::new(),
             template_body: None,
             decomposed_queries: Vec::new(),
+            output_format: crate::run_config::OutputFormat::Report,
         };
         mgr.write_document(&doc).await.unwrap();
         let path = ResearchIo::research_md_path(tmp.path(), &name);
@@ -887,5 +948,59 @@ mod tests {
         // Supporting file must exist on disk.
         let supp = ResearchIo::source_body_path(tmp.path(), &name, "web", 1);
         assert!(supp.is_file());
+    }
+}
+
+#[cfg(test)]
+mod frontmatter_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn complete_gathering_preserves_sources_count_and_queries() {
+        let tmp = TempDir::new().unwrap();
+        let mgr = ResearchManager::new(tmp.path());
+        mgr.create("rust-async", "Rust Async", "topic")
+            .await
+            .unwrap();
+        let mut item = mgr.show("rust-async").await.unwrap();
+        item.add_source(Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
+            relevance: String::new(),
+        });
+        item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
+        let doc = ResearchDocument {
+            item,
+            summary: "summary".into(),
+            findings: Vec::new(),
+            cross_references: Vec::new(),
+            open_questions: Vec::new(),
+            template_body: None,
+            decomposed_queries: vec!["Rust async".into(), "Tokio runtime".into()],
+            output_format: crate::run_config::OutputFormat::Report,
+        };
+        mgr.write_document(&doc).await.unwrap();
+        mgr.complete_gathering("rust-async").await.unwrap();
+
+        let path =
+            ResearchIo::research_md_path(tmp.path(), &ResearchName::new("rust-async").unwrap());
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(
+            content.contains("sources: 1 # see sources/ subdirectory"),
+            "frontmatter sources count should be preserved after complete_gathering; got:\n{content}"
+        );
+        assert!(
+            content.contains("queries:\n  - \"Rust async\"\n  - \"Tokio runtime\""),
+            "frontmatter queries list should be preserved after complete_gathering; got:\n{content}"
+        );
+        assert!(
+            content.contains("status: complete"),
+            "status should be updated to complete; got:\n{content}"
+        );
     }
 }

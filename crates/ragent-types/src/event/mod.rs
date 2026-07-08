@@ -625,6 +625,16 @@ pub enum Event {
         cwd: String,
     },
 
+    /// Open the `/research open` markdown viewer in the TUI.
+    OpenResearchView {
+        /// Research item name displayed in the title.
+        name: String,
+        /// Absolute path to the RESEARCH.md file.
+        path: std::path::PathBuf,
+        /// Markdown body (frontmatter already stripped).
+        markdown: String,
+    },
+
     // ── User input events ────────────────────────────────────────────────
     /// The user submitted generic free-text input to the running session.
     UserInput {
@@ -757,6 +767,7 @@ impl Event {
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
+            Self::OpenResearchView { .. } => "OpenResearchView",
             Self::UserInput { .. } => "UserInput",
             Self::MemoryStored { .. } => "MemoryStored",
             Self::MemoryRecalled { .. } => "MemoryRecalled",
@@ -830,6 +841,7 @@ impl Event {
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }
+            Self::OpenResearchView { .. } => None,
             Self::MemoryStored { session_id, .. }
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }
