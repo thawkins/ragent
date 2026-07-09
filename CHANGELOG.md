@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.142
+
+### Fixed — Edit/MultiEdit tool matcher reliability
+
+- **Single-file `edit` now uses the tolerant seven-pass matcher.** It accepts common
+  whitespace and line-ending differences (CRLF vs LF, trailing/leading spaces,
+  indentation drift) while still requiring a unique match. This exceeds the strict
+  byte-for-byte behavior of Claude Code's `Edit` tool, which is known to fail
+  frequently on real-world files.
+- **`multi_edit` batch normalization fallback.** Each batch edit tries strict exact
+  match first; if that fails with `NotFound`, a controlled fallback strips CRLF and
+  trailing whitespace per line and retries. Indentation and internal whitespace
+  are preserved so batch edits remain deterministic.
+- **Improved match-failure diagnostics.** Error messages now report the last
+  attempted tolerance pass (e.g. `trailing-ws`, `batch-normalized`) and the closest
+  near-match line when one can be identified, giving the model concrete guidance.
+- **Dry-run mode for `edit` and `multi_edit`.** Pass `"dry_run": true` to resolve
+  matches and preview snippets without writing any files.
+- **Updated agent instructions and `AGENTS.md`** to describe the tolerant matching,
+  recommend context blocks and `dry_run`, and document the `write`-fallback pattern.
+- **Amended `specs/editrenewal/SPEC.md`** (FR-004, FR-009, FR-011) to reflect the
+  new matcher behavior.
+- **Files changed:** `crates/ragent-tools-core/src/edit.rs`,
+  `crates/ragent-tools-core/src/multiedit.rs`,
+  `crates/ragent-tools-core/src/replace.rs`,
+  `crates/ragent-tools-core/tests/test_edit_integration.rs`,
+  `crates/ragent-tools-core/tests/test_multiedit.rs`,
+  `crates/ragent-tools-core/tests/test_multiedit_helpers.rs`,
+  `crates/ragent-agent/src/agent/mod.rs`,
+  `assets/config/AGENTS.md`, `specs/editrenewal/SPEC.md`.
+
 ## Version: 0.1.0-alpha.141
 
 ### Added — Research findings now render with a headline

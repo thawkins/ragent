@@ -168,11 +168,10 @@ async fn test_json_order_independence() {
 /// the file byte-for-byte (here: the file has trailing spaces and CRLF that
 /// the needle omits) must be rejected, and no files may be modified.
 #[tokio::test]
-async fn test_strict_match_rejects_whitespace_mismatch() {
+async fn test_batch_normalization_accepts_crlf_and_trailing_space_mismatch() {
     let tmp = TempDir::new().unwrap();
     // File has trailing spaces the needle omits, and uses CRLF for one line.
     let path = write_file(tmp.path(), "a.rs", "fn a() {  \r\n    bar  \n}\n");
-    let original = std::fs::read_to_string(&path).unwrap();
 
     let input = json!({
         "edits": [
@@ -180,10 +179,63 @@ async fn test_strict_match_rejects_whitespace_mismatch() {
         ]
     });
 
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("batch normalization should accept CRLF/trailing-space mismatch");
+    assert_eq!(out.content, "Applied 1 edit across 1 file");
+
+    let result = std::fs::read_to_string(&path).unwrap();
+    assert!(result.contains("baz"), "replacement should apply: {result}");
+}
+
+#[tokio::test]
+async fn test_batch_dry_run_previews_without_writing() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "alpha\n");
+    let p2 = write_file(tmp.path(), "b.rs", "beta\n");
+
+    let input = json!({
+        "dry_run": true,
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "b.rs", "old_string": "beta", "new_string": "BETA" }
+        ]
+    });
+
+    let out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("dry_run batch should validate");
+    assert!(out.content.starts_with("Would apply"));
+    let meta = out.metadata.unwrap();
+    assert_eq!(meta["dry_run"], true);
+    assert_eq!(meta["edits"], 2);
+
+    // No file was modified.
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\n");
+    assert_eq!(std::fs::read_to_string(&p2).unwrap(), "beta\n");
+}
+
+#[tokio::test]
+async fn test_batch_indentation_mismatch_still_rejected() {
+    let tmp = TempDir::new().unwrap();
+    // File uses 4-space indentation; needle omits indentation for the inner
+    // line. Batch normalization does NOT adjust leading whitespace, so this
+    // edit should fail.
+    let path = write_file(tmp.path(), "a.rs", "fn a() {\n    bar\n}\n");
+    let original = std::fs::read_to_string(&path).unwrap();
+
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "fn a() {\nbar\n}\n", "new_string": "fn a() {\nbaz\n}\n" }
+        ]
+    });
+
     let err = MultiEditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("strict matcher must reject whitespace-mismatched edit");
+        .expect_err("batch normalization must not adjust indentation");
     let msg = format!("{err}");
     assert!(
         msg.contains("Edit 0"),
@@ -194,12 +246,7 @@ async fn test_strict_match_rejects_whitespace_mismatch() {
         "error should say the string was not found: {msg}"
     );
 
-    // Atomicity: no file should have been modified.
-    assert_eq!(
-        std::fs::read_to_string(&path).unwrap(),
-        original,
-        "file must be unchanged when the batch is rejected"
-    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 }
 
 /// A batch edit whose `old_string` matches the file exactly (including

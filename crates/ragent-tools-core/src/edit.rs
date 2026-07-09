@@ -1,10 +1,11 @@
 //! Surgical text replacement tool for file editing.
 //!
-//! Provides [`EditTool`], the renewed single-file edit tool aligned with
-//! Claude Code's `Edit` semantics (editrenewal spec). It replaces exactly one
-//! occurrence of `old_string` with `new_string` in a file using **strict
-//! exact-match** replacement — whitespace, indentation, and line endings must
-//! match byte-for-byte.
+//! Provides [`EditTool`], the single-file edit tool. It replaces exactly one
+//! occurrence of `old_string` with `new_string` in a file using the same robust
+//! multi-pass matcher shared with `memory_replace`. The matcher tolerates
+//! common model-driven mismatches such as CRLF vs LF, trailing/leading
+//! whitespace, and indentation drift, while still requiring the match to be
+//! unique.
 //!
 //! # Parameter names (FR-001)
 //!
@@ -22,6 +23,15 @@
 //! - **Create**: `old_string` empty and the file does not exist → write
 //!   `new_string` to a new file. Rejected if the file already exists.
 //!
+//! # Matching (editrenewal FR-004 amended)
+//!
+//! `old_string` must match exactly once in the target file. The matcher
+//! attempts a cascade of passes (exact, CRLF-normalised, trailing-whitespace
+//! stripped, leading-whitespace re-applied, collapsed-whitespace, blank-line
+//! normalised, and final-newline normalised) before giving up. This makes the
+//! tool more forgiving than a strict byte-for-byte matcher while preserving
+//! the unique-match guarantee.
+//!
 //! # Stale-file detection (FR-003)
 //!
 //! When the session has recorded a read timestamp for `file_path` (via the
@@ -35,6 +45,19 @@
 //! On success the tool returns a `cat -n`-style snippet of the edited file
 //! with at least four lines of context before and after the change, clamped to
 //! the file boundaries.
+//!
+//! # Dry-run mode
+//!
+//! Pass `"dry_run": true` to resolve the match and preview the change without
+//! writing to disk. The response includes the same snippet metadata and a
+//! `dry_run` flag.
+//!
+//! # Claude Code compatibility note
+//!
+//! Claude Code's `Edit` tool uses strict exact byte-for-byte matching. ragent
+//! deliberately exceeds that behaviour: the same parameter contract is kept,
+//! but the matcher tolerates common whitespace differences that would cause
+//! Claude Code's `Edit` to fail (see `EDITFIX.md`).
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -42,7 +65,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::path_util::resolve_path;
-use super::replace::{FindError, find_exact_replacement_range};
+use super::replace::{find_replacement_range_diag, format_match_failure};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Minimum lines of context to show before and after the edited region in the
@@ -50,7 +73,8 @@ use super::{Tool, ToolContext, ToolOutput};
 const SNIPPET_CONTEXT_LINES: usize = 4;
 
 /// Replaces an exact, unique occurrence of `old_string` with `new_string` in a
-/// file, matching Claude Code `Edit` semantics.
+/// file, tolerating common whitespace and line-ending differences while still
+/// requiring a unique match.
 ///
 /// The search string must match exactly once; zero or multiple matches are
 /// treated as errors to prevent ambiguous edits. Supports create, update, and
@@ -67,11 +91,13 @@ impl Tool for EditTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "Replace exactly one occurrence of old_string with new_string in a file. \
-         old_string must match exactly once, byte-for-byte (including whitespace and \
-         indentation). Use an empty old_string with a non-existent file to create it; \
+         old_string must match exactly once in the file, but common whitespace \
+         differences (indentation, trailing/leading spaces, CRLF vs LF) are \
+         tolerated. Use an empty old_string with a non-existent file to create it; \
          an empty new_string deletes the matched text. Include 3–5 lines of context \
          around the change point so the match is unique. The result includes a \
-         line-numbered snippet of the edited region."
+         line-numbered snippet of the edited region. Pass dry_run: true to preview \
+         the change without writing to disk."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -84,11 +110,15 @@ impl Tool for EditTool {
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "Exact string to find and replace (must match exactly once, including whitespace). Empty string creates a new file."
+                    "description": "String to find and replace (must match exactly once in the file; common whitespace and line-ending differences are tolerated). Empty string creates a new file."
                 },
                 "new_string": {
                     "type": "string",
                     "description": "Replacement string. Empty string deletes the matched text."
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "If true, resolve the match and return a preview snippet without writing the file."
                 },
                 "path": {
                     "type": "string",
@@ -118,7 +148,7 @@ impl Tool for EditTool {
     /// Returns an error if:
     /// - The `file_path`, `old_string`, or `new_string` parameter is missing
     /// - The file cannot be read (file not found, permission denied, not UTF-8)
-    /// - `old_string` is not found in the file (FR-004)
+    /// - `old_string` is not found in the file under any tolerance pass (FR-004)
     /// - `old_string` matches multiple locations (FR-004, FR-005)
     /// - `old_string` and `new_string` are identical (FR-007)
     /// - A create is requested but the file already exists (FR-006)
@@ -141,6 +171,11 @@ impl Tool for EditTool {
 
         let used_legacy_params =
             !input["path"].is_null() || !input["old_str"].is_null() || !input["new_str"].is_null();
+
+        let dry_run = input
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
@@ -174,24 +209,31 @@ impl Tool for EditTool {
         // ── Stale-file detection (FR-003) ─────────────────────────────────────
         check_stale_file(&path, ctx)?;
 
-        // ── Strict exact-match replacement (FR-004, FR-005) ───────────────────
+        // ── Multi-pass tolerant replacement (FR-004, FR-005) ──────────────────
         let (start, end, effective_new_str) =
-            match find_exact_replacement_range(&content, old_string, new_string) {
+            match find_replacement_range_diag(&content, old_string, new_string) {
                 Ok(range) => range,
-                Err(FindError::NotFound) => bail!(
-                    "old_string not found in {}. \
-                     Strict exact match requires the string to occur verbatim, including \
-                     whitespace and indentation. Re-read the file and copy the exact text.",
-                    path.display()
-                ),
-                Err(FindError::MultipleMatches(n)) => bail!(
-                    "old_string found {} times in {}. \
-                     It must match exactly once. Add more surrounding context to the \
-                     old_string to make the match unique.",
-                    n,
-                    path.display()
-                ),
+                Err(diag) => bail!(format_match_failure(&diag, &path)),
             };
+
+        // ── Dry-run preview: resolve the match but do not write ────────────────
+        if dry_run {
+            let snippet = build_snippet(&content, start, end);
+            let old_lines = old_string.lines().count();
+            let new_lines = effective_new_str.lines().count();
+            let path_str = path.display().to_string();
+            return Ok(ToolOutput {
+                content: snippet.clone(),
+                metadata: Some(json!({
+                    "path": path_str,
+                    "dry_run": true,
+                    "old_lines": old_lines,
+                    "new_lines": new_lines,
+                    "lines": old_lines.max(new_lines),
+                    "snippet": snippet,
+                })),
+            });
+        }
 
         // ── Apply the replacement ─────────────────────────────────────────────
         let new_content = format!(
@@ -212,7 +254,8 @@ impl Tool for EditTool {
         // ── Build the result snippet (FR-008) ─────────────────────────────────
         let snippet = build_snippet(&new_content, start, start + effective_new_str.len());
 
-        let old_lines = old_string.lines().count();
+        // `old_string` may be the user-provided text; report the replaced byte span size.
+        let old_lines = content[start..end].lines().count().max(1);
         let new_lines = effective_new_str.lines().count();
         let lines_changed = old_lines.max(new_lines);
 
@@ -221,6 +264,7 @@ impl Tool for EditTool {
             "old_lines": old_lines,
             "new_lines": new_lines,
             "lines": lines_changed,
+            "dry_run": false,
             "snippet": snippet,
         });
 

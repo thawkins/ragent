@@ -90,24 +90,29 @@ pub enum FindDiagKind {
 pub struct FindDiag {
     /// What kind of failure occurred.
     pub kind: FindDiagKind,
+    /// Name of the last matching pass attempted before giving up.
+    pub pass: &'static str,
+    /// Best-effort 0-based line index of the closest near-match, if one could
+    /// be identified.
+    pub closest_line: Option<usize>,
 }
 
 impl FindDiag {
     /// Build a `NotFound` diagnostic.
-    pub(crate) fn not_found(_pass: &'static str, _closest_line: Option<usize>) -> Self {
+    pub fn not_found(pass: &'static str, closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::NotFound,
+            pass,
+            closest_line,
         }
     }
 
     /// Build a `MultipleMatches` diagnostic.
-    pub(crate) fn multiple(
-        _pass: &'static str,
-        count: usize,
-        _closest_line: Option<usize>,
-    ) -> Self {
+    pub fn multiple(pass: &'static str, count: usize, closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::MultipleMatches(count),
+            pass,
+            closest_line,
         }
     }
 }
@@ -119,6 +124,85 @@ impl From<FindDiag> for FindError {
             FindDiagKind::MultipleMatches(n) => FindError::MultipleMatches(n),
         }
     }
+}
+
+/// Format a [`FindDiag`] into an actionable error message.
+///
+/// The message names the file path, explains whether the needle was not found
+/// or matched multiple times, and — when available — reports the last
+/// tolerance pass attempted and the closest near-match line. This gives LLM
+/// callers concrete hints about how to fix their `old_string`.
+pub fn format_match_failure(diag: &FindDiag, path: &std::path::Path) -> String {
+    let closest_hint = diag
+        .closest_line
+        .map(|l| format!(" Closest near-match around line {}.", l + 1))
+        .unwrap_or_default();
+    match diag.kind {
+        FindDiagKind::NotFound => format!(
+            "old_string not found in {}. Last attempted match pass: '{}'{}. \
+             Common causes: indentation mismatch, trailing/leading whitespace, \
+             or CRLF vs LF line endings. Re-read the file and include 3–5 lines \
+             of context around the change point.",
+            path.display(),
+            diag.pass,
+            closest_hint,
+        ),
+        FindDiagKind::MultipleMatches(n) => format!(
+            "old_string found {} times in {}. It must match exactly once. \
+             Add more surrounding context to make the match unique.{}",
+            n,
+            path.display(),
+            closest_hint,
+        ),
+    }
+}
+
+/// Batch-edit normalization: CRLF → LF and trailing-whitespace stripped per
+/// line, but indentation and internal whitespace are preserved.
+///
+/// This is intentionally stricter than the full seven-pass matcher used by the
+/// single-file `edit` tool. It only fixes the two most common model-driven
+/// mismatches (CRLF and invisible trailing spaces) while keeping batch edits
+/// deterministic and easy to reason about.
+pub fn find_batch_normalized_replacement_range(
+    content: &str,
+    needle: &str,
+    new_str: &str,
+) -> Result<(usize, usize, String), FindError> {
+    let norm_content = strip_cr(content)
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let norm_needle = strip_cr(needle)
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if norm_needle.is_empty() {
+        return Err(FindError::NotFound);
+    }
+
+    let count = norm_content.matches(norm_needle.as_str()).count();
+    if count == 0 {
+        return Err(FindError::NotFound);
+    }
+    if count > 1 {
+        return Err(FindError::MultipleMatches(count));
+    }
+
+    let norm_start = norm_content.find(norm_needle.as_str()).unwrap();
+    let start_line = norm_content[..norm_start]
+        .chars()
+        .filter(|&c| c == '\n')
+        .count();
+    let end_line = start_line + norm_needle.lines().count();
+
+    let orig_start = byte_offset_of_line(content, start_line);
+    let orig_end = byte_offset_of_line(content, end_line);
+
+    Ok((orig_start, orig_end, new_str.to_string()))
 }
 
 /// Try to find the unique byte range `[start, end)` in `content` where `needle`
@@ -387,7 +471,7 @@ pub fn find_replacement_range_diag(
 }
 
 /// Remove all `\r` characters (handles both `\r\n` and lone `\r`).
-fn strip_cr(s: &str) -> String {
+pub(crate) fn strip_cr(s: &str) -> String {
     s.chars().filter(|&c| c != '\r').collect()
 }
 
@@ -442,7 +526,7 @@ fn closest_collapsed_line(content: &str, needle: &str) -> Option<usize> {
 }
 
 /// Strip trailing whitespace from every line and re-join with `\n`.
-fn strip_trailing_ws(s: &str) -> String {
+pub(crate) fn strip_trailing_ws(s: &str) -> String {
     s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
 }
 

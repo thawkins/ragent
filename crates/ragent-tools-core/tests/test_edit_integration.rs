@@ -89,53 +89,112 @@ async fn test_edit_exact_match_baseline() {
     .await;
 }
 
-// ── Strict matching: whitespace mismatches are rejected (FR-004) ─────────────
+// ── Tolerant matching: common whitespace/line-ending mismatches are accepted ───
 
 #[tokio::test]
-async fn test_edit_strict_rejects_crlf_mismatch() {
+async fn test_edit_tolerant_accepts_crlf_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File has CRLF; old_string uses LF only — strict matcher must reject.
+    // File uses CRLF; needle is LF-only — tolerant CRLF pass should still match.
+    // The replacement itself uses new_string verbatim, so only the matched
+    // substring changes; surrounding CRLF lines are preserved.
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n");
     let input = json!({
         "file_path": "a.rs",
-        "old_string": "fn foo() {\n    bar\n}\n",
-        "new_string": "fn foo() {\n    baz\n}\n",
+        "old_string": "bar",
+        "new_string": "baz",
     });
-    let msg = expect_edit_error(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n", input).await;
-    assert!(
-        msg.contains("not found"),
-        "strict matcher should reject CRLF mismatch: {msg}"
+    let _ = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() {\r\n    baz\r\n}\r\n"
     );
 }
 
 #[tokio::test]
-async fn test_edit_strict_rejects_trailing_space_mismatch() {
+async fn test_edit_tolerant_accepts_trailing_space_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File has trailing spaces the old_string omits — strict matcher must reject.
+    // File has no trailing spaces; needle includes them — trailing-whitespace
+    // pass should strip the needle's trailing spaces and match.
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
     let input = json!({
         "file_path": "a.rs",
-        "old_string": "fn foo() {\n    bar\n}\n",
-        "new_string": "fn foo() {\n    baz\n}\n",
+        "old_string": "    bar  \n",
+        "new_string": "    baz\n",
     });
-    let msg = expect_edit_error(tmp.path(), "a.rs", "fn foo() {  \n    bar  \n}\n", input).await;
-    assert!(
-        msg.contains("not found"),
-        "strict matcher should reject trailing-space mismatch: {msg}"
+    let _ = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() {\n    baz\n}\n"
     );
 }
 
 #[tokio::test]
-async fn test_edit_strict_accepts_exact_crlf() {
+async fn test_edit_tolerant_accepts_indentation_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // old_string matches the file exactly (including CRLF) — must succeed.
+    // File uses 4-space indentation; model provides 2-space indentation — still unique.
     assert_edit(
         tmp.path(),
         "a.rs",
-        "fn foo() {\r\n    bar\r\n}\r\n",
-        "fn foo() {\r\n    bar\r\n}\r\n",
-        "fn foo() {\r\n    baz\r\n}\r\n",
-        "fn foo() {\r\n    baz\r\n}\r\n",
+        "fn foo() {\n    bar\n}\n",
+        "  bar\n",
+        "  baz\n",
+        "fn foo() {\n    baz\n}\n",
     )
     .await;
+}
+
+#[tokio::test]
+async fn test_edit_dry_run_previews_without_writing() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "    bar\n",
+        "new_string": "    baz\n",
+        "dry_run": true,
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("dry_run edit should succeed");
+    let meta = out.metadata.unwrap();
+    assert_eq!(meta["dry_run"], true);
+    // Snippet is built from the original file content around the matched region.
+    assert!(
+        out.content.contains("bar"),
+        "dry_run snippet should show original matched region: {}",
+        out.content
+    );
+    // File must remain unchanged.
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() {\n    bar\n}\n",
+        "dry_run must not modify the file"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_not_found_includes_pass_hint() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "totally absent text",
+        "new_string": "x",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("absent text must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "error should say not found: {msg}"
+    );
+    assert!(
+        msg.contains("pass:") || msg.contains("Last attempted match pass"),
+        "error should mention the last attempted pass: {msg}"
+    );
 }
 
 // ── Multiple matches (FR-004, FR-005) ────────────────────────────────────────

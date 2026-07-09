@@ -1,20 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.141
+## Current Version: 0.1.0-alpha.142
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.142`. Fix Edit/MultiEdit tool matcher reliability.
+
+## Previous Version: 0.1.0-alpha.141
 
 ### Changed
 
 - **Workspace version** — Bumped to `0.1.0-alpha.141`. Update research to add titles to findings.
-
-## Previous Version: 0.1.0-alpha.140
-
-### Changed
-
-- **Workspace version** — Bumped to `0.1.0-alpha.138`. Continued code
-  duplication removal tracked in `DUPPLAN.md`, following the
-  `0.1.0-alpha.137` milestone which reduced `cargo dupes` exact-duplicate
-  groups from 385 → 340 and exact-dup lines from 15,573 → 11,775 across
-  milestones A–K.
 
 ## Previous Version: 0.1.0-alpha.137
 

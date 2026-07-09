@@ -4,13 +4,20 @@
 //! operations across one or more files atomically. All edits are validated
 //! before any files are written — if any match fails, no files are modified.
 //!
-//! # Matching (editrenewal FR-004 / FR-009)
+//! # Matching (editrenewal FR-004 / FR-009, amended)
 //!
-//! Each edit uses the **strict exact-match** matcher
-//! ([`find_exact_replacement_range`]): `old_string` must occur exactly once
-//! in the target file, byte-for-byte including whitespace and indentation.
-//! Whitespace-tolerant matching is intentionally NOT applied so that batch
-//! edits behave identically to the renewed single-file `edit` tool.
+//! Each edit first attempts **strict exact-match** replacement
+//! ([`find_exact_replacement_range`]). If the strict match fails with
+//! `NotFound`, a controlled batch normalization fallback strips CRLF and
+//! trailing whitespace per line and tries again. Indentation and internal
+//! whitespace are preserved so batch edits remain deterministic and easy to
+//! reason about. If the fallback also fails, the edit is rejected and no files
+//! are modified.
+//!
+//! # Dry-run mode
+//!
+//! Pass `"dry_run": true` to validate every edit and preview the changes
+//! without writing any files.
 //!
 //! # Parameter names (editrenewal FR-009)
 //!
@@ -35,7 +42,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::path_util::resolve_path;
-use super::replace::{FindError, find_exact_replacement_range};
+use super::replace::{
+    FindDiag, FindError, find_batch_normalized_replacement_range, find_exact_replacement_range,
+    format_match_failure,
+};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
@@ -119,7 +129,7 @@ impl Tool for MultiEditTool {
                             },
                             "old_string": {
                                 "type": "string",
-                                "description": "Exact string to find (must match exactly once, including whitespace and indentation)"
+                                "description": "String to find (must match exactly once; CRLF and trailing-whitespace differences are tolerated after strict exact match fails)"
                             },
                             "new_string": {
                                 "type": "string",
@@ -158,6 +168,11 @@ impl Tool for MultiEditTool {
     /// cannot be read, if any `old_str` does not match exactly once in its
     /// target file, or if two edits on the same file overlap.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let dry_run = input
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         let edits_arr = input["edits"]
             .as_array()
             .context("Missing required 'edits' array parameter")?;
@@ -224,8 +239,8 @@ impl Tool for MultiEditTool {
         }
         // Phase 2: Resolve every edit against the original file content and
         // group resolved edits by file path. Uses the strict exact-match
-        // matcher (editrenewal FR-004 / FR-009): old_string must occur
-        // exactly once, byte-for-byte.
+        // matcher first, then a controlled CRLF/trailing-whitespace fallback
+        // if the strict match returns NotFound.
         let mut resolved_by_file: HashMap<PathBuf, Vec<ResolvedEdit>> = HashMap::new();
         for (i, op) in ops.iter().enumerate() {
             let original = file_contents
@@ -233,12 +248,11 @@ impl Tool for MultiEditTool {
                 .expect("file content must exist for every op path");
 
             let (start, end, effective_new) =
-                match find_exact_replacement_range(original, &op.old_str, &op.new_str) {
-                    Ok(range) => range,
-                    Err(err) => bail!(format_strict_error(&err, i, &op.path)),
-                };
+                resolve_batch_edit(original, &op.old_str, &op.new_str).map_err(|diag| {
+                    anyhow::anyhow!("Edit {}: {}", i, format_match_failure(&diag, &op.path))
+                })?;
 
-            let old_lines = op.old_str.lines().count();
+            let old_lines = original[start..end].lines().count().max(1);
             let new_lines = effective_new.lines().count();
 
             resolved_by_file
@@ -326,16 +340,18 @@ impl Tool for MultiEditTool {
             total_removed += removed;
         }
 
-        // Phase 5: Write all modified files.
-        for (path, content) in &file_contents {
-            if file_stats.contains_key(path) {
-                tokio::fs::write(path, content)
-                    .await
-                    .with_context(|| format!("Failed to write file: {}", path.display()))?;
-                // Refresh the read timestamp for this file so a follow-up
-                // edit in the same session does not trip the stale-file
-                // check on a file we just wrote (editrenewal FR-003).
-                record_edit_timestamp(path, ctx);
+        // Phase 5: Write all modified files (skipped in dry-run mode).
+        if !dry_run {
+            for (path, content) in &file_contents {
+                if file_stats.contains_key(path) {
+                    tokio::fs::write(path, content)
+                        .await
+                        .with_context(|| format!("Failed to write file: {}", path.display()))?;
+                    // Refresh the read timestamp for this file so a follow-up
+                    // edit in the same session does not trip the stale-file
+                    // check on a file we just wrote (editrenewal FR-003).
+                    record_edit_timestamp(path, ctx);
+                }
             }
         }
         let file_count = file_stats.len();
@@ -357,7 +373,8 @@ impl Tool for MultiEditTool {
             .collect();
 
         let summary = format!(
-            "Applied {} edit{} across {} file{}",
+            "{} {} edit{} across {} file{}",
+            if dry_run { "Would apply" } else { "Applied" },
             total_edits,
             if total_edits == 1 { "" } else { "s" },
             file_count,
@@ -369,6 +386,7 @@ impl Tool for MultiEditTool {
             metadata: Some(json!({
                 "file_count": file_count,
                 "edits": total_edits,
+                "dry_run": dry_run,
                 "lines_added": total_added,
                 "lines_removed": total_removed,
                 "file_stats": per_file,
@@ -377,31 +395,29 @@ impl Tool for MultiEditTool {
     }
 }
 
-/// Format a [`FindError`] from the strict exact-match matcher into a
-/// human-readable, actionable error string that names the edit index and
-/// file path (editrenewal FR-004 / FR-009).
+/// Resolve a single batch edit against the original file content.
 ///
-/// Strict matching has a single pass (exact substring search), so — unlike
-/// the legacy whitespace-tolerant matcher — there is no pass name or
-/// closest-line hint to report. The messages focus on what the caller can
-/// fix: make the string match exactly, or add context to make it unique.
-pub(crate) fn format_strict_error(err: &FindError, edit_index: usize, path: &Path) -> String {
-    match err {
-        FindError::NotFound => format!(
-            "Edit {}: old_string not found in {}. \
-             Strict exact match requires the string to occur verbatim, including \
-             whitespace and indentation. Re-read the file and copy the exact text.",
-            edit_index,
-            path.display()
-        ),
-        FindError::MultipleMatches(n) => format!(
-            "Edit {}: old_string found {} times in {}. \
-             It must match exactly once. Add more surrounding context to the \
-             old_string to make the match unique.",
-            edit_index,
-            n,
-            path.display()
-        ),
+/// First tries a strict exact match. If that returns [`FindError::NotFound`],
+/// falls back to the controlled batch normalization (CRLF → LF, trailing
+/// whitespace stripped per line). On failure returns a [`FindDiag`] so the
+/// caller can produce an actionable error message.
+pub(crate) fn resolve_batch_edit(
+    content: &str,
+    old_str: &str,
+    new_str: &str,
+) -> Result<(usize, usize, String), FindDiag> {
+    match find_exact_replacement_range(content, old_str, new_str) {
+        Ok(range) => return Ok(range),
+        Err(FindError::MultipleMatches(n)) => {
+            return Err(FindDiag::multiple("exact", n, None));
+        }
+        Err(FindError::NotFound) => {}
+    };
+
+    match find_batch_normalized_replacement_range(content, old_str, new_str) {
+        Ok(range) => Ok(range),
+        Err(FindError::MultipleMatches(n)) => Err(FindDiag::multiple("batch-normalized", n, None)),
+        Err(FindError::NotFound) => Err(FindDiag::not_found("batch-normalized", None)),
     }
 }
 

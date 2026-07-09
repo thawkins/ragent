@@ -8,8 +8,13 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 ### Core Tools (always available)
 - `bash` — Execute a shell command. Use `command` to provide the command, or `code` for a code snippet.
 - `read` — Read file contents with optional `start_line`/`end_line` range.
-- `edit` — Replace an exact occurrence of text in a file.
-- `multiedit` — Apply multiple edits across one or more files atomically.
+- `edit` — Replace a unique occurrence of text in a file. Common whitespace and
+  line-ending differences (indentation, trailing/leading spaces, CRLF vs LF) are
+  tolerated, but the match must still be unique. Include 3–5 lines of context in
+  `old_string` to make the match unique.
+- `multi_edit` — Apply multiple edits across one or more files atomically. Each
+  edit is strict exact-match first; if that fails, a CRLF/trailing-whitespace
+  normalization fallback is tried. Use `dry_run: true` to preview changes.
 - `write` — Create or overwrite a file.
 - `create` — Create a new file with content.
 - `append_to_file` — Append text to the end of a file.
@@ -43,6 +48,24 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `codeindex_dependencies` — Query file-level dependencies from the code index.
 - `codeindex_status` — Show the current status and statistics of the codebase index.
 - `codeindex_reindex` — Trigger a full re-index of the codebase.
+
+### File Editing Best Practices
+
+- **Read before editing.** Use `read` to inspect the file first; the `edit` tool
+  relies on up-to-date file content and stale-file detection may reject edits
+  made to files modified after reading.
+- **Include 3–5 lines of context** in `old_string` so the match is unique.
+- **Common whitespace differences are tolerated** by `edit` (CRLF vs LF,
+  trailing/leading spaces, indentation drift), but the match must still occur
+  exactly once. `multi_edit` only normalizes CRLF and trailing whitespace per
+  line; indentation must match.
+- **Use `multi_edit`** for multiple changes to one or more files; it validates
+  all edits before writing any files.
+- **Use `dry_run: true`** when unsure whether `old_string` will match; this
+  resolves the match and returns a preview without writing to disk.
+- **If edits keep failing**, fall back to `write` to overwrite the whole file.
+- **Prefer canonical parameter names** `file_path`, `old_string`, `new_string`.
+  Legacy `path`/`old_str`/`new_str` still work but are deprecated.
 
 ### Code Intelligence Decision Flow
 When the codebase index is active, you MUST use `codeindex` tools instead of `grep` for code symbol queries. The index is faster, returns structured results, and understands symbol kinds.
