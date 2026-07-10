@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.143
+
+### Fixed — Scroll optimizations and edit tool follow-up
+
+- **Workspace version bumped** to `0.1.0-alpha.143`.
+- **Scroll optimizations** — additional TUI scrolling fixes and improvements.
+- **Edit/MultiEdit reliability follow-up** — continued hardening of the tolerant matcher and batch normalization fallback introduced in `0.1.0-alpha.142`.
+
 ## Version: 0.1.0-alpha.142
 
 ### Fixed — Edit/MultiEdit tool matcher reliability
