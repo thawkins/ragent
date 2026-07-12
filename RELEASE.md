@@ -1,12 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.143
+## Current Version: 0.1.0-alpha.144
 
 ### Changed
 
-- **Workspace version** — Bumped to `0.1.0-alpha.143`. Fixes to scroll optimizations and continued edit/multi-edit reliability improvements.
+- **Workspace version** — Bumped to `0.1.0-alpha.144`.
 
-## Previous Version: 0.1.0-alpha.142
+## Previous Version: 0.1.0-alpha.143
 
 ### Changed
 

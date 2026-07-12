@@ -660,10 +660,23 @@ impl App {
                             crate::app::helpers::sanitize_for_display(&decoded.detail)
                         ),
                     );
+                    // Keep the status bar in sync with the running phase.
+                    // The `⏳` prefix marks this as async-in-progress so
+                    // [`App::arm_status_expiry`] will not auto-clear it to
+                    // "ready" while the background research is still running.
+                    // Errors outside the web phase surface as a warning
+                    // status instead.
                     if decoded.status == crate::research_progress::StepStatus::Error
                         && decoded.phase != crate::research_progress::SessionPhase::Web
                     {
                         self.status = format!("⚠ research: {}", decoded.detail);
+                    } else if decoded.total_sources.is_none() {
+                        self.status = format!(
+                            "⏳ research: {} — {} ({}) — running",
+                            decoded.name,
+                            decoded.phase.as_str(),
+                            decoded.status.icon(),
+                        );
                     }
                     let progress = if let Some(existing) = self
                         .research_progress
@@ -687,6 +700,13 @@ impl App {
                     progress.apply(decoded.phase, decoded.status, decoded.detail);
                     if let Some(total) = decoded.total_sources {
                         progress.finish(total);
+                        // The final progress event marks the run complete.
+                        // Drop the `⏳` in-progress status for a terminal
+                        // message and arm the auto-expiry timer so it
+                        // transitions to "ready" after the grace period.
+                        self.status =
+                            format!("research: {} complete — {total} sources", decoded.name);
+                        self.arm_status_expiry();
                     }
                     let name_for_refresh = decoded.name.clone();
                     self.refresh_research_progress_message(&name_for_refresh);

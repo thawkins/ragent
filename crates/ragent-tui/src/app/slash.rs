@@ -258,6 +258,10 @@ impl App {
             return;
         }
 
+        // Arm the status auto-expiry timer so the indicator transitions to
+        // "ready" after a short grace period (see poll_status_expiry).
+        self.arm_status_expiry();
+
         let end_lines = self.assistant_output_lines();
         let added = end_lines.saturating_sub(start_lines);
         self.push_log_no_agent(

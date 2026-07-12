@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.144
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.144`.
+
 ## Version: 0.1.0-alpha.143
 
 ### Fixed — Scroll optimizations and edit tool follow-up

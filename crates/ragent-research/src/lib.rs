@@ -80,7 +80,7 @@ pub use engine::{
     Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,
 };
 pub use io::{IndexEntry, ResearchIo, ResearchIoError};
-pub use item::{ResearchItem, ResearchItemError};
+pub use item::{DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title};
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch, LocalGatherConfig, LocalGatherError,
     LocalGatherer, LocalTool, MAX_LOCAL_EXCERPT_LINES, build_local_excerpt, build_relevance_note,

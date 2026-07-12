@@ -288,18 +288,10 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                     println!("{}", ragent_research::render_session_event_json(&event));
                 }
             }
-            // When --from-url is given without a topic, use the URL as the
-            // item title; the session derives the real topic from the fetched
-            // page.
-            let title = if topic.is_empty() {
-                from_url.clone().unwrap_or_else(|| "Research".to_string())
-            } else {
-                topic
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(&topic)
-                    .to_string()
-            };
+            // Derive a human-readable item title that summarises the topic
+            // (rather than truncating to its first word). Falls back to the
+            // URL when only `--from-url` was supplied, then to "Research".
+            let title = ragent_research::derive_title(&topic, from_url.as_deref());
             let config = SessionConfig {
                 topic: topic.clone(),
                 from_url,

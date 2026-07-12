@@ -68,6 +68,9 @@ impl App {
                         run.workbook_paths.len()
                     ),
                 );
+                // Arm the status auto-expiry timer so "bench: done" transitions
+                // to "ready" after the grace period.
+                self.arm_status_expiry();
             }
             Err(msg) => {
                 self.bench_last_summary = Some(format!("Benchmark run failed: {msg}"));

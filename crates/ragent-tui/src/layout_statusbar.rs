@@ -349,7 +349,7 @@ fn build_line1_right(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
-    if !app.status.is_empty() && app.status != "Ready" {
+    if !app.status.is_empty() && !app.status.eq_ignore_ascii_case("Ready") {
         spans.push(Span::styled(
             format!("{} ", app.status),
             Style::default()

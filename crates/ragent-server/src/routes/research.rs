@@ -148,19 +148,10 @@ async fn create_research(
             .unwrap_or(OutputFormat::Report),
         ..SessionConfig::default()
     };
-    let title = req.title.clone().unwrap_or_else(|| {
-        if req.topic.is_empty() {
-            req.from_url
-                .clone()
-                .unwrap_or_else(|| "Research".to_string())
-        } else {
-            req.topic
-                .split_whitespace()
-                .next()
-                .unwrap_or("Research")
-                .to_string()
-        }
-    });
+    let title = req
+        .title
+        .clone()
+        .unwrap_or_else(|| ragent_research::derive_title(&req.topic, req.from_url.as_deref()));
 
     // Stream every gathering event as a server-sent response. The HTTP
     // layer doesn't currently expose SSE for research, so we collect the

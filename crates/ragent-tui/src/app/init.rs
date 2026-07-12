@@ -131,6 +131,8 @@ impl App {
             session_id: None,
             agent_name,
             status: "ready".to_string(),
+            status_set_at: None,
+            status_snapshot: String::new(),
             permission_queue: VecDeque::new(),
             question_queue: VecDeque::new(),
             pending_question_input: String::new(),

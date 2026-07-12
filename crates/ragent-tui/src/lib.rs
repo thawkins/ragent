@@ -500,6 +500,9 @@ pub async fn run_tui(
         // Check for completed /bench background runs.
         app.poll_pending_bench();
 
+        // Transition slash-command statuses to "ready" after a grace period.
+        app.poll_status_expiry();
+
         // Unblock swarm tasks whose dependencies are satisfied.
         app.poll_swarm_unblock();
 

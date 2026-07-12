@@ -41,6 +41,9 @@ impl App {
                         LogLevel::Info,
                         format!("Finished /opt — {} lines output", lines),
                     );
+                    // Arm the status auto-expiry timer so "opt: done" transitions
+                    // to "ready" after the grace period.
+                    self.arm_status_expiry();
                 }
                 Err(msg) => {
                     self.status = format!("⚠ opt failed: {}", msg);

@@ -997,6 +997,18 @@ pub struct App {
     pub agent_name: String,
     /// Human-readable status string shown in the status bar.
     pub status: String,
+    /// When a slash command last set the status, and the value it set.
+    ///
+    /// After a short delay (see [`STATUS_EXPIRY_MS`]), if the status hasn't
+    /// changed, it auto-transitions to `"ready"` so the indicator reflects
+    /// that the system has finished the command and is ready for input.
+    pub status_set_at: Option<std::time::Instant>,
+    /// Snapshot of the status value recorded in [`App::status_set_at`].
+    ///
+    /// The expiry only fires when the current status still matches this
+    /// snapshot — if anything else changed the status in the meantime the
+    /// timer is silently cleared without overwriting the new status.
+    pub status_snapshot: String,
     /// Queue of pending permission requests awaiting user resolution.
     /// The front of the queue is the currently displayed dialog; subsequent
     /// requests are shown one-at-a-time as earlier ones are resolved.
@@ -1652,7 +1664,68 @@ impl App {
         self.history_dirty = false;
         self.history_save_deadline = None;
     }
+
+    /// Arm the status auto-expiry timer for the current status value.
+    ///
+    /// Called after a slash command completes (synchronously or when an
+    /// async slash-command poll produces its final status). Records the
+    /// current status and the instant it was set so [`App::poll_status_expiry`]
+    /// can transition it to `"ready"` once the grace period elapses — but only
+    /// if nothing else changed the status in the meantime.
+    ///
+    /// No-op for statuses that should persist: async-in-progress (`⏳`) and
+    /// error/warning (`⚠`) states are left untouched.
+    pub fn arm_status_expiry(&mut self) {
+        // Never auto-clear async-in-progress or error states — those need to
+        // stay visible until their own completion handler updates them.
+        if self.status.starts_with('⏳') || self.status.starts_with('⚠') {
+            return;
+        }
+        // "ready" is already the idle state — nothing to transition to.
+        if self.status.eq_ignore_ascii_case("ready") {
+            return;
+        }
+        self.status_snapshot = self.status.clone();
+        self.status_set_at = Some(std::time::Instant::now());
+    }
+
+    /// Poll the status auto-expiry timer and transition to `"ready"` if the
+    /// grace period has elapsed and the status is unchanged.
+    ///
+    /// Called from the TUI main loop (~50 ms cadence). If the recorded status
+    /// snapshot still matches the current status and the delay has passed, the
+    /// status is set to `"ready"`. If the status changed since the timer was
+    /// armed, the timer is silently cleared without overwriting the new status.
+    pub fn poll_status_expiry(&mut self) {
+        let Some(set_at) = self.status_set_at else {
+            return;
+        };
+        // Clear the timer first — either we transition below, or the status
+        // changed and we no longer own it.
+        self.status_set_at = None;
+        let snapshot = std::mem::take(&mut self.status_snapshot);
+
+        if std::time::Instant::now().duration_since(set_at)
+            < std::time::Duration::from_millis(STATUS_EXPIRY_MS)
+        {
+            // Not enough time has passed — re-arm for the next poll.
+            self.status_set_at = Some(set_at);
+            self.status_snapshot = snapshot;
+            return;
+        }
+
+        // Only transition to "ready" if the status hasn't been changed by
+        // something else (e.g. agent processing started and set "busy").
+        if self.status == snapshot && !self.status.is_empty() {
+            self.status = "ready".to_string();
+            self.needs_redraw = true;
+        }
+    }
 }
+
+/// Grace period (in milliseconds) before a slash-command status auto-clears to
+/// `"ready"`. Long enough to read the status, short enough to feel responsive.
+pub const STATUS_EXPIRY_MS: u64 = 2000;
 
 /// Serialise history entries to a newline-separated string.
 ///

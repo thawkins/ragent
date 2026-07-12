@@ -61,7 +61,13 @@ impl App {
                 use_local,
                 use_specs,
             } => {
-                self.status = format!("research: writing research/{name}/RESEARCH.md…");
+                // Use the `⏳` prefix so the status is treated as
+                // async-in-progress and NOT auto-expired to "ready" by
+                // [`App::arm_status_expiry`] while the background research
+                // session is still running. The live progress events update
+                // this status per-phase (see the AgentNotice handler), and
+                // the completion notice sets a terminal status.
+                self.status = format!("⏳ research: {name}…");
                 self.push_log_no_agent(
                     LogLevel::Info,
                     if from_url.is_some() {
@@ -81,18 +87,11 @@ impl App {
                         &name, &topic,
                     ));
                 self.refresh_research_progress_message(&name);
-                // When --from-url is given without a topic, use the URL as
-                // the item title; the session derives the real topic from
-                // the fetched page.
-                let title = if topic.is_empty() {
-                    from_url.clone().unwrap_or_else(|| "Research".to_string())
-                } else {
-                    topic
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or(&topic)
-                        .to_string()
-                };
+                // Use the shared `derive_title` so the TUI produces the same
+                // full-topic title as the CLI and HTTP server (not just the
+                // first word). The session derives the real topic from the
+                // fetched page when `--from-url` is used without a topic.
+                let title = ragent_research::derive_title(&topic, from_url.as_deref());
                 let config = SessionConfig {
                     topic: topic.clone(),
                     from_url,

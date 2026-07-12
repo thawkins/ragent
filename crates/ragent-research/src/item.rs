@@ -440,6 +440,65 @@ fn sources_count(sources: &[Source]) -> String {
     format!("{} # see sources/ subdirectory", sources.len())
 }
 
+/// Maximum length of a derived research item title, in characters.
+///
+/// Topics can be long free-form descriptions; using the whole string verbatim
+/// as a title produces unwieldy headers in `/research list` and
+/// `RESEARCH.md`. We cap at a generous width and break on a word boundary so
+/// the title stays scannable while still summarising the topic content.
+pub const DERIVED_TITLE_MAX_CHARS: usize = 100;
+
+/// Derive a human-readable research item title from the user-supplied topic.
+///
+/// When `topic` is non-empty, the full topic is used (trimmed) so the title
+/// actually summarises the research subject rather than being truncated to its
+/// first word. Extremely long topics are capped at [`DERIVED_TITLE_MAX_CHARS`]
+/// characters on a word boundary with a trailing ellipsis.
+///
+/// When `topic` is empty, fall back to `from_url` (the `--from-url` case where
+/// the session later derives the real topic from the fetched page), and
+/// finally to `"Research"` when neither is available.
+///
+/// This is the single source of truth used by the CLI, TUI, and HTTP server
+/// entry points so all three produce identical titles for the same inputs.
+pub fn derive_title(topic: &str, from_url: Option<&str>) -> String {
+    let trimmed = topic.trim();
+    if !trimmed.is_empty() {
+        return cap_title(trimmed);
+    }
+    if let Some(url) = from_url.map(str::trim).filter(|s| !s.is_empty()) {
+        return url.to_string();
+    }
+    "Research".to_string()
+}
+
+/// Cap `title` to [`DERIVED_TITLE_MAX_CHARS`] characters on a word boundary,
+/// appending an ellipsis when truncation occurs. A single over-long word is
+/// hard-truncated rather than overflowing.
+fn cap_title(title: &str) -> String {
+    if title.chars().count() <= DERIVED_TITLE_MAX_CHARS {
+        return title.to_string();
+    }
+    // Walk char indices up to the limit, then roll back to the last whitespace
+    // so we don't split a word in half.
+    let limit_byte = title
+        .char_indices()
+        .take(DERIVED_TITLE_MAX_CHARS)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(title.len());
+    let head = &title[..limit_byte];
+    let cut = head
+        .char_indices()
+        .rev()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(limit_byte);
+    let mut out = title[..cut].trim_end().to_string();
+    out.push('…');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -634,6 +693,54 @@ mod tests {
         let block = "---\n\n**name:** ..\n\n**title:** foo\n\n---\n\n";
         let err = ResearchItem::from_frontmatter(block).unwrap_err();
         assert!(matches!(err, ResearchItemError::InvalidName(_)));
+    }
+
+    // ── derive_title ───────────────────────────────────────────────────────
+
+    #[test]
+    fn derive_title_uses_full_topic_not_first_word() {
+        // Regression: the title must summarise the topic, not be truncated to
+        // the first word.
+        let title = derive_title("async/await idioms in stable Rust", None);
+        assert_eq!(title, "async/await idioms in stable Rust");
+    }
+
+    #[test]
+    fn derive_title_trims_surrounding_whitespace() {
+        let title = derive_title("   rust async runtimes   ", None);
+        assert_eq!(title, "rust async runtimes");
+    }
+
+    #[test]
+    fn derive_title_falls_back_to_from_url_when_topic_empty() {
+        let title = derive_title("", Some("https://example.com/article"));
+        assert_eq!(title, "https://example.com/article");
+    }
+
+    #[test]
+    fn derive_title_falls_back_to_research_when_both_empty() {
+        assert_eq!(derive_title("", None), "Research");
+        assert_eq!(derive_title("   ", Some("")), "Research");
+    }
+
+    #[test]
+    fn derive_title_caps_long_topics_on_a_word_boundary() {
+        let long = "word ".repeat(40); // 200 chars, each "word " is 5 chars
+        let title = derive_title(&long, None);
+        assert!(title.chars().count() <= DERIVED_TITLE_MAX_CHARS + 1); // +1 ellipsis
+        assert!(title.ends_with('…'));
+        // Must not split a word in half.
+        assert!(!title.trim_end_matches('…').ends_with("wo"));
+        assert!(!title.trim_end_matches('…').ends_with("r"));
+    }
+
+    #[test]
+    fn derive_title_caps_single_overlong_word() {
+        let huge = "a".repeat(300);
+        let title = derive_title(&huge, None);
+        // No whitespace to break on, so it is hard-truncated at the limit.
+        assert!(title.chars().count() <= DERIVED_TITLE_MAX_CHARS + 1);
+        assert!(title.ends_with('…'));
     }
 
     #[test]
