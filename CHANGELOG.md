@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.145
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.145`.
+
 ## Version: 0.1.0-alpha.144
 
 ### Changed
