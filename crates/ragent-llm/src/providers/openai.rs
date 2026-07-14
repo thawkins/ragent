@@ -88,6 +88,10 @@ impl Provider for OpenAiProvider {
         "OpenAI"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns default `OpenAI` models (GPT-4o, GPT-4o Mini).
     fn default_models(&self) -> Vec<ModelInfo> {
         openai_default_models("openai")

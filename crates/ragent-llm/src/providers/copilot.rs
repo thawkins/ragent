@@ -213,6 +213,10 @@ impl Provider for CopilotProvider {
         "GitHub Copilot"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns the default models available through GitHub Copilot.
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![

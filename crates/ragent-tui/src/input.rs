@@ -1720,6 +1720,24 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = Some(step);
             }
         }
+        ProviderSetupStep::SetupRouter { .. } => {
+            // Router setup rendering is implemented; input handling will be wired in a follow-up.
+            // For now, Esc closes the dialog and any other key preserves the current state.
+            if key.code == KeyCode::Esc {
+                app.provider_setup = None;
+            } else {
+                app.provider_setup = Some(step);
+            }
+        }
+        ProviderSetupStep::SelectRouterModel { .. } => {
+            // Router model picker rendering is implemented; input handling will be wired in a follow-up.
+            // For now, Esc closes the dialog and any other key preserves the current state.
+            if key.code == KeyCode::Esc {
+                app.provider_setup = None;
+            } else {
+                app.provider_setup = Some(step);
+            }
+        }
     }
 }
 /// Starts the Copilot device flow and spawns a background polling task.

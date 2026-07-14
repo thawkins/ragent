@@ -315,6 +315,9 @@ impl App {
             config_paths: app_config.config_paths.clone(),
             router_enabled: false,
             router_current_tier: None,
+            router_draft_config: None,
+            router_draft_providers: Vec::new(),
+            router_draft_selected_ids: Vec::new(),
             research_progress: Vec::new(),
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel

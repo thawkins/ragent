@@ -89,6 +89,11 @@ impl Provider for RouterProvider {
         "Model Router"
     }
 
+    /// Expose the concrete router instance for state inspection from the TUI.
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// The router does not expose its own models — it routes to other
     /// providers. Returns an empty list because the router itself is not
     /// a model host; it delegates to the concrete providers configured

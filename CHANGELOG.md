@@ -4,9 +4,33 @@
 
 ## Version: 0.1.0-alpha.145
 
+### Added — Router Provider TUI Setup (spec: routeui)
+
+- **Interactive Model Router configuration panel** reachable via `/provider` → `Model Router`
+  or `/provider router`. Users can select multiple already-configured concrete providers,
+  assign provider/model pairs to the four routing tiers (`SIMPLE`, `MEDIUM`, `COMPLEX`,
+  `REASONING`), and save the cluster to `ragent.json`.
+- **Router setup state machine** added to `ProviderSetupStep` with `SetupRouter` and
+  `SelectRouterModel` variants, reusing the existing provider-setup overlay.
+- **Two-pane router UI** — provider multi-selection list on the left, four bucket columns
+  on the right, with keyboard navigation (Tab, arrows, Space, Enter, Delete, Ctrl+S, Esc).
+- **Model picker dialog** for choosing which model from a selected provider is assigned
+  to the active tier bucket.
+- **Persistence and validation** — `Ctrl+S` saves `provider.router.tiers` to `ragent.json`,
+  enables the router, preserves existing classifier weights/boundaries, rejects recursive
+  router-to-router assignments, and requires at least one non-empty tier.
+- **`/provider show` now renders the router cluster** with each tier and its assigned
+  provider/model entries.
+- **Status bar label** displays `"Model Router"` when the router virtual provider is active.
+- **Spec and tests** — added `specs/routeui/SPEC.md`/`PLAN.md` and
+  `crates/ragent-tui/tests/test_router_setup.rs` covering the provider helper, state
+  defaults, report rendering, and picker list invariants.
+
 ### Changed
 
 - **Workspace version** — Bumped to `0.1.0-alpha.145`.
+- **`ragent-llm` Provider trait** now requires `as_any_static()` so callers can
+  downcast concrete providers (e.g. to inspect the router's enabled state).
 
 ## Version: 0.1.0-alpha.144
 

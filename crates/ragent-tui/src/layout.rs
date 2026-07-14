@@ -1218,6 +1218,253 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
+        ProviderSetupStep::SetupRouter {
+            providers,
+            selected_provider_ids,
+            selected_provider_index,
+            draft_config,
+            active_bucket,
+            active_bucket_index,
+            left_pane_focused,
+            error,
+        } => {
+            let area = centered_rect(80, 80, frame.area());
+            frame.render_widget(Clear, area);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Model Router Setup ")
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+
+            // Split into left (providers) and right (buckets) panes.
+            let chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .margin(1)
+                .split(inner);
+
+            // ── Left pane: multi-select provider list ──
+            let left_block = Block::default()
+                .borders(Borders::ALL)
+                .title(if *left_pane_focused {
+                    " Providers (*) "
+                } else {
+                    " Providers "
+                })
+                .border_style(if *left_pane_focused {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                });
+            let _left_inner = left_block.inner(chunks[0]);
+            let mut provider_lines: Vec<Line<'_>> = Vec::new();
+            if providers.is_empty() {
+                provider_lines.push(Line::from(Span::styled(
+                    "No concrete providers configured.",
+                    Style::default().fg(Color::Yellow),
+                )));
+                provider_lines.push(Line::from(""));
+                provider_lines.push(Line::from(Span::styled(
+                    "Set up a provider first, then return to /provider.",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                for (i, p) in providers.iter().enumerate() {
+                    let is_selected = i == *selected_provider_index;
+                    let in_cluster = selected_provider_ids.contains(&p.id);
+                    let tick = if in_cluster { "[x]" } else { "[ ]" };
+                    let (indicator, style) = if is_selected && *left_pane_focused {
+                        (
+                            "▸ ",
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        ("  ", Style::default().fg(Color::White))
+                    };
+                    let tick_style = if in_cluster {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    provider_lines.push(Line::from(vec![
+                        Span::styled(indicator, style),
+                        Span::styled(format!("{} ", tick), tick_style),
+                        Span::styled(p.name.clone(), style),
+                    ]));
+                }
+            }
+            let left_para = Paragraph::new(provider_lines)
+                .block(left_block)
+                .wrap(Wrap { trim: false });
+            frame.render_widget(left_para, chunks[0]);
+
+            // ── Right pane: four bucket columns ──
+            let right_block = Block::default()
+                .borders(Borders::ALL)
+                .title(if *left_pane_focused {
+                    " Tiers "
+                } else {
+                    " Tiers (*) "
+                })
+                .border_style(if *left_pane_focused {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                });
+            let right_inner = right_block.inner(chunks[1]);
+            frame.render_widget(right_block.clone(), chunks[1]);
+
+            let bucket_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                ])
+                .split(right_inner);
+
+            for (idx, tier) in ragent_llm::providers::router_config::Tier::all()
+                .iter()
+                .enumerate()
+            {
+                let is_active = *active_bucket == *tier;
+                let tier_config = draft_config.tiers.get(&tier.to_string());
+                let models = tier_config.map(|t| t.models.as_slice()).unwrap_or(&[]);
+
+                let bucket_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(
+                        " {} {} ",
+                        tier.initial(),
+                        if is_active && !left_pane_focused {
+                            "*"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .border_style(if is_active && !left_pane_focused {
+                        Style::default().fg(Color::Cyan)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    });
+                let _bucket_inner = bucket_block.inner(bucket_chunks[idx]);
+
+                let mut bucket_lines: Vec<Line<'_>> = Vec::new();
+                if models.is_empty() {
+                    bucket_lines.push(Line::from(Span::styled(
+                        "empty",
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                } else {
+                    for (midx, entry) in models.iter().enumerate() {
+                        let is_selected =
+                            midx == *active_bucket_index && is_active && !left_pane_focused;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        bucket_lines.push(Line::from(Span::styled(
+                            format!("{}\n  {}", entry.provider, entry.model),
+                            style,
+                        )));
+                    }
+                }
+
+                let bucket_para = Paragraph::new(bucket_lines)
+                    .block(bucket_block)
+                    .wrap(Wrap { trim: false });
+                frame.render_widget(bucket_para, bucket_chunks[idx]);
+            }
+
+            // Footer with hints/error.
+            let footer_text = if let Some(err) = error {
+                format!(
+                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign model | Ctrl+S save — Error: {err}"
+                )
+            } else {
+                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign model | Ctrl+S save".to_string()
+            };
+            let footer = Paragraph::new(Line::from(Span::styled(
+                footer_text,
+                Style::default().fg(Color::DarkGray),
+            )))
+            .alignment(Alignment::Center);
+            let footer_height = 1u16;
+            if area.height > footer_height + 2 {
+                let footer_area = Rect::new(
+                    area.x,
+                    area.y + area.height - footer_height - 1,
+                    area.width,
+                    footer_height,
+                );
+                frame.render_widget(footer, footer_area);
+            }
+        }
+        ProviderSetupStep::SelectRouterModel {
+            provider_id: _,
+            provider_name,
+            models,
+            selected,
+            target_tier,
+        } => {
+            let area = centered_rect(60, 70, frame.area());
+            frame.render_widget(Clear, area);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(
+                    " Assign model for {} → {} ",
+                    provider_name, target_tier
+                ))
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+
+            let mut lines: Vec<Line<'_>> = Vec::new();
+            if models.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "No models available.",
+                    Style::default().fg(Color::Yellow),
+                )));
+            } else {
+                for (i, m) in models.iter().enumerate() {
+                    let is_selected = i == *selected;
+                    let style = if is_selected {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled(if is_selected { "▸ " } else { "  " }, style),
+                        Span::styled(m.name.clone(), style),
+                        Span::styled(
+                            format!(" ({}) [{} tokens]", m.id, m.context_window),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+                }
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Esc cancel | ↑↓ select | Enter assign",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let paragraph = Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .alignment(Alignment::Left);
+            frame.render_widget(paragraph, inner);
+        }
     }
 }
 

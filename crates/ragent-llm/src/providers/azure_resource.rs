@@ -246,6 +246,10 @@ impl Provider for AzureResourceProvider {
         "Azure Resource (File)"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn default_models(&self) -> Vec<ModelInfo> {
         match parse_azure_resources(&self.config_path) {
             Ok(entries) => entries.into_iter().map(entry_to_model_info).collect(),

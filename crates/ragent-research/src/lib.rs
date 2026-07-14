@@ -53,6 +53,7 @@ pub mod plan_dep;
 pub mod planner;
 pub mod research_name;
 pub mod run_config;
+pub mod semantic;
 pub mod session;
 pub mod source;
 pub mod source_registry;
@@ -97,6 +98,10 @@ pub use plan_dep::{
 pub use planner::{HeuristicPlanner, LlmPlanner, Planner};
 pub use research_name::{MAX_LEN, MIN_LEN, ResearchName, ResearchNameError, is_path_traversal};
 pub use run_config::{Depth, OutputFormat};
+pub use semantic::{
+    SemanticHit, SemanticHitKind, SemanticResearchAugmentor, arc_boxed as semantic_arc_boxed,
+    boxed as semantic_boxed,
+};
 pub use session::{
     NoopObserver, ResearchSession, RunOutcome, SessionConfig, SessionEvent, SessionObserver,
     SessionPhase, SynthesizeOutcome,

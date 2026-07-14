@@ -90,7 +90,7 @@ pub struct UsageInfo {
 /// Implementors supply model metadata and can construct an [`LlmClient`] for
 /// making chat completion requests against the provider's API.
 #[async_trait::async_trait]
-pub trait Provider: Send + Sync {
+pub trait Provider: Send + Sync + 'static {
     /// Returns the unique identifier for this provider (e.g. `"openai"`).
     fn id(&self) -> &str;
     /// Returns the human-readable display name (e.g. `"OpenAI"`).
@@ -125,6 +125,11 @@ pub trait Provider: Send + Sync {
         base_url: Option<&str>,
         options: &HashMap<String, serde_json::Value>,
     ) -> Result<Box<dyn LlmClient>>;
+
+    /// Expose the concrete provider instance for state inspection.
+    ///
+    /// Implementors should return `self` as `dyn std::any::Any`.
+    fn as_any_static(&self) -> &dyn std::any::Any;
 
     /// Returns plan and quota usage information for the current API key.
     ///
@@ -228,6 +233,14 @@ impl ProviderRegistry {
     #[must_use]
     pub fn get(&self, id: &str) -> Option<&dyn Provider> {
         self.providers.get(id).map(std::convert::AsRef::as_ref)
+    }
+
+    /// Returns the provider registered under `id` as a downcastable `Any`
+    /// reference, if found. This is useful for inspecting concrete provider
+    /// state such as the router's enabled flag.
+    #[must_use]
+    pub fn get_as_any(&self, id: &str) -> Option<&dyn std::any::Any> {
+        self.providers.get(id).map(|p| p.as_any_static())
     }
 
     /// Returns [`ProviderInfo`] for every registered provider.

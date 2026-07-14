@@ -815,6 +815,27 @@ impl App {
         configured
     }
 
+    /// Enumerate all configured providers **excluding** the router virtual provider.
+    ///
+    /// This is the list used by the router setup flow to populate the multi-selection
+    /// palette; the router must never route to itself (FR-004, FR-024).
+    pub fn get_configured_providers_for_router(storage: &Storage) -> Vec<ConfiguredProvider> {
+        Self::get_configured_providers(storage)
+            .into_iter()
+            .filter(|p| p.id != "router")
+            .collect()
+    }
+
+    /// Detect whether the router virtual provider has been enabled by reading
+    /// the [`RouterProvider`] state from the provider registry, if present.
+    pub fn is_router_enabled(provider_registry: &ragent_llm::provider::ProviderRegistry) -> bool {
+        provider_registry
+            .get_as_any("router")
+            .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
+            .map(|rp| rp.is_enabled())
+            .unwrap_or(false)
+    }
+
     /// Re-detect the configured provider and update `configured_provider`.
     pub fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
@@ -1277,8 +1298,16 @@ impl App {
 
     /// Build the human-readable `"Provider / model [thinking: Level]"` label
     /// shown in the status bar, or `None` when no provider/model is configured.
+    ///
+    /// When the router virtual provider is active, the label reads
+    /// `"Model Router / router"` so the status bar matches the active provider
+    /// (FR-020).
     pub fn provider_model_label(&self) -> Option<String> {
-        let provider_name = self.configured_provider.as_ref()?.name.clone();
+        let provider_name = if App::is_router_enabled(&self.provider_registry) {
+            "Model Router".to_string()
+        } else {
+            self.configured_provider.as_ref()?.name.clone()
+        };
         let model_str = self.selected_model.as_ref()?;
         let model_id = model_str
             .split_once('/')
@@ -1365,6 +1394,58 @@ impl App {
         }
 
         Some(report)
+    }
+
+    /// Render a detailed `/provider show` report for the router virtual provider,
+    /// including each tier and the provider/model pairs assigned to it (FR-010).
+    pub fn router_config_report(
+        &self,
+        registry: &ragent_llm::provider::ProviderRegistry,
+    ) -> String {
+        let config = self.current_config();
+        let router_config = config
+            .provider
+            .get("router")
+            .and_then(|pc| {
+                pc.options.get("router_config").and_then(|v| {
+                    serde_json::from_value::<ragent_llm::providers::router_config::RouterConfig>(
+                        v.clone(),
+                    )
+                    .ok()
+                })
+            })
+            .unwrap_or_default();
+
+        let mut report = String::from(
+            "From: /provider show\n\n# Provider: Model Router\n\n- **ID:** `router`\n- **Name:** Model Router\n",
+        );
+        report.push_str(&format!(
+            "- **Enabled:** {}\n\n",
+            if router_config.enabled { "yes" } else { "no" }
+        ));
+
+        report.push_str("## Tier Mappings\n\n");
+        for tier in ragent_llm::providers::router_config::Tier::all() {
+            report.push_str(&format!("### {}\n\n", tier));
+            let tier_config = router_config.tier_config(*tier);
+            if tier_config.models.is_empty() {
+                report.push_str("_No models assigned._\n\n");
+            } else {
+                for entry in &tier_config.models {
+                    let provider_name = registry
+                        .get(&entry.provider)
+                        .map(|p| p.name().to_string())
+                        .unwrap_or_else(|| entry.provider.clone());
+                    report.push_str(&format!(
+                        "- `{}` via **{}** (`{}`)\n",
+                        entry.model, provider_name, entry.provider
+                    ));
+                }
+                report.push('\n');
+            }
+        }
+
+        report
     }
 
     /// Render a detailed `/provider show` report for a single configured

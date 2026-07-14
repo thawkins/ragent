@@ -120,6 +120,10 @@ impl Provider for BedrockProvider {
         "Amazon Bedrock"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns the default Bedrock model catalog (FR-010).
     fn default_models(&self) -> Vec<ModelInfo> {
         bedrock_default_models()

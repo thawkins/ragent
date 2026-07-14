@@ -1517,6 +1517,10 @@ mod tests {
             }
 
             fn set_event_bus(&self, _event_bus: Option<Arc<ragent_types::event::EventBus>>) {}
+
+            fn as_any_static(&self) -> &dyn std::any::Any {
+                self
+            }
         }
 
         let mut registry = ProviderRegistry::new();
@@ -1588,6 +1592,10 @@ mod tests {
             }
 
             fn set_event_bus(&self, _event_bus: Option<Arc<ragent_types::event::EventBus>>) {}
+
+            fn as_any_static(&self) -> &dyn std::any::Any {
+                self
+            }
         }
 
         let mut registry = ProviderRegistry::new();

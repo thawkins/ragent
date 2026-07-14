@@ -176,6 +176,10 @@ impl Provider for OllamaProvider {
         "Ollama"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns a placeholder model list.
     ///
     /// Since Ollama model availability depends on the running server, this

@@ -269,6 +269,10 @@ impl Provider for OllamaCloudProvider {
         "Ollama Cloud"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![]
     }

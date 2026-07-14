@@ -276,6 +276,7 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("azure_foundry", "Azure AI Foundry"),
     ("azure_resource", "Azure Resource (File)"),
     ("copilot", "GitHub Copilot"),
+    ("router", "Model Router"),
 ];
 
 /// Entry in the model picker with full metadata for table display.
@@ -337,7 +338,7 @@ pub struct ModelDownloadState {
 }
 
 /// State of the interactive provider-setup dialog.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ProviderSetupStep {
     /// Choosing which provider to configure.
     SelectProvider {
@@ -465,6 +466,42 @@ pub enum ProviderSetupStep {
         instance_url: String,
         /// Token being validated.
         token: String,
+    },
+    // ── Router (Model Router) setup steps ─────────────────────────────
+    /// Configure the router virtual provider cluster: provider multi-selection
+    /// and tier-bucket assignment (FR-003).
+    SetupRouter {
+        /// Configured concrete providers that can feed the router buckets.
+        providers: Vec<ConfiguredProvider>,
+        /// IDs of providers that have been selected for the cluster palette.
+        selected_provider_ids: Vec<String>,
+        /// Currently highlighted provider in the multi-selection list.
+        selected_provider_index: usize,
+        /// In-memory draft [`RouterConfig`] being edited.
+        draft_config: ragent_llm::providers::router_config::RouterConfig,
+        /// Which of the four buckets is active when the right pane is focused.
+        active_bucket: ragent_llm::providers::router_config::Tier,
+        /// Which item is active in the active bucket (0 = first model).
+        active_bucket_index: usize,
+        /// Whether the left provider pane (true) or right bucket pane (false)
+        /// has input focus.
+        left_pane_focused: bool,
+        /// Optional error or validation message shown in the panel footer.
+        error: Option<String>,
+    },
+    /// Model picker shown after selecting a provider in the router setup flow.
+    /// The chosen model is assigned to the currently selected bucket.
+    SelectRouterModel {
+        /// Provider being configured for the active bucket.
+        provider_id: String,
+        /// Provider display name.
+        provider_name: String,
+        /// Available models with full metadata.
+        models: Vec<ModelPickerEntry>,
+        /// Index of the highlighted model.
+        selected: usize,
+        /// Which tier bucket the model will be assigned to.
+        target_tier: ragent_llm::providers::router_config::Tier,
     },
 }
 
@@ -1424,6 +1461,15 @@ pub struct App {
     /// The last tier selected by the router for the most recent request.
     /// `None` when no request has been routed yet or the router is not active.
     pub router_current_tier: Option<String>,
+    /// Stashed router draft configuration used to preserve cluster edits while
+    /// a sub-dialog (e.g. the model picker) is open.
+    pub router_draft_config: Option<ragent_llm::providers::router_config::RouterConfig>,
+    /// Stashed provider list used to repopulate the router setup left pane after
+    /// returning from the model picker sub-dialog.
+    pub router_draft_providers: Vec<ConfiguredProvider>,
+    /// Stashed selected provider IDs used to preserve the router setup palette
+    /// after returning from the model picker sub-dialog.
+    pub router_draft_selected_ids: Vec<String>,
 
     // ── Research progress (`/research create`) ───────────────────────────────
     /// Live progress trackers for all running/completed `/research create`

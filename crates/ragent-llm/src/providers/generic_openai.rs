@@ -29,6 +29,10 @@ impl Provider for GenericOpenAiProvider {
         "Generic OpenAI API"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn default_models(&self) -> Vec<ModelInfo> {
         openai_default_models("generic_openai")
     }

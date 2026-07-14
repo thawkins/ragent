@@ -44,6 +44,10 @@ impl Provider for HuggingFaceProvider {
         "Hugging Face"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns a curated set of popular HuggingFace Inference API models.
     ///
     /// These serve as fallback defaults when dynamic discovery is unavailable.

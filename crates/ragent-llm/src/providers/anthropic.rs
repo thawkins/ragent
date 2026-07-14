@@ -58,6 +58,10 @@ impl Provider for AnthropicProvider {
         "Anthropic"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns default Claude models (Sonnet 4, 3.5 Haiku).
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![

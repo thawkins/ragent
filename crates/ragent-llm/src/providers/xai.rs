@@ -223,6 +223,10 @@ impl Provider for XaiProvider {
         "xAI"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns the default xAI Grok model catalog.
     fn default_models(&self) -> Vec<ModelInfo> {
         xai_default_models("xai")

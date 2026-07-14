@@ -163,6 +163,10 @@ impl Provider for GeminiProvider {
         "Google Gemini"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     /// Returns default Gemini models.
     fn default_models(&self) -> Vec<ModelInfo> {
         gemini_default_models("gemini")

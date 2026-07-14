@@ -1321,14 +1321,36 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         });
                     }
                 }
+                "router" => {
+                    let providers = App::get_configured_providers_for_router(&self.storage);
+                    if providers.is_empty() {
+                        self.status = "⚠ No concrete providers — configure one first".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            "provider router: no concrete providers configured".to_string(),
+                        );
+                    } else {
+                        self.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                            providers,
+                            selected_provider_ids: Vec::new(),
+                            selected_provider_index: 0,
+                            draft_config:
+                                ragent_llm::providers::router_config::RouterConfig::default(),
+                            active_bucket: ragent_llm::providers::router_config::Tier::Simple,
+                            active_bucket_index: 0,
+                            left_pane_focused: true,
+                            error: None,
+                        });
+                    }
+                }
                 "" => {
                     self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
                 }
                 _ => {
                     self.append_assistant_text(
                         "From: /provider
-Usage: /provider [show]
-",
+  Usage: /provider [show|router]
+  ",
                     );
                     self.status = "provider: usage".to_string();
                 }

@@ -2,9 +2,17 @@
 
 ## Current Version: 0.1.0-alpha.145
 
+### Added — Router Provider TUI Setup (spec: routeui)
+
+- Interactive Model Router configuration panel reachable via `/provider` → `Model Router` or `/provider router`.
+- Multi-provider selection, four-tier bucket assignment (`SIMPLE`, `MEDIUM`, `COMPLEX`, `REASONING`), and `ragent.json` persistence.
+- `/provider show` renders the router cluster; status bar shows `"Model Router"` when active.
+- Validation prevents recursive router assignments and empty clusters; existing classifier weights/boundaries are preserved.
+
 ### Changed
 
 - **Workspace version** — Bumped to `0.1.0-alpha.145`.
+- **`ragent-llm` Provider trait** now exposes `as_any_static()` for concrete-provider state inspection.
 
 ## Previous Version: 0.1.0-alpha.144
 

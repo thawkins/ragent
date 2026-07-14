@@ -41,6 +41,10 @@ impl Provider for AzureFoundryProvider {
         "Azure AI Foundry"
     }
 
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn default_models(&self) -> Vec<ModelInfo> {
         let mut models = openai_default_models("azure_foundry");
         // Add Azure-specific model variants with reasoning support
