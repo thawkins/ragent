@@ -624,7 +624,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "provider",
-        description: "Change the LLM provider or show config: /provider show",
+        description: "Change provider, show config, or configure model router: /provider [show|router]",
     },
     SlashCommandDef {
         trigger: "provider_reset",

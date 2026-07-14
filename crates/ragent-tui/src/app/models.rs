@@ -1303,11 +1303,12 @@ impl App {
     /// `"Model Router / router"` so the status bar matches the active provider
     /// (FR-020).
     pub fn provider_model_label(&self) -> Option<String> {
-        let provider_name = if App::is_router_enabled(&self.provider_registry) {
-            "Model Router".to_string()
-        } else {
-            self.configured_provider.as_ref()?.name.clone()
-        };
+        let provider_name =
+            if Self::is_router_enabled(&self.provider_registry) || self.router_enabled {
+                "Model Router".to_string()
+            } else {
+                self.configured_provider.as_ref()?.name.clone()
+            };
         let model_str = self.selected_model.as_ref()?;
         let model_id = model_str
             .split_once('/')
@@ -1400,21 +1401,9 @@ impl App {
     /// including each tier and the provider/model pairs assigned to it (FR-010).
     pub fn router_config_report(
         &self,
-        registry: &ragent_llm::provider::ProviderRegistry,
+        _registry: &ragent_llm::provider::ProviderRegistry,
     ) -> String {
-        let config = self.current_config();
-        let router_config = config
-            .provider
-            .get("router")
-            .and_then(|pc| {
-                pc.options.get("router_config").and_then(|v| {
-                    serde_json::from_value::<ragent_llm::providers::router_config::RouterConfig>(
-                        v.clone(),
-                    )
-                    .ok()
-                })
-            })
-            .unwrap_or_default();
+        let router_config = self.load_raw_router_config().unwrap_or_default();
 
         let mut report = String::from(
             "From: /provider show\n\n# Provider: Model Router\n\n- **ID:** `router`\n- **Name:** Model Router\n",
@@ -1432,7 +1421,8 @@ impl App {
                 report.push_str("_No models assigned._\n\n");
             } else {
                 for entry in &tier_config.models {
-                    let provider_name = registry
+                    let provider_name = self
+                        .provider_registry
                         .get(&entry.provider)
                         .map(|p| p.name().to_string())
                         .unwrap_or_else(|| entry.provider.clone());
@@ -1446,6 +1436,93 @@ impl App {
         }
 
         report
+    }
+
+    /// Load the raw `provider.router` block from the on-disk `ragent.json`
+    /// without being affected by `ProviderConfig` catch-all deserialisation.
+    pub(crate) fn load_raw_router_config(
+        &self,
+    ) -> Option<ragent_llm::providers::router_config::RouterConfig> {
+        for path in &self.config_paths {
+            if !path.exists() {
+                continue;
+            }
+            let raw = std::fs::read_to_string(path).unwrap_or_default();
+            let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+            let router_value = json.get("provider")?.get("router")?;
+            let router_config = serde_json::from_value::<
+                ragent_llm::providers::router_config::RouterConfig,
+            >(router_value.clone())
+            .ok()?;
+            return Some(router_config);
+        }
+        None
+    }
+
+    /// Persist the supplied draft router cluster to `ragent.json`.
+    ///
+    /// The existing classifier weights, boundary thresholds, context window, and
+    /// timeout settings are preserved when a prior `provider.router` block
+    /// exists (FR-026). The resulting `provider.router` value is the serialised
+    /// [`RouterConfig`] itself, matching the format expected by `/router reload`
+    /// (FR-008, FR-009, FR-014).
+    pub fn save_router_config(
+        &self,
+        draft: &ragent_llm::providers::router_config::RouterConfig,
+    ) -> Result<(), String> {
+        use std::collections::HashMap;
+
+        let config_path = self.config_paths.first().cloned().unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(".ragent")
+                .join("ragent.json")
+        });
+
+        // Seed the saved config from any existing router block so we preserve
+        // weights, boundaries, and other manually-edited fields.
+        let mut saved = self.load_raw_router_config().unwrap_or_default();
+        saved.enabled = true;
+        saved.tiers = HashMap::new();
+        for (key, tier) in &draft.tiers {
+            if !tier.models.is_empty() {
+                saved.tiers.insert(key.clone(), tier.clone());
+            }
+        }
+
+        let router_value =
+            serde_json::to_value(&saved).map_err(|e| format!("serialise router config: {e}"))?;
+
+        crate::app::state::atomic_config_update(&config_path, |json| {
+            json["provider"]["router"] = router_value.clone();
+            Ok(())
+        })
+        .map_err(|e| format!("save router config: {e}"))?;
+
+        // Keep the in-memory provider registry in sync so the status bar and
+        // subsequent routing reflect the new configuration immediately.
+        if let Some(router_provider) = self
+            .provider_registry
+            .get_as_any("router")
+            .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
+        {
+            router_provider.reload_config(saved.clone());
+        }
+
+        Ok(())
+    }
+
+    /// Return a human-readable cost estimate for a provider/model pair, if the
+    /// registry advertises pricing information for the model.
+    pub fn estimate_entry_cost(&self, provider_id: &str, model_id: &str) -> Option<String> {
+        let model = self
+            .provider_registry
+            .resolve_model(provider_id, model_id)?;
+        let avg = f64::midpoint(model.cost.input, model.cost.output);
+        if avg <= 0.0 {
+            return None;
+        }
+        Some(format!("~${:.2}/M", avg))
     }
 
     /// Render a detailed `/provider show` report for a single configured

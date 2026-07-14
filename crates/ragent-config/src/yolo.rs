@@ -10,22 +10,33 @@
 //! This is inherently dangerous. Use only when you trust the agent and its
 //! inputs completely, or for local development/debugging.
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static YOLO_MODE: AtomicBool = AtomicBool::new(false);
+static YOLO_LOCK: Mutex<()> = Mutex::new(());
 
 /// Returns `true` if YOLO mode is currently enabled.
 pub fn is_enabled() -> bool {
+    let _guard = YOLO_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     YOLO_MODE.load(Ordering::Relaxed)
 }
 
 /// Enable or disable YOLO mode globally.
 pub fn set_enabled(enabled: bool) {
+    let _guard = YOLO_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     YOLO_MODE.store(enabled, Ordering::Relaxed);
 }
 
 /// Toggle YOLO mode and return the new state.
 pub fn toggle() -> bool {
+    let _guard = YOLO_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let was = YOLO_MODE.fetch_xor(true, Ordering::Relaxed);
     !was
 }

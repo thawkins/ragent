@@ -1,4 +1,5 @@
 //! Slash-command dispatch for the TUI.
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,8 +16,8 @@ use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, LogLevel, McpDiscoverState, PendingForceCleanup, ProviderSetupStep, RoleMode,
-    SLASH_COMMANDS, SlashMenuEntry, SlashMenuState,
+    App, ConfiguredProvider, LogLevel, McpDiscoverState, PendingForceCleanup, ProviderSetupStep,
+    ProviderSource, RoleMode, SLASH_COMMANDS, SlashMenuEntry, SlashMenuState,
 };
 
 // Helpers
@@ -1307,7 +1308,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "provider" => match args.trim() {
                 "show" => {
-                    let providers = Self::get_configured_providers(&self.storage);
+                    let mut providers = Self::get_configured_providers(&self.storage);
                     if providers.is_empty() {
                         self.status = "⚠ No configured providers".to_string();
                         self.push_log_no_agent(
@@ -1315,6 +1316,15 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             "provider show: no configured providers".to_string(),
                         );
                     } else {
+                        // Include the router virtual provider if it has a saved
+                        // configuration so the cluster can be viewed inline.
+                        if self.load_raw_router_config().is_some() {
+                            providers.push(ConfiguredProvider {
+                                id: "router".to_string(),
+                                name: "Model Router".to_string(),
+                                source: ProviderSource::Database,
+                            });
+                        }
                         self.provider_setup = Some(ProviderSetupStep::ShowProviderConfig {
                             providers,
                             selected: 0,
@@ -1322,7 +1332,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                 }
                 "router" => {
-                    let providers = App::get_configured_providers_for_router(&self.storage);
+                    let providers = Self::get_configured_providers_for_router(&self.storage);
                     if providers.is_empty() {
                         self.status = "⚠ No concrete providers — configure one first".to_string();
                         self.push_log_no_agent(
@@ -1334,8 +1344,11 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             providers,
                             selected_provider_ids: Vec::new(),
                             selected_provider_index: 0,
-                            draft_config:
-                                ragent_llm::providers::router_config::RouterConfig::default(),
+                            draft_config: ragent_llm::providers::router_config::RouterConfig {
+                                enabled: false,
+                                tiers: HashMap::new(),
+                                ..ragent_llm::providers::router_config::RouterConfig::default()
+                            },
                             active_bucket: ragent_llm::providers::router_config::Tier::Simple,
                             active_bucket_index: 0,
                             left_pane_focused: true,

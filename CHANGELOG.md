@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.146
+
+### Added — Model router baseline support with TUI
+
+- Baseline model router support with TUI setup flow for selecting providers and
+  assigning them to routing tiers (`SIMPLE`, `MEDIUM`, `COMPLEX`, `REASONING`).
+
+### Changed
+
+- **Workspace version** — Bumped to `0.1.0-alpha.146`.
+
+### Removed — Rig framework integration
+
+- **Deleted the `ragent-rig` workspace crate** and the entire Rig (`rig-core`)
+  integration, including Rig-backed providers, embeddings, vector stores,
+  conversation-memory policies, semantic code index, semantic memory, and the
+  Rig-backed research augmentor.
+- **Removed Rig-only abstraction points:**
+  - `crates/ragent-agent/src/session/semantic_handles.rs`
+  - `crates/ragent-research/src/semantic.rs`
+  - `crates/ragent-research/tests/test_research_semantic.rs`
+- **Removed Rig-specific documentation and specs:**
+  - `docs/howtos/rig-integration.md`
+  - `docs/reports/rig-interface-audit.md`
+  - `docs/reports/rig-binary-size-compile-time-impact.md`
+  - `specs/rig/SPEC.md`
+  - `specs/rig/PLAN.md`
+- **Removed generated Rig research artifacts** under `research/rig/`.
+- **Native providers and native memory/code-index/search remain unchanged;**
+  `memory_search` and `codeindex_search` continue to use their existing
+  non-Rig implementations.
+
 ## Version: 0.1.0-alpha.145
 
 ### Added — Router Provider TUI Setup (spec: routeui)
@@ -13,18 +45,22 @@
 - **Router setup state machine** added to `ProviderSetupStep` with `SetupRouter` and
   `SelectRouterModel` variants, reusing the existing provider-setup overlay.
 - **Two-pane router UI** — provider multi-selection list on the left, four bucket columns
-  on the right, with keyboard navigation (Tab, arrows, Space, Enter, Delete, Ctrl+S, Esc).
+  on the right, with keyboard navigation (Tab, arrows, Space, Enter, Ctrl+S, Esc).
 - **Model picker dialog** for choosing which model from a selected provider is assigned
   to the active tier bucket.
 - **Persistence and validation** — `Ctrl+S` saves `provider.router.tiers` to `ragent.json`,
   enables the router, preserves existing classifier weights/boundaries, rejects recursive
   router-to-router assignments, and requires at least one non-empty tier.
+- **Bucket reordering** — `Ctrl+↑` / `Ctrl+↓` moves the selected model within a tier.
+- **Cost estimates** — each bucket entry shows a per-model `~$/M` estimate when pricing
+  metadata is available from the provider registry.
 - **`/provider show` now renders the router cluster** with each tier and its assigned
   provider/model entries.
 - **Status bar label** displays `"Model Router"` when the router virtual provider is active.
 - **Spec and tests** — added `specs/routeui/SPEC.md`/`PLAN.md` and
   `crates/ragent-tui/tests/test_router_setup.rs` covering the provider helper, state
-  defaults, report rendering, and picker list invariants.
+  machine, input handling, persistence, validation, `/provider` integration, and report
+  rendering.
 
 ### Changed
 

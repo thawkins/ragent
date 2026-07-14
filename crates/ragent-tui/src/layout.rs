@@ -1371,13 +1371,27 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                         } else {
                             Style::default().fg(Color::White)
                         };
-                        bucket_lines.push(Line::from(Span::styled(
-                            format!("{}\n  {}", entry.provider, entry.model),
-                            style,
-                        )));
+                        let cost = app
+                            .estimate_entry_cost(&entry.provider, &entry.model)
+                            .unwrap_or_default();
+                        let cost_span = if cost.is_empty() {
+                            Span::styled(String::new(), style)
+                        } else {
+                            Span::styled(
+                                format!("  {}", cost),
+                                Style::default().fg(Color::DarkGray),
+                            )
+                        };
+                        bucket_lines.push(Line::from(vec![
+                            Span::styled(format!("{}", entry.provider), style),
+                            Span::styled(
+                                format!(" / {} ", entry.model),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            cost_span,
+                        ]));
                     }
                 }
-
                 let bucket_para = Paragraph::new(bucket_lines)
                     .block(bucket_block)
                     .wrap(Wrap { trim: false });
@@ -1387,10 +1401,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             // Footer with hints/error.
             let footer_text = if let Some(err) = error {
                 format!(
-                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign model | Ctrl+S save — Error: {err}"
+                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder — Error: {err}"
                 )
             } else {
-                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign model | Ctrl+S save".to_string()
+                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder".to_string()
             };
             let footer = Paragraph::new(Line::from(Span::styled(
                 footer_text,

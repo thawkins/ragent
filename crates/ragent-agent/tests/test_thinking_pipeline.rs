@@ -82,6 +82,10 @@ impl Provider for MockProvider {
         }]
     }
 
+    fn as_any_static(&self) -> &(dyn std::any::Any + 'static) {
+        self
+    }
+
     async fn create_client(
         &self,
         _api_key: &str,

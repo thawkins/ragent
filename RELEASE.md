@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-alpha.145
+## Current Version: 0.1.0-alpha.146
+
+### Added — Model router baseline support with TUI
+
+- Baseline model router support with TUI setup flow for selecting providers and
+  assigning them to routing tiers (`SIMPLE`, `MEDIUM`, `COMPLEX`, `REASONING`).
+
+## Previous Version: 0.1.0-alpha.145
 
 ### Added — Router Provider TUI Setup (spec: routeui)
 

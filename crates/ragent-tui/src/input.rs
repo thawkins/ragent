@@ -9,6 +9,7 @@ use ragent_types::ThinkingLevel;
 use crate::app::{
     App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
 };
+use ragent_llm::providers::router_config::Tier;
 
 fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
     if char_index == 0 {
@@ -414,7 +415,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 // Select the highlighted command, or use the typed text.
                 // If the user typed more than just the trigger, preserve the full
                 // input so subcommands and arguments are not lost.
-                let command = if let Some(ref menu) = app.slash_menu {
+                let command = {
+                    let menu = app.slash_menu.as_ref()?;
                     let raw = app.input.trim_end().to_string();
                     if let Some(entry) = menu.matches.get(menu.selected) {
                         let with_slash = format!("/{}", entry.trigger);
@@ -430,8 +432,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                     } else {
                         menu.filter.clone()
                     }
-                } else {
-                    return None;
                 };
                 return Some(InputAction::SlashCommand(command));
             }
@@ -790,8 +790,17 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
 /// Handle key events inside the provider setup dialog.
 fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
-    // Escape always closes the dialog
-    if key.code == KeyCode::Esc {
+    // Escape always closes non-router setup dialogs. Router dialogs handle Esc
+    // internally so that the model picker can cancel back to the cluster panel
+    // without discarding the whole flow.
+    if key.code == KeyCode::Esc
+        && !matches!(
+            app.provider_setup,
+            Some(
+                ProviderSetupStep::SetupRouter { .. } | ProviderSetupStep::SelectRouterModel { .. }
+            )
+        )
+    {
         app.provider_setup = None;
         return;
     }
@@ -960,6 +969,36 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
                             entries,
                             selected,
+                            error: None,
+                        });
+                    }
+                } else if pid == "router" {
+                    // The Model Router is a virtual provider with no API key of
+                    // its own. Selecting it from the provider picker opens the
+                    // router cluster setup panel, mirroring `/provider router`.
+                    let providers = App::get_configured_providers_for_router(&app.storage);
+                    if providers.is_empty() {
+                        app.status = "⚠ No concrete providers — configure one first".to_string();
+                        app.push_log_no_agent(
+                            crate::app::LogLevel::Warn,
+                            "provider router: no concrete providers configured".to_string(),
+                        );
+                        // Keep the picker open so the user can choose a concrete
+                        // provider to configure first.
+                        app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
+                    } else {
+                        app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                            providers,
+                            selected_provider_ids: Vec::new(),
+                            selected_provider_index: 0,
+                            draft_config: ragent_llm::providers::router_config::RouterConfig {
+                                enabled: false,
+                                tiers: std::collections::HashMap::new(),
+                                ..ragent_llm::providers::router_config::RouterConfig::default()
+                            },
+                            active_bucket: ragent_llm::providers::router_config::Tier::Simple,
+                            active_bucket_index: 0,
+                            left_pane_focused: true,
                             error: None,
                         });
                     }
@@ -1471,7 +1510,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if let Some(prov) = providers.get(selected).cloned() {
-                    let report = app.provider_config_report(&prov);
+                    let report = if prov.id == "router" {
+                        app.router_config_report(&app.provider_registry.clone())
+                    } else {
+                        app.provider_config_report(&prov)
+                    };
                     app.append_assistant_text(&report);
                     app.status = format!("provider show: {}", prov.name);
                 }
@@ -1721,22 +1764,12 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
         }
         ProviderSetupStep::SetupRouter { .. } => {
-            // Router setup rendering is implemented; input handling will be wired in a follow-up.
-            // For now, Esc closes the dialog and any other key preserves the current state.
-            if key.code == KeyCode::Esc {
-                app.provider_setup = None;
-            } else {
-                app.provider_setup = Some(step);
-            }
+            app.provider_setup = Some(step);
+            handle_router_setup_key(app, key);
         }
         ProviderSetupStep::SelectRouterModel { .. } => {
-            // Router model picker rendering is implemented; input handling will be wired in a follow-up.
-            // For now, Esc closes the dialog and any other key preserves the current state.
-            if key.code == KeyCode::Esc {
-                app.provider_setup = None;
-            } else {
-                app.provider_setup = Some(step);
-            }
+            app.provider_setup = Some(step);
+            handle_router_model_picker_key(app, key);
         }
     }
 }
@@ -2095,5 +2128,346 @@ fn handle_context_menu_key(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+/// Handle keyboard input inside the router cluster setup panel.
+/// Navigation is entirely keyboard-driven: Tab switches between the provider
+/// list (left) and the tier bucket columns (right). Space toggles a provider in
+/// or out of the cluster palette. Enter opens the model picker for the selected
+/// provider and assigns the chosen model to the active bucket. Ctrl+S saves the
+/// cluster to `ragent.json`, preserving existing classifier weights/boundaries.
+fn handle_router_setup_key(app: &mut App, key: KeyEvent) {
+    let Some(ProviderSetupStep::SetupRouter {
+        providers,
+        mut selected_provider_ids,
+        mut selected_provider_index,
+        mut draft_config,
+        mut active_bucket,
+        mut active_bucket_index,
+        mut left_pane_focused,
+        error: _,
+    }) = app.provider_setup.take()
+    else {
+        return;
+    };
+
+    let mut error: Option<String> = None;
+
+    match key.code {
+        KeyCode::Esc => {
+            app.provider_setup = None;
+            return;
+        }
+        KeyCode::Tab => {
+            left_pane_focused = !left_pane_focused;
+            active_bucket_index = 0;
+        }
+        KeyCode::Left if !left_pane_focused => {
+            let idx = Tier::all()
+                .iter()
+                .position(|t| *t == active_bucket)
+                .unwrap_or(0);
+            active_bucket = *Tier::all()
+                .iter()
+                .cycle()
+                .nth(idx + Tier::all().len() - 1)
+                .expect("tier list non-empty");
+            active_bucket_index = 0;
+        }
+        KeyCode::Right if !left_pane_focused => {
+            let idx = Tier::all()
+                .iter()
+                .position(|t| *t == active_bucket)
+                .unwrap_or(0);
+            active_bucket = *Tier::all().get(idx + 1).unwrap_or(&Tier::Simple);
+            active_bucket_index = 0;
+        }
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) && !left_pane_focused => {
+            if let Some(tier_config) = draft_config.tiers.get_mut(&active_bucket.to_string()) {
+                if active_bucket_index > 0 && active_bucket_index < tier_config.models.len() {
+                    tier_config
+                        .models
+                        .swap(active_bucket_index, active_bucket_index - 1);
+                    active_bucket_index -= 1;
+                }
+            }
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) && !left_pane_focused => {
+            if let Some(tier_config) = draft_config.tiers.get_mut(&active_bucket.to_string()) {
+                if active_bucket_index + 1 < tier_config.models.len() {
+                    tier_config
+                        .models
+                        .swap(active_bucket_index, active_bucket_index + 1);
+                    active_bucket_index += 1;
+                }
+            }
+        }
+        KeyCode::Up => {
+            if left_pane_focused {
+                if providers.is_empty() {
+                    selected_provider_index = 0;
+                } else {
+                    selected_provider_index = if selected_provider_index == 0 {
+                        providers.len() - 1
+                    } else {
+                        selected_provider_index - 1
+                    };
+                }
+            } else {
+                let models = draft_config
+                    .tiers
+                    .get(&active_bucket.to_string())
+                    .map(|t| t.models.len())
+                    .unwrap_or(0);
+                if models == 0 {
+                    active_bucket_index = 0;
+                } else {
+                    active_bucket_index = if active_bucket_index == 0 {
+                        models - 1
+                    } else {
+                        active_bucket_index - 1
+                    };
+                }
+            }
+        }
+        KeyCode::Down => {
+            if left_pane_focused {
+                if providers.is_empty() {
+                    selected_provider_index = 0;
+                } else {
+                    selected_provider_index = (selected_provider_index + 1) % providers.len();
+                }
+            } else {
+                let models = draft_config
+                    .tiers
+                    .get(&active_bucket.to_string())
+                    .map(|t| t.models.len())
+                    .unwrap_or(0);
+                if models == 0 {
+                    active_bucket_index = 0;
+                } else {
+                    active_bucket_index = (active_bucket_index + 1) % models;
+                }
+            }
+        }
+        KeyCode::Char(' ') if left_pane_focused => {
+            if let Some(provider) = providers.get(selected_provider_index) {
+                let id = provider.id.clone();
+                if selected_provider_ids.contains(&id) {
+                    selected_provider_ids.retain(|x| x != &id);
+                    // Remove any existing assignments for this provider from
+                    // every tier so the cluster stays consistent.
+                    for tier_config in draft_config.tiers.values_mut() {
+                        tier_config.models.retain(|entry| entry.provider != id);
+                    }
+                } else {
+                    selected_provider_ids.push(id);
+                }
+            }
+        }
+        KeyCode::Enter => {
+            let provider = if left_pane_focused {
+                providers.get(selected_provider_index).cloned()
+            } else {
+                providers
+                    .get(selected_provider_index)
+                    .filter(|p| selected_provider_ids.contains(&p.id))
+                    .cloned()
+            };
+            if let Some(provider) = provider {
+                if !selected_provider_ids.contains(&provider.id) {
+                    error = Some("Select provider with Space first".to_string());
+                } else {
+                    let models = app.models_for_provider(&provider.id);
+                    if models.is_empty() {
+                        error = Some(format!("No models available for {}", provider.name));
+                    } else {
+                        app.router_draft_providers = providers.clone();
+                        app.router_draft_selected_ids = selected_provider_ids.clone();
+                        app.router_draft_config = Some(draft_config.clone());
+                        app.provider_setup = Some(ProviderSetupStep::SelectRouterModel {
+                            provider_id: provider.id,
+                            provider_name: provider.name,
+                            models,
+                            selected: 0,
+                            target_tier: active_bucket,
+                        });
+                        return;
+                    }
+                }
+            }
+        }
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let has_any = draft_config.tiers.values().any(|tc| !tc.models.is_empty());
+            if !has_any {
+                error = Some("At least one tier must contain a model".to_string());
+            } else if let Err(e) = app.save_router_config(&draft_config) {
+                error = Some(e);
+            } else {
+                app.status = "✓ Router cluster saved".to_string();
+                app.router_enabled = true;
+                app.provider_setup = None;
+                return;
+            }
+        }
+        _ => {}
+    }
+
+    app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+        providers,
+        selected_provider_ids,
+        selected_provider_index,
+        draft_config,
+        active_bucket,
+        active_bucket_index,
+        left_pane_focused,
+        error,
+    });
+}
+
+/// Handle keyboard input inside the router model picker sub-dialog.
+/// Esc cancels and returns to the router setup panel without assigning a model.
+/// Up/Down navigate the model list. Enter assigns the selected model to the
+/// target tier and returns to the bucket pane.
+fn handle_router_model_picker_key(app: &mut App, key: KeyEvent) {
+    let Some(ProviderSetupStep::SelectRouterModel {
+        provider_id,
+        provider_name,
+        models,
+        selected,
+        target_tier,
+    }) = app.provider_setup.take()
+    else {
+        return;
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            // Restore the stashed router setup state, returning focus to the
+            // provider palette.
+            let draft_config = app.router_draft_config.take().unwrap_or_default();
+            app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                providers: app.router_draft_providers.clone(),
+                selected_provider_ids: app.router_draft_selected_ids.clone(),
+                selected_provider_index: app
+                    .router_draft_providers
+                    .iter()
+                    .position(|p| p.id == provider_id)
+                    .unwrap_or(0),
+                draft_config,
+                active_bucket: target_tier,
+                active_bucket_index: 0,
+                left_pane_focused: true,
+                error: None,
+            });
+            app.router_draft_providers.clear();
+            app.router_draft_selected_ids.clear();
+        }
+        KeyCode::Up => {
+            let new = if models.is_empty() {
+                0
+            } else if selected == 0 {
+                models.len() - 1
+            } else {
+                selected - 1
+            };
+            app.provider_setup = Some(ProviderSetupStep::SelectRouterModel {
+                provider_id,
+                provider_name,
+                models,
+                selected: new,
+                target_tier,
+            });
+        }
+        KeyCode::Down => {
+            let new = if models.is_empty() {
+                0
+            } else {
+                (selected + 1) % models.len()
+            };
+            app.provider_setup = Some(ProviderSetupStep::SelectRouterModel {
+                provider_id,
+                provider_name,
+                models,
+                selected: new,
+                target_tier,
+            });
+        }
+        KeyCode::Enter => {
+            if let Some(model) = models.get(selected).cloned() {
+                let mut draft_config = app.router_draft_config.take().unwrap_or_default();
+                let tier_key = target_tier.to_string();
+                let tier_config = draft_config.tiers.entry(tier_key).or_default();
+                // Prevent recursive routing: the router must never route to itself.
+                if provider_id == "router" {
+                    app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                        providers: app.router_draft_providers.clone(),
+                        selected_provider_ids: app.router_draft_selected_ids.clone(),
+                        selected_provider_index: app
+                            .router_draft_providers
+                            .iter()
+                            .position(|p| p.id == provider_id)
+                            .unwrap_or(0),
+                        draft_config,
+                        active_bucket: target_tier,
+                        active_bucket_index: 0,
+                        left_pane_focused: true,
+                        error: Some("The router cannot route to itself".to_string()),
+                    });
+                    app.router_draft_providers.clear();
+                    app.router_draft_selected_ids.clear();
+                    return;
+                }
+
+                // Avoid duplicate exact provider/model pairs in the same tier.
+                let already_present = tier_config
+                    .models
+                    .iter()
+                    .any(|entry| entry.provider == provider_id && entry.model == model.id);
+                if !already_present {
+                    tier_config
+                        .models
+                        .push(ragent_llm::providers::router_config::TierEntry {
+                            provider: provider_id.clone(),
+                            model: model.id.clone(),
+                        });
+                }
+                let new_bucket_index = tier_config.models.len().saturating_sub(1);
+                app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                    providers: app.router_draft_providers.clone(),
+                    selected_provider_ids: app.router_draft_selected_ids.clone(),
+                    selected_provider_index: app
+                        .router_draft_providers
+                        .iter()
+                        .position(|p| p.id == provider_id)
+                        .unwrap_or(0),
+                    draft_config,
+                    active_bucket: target_tier,
+                    active_bucket_index: new_bucket_index,
+                    left_pane_focused: false,
+                    error: None,
+                });
+                app.router_draft_providers.clear();
+                app.router_draft_selected_ids.clear();
+            } else {
+                app.provider_setup = Some(ProviderSetupStep::SelectRouterModel {
+                    provider_id,
+                    provider_name,
+                    models,
+                    selected,
+                    target_tier,
+                });
+            }
+        }
+        _ => {
+            app.provider_setup = Some(ProviderSetupStep::SelectRouterModel {
+                provider_id,
+                provider_name,
+                models,
+                selected,
+                target_tier,
+            });
+        }
     }
 }
