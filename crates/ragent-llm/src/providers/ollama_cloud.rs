@@ -344,8 +344,19 @@ impl OllamaCloudClient {
             }));
         }
 
-        for msg in request.messages.iter() {
-            // Ollama Cloud requires content to always be a plain string.            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
+        // Only the most recent user message should carry an `images` array.
+        // Historical images remain in the chat history as `ContentPart::ImageUrl`,
+        // but sending them to a non-vision model (or on older turns) causes
+        // Ollama Cloud to reject the request with "this model does not support
+        // image input". Compute the index once and only attach images there.
+        let last_user_idx = request.messages.iter().rposition(|m| m.role == "user");
+
+        for (idx, msg) in request.messages.iter().enumerate() {
+            // Ollama Cloud requires content to always be a plain string.
+            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
+            // For any message other than the most recent user message, discard
+            // image parts so they are not sent to a model that cannot handle them.
+            let is_last_user = last_user_idx == Some(idx);
             let (content_str, images): (String, Vec<String>) = match &msg.content {
                 ChatContent::Text(text) => (text.clone(), vec![]),
                 ChatContent::Parts(parts) => {
@@ -355,13 +366,18 @@ impl OllamaCloudClient {
                         match part {
                             ContentPart::Text { text } => texts.push(text.clone()),
                             ContentPart::ImageUrl { url } => {
-                                // Strip data-URL prefix: "data:image/png;base64,<data>"
-                                let b64 = if let Some(idx) = url.find(";base64,") {
-                                    url[idx + 8..].to_string()
-                                } else {
-                                    url.clone()
-                                };
-                                imgs.push(b64);
+                                if is_last_user {
+                                    // Strip data-URL prefix: "data:image/png;base64,<data>"
+                                    let b64 = if let Some(idx) = url.find(";base64,") {
+                                        url[idx + 8..].to_string()
+                                    } else {
+                                        url.clone()
+                                    };
+                                    imgs.push(b64);
+                                }
+                                // For non-current user messages, silently drop the
+                                // image so a non-vision model is not rejected for
+                                // historical image attachments.
                             }
                             ContentPart::ToolUse { .. } | ContentPart::ToolResult { .. } => {}
                         }

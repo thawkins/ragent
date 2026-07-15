@@ -2,6 +2,163 @@
 
 ## Unreleased
 
+## Version: 0.1.0-alpha.147
+
+### Fixed — Model Router no longer forces a vision model for text-only follow-ups
+
+- `extract_attachments()` in `crates/ragent-llm/src/providers/router_client.rs` now
+  scans **only the most recent user message** for image/video attachments instead of
+  the entire conversation history.
+- Previously, once an image was sent in a conversation, every subsequent prompt
+  was treated as `requires_vision`, which caused the router to keep selecting a
+  vision-capable model even when the current user prompt had no attachment.
+- Now a text-only follow-up correctly re-classifies and selects the first model
+  in the resolved tier (e.g. a non-vision `glm-5.2` listed above a vision variant).
+- Added regression test
+  `test_router_text_followup_after_image_uses_non_vision_model` in
+  `crates/ragent-llm/tests/test_router_client.rs`.
+
+### Fixed — Selecting Model Router in the provider picker now opens the router setup UI
+
+- In the provider setup dialog (`/provider`), choosing **Model Router** when it
+  was already marked as configured previously fell through to the generic model
+  picker, which showed a useless single-entry "Model Router" list and offered no
+  way to reconfigure the cluster. The provider picker now detects this case and
+  opens the **Model Router cluster setup panel** instead.
+- The empty-cluster guard is preserved: if no concrete providers are configured,
+  the picker stays open with a warning so the user can set up a downstream provider
+  first.
+- Added a regression test in `crates/ragent-tui/tests/test_router_setup.rs`
+  (`test_provider_picker_already_configured_router_opens_setup_router`).
+
+### Fixed — Model Router classification now appears in the TUI log panel
+
+- `RouterProvider` now overrides the `Provider::set_event_bus` trait default so
+  that the TUI's `provider_registry.set_event_bus_all()` call actually reaches
+  the router. Previously the router kept its event bus as `None` even though
+  other providers were wired, so `Event::RouterClassification` was never
+  published and the classification/bucket/model selection stayed invisible in
+  the Logging Window.
+- The router now also publishes classification events via a plain
+  `tracing::info!()` record, so the summary appears in the log panel regardless
+  of whether the event-bus bridge is active.
+
+### Fixed — Model Router no longer defaults to Anthropic for Medium/Complex/Reasoning tiers
+
+- `default_tier_config()` now uses local-first `ollama` models for every tier:
+  - `SIMPLE`: `qwen3:0.6b`, `llama3.2`
+  - `MEDIUM`: `qwen3:1.7b`, `qwen2.5:7b`
+  - `COMPLEX`: `qwen3:4b`, `qwen2.5:14b`
+  - `REASONING`: `qwq:32b`, `deepseek-r1:14b`
+- This removes the silent `anthropic` fallbacks for `MEDIUM`, `COMPLEX`, and
+  `REASONING` that produced 401 Unauthorized errors when no Anthropic API key
+  was configured.
+- If the resolved tier has no configured models, the router now falls back to
+  higher tiers first, then lower tiers, before giving up. This keeps a
+  partially configured cluster (e.g. only `SIMPLE` defined) working for prompts
+  that classify into any other bucket.
+
+### Fixed — Default model no longer hard-wires Anthropic/Claude
+
+- `create_default_registry()` now registers **local/self-hosted providers first**
+  (`ollama`, `ollama_cloud`, `generic_openai`, `huggingface`, `azure_resource`,
+  `azure_foundry`, `copilot`) before cloud providers (`openai`, `gemini`, `xai`,
+  `anthropic`, `bedrock`). The built-in `RouterProvider` remains last.
+- As a result, when no model is explicitly selected the fallback resolves to the
+  first available *local* provider/model (e.g. `ollama/...`) instead of
+  `anthropic/claude-sonnet-4-20250514`.
+- This affects all paths that call `resolve_default_model` /
+  `resolve_agent_with_model`: TUI startup, `ragent run`, `ragent serve`,
+  `POST /sessions/{id}/messages`, and the AGENTS.md init exchange.
+- Router built-in tiers are left unchanged but are only active when the user
+  explicitly enables the router (`/router on` or custom `provider.router` config).
+
+### Added — Model Router classification logging and virtual model discovery
+
+- The router now logs the **classified prompt**, **selected bucket/tier**,
+  **selected downstream model**, **composite score**, and **active classifier
+  dimensions** every time it routes a request. This information is published as
+  an `Event::RouterClassification` so it appears in the TUI log panel even when
+  the tracing filter is set to the default `warn` level.
+- `RouterProvider` now exposes a single virtual model (`Model Router`), so the
+  model picker and discovery flow show the router as a valid selection instead
+  of reporting "No models are currently available for this provider".
+
+### Added — Model Router save confirmation dialog
+
+- **Ctrl+S in the Model Router setup dialog now opens a confirmation modal**
+  instead of saving immediately. The modal shows the number of tier entries that
+  will be saved and prompts the user to press Enter to confirm or Esc to cancel.
+- **Confirming the dialog** persists the draft cluster to `ragent.json`,
+  enables the router, and selects `router/router` as the active model.
+- **Cancelling the dialog** clears the pending save and returns to the router
+  setup dialog without writing to disk.
+- **New tests** in `crates/ragent-tui/tests/test_router_save_dialog.rs` cover
+  both confirming and cancelling the save confirmation dialog.
+
+### Fixed — Model Router save confirmation dialog visibility
+
+- The router save confirmation modal is now rendered **after** the router setup
+  dialog so it appears on top instead of being painted over. Previously the
+  confirmation was invisible because `render_provider_setup_dialog` was drawn
+  later and covered the modal, which also meant users could not confirm the
+  save and the router cluster was not persisted.
+- Added a regression test in `crates/ragent-tui/tests/test_router_setup.rs`
+  (`test_router_save_confirmation_renders_above_setup_dialog`) that renders
+  both dialogs together and asserts the save confirmation title and hint are
+  visible.
+
+### Fixed — Router provider no longer demands an API key
+
+- `SessionProcessor::resolve_api_key` now returns an empty key immediately for
+  the virtual `router` provider. The router delegates authentication to its
+  downstream providers, so it does not require its own API key. This prevents the
+  spurious `"No API key found for provider 'router'"` error when the Model
+  Router is selected.
+
+### Fixed — "error decoding response body" retry loop for local/OpenAI-compatible providers
+
+- **OpenAI-compatible providers (OpenAI, Azure Foundry, Generic OpenAI) now detect
+  an empty/malformed SSE body immediately** and emit a clear, non-retryable error
+  (`"... returned an empty/malformed event stream ... model is not loaded"`) instead
+  of the raw reqwest `"error decoding response body"` diagnostic. The transform fires
+  when a chunk decode failure happens before any events have been yielded and the HTTP
+  status was successful, which is the typical signature of a local model that is not
+  loaded or an endpoint that returned a non-stream body.
+- **Ollama provider applies the same empty/malformed stream detection** in its SSE
+  parser, using captured response status and content-type to produce a clear local
+  model error message.
+- **Retry policy no longer retries raw `"error decoding response body"` before any
+  output has been received.** `should_retry_stream_error` now treats that specific
+  early decode failure as fatal, while still preserving partial output if the error
+  occurs mid-stream.
+- **TUI status-bar label now reflects the provider actually handling the request.**
+  It shows `"Model Router"` only when the active model ref points to the `router`
+  provider; if the router is enabled but a concrete model is still selected, the
+  label falls back to that concrete provider's name.
+
+### Changed — Model Router setup UI layout and model-property display
+
+- **Router cluster buckets now render as a 2×2 grid** (two rows of two buckets)
+  instead of a single row of four columns, improving readability on narrower
+  terminals. The four tiers are laid out in ascending complexity order:
+  `SIMPLE` | `MEDIUM` on the top row, `COMPLEX` | `REASONING` on the bottom row.
+- **Bucket titles now show the full tier name** (e.g. `SIMPLE`, `REASONING`)
+  instead of the previous single-character abbreviation (`S`, `M`, `C`, `R`).
+- **Retained model properties are displayed inside each bucket.** Each assigned
+  model entry now renders its context window, feature flags (`R`/`V`/`T`),
+  thinking levels, cost tier/multiplier, and registry cost estimate, in addition
+  to the `provider / model` label. Properties are resolved at render time via a
+  new `App::router_model_picker_entry` helper that prefers cached/discovered
+  model metadata and falls back to the provider registry's default catalog.
+- **Router model picker upgraded to a full properties table.** The
+  `SelectRouterModel` dialog now renders the same `Model | Context | Cost |
+  Thinking | Features` table used by the standard model picker, so users can
+  compare model properties before assigning a sub-model to a tier bucket.
+- **New tests** added to `crates/ragent-tui/tests/test_router_setup.rs` covering
+  the full tier-name bucket titles, retained property rendering, and the
+  picker property-column rendering.
+
 ## Version: 0.1.0-alpha.146
 
 ### Added — Model router baseline support with TUI

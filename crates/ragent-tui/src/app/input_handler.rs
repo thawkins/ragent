@@ -1207,6 +1207,33 @@ impl App {
                         self.status = "forcecleanup cancelled".to_string();
                     }
                 }
+                InputAction::ConfirmRouterSave => {
+                    if let Some(draft) = self.pending_router_save.take() {
+                        match self.save_router_config(&draft) {
+                            Ok(()) => {
+                                self.select_router_as_active();
+                                self.router_enabled = true;
+                                self.status =
+                                    "✓ Router cluster saved — Model Router active".to_string();
+                                self.provider_setup = None;
+                            }
+                            Err(e) => {
+                                self.status = format!("error: {e}");
+                                self.push_log_no_agent(LogLevel::Error, e.clone());
+                                if let Some(ProviderSetupStep::SetupRouter { error, .. }) =
+                                    self.provider_setup.as_mut()
+                                {
+                                    *error = Some(e);
+                                }
+                            }
+                        }
+                    }
+                }
+                InputAction::CancelRouterSave => {
+                    if self.pending_router_save.take().is_some() {
+                        self.status = "Router save cancelled".to_string();
+                    }
+                }
                 InputAction::ApprovePlan => {
                     if let Some(state) = self.plan_approval_pending.take() {
                         if let Some(ref session_id) = self.session_id.clone() {

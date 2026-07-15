@@ -342,21 +342,21 @@ fn test_local_persistence_key_is_model_only_format() {
 // ── Smoke: models_for_provider returns non-empty for built-in providers ───
 
 #[test]
-fn test_models_for_provider_anthropic_is_nonempty() {
+fn test_models_for_provider_anthropic_is_empty_without_key_or_discovery() {
     let app = make_app();
     let models = app.models_for_provider("anthropic");
     assert!(
-        !models.is_empty(),
-        "anthropic should have default fallback models"
+        models.is_empty(),
+        "anthropic models should be empty when no key or discovery is available"
     );
 }
 
 #[test]
-fn test_models_for_provider_openai_is_nonempty() {
+fn test_models_for_provider_openai_is_empty_without_key_or_discovery() {
     let app = make_app();
     let models = app.models_for_provider("openai");
     assert!(
-        !models.is_empty(),
-        "openai should have default fallback models"
+        models.is_empty(),
+        "openai models should be empty when no key or discovery is available"
     );
 }

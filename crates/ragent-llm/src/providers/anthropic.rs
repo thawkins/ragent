@@ -62,52 +62,12 @@ impl Provider for AnthropicProvider {
         self
     }
 
-    /// Returns default Claude models (Sonnet 4, 3.5 Haiku).
+    /// Returns an empty catalog.
+    ///
+    /// Anthropic models are discovered at runtime from the `/v1/models`
+    /// endpoint; no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        vec![
-            ModelInfo {
-                id: "claude-sonnet-4-20250514".to_string(),
-                provider_id: "anthropic".to_string(),
-                name: "Claude Sonnet 4".to_string(),
-                cost: Cost {
-                    input: 3.0,
-                    output: 15.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: true,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                    thinking_levels: anthropic_thinking_levels_for_model(
-                        "claude-sonnet-4-20250514",
-                    ),
-                },
-                context_window: 200_000,
-                max_output: Some(64_000),
-                request_multiplier: None,
-                thinking_config: None,
-            },
-            ModelInfo {
-                id: "claude-3-5-haiku-latest".to_string(),
-                provider_id: "anthropic".to_string(),
-                name: "Claude 3.5 Haiku".to_string(),
-                cost: Cost {
-                    input: 0.80,
-                    output: 4.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                    thinking_levels: anthropic_thinking_levels_for_model("claude-3-5-haiku-latest"),
-                },
-                context_window: 200_000,
-                max_output: Some(8_192),
-                request_multiplier: None,
-                thinking_config: None,
-            },
-        ]
+        Vec::new()
     }
 
     /// Discover available models from Anthropic's `/v1/models` endpoint.

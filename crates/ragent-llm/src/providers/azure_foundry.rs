@@ -18,7 +18,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::llm::LlmClient;
-use crate::provider::openai::{OpenAiClient, openai_default_models};
+use crate::provider::openai::OpenAiClient;
 use crate::{ModelInfo, Provider};
 
 const DEFAULT_AZURE_FOUNDRY_HOST: &str = "https://services.ai.azure.com";
@@ -46,51 +46,7 @@ impl Provider for AzureFoundryProvider {
     }
 
     fn default_models(&self) -> Vec<ModelInfo> {
-        let mut models = openai_default_models("azure_foundry");
-        // Add Azure-specific model variants with reasoning support
-        models.push(ModelInfo {
-            id: "o1".to_string(),
-            provider_id: "azure_foundry".to_string(),
-            name: "Azure o1".to_string(),
-            cost: ragent_config::Cost {
-                input: 15.0,
-                output: 60.0,
-            },
-            capabilities: ragent_config::Capabilities {
-                reasoning: true,
-                streaming: true,
-                vision: true,
-                tool_use: true,
-                thinking_levels: crate::provider::thinking::openai_thinking_levels_for_model("o1"),
-            },
-            context_window: 200_000,
-            max_output: Some(100_000),
-            request_multiplier: None,
-            thinking_config: None,
-        });
-        models.push(ModelInfo {
-            id: "o3-mini".to_string(),
-            provider_id: "azure_foundry".to_string(),
-            name: "Azure o3-mini".to_string(),
-            cost: ragent_config::Cost {
-                input: 1.10,
-                output: 4.40,
-            },
-            capabilities: ragent_config::Capabilities {
-                reasoning: true,
-                streaming: true,
-                vision: false,
-                tool_use: true,
-                thinking_levels: crate::provider::thinking::openai_thinking_levels_for_model(
-                    "o3-mini",
-                ),
-            },
-            context_window: 200_000,
-            max_output: Some(100_000),
-            request_multiplier: None,
-            thinking_config: None,
-        });
-        models
+        Vec::new()
     }
 
     /// Discover available models from the Azure AI Foundry endpoint.

@@ -50,6 +50,9 @@ pub struct ClassificationResult {
     /// a vision-capable model. When `true`, the router should only consider
     /// models with `Capabilities::vision == true`.
     pub requires_vision: bool,
+    /// When the user supplied an explicit tier modifier (e.g. `/reasoning`),
+    /// this is the tier requested by the modifier. Otherwise `None`.
+    pub modifier_tier: Option<Tier>,
 }
 
 /// Dimension names in display order.
@@ -116,6 +119,7 @@ impl PromptClassifier {
             composite_score,
             tier,
             requires_vision,
+            modifier_tier: None,
         }
     }
 
@@ -148,6 +152,7 @@ impl PromptClassifier {
                         composite_score: boundaries.simple_medium,
                         tier: Tier::Medium,
                         requires_vision: attachments.has_media(),
+                        modifier_tier: None,
                     }
                 } else {
                     r
@@ -160,10 +165,12 @@ impl PromptClassifier {
                     composite_score: boundaries.simple_medium,
                     tier: Tier::Medium,
                     requires_vision: attachments.has_media(),
+                    modifier_tier: None,
                 }
             }
         }
     }
+
     /// Score all 15 dimensions for a prompt.
     pub fn score_all_dimensions(
         prompt: &str,

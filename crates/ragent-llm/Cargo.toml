@@ -13,6 +13,7 @@ default = []
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 ragent-config = { path = "../ragent-config" }
+ragent-storage = { path = "../ragent-storage" }
 async-trait = { workspace = true }
 
 # Core async runtime

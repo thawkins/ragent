@@ -1302,7 +1302,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .wrap(Wrap { trim: false });
             frame.render_widget(left_para, chunks[0]);
 
-            // ── Right pane: four bucket columns ──
+            // ── Right pane: four tier buckets in a 2×2 grid ──
             let right_block = Block::default()
                 .borders(Borders::ALL)
                 .title(if *left_pane_focused {
@@ -1318,15 +1318,25 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             let right_inner = right_block.inner(chunks[1]);
             frame.render_widget(right_block.clone(), chunks[1]);
 
-            let bucket_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(25),
-                ])
+            // Arrange the four tier buckets as 2 rows of 2 columns so the full
+            // tier name and model properties remain readable on narrower
+            // terminals. Tiers are laid out in ascending complexity order:
+            //   row 0: SIMPLE   | MEDIUM
+            //   row 1: COMPLEX   | REASONING
+            let row_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(right_inner);
+            let bucket_chunks: Vec<Rect> = row_chunks
+                .iter()
+                .flat_map(|row| {
+                    Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(*row)
+                        .to_vec()
+                })
+                .collect();
 
             for (idx, tier) in ragent_llm::providers::router_config::Tier::all()
                 .iter()
@@ -1336,13 +1346,15 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 let tier_config = draft_config.tiers.get(&tier.to_string());
                 let models = tier_config.map(|t| t.models.as_slice()).unwrap_or(&[]);
 
+                // Use the full tier name (e.g. "SIMPLE") in the bucket title so
+                // each bucket is unambiguous at a glance.
                 let bucket_block = Block::default()
                     .borders(Borders::ALL)
                     .title(format!(
-                        " {} {} ",
-                        tier.initial(),
+                        " {}{} ",
+                        tier,
                         if is_active && !left_pane_focused {
-                            "*"
+                            " *"
                         } else {
                             ""
                         }
@@ -1371,25 +1383,76 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                         } else {
                             Style::default().fg(Color::White)
                         };
-                        let cost = app
-                            .estimate_entry_cost(&entry.provider, &entry.model)
-                            .unwrap_or_default();
-                        let cost_span = if cost.is_empty() {
-                            Span::styled(String::new(), style)
-                        } else {
-                            Span::styled(
-                                format!("  {}", cost),
-                                Style::default().fg(Color::DarkGray),
-                            )
-                        };
+
+                        // Resolve the full model metadata so its properties are
+                        // retained and displayed inside the bucket. Falls back to
+                        // a minimal label when the model is not advertised by the
+                        // provider registry (e.g. a stale assignment).
+                        let metadata = app.router_model_picker_entry(&entry.provider, &entry.model);
+
+                        // Line 1: provider / model name.
+                        let model_label = metadata
+                            .as_ref()
+                            .map(|m| m.name.clone())
+                            .unwrap_or_else(|| entry.model.clone());
                         bucket_lines.push(Line::from(vec![
                             Span::styled(format!("{}", entry.provider), style),
                             Span::styled(
-                                format!(" / {} ", entry.model),
+                                format!(" / {} ", model_label),
                                 Style::default().fg(Color::DarkGray),
                             ),
-                            cost_span,
                         ]));
+
+                        // Line 2: retained model properties — context window,
+                        // features, thinking levels, and cost tier.
+                        if let Some(m) = &metadata {
+                            let ctx_str = if m.context_window >= 1_000_000 {
+                                format!("{}M", m.context_window / 1_000_000)
+                            } else if m.context_window >= 1_000 {
+                                format!("{}K", m.context_window / 1_000)
+                            } else {
+                                m.context_window.to_string()
+                            };
+                            let mut features: Vec<&'static str> = Vec::new();
+                            if m.reasoning {
+                                features.push("R");
+                            }
+                            if m.vision {
+                                features.push("V");
+                            }
+                            if m.tool_use {
+                                features.push("T");
+                            }
+                            let features_str = if features.is_empty() {
+                                "-".to_string()
+                            } else {
+                                features.join(",")
+                            };
+                            let thinking_str = App::format_thinking_levels(&m.thinking_levels);
+                            let props_style = Style::default().fg(Color::DarkGray);
+                            bucket_lines.push(Line::from(vec![
+                                Span::styled("   ", props_style),
+                                Span::styled(format!("ctx {} ", ctx_str), props_style),
+                                Span::styled(format!("feat {} ", features_str), props_style),
+                                Span::styled(format!("think {} ", thinking_str), props_style),
+                                Span::styled(
+                                    format!("cost {}·{}", m.cost_tier, m.cost_multiplier),
+                                    props_style,
+                                ),
+                            ]));
+                        }
+
+                        // Line 3: cost estimate from the provider registry, when
+                        // available (FR-022).
+                        let cost = app
+                            .estimate_entry_cost(&entry.provider, &entry.model)
+                            .unwrap_or_default();
+                        if !cost.is_empty() {
+                            bucket_lines.push(Line::from(Span::styled(
+                                format!("   {}", cost),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
                     }
                 }
                 let bucket_para = Paragraph::new(bucket_lines)
@@ -1401,10 +1464,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             // Footer with hints/error.
             let footer_text = if let Some(err) = error {
                 format!(
-                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder — Error: {err}"
+                    "Esc cancel | Tab switch pane | ↑↓ move | Space toggle | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder | Del remove — Error: {err}"
                 )
             } else {
-                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder".to_string()
+                "Esc cancel | Tab switch pane | ↑↓ move | Space toggle provider | Enter assign | Ctrl+S save | Ctrl+↑↓ reorder | Del remove".to_string()
             };
             let footer = Paragraph::new(Line::from(Span::styled(
                 footer_text,
@@ -1429,7 +1492,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             selected,
             target_tier,
         } => {
-            let area = centered_rect(60, 70, frame.area());
+            let area = centered_rect(72, 78, frame.area());
             frame.render_widget(Clear, area);
 
             let block = Block::default()
@@ -1440,44 +1503,151 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 ))
                 .border_style(Style::default().fg(Color::Cyan));
             let inner = block.inner(area);
-            frame.render_widget(block, area);
+            frame.render_widget(block.clone(), area);
 
-            let mut lines: Vec<Line<'_>> = Vec::new();
             if models.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "No models available.",
-                    Style::default().fg(Color::Yellow),
-                )));
+                let paragraph = Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "No models are currently available for this provider.",
+                        Style::default().fg(Color::Yellow),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ])
+                .alignment(Alignment::Center);
+                frame.render_widget(paragraph, inner);
             } else {
-                for (i, m) in models.iter().enumerate() {
-                    let is_selected = i == *selected;
-                    let style = if is_selected {
+                // Render the same rich model-properties table used by the
+                // standard model picker so users can compare context window,
+                // cost, thinking levels, and feature flags before assigning a
+                // model to a router tier bucket.
+                let header = Row::new(vec!["Model", "Context", "Cost", "Thinking", "Features"])
+                    .style(
                         Style::default()
-                            .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::White)
-                    };
-                    lines.push(Line::from(vec![
-                        Span::styled(if is_selected { "▸ " } else { "  " }, style),
-                        Span::styled(m.name.clone(), style),
-                        Span::styled(
-                            format!(" ({}) [{} tokens]", m.id, m.context_window),
-                            Style::default().fg(Color::DarkGray),
-                        ),
-                    ]));
+                            .fg(Color::Cyan),
+                    );
+
+                let header_height = 3;
+                let footer_height = 3;
+                let available_rows =
+                    inner.height.saturating_sub(header_height + footer_height) as usize;
+                let visible = available_rows.max(1).min(models.len());
+                let start = if *selected >= visible {
+                    (*selected + 1).saturating_sub(visible)
+                } else {
+                    0
+                };
+                let end = (start + visible).min(models.len());
+
+                let rows: Vec<Row> = models
+                    .iter()
+                    .enumerate()
+                    .skip(start)
+                    .take(end - start)
+                    .map(|(i, m)| {
+                        let is_selected = i == *selected;
+                        let style = if is_selected {
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+
+                        let ctx_str = if m.context_window >= 1_000_000 {
+                            format!("{}M", m.context_window / 1_000_000)
+                        } else if m.context_window >= 1_000 {
+                            format!("{}K", m.context_window / 1_000)
+                        } else {
+                            m.context_window.to_string()
+                        };
+                        let cost_str = format!("{} · {}", m.cost_tier, m.cost_multiplier);
+                        let thinking_str = App::format_thinking_levels(&m.thinking_levels);
+
+                        let mut features = Vec::new();
+                        if m.reasoning {
+                            features.push("R");
+                        }
+                        if m.vision {
+                            features.push("V");
+                        }
+                        if m.tool_use {
+                            features.push("T");
+                        }
+                        let features_str = if features.is_empty() {
+                            "-".to_string()
+                        } else {
+                            features.join(",")
+                        };
+
+                        let model_name = if is_selected {
+                            format!("▸ {}", m.name)
+                        } else {
+                            format!("  {}", m.name)
+                        };
+
+                        Row::new(vec![
+                            model_name,
+                            ctx_str,
+                            cost_str,
+                            thinking_str,
+                            features_str,
+                        ])
+                        .style(style)
+                    })
+                    .collect();
+
+                let table = Table::new(
+                    rows,
+                    [
+                        Constraint::Percentage(35),
+                        Constraint::Percentage(15),
+                        Constraint::Percentage(20),
+                        Constraint::Percentage(18),
+                        Constraint::Percentage(12),
+                    ],
+                )
+                .header(header)
+                .block(block);
+                frame.render_widget(table, area);
+
+                // Footer hint.
+                if inner.height > 1 {
+                    let hint = Span::styled(
+                        "↑/↓ navigate  Enter assign  Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    );
+                    let hint_area = Rect::new(
+                        inner.x,
+                        inner.y + inner.height.saturating_sub(1),
+                        inner.width,
+                        1,
+                    );
+                    frame.render_widget(Paragraph::new(Line::from(hint)), hint_area);
+                }
+
+                if models.len() > visible && inner.height > 2 {
+                    let showing = Span::styled(
+                        format!("Showing {}-{} of {}", start + 1, end, models.len()),
+                        Style::default().fg(Color::DarkGray),
+                    );
+                    let showing_area = Rect::new(
+                        inner.x,
+                        inner.y + inner.height.saturating_sub(2),
+                        inner.width,
+                        1,
+                    );
+                    frame.render_widget(
+                        Paragraph::new(Line::from(showing)).alignment(Alignment::Right),
+                        showing_area,
+                    );
                 }
             }
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Esc cancel | ↑↓ select | Enter assign",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let paragraph = Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .alignment(Alignment::Left);
-            frame.render_widget(paragraph, inner);
         }
     }
 }
@@ -2088,6 +2258,13 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Provider setup dialog overlay (if active, e.g. via /provider command)
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
+    }
+
+    // Router save confirmation modal overlay
+    // Must render after provider_setup so the confirmation sits on top of the
+    // router setup dialog when the user presses Ctrl+S.
+    if app.pending_router_save.is_some() {
+        render_router_save_dialog(frame, app);
     }
 
     // MCP discover dialog overlay
@@ -4551,4 +4728,41 @@ mod tests {
             "Expected second thought line in rendered output: {rendered:?}"
         );
     }
+}
+
+/// Render the router save confirmation modal overlay.
+fn render_router_save_dialog(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "Save Router Configuration",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("This will overwrite your current Model Router cluster in ragent.json."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter save  Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    if let Some(ref draft) = app.pending_router_save {
+        let total: usize = draft.tiers.values().map(|t| t.models.len()).sum();
+        lines.insert(3, Line::from(format!("Tier entries to save: {total}")));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm Save ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
 }

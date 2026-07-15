@@ -1,13 +1,50 @@
 # Release
 
-## Current Version: 0.1.0-alpha.146
+## Current Version: 0.1.0-alpha.147
 
-### Added — Model router baseline support with TUI
+### Fixed — Model Router vision-model, provider picker, classification logging, and local-provider error handling
 
-- Baseline model router support with TUI setup flow for selecting providers and
-  assigning them to routing tiers (`SIMPLE`, `MEDIUM`, `COMPLEX`, `REASONING`).
+- `extract_attachments()` in the router client now scans only the most recent
+  user message for image/video attachments, so text-only follow-ups after an
+  image are no longer forced onto a vision model.
+- Selecting an already-configured Model Router in the provider picker now opens
+  the router cluster setup panel instead of a useless single-entry model list.
+- `RouterProvider` now overrides `Provider::set_event_bus` so
+  `Event::RouterClassification` is published and the classification/bucket/model
+  selection appears in the TUI log panel.
+- `default_tier_config()` now uses local-first `ollama` models for every tier,
+  removing the silent `anthropic` fallbacks that produced 401 errors when no
+  Anthropic key was configured; tier fallback now walks higher then lower tiers.
+- `create_default_registry()` registers local/self-hosted providers first, so
+  the default model resolves to a local provider instead of Anthropic/Claude.
+- OpenAI-compatible and Ollama providers now detect empty/malformed SSE streams
+  and emit a clear non-retryable local-model error instead of the raw
+  `"error decoding response body"` retry loop.
+- Router save confirmation dialog now renders above the setup dialog and
+  requires Enter to confirm; the `router` provider no longer demands an API key.
 
-## Previous Version: 0.1.0-alpha.145
+### Added — Model Router classification logging, virtual model discovery, and save dialog
+
+- The router logs classified prompt, selected bucket/tier, downstream model,
+  composite score, and active classifier dimensions on every route, published as
+  `Event::RouterClassification`.
+- `RouterProvider` exposes a single virtual `Model Router` model so discovery and
+  the model picker show the router as a valid selection.
+- Ctrl+S in the router setup dialog opens a confirmation modal showing the
+  number of tier entries to save; confirming persists to `ragent.json`, enables
+  the router, and selects `router/router`.
+
+### Changed — Model Router setup UI layout and model-property display
+
+- Router cluster buckets render as a 2×2 grid (`SIMPLE` | `MEDIUM` top row,
+  `COMPLEX` | `REASONING` bottom row) with full tier names.
+- Each assigned model entry renders context window, feature flags, thinking
+  levels, cost tier/multiplier, and registry cost estimate alongside the
+  `provider / model` label.
+- The `SelectRouterModel` dialog now renders the same
+  `Model | Context | Cost | Thinking | Features` table as the standard picker.
+
+## Previous Version: 0.1.0-alpha.146
 
 ### Added — Router Provider TUI Setup (spec: routeui)
 

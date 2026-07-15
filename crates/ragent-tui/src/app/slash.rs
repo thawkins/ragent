@@ -1,5 +1,4 @@
 //! Slash-command dispatch for the TUI.
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1340,20 +1339,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             "provider router: no concrete providers configured".to_string(),
                         );
                     } else {
-                        self.provider_setup = Some(ProviderSetupStep::SetupRouter {
-                            providers,
-                            selected_provider_ids: Vec::new(),
-                            selected_provider_index: 0,
-                            draft_config: ragent_llm::providers::router_config::RouterConfig {
-                                enabled: false,
-                                tiers: HashMap::new(),
-                                ..ragent_llm::providers::router_config::RouterConfig::default()
-                            },
-                            active_bucket: ragent_llm::providers::router_config::Tier::Simple,
-                            active_bucket_index: 0,
-                            left_pane_focused: true,
-                            error: None,
-                        });
+                        self.provider_setup = Some(self.seeded_router_setup_step(providers));
                     }
                 }
                 "" => {

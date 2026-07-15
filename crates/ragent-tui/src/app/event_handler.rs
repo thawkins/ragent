@@ -1319,6 +1319,42 @@ impl App {
                         });
                     }
                 }
+            }
+            Event::RouterClassification {
+                ref session_id,
+                ref tier,
+                ref requested_tier,
+                ref model,
+                composite_score,
+                ref prompt,
+                ref dimensions,
+            } if self.is_current_session(session_id) => {
+                let dims = dimensions
+                    .iter()
+                    .map(|(name, score)| format!("{}={:.2}", name, score))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let prompt_display = if prompt.chars().count() > 80 {
+                    let mut end = 80;
+                    while end > 0 && !prompt.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &prompt[..end])
+                } else {
+                    prompt.clone()
+                };
+                let fallback_note = requested_tier
+                    .as_ref()
+                    .filter(|rt| rt.as_str() != tier.as_str())
+                    .map(|rt| format!(" (requested {})", rt))
+                    .unwrap_or_default();
+                self.push_log_no_agent(
+                                      LogLevel::Info,
+                                      format!(
+                                          "Router: bucket={} model={} composite={:.4} prompt=\"{}\" dimensions=[{}]{}",
+                                          tier, model, composite_score, prompt_display, dims, fallback_note
+                                      ),
+                                  );
             } // ── Model download progress (progress bar popup) ───────────────
             Event::ModelDownloadStarted {
                 ref provider_id,

@@ -30,9 +30,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Mutex;
 
-use super::thinking::{
-    full_reasoning_levels, reasoning_effort_from_request, reasoning_levels_from_supported_efforts,
-};
+use super::thinking::{reasoning_effort_from_request, reasoning_levels_from_supported_efforts};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -217,90 +215,12 @@ impl Provider for CopilotProvider {
         self
     }
 
-    /// Returns the default models available through GitHub Copilot.
+    /// Returns an empty catalog.
+    ///
+    /// Copilot models are discovered at runtime from the GitHub Models endpoint;
+    /// no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        vec![
-            ModelInfo {
-                id: "gpt-4o".to_string(),
-                provider_id: "copilot".to_string(),
-                name: "GPT-4o (Copilot)".to_string(),
-                cost: Cost {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                    thinking_levels: Vec::new(),
-                },
-                context_window: 128_000,
-                max_output: Some(16_384),
-                request_multiplier: Some(0.0),
-                thinking_config: None,
-            },
-            ModelInfo {
-                id: "gpt-4o-mini".to_string(),
-                provider_id: "copilot".to_string(),
-                name: "GPT-4o Mini (Copilot)".to_string(),
-                cost: Cost {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                    thinking_levels: Vec::new(),
-                },
-                context_window: 128_000,
-                max_output: Some(16_384),
-                request_multiplier: Some(0.0),
-                thinking_config: None,
-            },
-            ModelInfo {
-                id: "claude-sonnet-4".to_string(),
-                provider_id: "copilot".to_string(),
-                name: "Claude Sonnet 4 (Copilot)".to_string(),
-                cost: Cost {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: true,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                    thinking_levels: full_reasoning_levels(),
-                },
-                context_window: 200_000,
-                max_output: Some(64_000),
-                request_multiplier: Some(1.0),
-                thinking_config: None,
-            },
-            ModelInfo {
-                id: "o3-mini".to_string(),
-                provider_id: "copilot".to_string(),
-                name: "o3-mini (Copilot)".to_string(),
-                cost: Cost {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: true,
-                    streaming: true,
-                    vision: false,
-                    tool_use: true,
-                    thinking_levels: full_reasoning_levels(),
-                },
-                context_window: 200_000,
-                max_output: Some(100_000),
-                request_multiplier: Some(1.0),
-                thinking_config: None,
-            },
-        ]
+        Vec::new()
     }
 
     /// Discover available models from the Copilot `/models` endpoint.
@@ -1619,10 +1539,10 @@ mod tests {
         let provider = CopilotProvider::new();
         assert_eq!(provider.id(), "copilot");
         assert_eq!(provider.name(), "GitHub Copilot");
-        let models = provider.default_models();
-        assert!(models.len() >= 4);
-        assert!(models.iter().any(|m| m.id == "gpt-4o"));
-        assert!(models.iter().any(|m| m.id == "claude-sonnet-4"));
+        assert!(
+            provider.default_models().is_empty(),
+            "Copilot default_models should be empty; models are discovered at runtime"
+        );
     }
 
     #[test]

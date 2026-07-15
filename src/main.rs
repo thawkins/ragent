@@ -305,6 +305,15 @@ async fn main() -> Result<()> {
 
     // Create registries
     let provider_registry = Arc::new(provider::create_default_registry());
+    // Attach the provider registry to the router so it can delegate to
+    // concrete providers at chat time.
+    if let Some(router_provider) = provider_registry
+        .get_as_any("router")
+        .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
+    {
+        router_provider.set_registry(Arc::clone(&provider_registry));
+        router_provider.set_storage(Arc::clone(&storage));
+    }
     let tool_registry = Arc::new(tool::create_default_registry());
     let provider_count = provider_registry.list().len();
     let tool_count = tool_registry.list().len();
@@ -338,7 +347,7 @@ async fn main() -> Result<()> {
     // Apply model selection with priority:
     //   1. --model CLI flag (provider/model format)
     //   2. storage selected_model (saved by TUI /provider or /model command)
-    //   3. agent built-in default (e.g. anthropic/claude-sonnet-4)
+    //   3. registry default order (local/self-hosted providers registered first)
     //
     // Skip override when the agent has model_pinned=true (custom agents that
     // explicitly fix a model should not be overridden by global selection).

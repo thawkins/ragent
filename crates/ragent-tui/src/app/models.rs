@@ -569,6 +569,11 @@ impl App {
                         .ok()
                         .filter(|key| !key.is_empty())
                 }),
+            "xai" => from_storage().or_else(|| {
+                std::env::var("XAI_API_KEY")
+                    .ok()
+                    .filter(|key| !key.is_empty())
+            }),
             "ollama_cloud" => self.ollama_cloud_api_key(),
             "azure_foundry" => from_storage().or_else(|| {
                 std::env::var("AZURE_AI_FOUNDRY_API_KEY")
@@ -655,6 +660,7 @@ impl App {
         (tier, multiplier)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn hf_default_model_entries(&self) -> Vec<ModelPickerEntry> {
         self.provider_registry
             .get("huggingface")
@@ -736,6 +742,28 @@ impl App {
                             .filter(|k| !k.is_empty())
                     })
                     .map(|_| ProviderSource::EnvVar),
+                "xai" => std::env::var("XAI_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "bedrock" => {
+                    // Bedrock is "configured" when AWS static credentials are present
+                    // (access key + secret). Profile-based auth is handled at request
+                    // time, so we only surface it here when env-var creds exist.
+                    let has_access = std::env::var("AWS_ACCESS_KEY_ID")
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                        .is_some();
+                    let has_secret = std::env::var("AWS_SECRET_ACCESS_KEY")
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                        .is_some();
+                    if has_access && has_secret {
+                        Some(ProviderSource::EnvVar)
+                    } else {
+                        None
+                    }
+                }
                 "generic_openai" => {
                     if let Ok(key) = std::env::var("GENERIC_OPENAI_API_KEY") {
                         if !key.is_empty() {
@@ -839,6 +867,65 @@ impl App {
     /// Re-detect the configured provider and update `configured_provider`.
     pub fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
+    }
+
+    /// Make the Model Router the active provider/model selection.
+    ///
+    /// Persists `selected_model`, `preferred_provider`, and the configured
+    /// provider so the router remains active across restarts (FR-049).
+    pub(crate) fn select_router_as_active(&mut self) {
+        let model_value = "router/router".to_string();
+        let _ = self.storage.set_setting("selected_model", &model_value);
+        let _ = self.storage.set_setting("preferred_provider", "router");
+        let _ = self.storage.delete_setting("selected_thinking_level");
+
+        self.selected_model = Some(model_value);
+        self.selected_model_ctx_window = None;
+        self.selected_thinking_level = None;
+        self.configured_provider = Some(ConfiguredProvider {
+            id: "router".to_string(),
+            name: "Model Router".to_string(),
+            source: ProviderSource::Database,
+        });
+    }
+
+    /// Restore router state when the persisted active model is the router.
+    ///
+    /// If `selected_model` is `router/router`, this sets the configured
+    /// provider to the router and synchronises the in-memory
+    /// `router_enabled` flag and the provider-registry `RouterProvider`
+    /// state from the saved `provider.router` configuration (FR-049).
+    pub fn restore_router_state(&mut self) {
+        let is_router = self
+            .selected_model
+            .as_deref()
+            .map(|s| s == "router/router")
+            .unwrap_or(false);
+        if !is_router {
+            return;
+        }
+
+        self.configured_provider = Some(ConfiguredProvider {
+            id: "router".to_string(),
+            name: "Model Router".to_string(),
+            source: ProviderSource::Database,
+        });
+
+        if let Some(raw_config) = self.load_raw_router_config() {
+            self.router_enabled = raw_config.enabled;
+            if let Some(router_provider) = self
+                .provider_registry
+                .get_as_any("router")
+                .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
+            {
+                router_provider.reload_config(raw_config);
+            }
+        } else {
+            // A previous session selected the router but no `provider.router`
+            // block is present; keep it selected but leave it disabled until
+            // a cluster is configured.
+            self.router_enabled = false;
+        }
     }
 
     /// Paste the supplied text into the active provider-setup dialog field,
@@ -1187,13 +1274,9 @@ impl App {
                     cached
                 } else if self.provider_api_key("huggingface").is_some() {
                     // A token is configured but (a) no models are cached and
-                    // (b) synchronous discovery returned nothing. Per the
-                    // HuggingFace provider contract, when a token is present
-                    // we MUST NOT fall back to the static default catalog —
-                    // doing so would surface stale curated models after the
-                    // user has authenticated. Return an empty list so the
-                    // picker shows "no models" instead of stale defaults
-                    // (see test_huggingface_with_token_does_not_fall_back_to_static_defaults_without_discovery).
+                    // (b) synchronous discovery returned nothing. Return an
+                    // empty list so the picker shows "no models" instead of
+                    // stale hard-coded defaults.
                     let discovered = self.sync_discover_models("huggingface");
                     if !discovered.is_empty() {
                         self.picker_entries_from_models(discovered)
@@ -1201,7 +1284,9 @@ impl App {
                         Vec::new()
                     }
                 } else {
-                    self.hf_default_model_entries()
+                    // No token and no cached/discovered models. Do not fall
+                    // back to a hard-coded catalog; models must be discovered.
+                    Vec::new()
                 }
             }
             "azure_foundry" => {
@@ -1219,7 +1304,7 @@ impl App {
                     default_entries()
                 }
             }
-            "anthropic" | "gemini" | "copilot" => {
+            "anthropic" | "gemini" | "copilot" | "xai" | "bedrock" => {
                 let cached = self.cached_model_entries(provider_id);
                 if !cached.is_empty() {
                     cached
@@ -1299,21 +1384,32 @@ impl App {
     /// Build the human-readable `"Provider / model [thinking: Level]"` label
     /// shown in the status bar, or `None` when no provider/model is configured.
     ///
-    /// When the router virtual provider is active, the label reads
-    /// `"Model Router / router"` so the status bar matches the active provider
-    /// (FR-020).
+    /// When the active model belongs to the router virtual provider, the label
+    /// reads `"Model Router / router"` so the status bar matches the active
+    /// provider (FR-020). If the router is enabled but a concrete model is
+    /// still selected, the label falls back to that provider so the displayed
+    /// name matches the provider actually handling the request.
     pub fn provider_model_label(&self) -> Option<String> {
-        let provider_name =
-            if Self::is_router_enabled(&self.provider_registry) || self.router_enabled {
-                "Model Router".to_string()
-            } else {
-                self.configured_provider.as_ref()?.name.clone()
-            };
-        let model_str = self.selected_model.as_ref()?;
-        let model_id = model_str
+        let model_ref = self.active_model_ref_string()?;
+        let (provider_id, model_id) = model_ref
             .split_once('/')
-            .map(|(_, m)| m)
-            .unwrap_or(model_str);
+            .unwrap_or((&model_ref, &model_ref));
+
+        let provider_name = if provider_id == "router" {
+            "Model Router".to_string()
+        } else {
+            self.configured_provider
+                .as_ref()
+                .filter(|p| p.id == provider_id)
+                .map(|p| p.name.clone())
+                .or_else(|| {
+                    self.provider_registry
+                        .get(provider_id)
+                        .map(|p| p.name().to_string())
+                })
+                .unwrap_or_else(|| provider_id.to_string())
+        };
+
         let thinking = self
             .active_model_entry()
             .filter(|entry| !entry.thinking_levels.is_empty())
@@ -1459,6 +1555,63 @@ impl App {
         None
     }
 
+    /// Build the [`ProviderSetupStep::SetupRouter`] state, seeded from the
+    /// persisted `provider.router` configuration when one exists.
+    ///
+    /// When a saved router cluster is present, its tiers (and the provider
+    /// ids referenced by them) are loaded into the draft so the user can see
+    /// and edit their existing configuration instead of starting from an
+    /// empty panel. When no configuration has been saved yet, a fresh empty
+    /// draft is used so first-time setup still presents four empty buckets.
+    ///
+    /// `selected_provider_ids` is pre-populated with the concrete providers
+    /// (from `providers`) that are referenced by any saved tier, so the left
+    /// palette reflects existing cluster membership. Providers that are no
+    /// longer configured are not pre-checked.
+    pub(crate) fn seeded_router_setup_step(
+        &self,
+        providers: Vec<ConfiguredProvider>,
+    ) -> ProviderSetupStep {
+        use ragent_llm::providers::router_config::{RouterConfig, Tier};
+
+        let (draft_config, selected_provider_ids) = if let Some(saved) =
+            self.load_raw_router_config()
+        {
+            let provider_ids: std::collections::HashSet<String> =
+                providers.iter().map(|p| p.id.clone()).collect();
+            let mut selected: Vec<String> = Vec::new();
+            for tier in saved.tiers.values() {
+                for entry in &tier.models {
+                    if provider_ids.contains(&entry.provider) && !selected.contains(&entry.provider)
+                    {
+                        selected.push(entry.provider.clone());
+                    }
+                }
+            }
+            (saved, selected)
+        } else {
+            (
+                RouterConfig {
+                    enabled: false,
+                    tiers: std::collections::HashMap::new(),
+                    ..RouterConfig::default()
+                },
+                Vec::new(),
+            )
+        };
+
+        ProviderSetupStep::SetupRouter {
+            providers,
+            selected_provider_ids,
+            selected_provider_index: 0,
+            draft_config,
+            active_bucket: Tier::Simple,
+            active_bucket_index: 0,
+            left_pane_focused: true,
+            error: None,
+        }
+    }
+
     /// Persist the supplied draft router cluster to `ragent.json`.
     ///
     /// The existing classifier weights, boundary thresholds, context window, and
@@ -1523,6 +1676,39 @@ impl App {
             return None;
         }
         Some(format!("~${:.2}/M", avg))
+    }
+
+    /// Resolve a router tier entry `(provider_id, model_id)` into a fully
+    /// populated [`ModelPickerEntry`] so the router setup UI can display the
+    /// model's properties (context window, features, thinking levels, cost
+    /// tier) alongside the assignment.
+    ///
+    /// Lookup first tries cached/discovered entries (which retain the richest
+    /// metadata, including cost multipliers for Copilot), then falls back to the
+    /// provider registry's static default catalog via [`ProviderRegistry::resolve_model`].
+    /// Returns `None` when neither source advertises the model, in which case
+    /// the caller renders a minimal `provider / model` label.
+    pub(crate) fn router_model_picker_entry(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Option<ModelPickerEntry> {
+        // Prefer cached/discovered entries: they include provider-specific
+        // metadata such as Copilot premium-request multipliers.
+        let cached = self.models_for_provider(provider_id);
+        if let Some(entry) = cached
+            .iter()
+            .find(|e| e.id == model_id || e.id.split_once('@').map(|(b, _)| b) == Some(model_id))
+        {
+            return Some(entry.clone());
+        }
+
+        // Fall back to the registry's static default-model catalog.
+        let model = self
+            .provider_registry
+            .resolve_model(provider_id, model_id)?;
+        let avg_cost = f64::midpoint(model.cost.input, model.cost.output);
+        Some(self.model_to_picker_entry(model, avg_cost))
     }
 
     /// Render a detailed `/provider show` report for a single configured

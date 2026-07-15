@@ -450,44 +450,13 @@ impl RouterConfig {
 
 /// Built-in default tier models.
 ///
-/// These provide a working out-of-the-box configuration when no `provider.router`
-/// block exists in `ragent.json` (FR-024).
-fn default_tier_config(tier: Tier) -> TierConfig {
-    match tier {
-        Tier::Simple => TierConfig {
-            models: vec![
-                TierEntry {
-                    provider: "ollama".to_string(),
-                    model: "qwen3:0.6b".to_string(),
-                },
-                TierEntry {
-                    provider: "anthropic".to_string(),
-                    model: "claude-haiku-4-5-20250315".to_string(),
-                },
-            ],
-            timeout_ms: Some(15000),
-        },
-        Tier::Medium => TierConfig {
-            models: vec![TierEntry {
-                provider: "anthropic".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            }],
-            timeout_ms: None,
-        },
-        Tier::Complex => TierConfig {
-            models: vec![TierEntry {
-                provider: "anthropic".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            }],
-            timeout_ms: None,
-        },
-        Tier::Reasoning => TierConfig {
-            models: vec![TierEntry {
-                provider: "anthropic".to_string(),
-                model: "claude-opus-4-20250115".to_string(),
-            }],
-            timeout_ms: Some(120000),
-        },
+/// The router never imposes hard-coded provider/model pairs.  Tiers start empty
+/// so that users (or the TUI `/provider router` setup flow) explicitly choose
+/// discovered models for each bucket (FR-024).
+fn default_tier_config(_tier: Tier) -> TierConfig {
+    TierConfig {
+        models: Vec::new(),
+        timeout_ms: None,
     }
 }
 
@@ -625,11 +594,38 @@ mod tests {
     }
 
     #[test]
-    fn test_tier_config_default_models() {
+    fn test_tier_config_default_models_empty() {
         let config = RouterConfig::default();
-        let simple = config.tier_config(Tier::Simple);
-        assert!(!simple.models.is_empty());
-        assert_eq!(simple.timeout_ms, Some(15000));
+        // Default router tiers are intentionally empty: ragent no longer
+        // hard-codes provider/model pairs. Users configure the cluster via
+        // `/provider router` or `provider.router` in `ragent.json`.
+        for tier in Tier::all() {
+            let tc = config.tier_config(*tier);
+            assert!(
+                tc.models.is_empty(),
+                "default tier {:?} should contain no hard-coded models",
+                tier
+            );
+            assert_eq!(tc.timeout_ms, None);
+        }
+        let all_default_providers: std::collections::HashSet<String> = Tier::all()
+            .iter()
+            .flat_map(|t| {
+                config
+                    .tier_config(*t)
+                    .models
+                    .into_iter()
+                    .map(|e| e.provider)
+            })
+            .collect();
+        assert!(
+            !all_default_providers.contains("ollama"),
+            "default tiers should not impose local Ollama models"
+        );
+        assert!(
+            !all_default_providers.contains("anthropic"),
+            "default tiers should not silently fall back to Anthropic"
+        );
     }
 
     #[test]

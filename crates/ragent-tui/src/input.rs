@@ -84,6 +84,10 @@ pub enum InputAction {
     ConfirmForceCleanup,
     /// Cancel a pending forcecleanup modal (Esc -> cancel).
     CancelForceCleanup,
+    /// Confirm the router save confirmation modal (Enter -> save).
+    ConfirmRouterSave,
+    /// Cancel the router save confirmation modal (Esc -> cancel).
+    CancelRouterSave,
     /// Confirm the plan approval dialog (Enter when cursor_approve = true).
     ApprovePlan,
     /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
@@ -175,6 +179,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return Some(InputAction::ConfirmQuit);
     }
 
+    // If a router save confirmation modal is active, intercept Enter/Esc
+    // before any other dialog so the confirmation always takes precedence.
+    if app.pending_router_save.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmRouterSave),
+            KeyCode::Esc => return Some(InputAction::CancelRouterSave),
+            _ => return None,
+        }
+    }
+
     // If context menu is active, route all keys there.
     if app.context_menu.is_some() {
         handle_context_menu_key(app, key);
@@ -189,7 +203,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
-    // If provider setup dialog is active, route all keys there
+    // If provider setup dialog is active, route all keys there.
     if app.provider_setup.is_some() {
         handle_provider_setup_key(app, key);
         return None;
@@ -360,6 +374,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => None,
         };
+    }
+
+    // If a router save confirmation modal is active, intercept Enter/Esc
+    if app.pending_router_save.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmRouterSave),
+            KeyCode::Esc => return Some(InputAction::CancelRouterSave),
+            _ => return None,
+        }
     }
 
     // If a forcecleanup confirmation modal is active, intercept Enter/Esc
@@ -825,7 +848,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 let (pid, pname) = PROVIDER_LIST[selected];
-                // If already configured, skip setup and go straight to model picker
+                // If already configured, skip setup and go straight to model picker.
+                // The Model Router is an exception: it is a virtual provider with no
+                // API key of its own, so selecting it always opens the cluster setup UI.
                 let already_configured = App::get_configured_providers(&app.storage)
                     .iter()
                     .any(|p| p.id == pid);
@@ -871,6 +896,22 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                 selected,
                                 error: None,
                             });
+                        }
+                        return;
+                    }
+                    if pid == "router" {
+                        let providers = App::get_configured_providers_for_router(&app.storage);
+                        if providers.is_empty() {
+                            app.status =
+                                "⚠ No concrete providers — configure one first".to_string();
+                            app.push_log_no_agent(
+                                crate::app::LogLevel::Warn,
+                                "provider router: no concrete providers configured".to_string(),
+                            );
+                            app.provider_setup =
+                                Some(ProviderSetupStep::SelectProvider { selected });
+                        } else {
+                            app.provider_setup = Some(app.seeded_router_setup_step(providers));
                         }
                         return;
                     }
@@ -987,20 +1028,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         // provider to configure first.
                         app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
                     } else {
-                        app.provider_setup = Some(ProviderSetupStep::SetupRouter {
-                            providers,
-                            selected_provider_ids: Vec::new(),
-                            selected_provider_index: 0,
-                            draft_config: ragent_llm::providers::router_config::RouterConfig {
-                                enabled: false,
-                                tiers: std::collections::HashMap::new(),
-                                ..ragent_llm::providers::router_config::RouterConfig::default()
-                            },
-                            active_bucket: ragent_llm::providers::router_config::Tier::Simple,
-                            active_bucket_index: 0,
-                            left_pane_focused: true,
-                            error: None,
-                        });
+                        app.provider_setup = Some(app.seeded_router_setup_step(providers));
                     }
                 } else {
                     app.provider_setup = Some(ProviderSetupStep::EnterKey {
@@ -2302,13 +2330,29 @@ fn handle_router_setup_key(app: &mut App, key: KeyEvent) {
             let has_any = draft_config.tiers.values().any(|tc| !tc.models.is_empty());
             if !has_any {
                 error = Some("At least one tier must contain a model".to_string());
-            } else if let Err(e) = app.save_router_config(&draft_config) {
-                error = Some(e);
             } else {
-                app.status = "✓ Router cluster saved".to_string();
-                app.router_enabled = true;
-                app.provider_setup = None;
+                app.pending_router_save = Some(draft_config.clone());
+                app.provider_setup = Some(ProviderSetupStep::SetupRouter {
+                    providers,
+                    selected_provider_ids,
+                    selected_provider_index,
+                    draft_config,
+                    active_bucket,
+                    active_bucket_index,
+                    left_pane_focused,
+                    error,
+                });
                 return;
+            }
+        }
+        KeyCode::Delete if !left_pane_focused => {
+            if let Some(tier_config) = draft_config.tiers.get_mut(&active_bucket.to_string()) {
+                if active_bucket_index < tier_config.models.len() {
+                    tier_config.models.remove(active_bucket_index);
+                    if active_bucket_index >= tier_config.models.len() && active_bucket_index > 0 {
+                        active_bucket_index -= 1;
+                    }
+                }
             }
         }
         _ => {}

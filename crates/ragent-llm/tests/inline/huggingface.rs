@@ -12,10 +12,13 @@ fn test_provider_id_and_name() {
 }
 
 #[test]
-fn test_default_models_non_empty() {
+fn test_default_models_empty() {
     let provider = HuggingFaceProvider;
     let models = provider.default_models();
-    assert!(models.len() >= 4, "Expected at least 4 default models");
+    assert!(
+        models.is_empty(),
+        "HuggingFace default_models should be empty; models are discovered at runtime"
+    );
 }
 
 #[test]

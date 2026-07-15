@@ -548,7 +548,19 @@ pub fn should_retry_stream_error(
     max_retries: u32,
     has_meaningful_partial_output: bool,
 ) -> bool {
-    is_retryable_stream_error(message) && attempt < max_retries && !has_meaningful_partial_output
+    // A raw "error decoding response body" before any output almost always
+    // indicates an empty/malformed stream (e.g. a local model that is not
+    // loaded). Treat it as fatal unless we have already received useful output,
+    // in which case it may be a transient mid-stream disconnect worth keeping.
+    let is_early_decode_failure = message
+        .to_lowercase()
+        .contains("error decoding response body")
+        && !has_meaningful_partial_output;
+
+    is_retryable_stream_error(message)
+        && attempt < max_retries
+        && !has_meaningful_partial_output
+        && !is_early_decode_failure
 }
 
 /// Converts message parts to chat content, handling images asynchronously.

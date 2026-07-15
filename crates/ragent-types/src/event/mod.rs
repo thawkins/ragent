@@ -278,6 +278,33 @@ pub enum Event {
         error: Option<String>,
     },
 
+    // ── Model Router classification logging ────────────────────────────
+    /// The Model Router has classified a prompt and chosen a downstream
+    /// model. Published so the TUI can log the bucket, model, prompt, and
+    /// dimension scores regardless of the tracing filter level.
+    RouterClassification {
+        /// Session that triggered the classification.
+        session_id: String,
+        /// Selected routing tier (bucket) actually used to choose the model.
+        /// When tier fallback is active this may differ from `requested_tier`.
+        tier: String,
+        /// The tier originally requested by the classifier (before fallback).
+        /// `None` when the event is created by older codepaths that do not
+        /// distinguish the requested and selected tiers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requested_tier: Option<String>,
+        /// Selected downstream model as "provider:model".
+        model: String,
+        /// Composite weighted complexity score (0.0–1.0).
+        composite_score: f64,
+        /// Prompt text that was classified (after modifier stripping).
+        prompt: String,
+        /// Per-dimension scores above the reporting threshold (0.05).
+        /// Zeroed or negligible dimensions are excluded to keep the log
+        /// panel concise and consistent with the tracing-based summary.
+        dimensions: Vec<(String, f64)>,
+    },
+
     // ── Model download progress (e.g. local providers) ─────────────────
     /// A local provider started downloading a model.
     ModelDownloadStarted {
@@ -778,6 +805,7 @@ impl Event {
             Self::CompressionFinished { .. } => "CompressionFinished",
             Self::ProviderLoadingStarted { .. } => "ProviderLoadingStarted",
             Self::ProviderLoadingFinished { .. } => "ProviderLoadingFinished",
+            Self::RouterClassification { .. } => "RouterClassification",
             Self::ModelDownloadStarted { .. } => "ModelDownloadStarted",
             Self::ModelDownloadProgress { .. } => "ModelDownloadProgress",
             Self::ModelDownloadFinished { .. } => "ModelDownloadFinished",
@@ -853,6 +881,7 @@ impl Event {
             Self::CompressionStarted { session_id, .. }
             | Self::CompressionFinished { session_id, .. } => Some(session_id.as_str()),
             Self::ProviderLoadingStarted { .. } | Self::ProviderLoadingFinished { .. } => None,
+            Self::RouterClassification { session_id, .. } => Some(session_id.as_str()),
         }
     }
 }

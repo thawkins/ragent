@@ -271,10 +271,12 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("anthropic", "Anthropic (Claude)"),
     ("openai", "OpenAI (GPT)"),
     ("gemini", "Google Gemini"),
+    ("xai", "xAI (Grok)"),
     ("huggingface", "Hugging Face"),
     ("generic_openai", "Generic OpenAI API"),
     ("azure_foundry", "Azure AI Foundry"),
     ("azure_resource", "Azure Resource (File)"),
+    ("bedrock", "Amazon Bedrock"),
     ("copilot", "GitHub Copilot"),
     ("router", "Model Router"),
 ];
@@ -1470,6 +1472,8 @@ pub struct App {
     /// Stashed selected provider IDs used to preserve the router setup palette
     /// after returning from the model picker sub-dialog.
     pub router_draft_selected_ids: Vec<String>,
+    /// Pending confirmation for saving the current router draft configuration.
+    pub pending_router_save: Option<ragent_llm::providers::router_config::RouterConfig>,
 
     // ── Research progress (`/research create`) ───────────────────────────────
     /// Live progress trackers for all running/completed `/research create`

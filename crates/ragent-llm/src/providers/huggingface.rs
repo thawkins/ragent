@@ -48,11 +48,12 @@ impl Provider for HuggingFaceProvider {
         self
     }
 
-    /// Returns a curated set of popular HuggingFace Inference API models.
+    /// Returns an empty catalog.
     ///
-    /// These serve as fallback defaults when dynamic discovery is unavailable.
+    /// HuggingFace models are discovered at runtime from the public router;
+    /// no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        huggingface_default_models()
+        Vec::new()
     }
 
     /// Discover available chat-completions models from HuggingFace router.

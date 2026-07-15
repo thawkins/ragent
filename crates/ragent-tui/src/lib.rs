@@ -200,7 +200,7 @@ pub async fn run_tui(
 
     let mut app = App::new(
         event_bus.clone(),
-        storage,
+        Arc::clone(&storage),
         provider_registry.clone(),
         session_processor.clone(),
         agent,
@@ -211,6 +211,15 @@ pub async fn run_tui(
     // Attach the event bus to providers that publish lifecycle events
     // (e.g. local model download progress).
     provider_registry.set_event_bus_all(Some(event_bus.clone()));
+    // Attach storage to the router provider so it can resolve database-backed
+    // API keys (e.g. `ragent auth ollama_cloud <key>`) when routing to
+    // downstream providers.
+    if let Some(router_provider) = provider_registry
+        .get_as_any("router")
+        .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
+    {
+        router_provider.set_storage(Arc::clone(&storage));
+    }
     // Pass through the config file paths loaded at startup so the TUI
     // can display them in the message window.
     app.config_paths = config_paths;

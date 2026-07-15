@@ -27,7 +27,7 @@ mod thinking;
 pub mod xai;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -159,6 +159,11 @@ pub trait Provider: Send + Sync + 'static {
 /// lookup by provider ID and model resolution.
 pub struct ProviderRegistry {
     providers: HashMap<String, Box<dyn Provider>>,
+    /// Models discovered at runtime via [`Provider::discover_models`], keyed by
+    /// provider id. Used by [`ProviderRegistry::resolve_model_async`] so the
+    /// model router can inspect vision/reasoning capabilities for providers
+    /// whose `default_models` catalog is empty (e.g. Ollama, Ollama Cloud).
+    discovered: Mutex<HashMap<String, Vec<ModelInfo>>>,
 }
 
 impl ProviderRegistry {
@@ -176,6 +181,7 @@ impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
             providers: HashMap::new(),
+            discovered: Mutex::new(HashMap::new()),
         }
     }
 
@@ -268,6 +274,15 @@ impl ProviderRegistry {
 
     /// Looks up a specific model by provider and model ID.
     ///
+    /// The lookup order is:
+    /// 1. Hard-coded [`Provider::default_models`] catalog.
+    /// 2. Models previously discovered via [`Provider::discover_models`] and
+    ///    cached in this registry.
+    ///
+    /// This is synchronous so it can be used from non-async model-selection
+    /// paths. The cache is populated by [`ProviderRegistry::resolve_model_async`]
+    /// (used by the router) or by calling `discover_models` directly.
+    ///
     /// The `model_id` parameter supports multiple formats:
     /// - Exact model ID (e.g. `"gpt-4o"`)
     /// - Display name match (e.g. `"GPT-4o"`)
@@ -288,7 +303,72 @@ impl ProviderRegistry {
         let provider = self.providers.get(provider_id)?;
         let models = provider.default_models();
 
-        // First try exact ID match
+        if let Some(model) = Self::find_model_in_list(&models, model_id) {
+            return Some(model);
+        }
+
+        if let Ok(cache) = self.discovered.lock()
+            && let Some(models) = cache.get(provider_id)
+        {
+            return Self::find_model_in_list(models, model_id);
+        }
+
+        None
+    }
+
+    /// Async variant of [`resolve_model`] that triggers runtime model discovery
+    /// when the model is not found in the static catalog or cache.
+    ///
+    /// Discovery results are cached per provider, so repeated lookups do not
+    /// hammer the provider's `/models` endpoint. Failed discoveries are also
+    /// cached as an empty list to avoid retry storms.
+    pub async fn resolve_model_async(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Option<ModelInfo> {
+        // Fast path: static catalog.
+        if let Some(model) = self.resolve_model(provider_id, model_id) {
+            return Some(model);
+        }
+
+        // Check the discovery cache without holding the lock across await.
+        {
+            if let Ok(cache) = self.discovered.lock()
+                && let Some(models) = cache.get(provider_id)
+            {
+                return Self::find_model_in_list(models, model_id);
+            }
+        }
+
+        let provider = self.providers.get(provider_id)?;
+        match provider.discover_models().await {
+            Ok(models) => {
+                let model = Self::find_model_in_list(&models, model_id);
+                if let Ok(mut cache) = self.discovered.lock() {
+                    cache.insert(provider_id.to_string(), models);
+                }
+                model
+            }
+            Err(e) => {
+                tracing::warn!(
+                    provider = %provider_id,
+                    error = %e,
+                    "Model discovery failed during router resolution"
+                );
+                // Cache an empty list so a failing provider is not rediscovered
+                // on every routing attempt in the same session.
+                if let Ok(mut cache) = self.discovered.lock() {
+                    cache.insert(provider_id.to_string(), Vec::new());
+                }
+                None
+            }
+        }
+    }
+
+    /// Find a model by id (and vendor-stripped id / display name) in a list.
+    fn find_model_in_list(models: &[ModelInfo], model_id: &str) -> Option<ModelInfo> {
+        // First try exact ID match.
         if let Some(model) = models.iter().find(|m| m.id == model_id) {
             return Some(model.clone());
         }

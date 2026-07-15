@@ -16,13 +16,14 @@
 //!
 //! `https://api.x.ai` with path `/v1/chat/completions`.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::llm::LlmClient;
-use crate::provider::openai::OpenAiClient;
+use crate::provider::openai::{OpenAiClient, discover_openai_models};
 use crate::{ModelInfo, Provider};
+#[cfg(test)]
 use ragent_config::{Capabilities, Cost};
 
 /// Default API base URL for the xAI Grok endpoint.
@@ -44,10 +45,10 @@ const XAI_MODEL_ALIASES: &[(&str, &str)] = &[
 
 /// Returns the default xAI Grok model catalog with `provider_id` attached.
 ///
-/// The catalog includes Grok 3, Grok 3 Mini, Grok 3 Mini Fast, Grok 2,
-/// Grok 2 Mini, and Grok 2 Vision. Vision capability is enabled only for
-/// models whose IDs contain `"vision"`.
+/// This catalog is only used by tests; the `XaiProvider` itself no longer ships
+/// hard-coded default models and discovers them at runtime instead.
 #[must_use]
+#[cfg(test)]
 pub fn xai_default_models(provider_id: &str) -> Vec<ModelInfo> {
     vec![
         ModelInfo {
@@ -227,9 +228,28 @@ impl Provider for XaiProvider {
         self
     }
 
-    /// Returns the default xAI Grok model catalog.
+    /// Returns an empty catalog.
+    ///
+    /// xAI Grok models are discovered at runtime from the `/v1/models`
+    /// endpoint; no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        xai_default_models("xai")
+        Vec::new()
+    }
+
+    /// Discover available models from the xAI `/v1/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("XAI_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("xAI model discovery requires XAI_API_KEY")?;
+        let base_url = std::env::var(XAI_API_BASE_ENV)
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| XAI_API_BASE.to_string());
+        let models = discover_openai_models(&api_key, &base_url, "xai")
+            .await
+            .with_context(|| "xAI model discovery failed")?;
+        Ok(models)
     }
 
     /// Creates an [`OpenAiClient`] configured for the xAI endpoint.

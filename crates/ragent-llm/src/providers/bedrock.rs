@@ -124,9 +124,24 @@ impl Provider for BedrockProvider {
         self
     }
 
-    /// Returns the default Bedrock model catalog (FR-010).
+    /// Returns an empty catalog.
+    ///
+    /// Bedrock models are discovered at runtime from the
+    /// `ListFoundationModels` API; no models are hard-coded as defaults.
     fn default_models(&self) -> Vec<ModelInfo> {
-        bedrock_default_models()
+        Vec::new()
+    }
+
+    /// Discover available models from the Bedrock `ListFoundationModels` API.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let options = std::collections::HashMap::new();
+        let credentials = resolve_aws_credentials(&options)
+            .context("Bedrock model discovery requires AWS credentials")?;
+        let models = discover_bedrock_models(&credentials, None).await;
+        if models.is_empty() {
+            bail!("Bedrock model discovery returned no models");
+        }
+        Ok(models)
     }
 
     /// Creates a Bedrock client for the given model.
@@ -202,7 +217,12 @@ fn build_bedrock_base_url(region: &str, endpoint_url: Option<&str>) -> String {
     format!("https://bedrock.{region}.amazonaws.com")
 }
 
-/// Returns the default Bedrock model catalog (FR-010).
+/// Returns the static Bedrock model catalog for tests.
+///
+/// The provider itself no longer returns this as `default_models`, but the
+/// catalog is retained for unit-test assertions that exercise model metadata
+/// formatting and alias resolution.
+#[must_use]
 pub fn bedrock_default_models() -> Vec<ModelInfo> {
     vec![
         ModelInfo {
@@ -1156,7 +1176,8 @@ struct BedrockModelSummary {
 
 /// Discovers available models from the Bedrock `ListFoundationModels` API (FR-022).
 ///
-/// Falls back to the static default catalog on error (FR-023).
+/// Returns an empty vector when discovery fails, leaving the model list empty
+/// rather than falling back to a hard-coded catalog.
 pub async fn discover_bedrock_models(
     credentials: &AwsCredentials,
     endpoint_url: Option<&str>,
@@ -1170,8 +1191,8 @@ pub async fn discover_bedrock_models(
 
     if let Err(e) = super::bedrock_sigv4::sign_request("GET", &url, &mut headers, b"", credentials)
     {
-        tracing::warn!(error = %e, "Failed to sign Bedrock model discovery request; using static catalog");
-        return bedrock_default_models();
+        tracing::warn!(error = %e, "Failed to sign Bedrock model discovery request");
+        return Vec::new();
     }
 
     let http = crate::provider::http_client::create_http_client();
@@ -1229,26 +1250,24 @@ pub async fn discover_bedrock_models(
                         .collect();
 
                     if models.is_empty() {
-                        tracing::warn!("Bedrock returned empty model list; using static catalog");
-                        bedrock_default_models()
-                    } else {
-                        models
+                        tracing::warn!("Bedrock returned empty model list");
                     }
+                    models
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "Failed to parse Bedrock models response; using static catalog");
-                    bedrock_default_models()
+                    tracing::warn!(error = %e, "Failed to parse Bedrock models response");
+                    Vec::new()
                 }
             }
         }
         Ok(response) => {
             let status = response.status();
-            tracing::warn!(status = %status, "Bedrock model discovery returned non-success; using static catalog");
-            bedrock_default_models()
+            tracing::warn!(status = %status, "Bedrock model discovery returned non-success");
+            Vec::new()
         }
         Err(e) => {
-            tracing::warn!(error = %e, "Bedrock model discovery request failed; using static catalog");
-            bedrock_default_models()
+            tracing::warn!(error = %e, "Bedrock model discovery request failed");
+            Vec::new()
         }
     }
 }

@@ -318,6 +318,7 @@ impl App {
             router_draft_config: None,
             router_draft_providers: Vec::new(),
             router_draft_selected_ids: Vec::new(),
+            pending_router_save: None,
             research_progress: Vec::new(),
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
@@ -333,6 +334,10 @@ impl App {
 
         // Migrate legacy file-based GitLab credentials into the database
         ragent_agent::gitlab::auth::migrate_legacy_files(app.storage.as_ref());
+
+        // Restore the Model Router as the active provider if it was the
+        // persisted current model when the previous session exited.
+        app.restore_router_state();
 
         app
     }

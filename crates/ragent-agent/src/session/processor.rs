@@ -1687,6 +1687,12 @@ impl SessionProcessor {
     }
 
     pub(crate) async fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
+        // The router provider is virtual: it delegates to downstream providers
+        // and does not need its own API key.
+        if provider_id == "router" {
+            return Ok(String::new());
+        }
+
         // Ollama does not require an API key for local servers
         if provider_id == "ollama" {
             return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());

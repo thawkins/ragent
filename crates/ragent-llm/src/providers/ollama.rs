@@ -180,33 +180,14 @@ impl Provider for OllamaProvider {
         self
     }
 
-    /// Returns a placeholder model list.
+    /// Returns an empty catalog.
     ///
-    /// Since Ollama model availability depends on the running server, this
-    /// returns an empty list. Use [`OllamaProvider::discover_models`] or the
-    /// `ragent models --provider ollama` command to query available models.
+    /// Ollama model availability depends entirely on the running server, so
+    /// ragent does not ship a hard-coded default list. Use
+    /// [`OllamaProvider::discover_models`] or the `ragent models` CLI to query
+    /// available models at runtime.
     fn default_models(&self) -> Vec<ModelInfo> {
-        // Return a generic entry — actual models are discovered at runtime
-        vec![ModelInfo {
-            id: "llama3.2".to_string(),
-            provider_id: "ollama".to_string(),
-            name: "Llama 3.2 (default)".to_string(),
-            cost: Cost {
-                input: 0.0,
-                output: 0.0,
-            },
-            capabilities: Capabilities {
-                reasoning: false,
-                streaming: true,
-                vision: false,
-                tool_use: true,
-                thinking_levels: binary_thinking_levels_for_model("llama3.2"),
-            },
-            context_window: 131_072,
-            max_output: None,
-            request_multiplier: None,
-            thinking_config: None,
-        }]
+        Vec::new()
     }
 
     /// Queries the Ollama `/api/tags` endpoint for live model discovery.
@@ -482,6 +463,13 @@ impl LlmClient for OllamaClient {
             bail!("Ollama API error ({status}): {error_body}");
         }
 
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
@@ -489,6 +477,7 @@ impl LlmClient for OllamaClient {
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut tool_call_names: HashMap<u64, String> = HashMap::new();
             let mut stream_done = false;
+            let mut yielded_event = false;
 
             futures::pin_mut!(stream);
 
@@ -511,7 +500,18 @@ impl LlmClient for OllamaClient {
                 let chunk = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
-                        yield StreamEvent::Error { message: e.to_string() };
+                        let err_text = e.to_string();
+                        let is_decode_failure = err_text.to_lowercase().contains("error decoding response body");
+                        let message = if is_decode_failure && !yielded_event && status.is_success() {
+                            format!(
+                                "Ollama returned an empty/malformed event stream (status {}, content-type {}). \
+                                 This usually means the requested model is not loaded.",
+                                status, content_type
+                            )
+                        } else {
+                            err_text
+                        };
+                        yield StreamEvent::Error { message };
                         break;
                     }
                 };
@@ -571,68 +571,71 @@ impl LlmClient for OllamaClient {
                             .as_array()
                             .is_some_and(|a| !a.is_empty());
 
-                        // Text content
-                        if !has_tool_calls
-                            && let Some(content) = delta["content"].as_str()
-                            && !content.is_empty()
-                        {
-                            yield StreamEvent::TextDelta { text: content.to_string() };
-                        }
+                      // Text content
+                      if !has_tool_calls
+                          && let Some(content) = delta["content"].as_str()
+                          && !content.is_empty()
+                      {
+                          yield StreamEvent::TextDelta { text: content.to_string() };
+                          yielded_event = true;
+                      }
 
-                        // Reasoning / thinking content (Ollama emits this in the
-                        // OpenAI-compatible stream under `delta.reasoning`).
-                        // We treat it as reasoning so it does not pollute the
-                        // assistant text buffer and the model's subsequent
-                        // tool_calls are still parsed and executed.
-                        if let Some(reasoning) = delta["reasoning"].as_str() {
-                            yield StreamEvent::ReasoningDelta {
-                                text: reasoning.to_string(),
-                            };
-                        }
+                      // Reasoning / thinking content (Ollama emits this in the
+                      // OpenAI-compatible stream under `delta.reasoning`).
+                      // We treat it as reasoning so it does not pollute the
+                      // assistant text buffer and the model's subsequent
+                      // tool_calls are still parsed and executed.
+                      if let Some(reasoning) = delta["reasoning"].as_str() {
+                          yield StreamEvent::ReasoningDelta {
+                              text: reasoning.to_string(),
+                          };
+                          yielded_event = true;
+                      }
 
-                        // Tool calls
-                        if has_tool_calls
-                            && let Some(tool_calls) = delta["tool_calls"].as_array()
-                        {
-                            for tc in tool_calls {
-                                let index = tc["index"].as_u64().unwrap_or(0);
+                      // Tool calls
+                      if has_tool_calls
+                          && let Some(tool_calls) = delta["tool_calls"].as_array()
+                      {
+                          for tc in tool_calls {
+                              let index = tc["index"].as_u64().unwrap_or(0);
 
-                                if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
-                                }
+                              if let Some(id) = tc["id"].as_str() {
+                                  tool_call_ids.insert(index, id.to_string());
+                              }
 
-                                if let Some(function) = tc.get("function") {
-                                    if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        tool_call_names.insert(index, name.to_string());
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
-                                    }
+                              if let Some(function) = tc.get("function") {
+                                  if let Some(name) = function["name"].as_str() {
+                                      let tc_id = tool_call_ids
+                                          .get(&index)
+                                          .cloned()
+                                          .unwrap_or_else(|| format!("tc_{index}"));
+                                      tool_call_names.insert(index, name.to_string());
+                                      yield StreamEvent::ToolCallStart {
+                                          id: tc_id,
+                                          name: name.to_string(),
+                                      };
+                                      yielded_event = true;
+                                  }
 
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
-                                    {
-                                        let tc_id = tool_call_ids
-                                            .get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args.to_string(),
-                                        };
-                                    }
-                                }
-                            }
-                        }
+                                  if let Some(args) = function["arguments"].as_str()
+                                      && !args.is_empty()
+                                  {
+                                      let tc_id = tool_call_ids
+                                          .get(&index)
+                                          .cloned()
+                                          .unwrap_or_else(|| format!("tc_{index}"));
+                                      yield StreamEvent::ToolCallDelta {
+                                          id: tc_id,
+                                          args_json: args.to_string(),
+                                      };
+                                      yielded_event = true;
+                                  }
+                              }
+                          }
+                                              }
 
-                        // Finish reason
-                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            for (_idx, id) in tool_call_ids.drain() {
+                                              // Finish reason
+                                              if let Some(finish_reason) = choice["finish_reason"].as_str() {                            for (_idx, id) in tool_call_ids.drain() {
                                 yield StreamEvent::ToolCallEnd { id };
                             }
                             tool_call_names.clear();
@@ -779,7 +782,10 @@ mod tests {
         let provider = OllamaProvider::new();
         assert_eq!(provider.id(), "ollama");
         assert_eq!(provider.name(), "Ollama");
-        assert!(!provider.default_models().is_empty());
+        assert!(
+            provider.default_models().is_empty(),
+            "Ollama default_models should be empty; models are discovered at runtime"
+        );
     }
 
     #[test]

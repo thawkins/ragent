@@ -19,7 +19,11 @@ use ragent_types::event::FinishReason;
 pub const OPENAI_API_BASE: &str = "https://api.openai.com";
 
 /// Returns the default `OpenAI` model catalog with `provider_id` attached.
+///
+/// This catalog is only used by tests; the `OpenAiProvider` itself no longer
+/// ships hard-coded default models and discovers them at runtime instead.
 #[must_use]
+#[cfg(test)]
 pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
     vec![
         ModelInfo {
@@ -92,9 +96,24 @@ impl Provider for OpenAiProvider {
         self
     }
 
-    /// Returns default `OpenAI` models (GPT-4o, GPT-4o Mini).
+    /// Returns an empty catalog.
+    ///
+    /// OpenAI models are discovered at runtime from the `/v1/models` endpoint;
+    /// no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        openai_default_models("openai")
+        Vec::new()
+    }
+
+    /// Discover available models from the OpenAI `/v1/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("OpenAI model discovery requires OPENAI_API_KEY")?;
+        let models = discover_openai_models(&api_key, OPENAI_API_BASE, "openai")
+            .await
+            .with_context(|| "OpenAI model discovery failed")?;
+        Ok(models)
     }
 
     /// Creates an [`OpenAiClient`] configured with the given API key and optional base URL.
@@ -396,18 +415,25 @@ impl OpenAiClient {
                         provider = %provider_name,
                         status = %status,
                         content_type = %content_type,
+                        yielded_events = yielded_event,
                         error = %e,
                         "SSE stream decode error"
                     );
-                                          let message = if content_type.contains("event-stream")
-                                              && e.to_string().to_lowercase().contains("error decoding response body")
-                                          {
-                                              format!(
-                                                  "{} returned an empty/malformed event stream (status {}, content-type {}). \
-                                                  For local OpenAI-compatible providers this usually means the requested model is not loaded.",
-                                                  provider_name, status, content_type
-                                              )
-                                          } else {                        e.to_string()
+                    let err_text = e.to_string();
+                    let is_decode_failure = err_text.to_lowercase().contains("error decoding response body");
+                    // A successful HTTP status with an immediate decode failure
+                    // almost always means the endpoint returned an empty or
+                    // non-stream body (e.g. a local model that is not loaded).
+                    // Surface that as a clear, non-retryable error instead of
+                    // the raw reqwest diagnostic.
+                    let message = if is_decode_failure && !yielded_event && status.is_success() {
+                        format!(
+                            "{} returned an empty/malformed event stream (status {}, content-type {}). \
+                             For local OpenAI-compatible providers this usually means the requested model is not loaded.",
+                            provider_name, status, content_type
+                        )
+                    } else {
+                        err_text
                     };
                     yield StreamEvent::Error { message };
                     break;
@@ -587,4 +613,108 @@ pub(crate) fn parse_openai_rate_limit_headers(
     } else {
         None
     }
+}
+
+/// Query an OpenAI-compatible `/v1/models` endpoint and return discovered
+/// [`ModelInfo`] entries.
+///
+/// This helper is shared by the `openai`, `generic_openai`, and `xai`
+/// providers. It performs a lightweight heuristic pass over the returned IDs
+/// to skip obvious non-chat models (embeddings, audio, image generation,
+/// moderations, and legacy completion engines).
+pub async fn discover_openai_models(
+    api_key: &str,
+    base_url: &str,
+    provider_id: &str,
+) -> Result<Vec<ModelInfo>> {
+    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let response = crate::provider::http_client::create_http_client()
+        .get(&url)
+        .header("Authorization", format!("Bearer {api_key}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .with_context(|| format!("Failed to connect to {provider_id} models endpoint at {url}"))?;
+    if !response.status().is_success() {
+        bail!(
+            "{provider_id} models endpoint returned status {}",
+            response.status()
+        );
+    }
+    let payload: Value = response
+        .json()
+        .await
+        .context("Failed to parse models response")?;
+    let data = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .context("Unexpected models response format: missing 'data' array")?;
+
+    Ok(data
+        .iter()
+        .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+        .filter(|id| is_openai_chat_model_id(id))
+        .map(|id| {
+            let model_id = id.to_string();
+            let reasoning = !openai_thinking_levels_for_model(&model_id).is_empty();
+            let vision = model_id.contains("vision") || model_id.contains("gpt-4o");
+            ModelInfo {
+                id: model_id.clone(),
+                provider_id: provider_id.to_string(),
+                name: model_id.clone(),
+                cost: Cost {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                capabilities: Capabilities {
+                    reasoning,
+                    streaming: true,
+                    vision,
+                    tool_use: true,
+                    thinking_levels: openai_thinking_levels_for_model(&model_id),
+                },
+                context_window: 128_000,
+                max_output: Some(16_384),
+                request_multiplier: None,
+                thinking_config: None,
+            }
+        })
+        .collect())
+}
+
+/// Heuristic filter for OpenAI-compatible `/v1/models` responses.
+///
+/// Skips models that are clearly not chat-completion endpoints, such as
+/// embeddings, audio/image generation, moderation, and legacy engines.
+fn is_openai_chat_model_id(model_id: &str) -> bool {
+    let lower = model_id.to_ascii_lowercase();
+    let non_chat_prefixes = [
+        "text-embedding",
+        "embedding",
+        "whisper",
+        "tts",
+        "dall-e",
+        "dall",
+        "audio",
+        "babbage",
+        "davinci",
+        "curie",
+        "ada",
+        "moderation",
+        "omni-moderation",
+        "gpt-3.5-turbo-instruct",
+    ];
+    if non_chat_prefixes.iter().any(|p| lower.starts_with(p)) {
+        return false;
+    }
+    let non_chat_keywords = [
+        "-embedding-",
+        "embed",
+        "transcribe",
+        "translate",
+        "speech",
+        "image",
+        "instruct",
+    ];
+    !non_chat_keywords.iter().any(|k| lower.contains(k))
 }

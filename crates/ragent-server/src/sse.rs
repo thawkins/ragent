@@ -334,6 +334,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::CompressionStarted { .. } => "compression_started",
         Event::CompressionFinished { .. } => "compression_finished",
         Event::OpenResearchView { .. } => "open_research_view",
+        Event::RouterClassification { .. } => "router_classification",
     }
 }
 // ── Public API ───────────────────────────────────────────────────────────
@@ -942,6 +943,23 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "name": name,
             "path": path,
             "markdown": markdown,
+        })),
+        Event::RouterClassification {
+            session_id,
+            tier,
+            requested_tier,
+            model,
+            composite_score,
+            prompt,
+            dimensions,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "tier": tier,
+            "requested_tier": requested_tier,
+            "model": model,
+            "composite_score": composite_score,
+            "prompt": prompt,
+            "dimensions": dimensions,
         })),
     };
     (name, data)

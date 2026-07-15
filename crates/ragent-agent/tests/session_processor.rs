@@ -286,6 +286,13 @@ fn test_should_retry_stream_error_only_before_meaningful_output() {
         4,
         false
     ));
+
+    // A raw "error decoding response body" before any output is treated as a
+    // malformed/empty stream (e.g. local model not loaded) and should not be
+    // retried. Once partial output exists it is kept, not retried.
+    let decode_error = "error decoding response body";
+    assert!(!should_retry_stream_error(decode_error, 0, 4, false));
+    assert!(!should_retry_stream_error(decode_error, 0, 4, true));
 }
 
 #[test]

@@ -3,12 +3,12 @@
 //! This provider mirrors the `OpenAI` Chat Completions flow but uses a
 //! configurable API base URL, including custom ports.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::llm::LlmClient;
-use crate::provider::openai::{OPENAI_API_BASE, OpenAiClient, openai_default_models};
+use crate::provider::openai::{OPENAI_API_BASE, OpenAiClient, discover_openai_models};
 use crate::{ModelInfo, Provider};
 
 /// Provider implementation for arbitrary OpenAI-compatible endpoints.
@@ -33,8 +33,31 @@ impl Provider for GenericOpenAiProvider {
         self
     }
 
+    /// Returns an empty catalog.
+    ///
+    /// Generic OpenAI-compatible models are discovered at runtime from the
+    /// configured endpoint's `/v1/models` endpoint; no models are hard-coded.
     fn default_models(&self) -> Vec<ModelInfo> {
-        openai_default_models("generic_openai")
+        Vec::new()
+    }
+
+    /// Discover available models from the configured `/v1/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("GENERIC_OPENAI_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context(
+                "Generic OpenAI model discovery requires GENERIC_OPENAI_API_KEY or OPENAI_API_KEY",
+            )?;
+        let base_url = std::env::var(Self::DEFAULT_ENV_ENDPOINT_KEY)
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| OPENAI_API_BASE.to_string());
+        let models = discover_openai_models(&api_key, &base_url, "generic_openai")
+            .await
+            .with_context(|| "Generic OpenAI model discovery failed")?;
+        Ok(models)
     }
 
     async fn create_client(

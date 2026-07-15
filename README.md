@@ -15,6 +15,9 @@ It is implemented in Rust as a learning exercise for the author.
   GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
   Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, and Microsoft Foundry Local
   out of the box, with an extensible provider trait for adding more
+- **Local-first defaults** — when no model is explicitly configured, ragent resolves
+  to the first available local/self-hosted provider (e.g. Ollama) rather than
+  hard-wiring a cloud provider
 - **Comprehensive tool system** — ~111 registered tools across 15 categories:
   - **File operations** — read, write, create, edit, multiedit, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list

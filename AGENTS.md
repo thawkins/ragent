@@ -1,3 +1,5 @@
+to change formating like
+
 # Agent Guidelines for Rust apps
 
 - First when you startup say "Hi im RAgent and I have read Agents.md"
@@ -140,7 +142,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 ## Lint & Format Commands
 
 - `cargo clippy` - Run linter with clippy
-- `cargo fmt` - Format code with rustfmt
+- `cargo fmt` - Format code with rustfmt, always use this to fix indentation
 - `cargo fmt --check` - Check formatting without changes
 
 ## Units
