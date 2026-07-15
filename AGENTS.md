@@ -216,7 +216,7 @@ team_status                        ← read what they found
 
 ## Versioning
 
-1. During development the release number will have `-alpha` appended to the end in line with semantic versioning conventions. Only remove it for a production release.
+1. During development the release number will have `-beta` appended to the end in line with semantic versioning conventions. Only remove it for a production release.
 
 ## Temporary Files
 

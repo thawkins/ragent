@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.147
+## Current Version: 0.1.0-beta.1
+
+### Changed — Transition to beta channel
+
+- Workspace version bumped from `0.1.0-alpha.147` to `0.1.0-beta.1`,
+  marking the transition from alpha to beta pre-release channel.
+- `cargo check` passes cleanly with the new version.
+
+## Previous Version: 0.1.0-alpha.147
 
 ### Fixed — Model Router vision-model, provider picker, classification logging, and local-provider error handling
 

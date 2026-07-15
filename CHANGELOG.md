@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## Version: 0.1.0-beta.1
+
+### Changed — Transition to beta channel
+
+- Workspace version bumped from `0.1.0-alpha.147` to `0.1.0-beta.1`, marking
+  the transition from the alpha pre-release channel to the beta pre-release
+  channel.
+- `cargo check` passes cleanly with the new version.
+
 ## Version: 0.1.0-alpha.147
 
 ### Fixed — Model Router no longer forces a vision model for text-only follow-ups
