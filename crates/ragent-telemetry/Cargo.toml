@@ -1,0 +1,52 @@
+[package]
+name = "ragent-telemetry"
+version = "0.1.0"
+edition = "2024"
+authors = ["Tim Hawkins <tim.thawkins@gmail.com>"]
+license = "MIT"
+description = "OpenTelemetry metrics export subsystem for ragent"
+repository = "https://github.com/thawkins/ragent"
+
+[features]
+default = []
+# Enable the real OpenTelemetry meter provider and OTLP exporters.
+# When disabled, the crate compiles with zero-overhead no-op stubs and
+# pulls no opentelemetry dependencies.
+telemetry = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+
+[dependencies]
+ragent-types = { path = "../ragent-types" }
+ragent-config = { path = "../ragent-config" }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+
+# Optional OTEL dependencies — only pulled in when the `telemetry` feature is
+# enabled, satisfying NFR-006 (users who do not need OTEL can build without
+# these crates).
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", optional = true, features = [
+    "metrics",
+    "rt-tokio",
+] }
+opentelemetry-otlp = { version = "0.27", optional = true, features = [
+    "metrics",
+    "http-proto",
+    "reqwest-client",
+    "grpc-tonic",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true }
+opentelemetry_sdk = { version = "0.27", features = ["metrics", "rt-tokio", "testing"] }
+
+[lints]
+workspace = true

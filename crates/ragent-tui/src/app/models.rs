@@ -975,6 +975,23 @@ impl App {
                 token_input.insert_str(insert_pos, &clean);
                 *token_cursor += clean.chars().count();
             }
+        } else if let ProviderSetupStep::TelemetrySetup {
+            endpoint_field,
+            interval_field,
+            timeout_field,
+            port_field,
+            active_field,
+            ..
+        } = step
+        {
+            let target = match *active_field {
+                0 => endpoint_field,
+                2 => interval_field,
+                3 => timeout_field,
+                4 => port_field,
+                _ => return,
+            };
+            target.insert_str(&clean);
         }
     }
 
@@ -2156,6 +2173,7 @@ impl App {
             self.show_log = false;
             self.show_todo = false;
             self.show_memory = false;
+            self.show_telemetry = false;
         }
         self.status = if enabled {
             "profile panel visible".to_string()

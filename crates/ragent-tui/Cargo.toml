@@ -22,6 +22,7 @@ ragent-codeindex = { path = "../ragent-codeindex" }
 # agent-local crate::tool::bash copy is a dormant duplicate (DCREMOVALPLAN M2.3).
 ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-server = { path = "../ragent-server" }
+ragent-telemetry = { path = "../ragent-telemetry" }
 axum = { workspace = true }
 dirs = { workspace = true }
 tokio = { workspace = true }

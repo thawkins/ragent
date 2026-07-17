@@ -92,6 +92,13 @@ pub struct Config {
     /// `specs/AgentPerf/SPEC.md` for the full schema.
     #[serde(default)]
     pub agent_perf: AgentPerfConfig,
+    /// Telemetry configuration for the OpenTelemetry metrics export subsystem.
+    ///
+    /// See `specs/otel/SPEC.md` for the `telemetry.otel` schema. Defaults to
+    /// disabled; the legacy `experimental.open_telemetry` flag is mapped as a
+    /// deprecated alias via [`TelemetryConfig::apply_legacy_flag`](crate::telemetry::TelemetryConfig::apply_legacy_flag).
+    #[serde(default)]
+    pub telemetry: crate::telemetry::TelemetryConfig,
     /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
     /// Hidden tools remain registered and executable; they are simply not advertised to the model.
     ///
@@ -1324,6 +1331,16 @@ impl Config {
         }
         if overlay.experimental.parallel_tool_calls {
             base.experimental.parallel_tool_calls = true;
+        }
+
+        // Telemetry: merge the overlay telemetry config into the base. The
+        // overlay takes precedence when it explicitly enables telemetry.
+        base.telemetry =
+            crate::telemetry::TelemetryConfig::merge(&base.telemetry, &overlay.telemetry);
+        // Legacy experimental.open_telemetry flag support: if the overlay has
+        // the legacy flag set, apply it after merging the new telemetry block.
+        if overlay.experimental.open_telemetry {
+            base.telemetry.apply_legacy_flag(true);
         }
 
         // Hooks append (overlay hooks are added on top of base hooks)

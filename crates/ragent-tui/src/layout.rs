@@ -1188,6 +1188,103 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             frame.render_widget(paragraph, area);
         }
 
+        ProviderSetupStep::TelemetrySetup {
+            endpoint_field,
+            protocol,
+            interval_field,
+            timeout_field,
+            port_field,
+            active_field,
+            error,
+        } => {
+            let mut lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    "Configure Telemetry",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+
+            let fields: [(&str, &crate::input_field::InputField, u8, &str); 4] = [
+                ("OTLP endpoint:", endpoint_field, 0, "http://localhost:4318"),
+                ("Export interval (s):", interval_field, 2, "30"),
+                ("Export timeout (s):", timeout_field, 3, "10"),
+                ("Internal Prometheus port:", port_field, 4, "disabled"),
+            ];
+
+            for (label, field, idx, placeholder) in fields {
+                let is_active = *active_field == idx;
+                lines.push(Line::from(label.to_string()));
+                let display = if field.text().is_empty() {
+                    placeholder.to_string()
+                } else if is_active {
+                    with_cursor_marker(field.text(), field.cursor())
+                } else {
+                    field.text().to_string()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if is_active { "> " } else { "  " },
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        display,
+                        Style::default().fg(if field.text().is_empty() {
+                            Color::DarkGray
+                        } else {
+                            Color::White
+                        }),
+                    ),
+                ]));
+                lines.push(Line::from(""));
+            }
+
+            // Protocol row is always visible and togglable.
+            let proto_active = *active_field == 1;
+            lines.push(Line::from("Transport protocol:"));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if proto_active { "> " } else { "  " },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    format!(
+                        "[{}]",
+                        match protocol {
+                            ragent_config::OtelProtocol::Http => "http",
+                            ragent_config::OtelProtocol::Grpc => "grpc",
+                        }
+                    ),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+            lines.push(Line::from(""));
+
+            if let Some(err) = error {
+                lines.push(Line::from(Span::styled(
+                    err.as_str(),
+                    Style::default().fg(Color::Red),
+                )));
+                lines.push(Line::from(""));
+            }
+
+            lines.push(Line::from(Span::styled(
+                "Tab switch fields  Up/Down toggle protocol  Enter save  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Telemetry Setup ")
+                .border_style(Style::default().fg(Color::Cyan));
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+
         ProviderSetupStep::GitLabValidating { .. } => {
             let lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
@@ -2134,7 +2231,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // reachable via the `/log` + `/profile` slash commands. The TODO panel is a
     // third sibling (FR-004, FR-012) and is rendered alone in the side column
     // when `show_todo` is true.
-    if app.show_log || app.show_profile || app.show_todo || app.show_memory {
+    if app.show_log || app.show_profile || app.show_todo || app.show_memory || app.show_telemetry {
         let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -2148,7 +2245,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_messages(frame, app, h_chunks[0]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, h_chunks[0]);
 
-        // The TODO panel is mutually exclusive with log/profile/memory
+        // The TODO panel is mutually exclusive with log/profile/memory/telemetry
         // (FR-012), so it gets its own branch that renders alone in the side
         // column.
         if app.show_todo {
@@ -2157,11 +2254,12 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
             app.memory_area = Rect::default();
+            app.telemetry_area = Rect::default();
             app.todo_area = h_chunks[1];
             render_todo_panel(frame, app, h_chunks[1]);
             apply_selection_highlight(frame, app, SelectionPane::Todo, h_chunks[1]);
         } else if app.show_memory {
-            // The Memory panel is mutually exclusive with log/profile/todo
+            // The Memory panel is mutually exclusive with log/profile/todo/telemetry
             // (FR-004), so it gets its own branch that renders alone in the
             // side column. Clearing the other side-panel areas ensures mouse
             // hit-testing and scrollbar drag dispatch never target a panel
@@ -2171,9 +2269,22 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
             app.todo_area = Rect::default();
+            app.telemetry_area = Rect::default();
             app.memory_area = h_chunks[1];
             render_memory_panel(frame, app, h_chunks[1]);
             apply_selection_highlight(frame, app, SelectionPane::Memory, h_chunks[1]);
+        } else if app.show_telemetry {
+            // The Telemetry panel is mutually exclusive with log/profile/todo/memory,
+            // so it renders alone in the side column.
+            app.log_area = Rect::default();
+            app.profile_area = Rect::default();
+            app.active_agents_area = Rect::default();
+            app.teams_area = Rect::default();
+            app.todo_area = Rect::default();
+            app.memory_area = Rect::default();
+            app.telemetry_area = h_chunks[1];
+            render_telemetry_panel(frame, app, h_chunks[1]);
+            apply_selection_highlight(frame, app, SelectionPane::Telemetry, h_chunks[1]);
         } else {
             match (app.show_log, app.show_profile) {
                 (true, true) => {
@@ -2202,11 +2313,13 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
                     app.active_agents_area = Rect::default();
                     app.teams_area = Rect::default();
                     app.memory_area = Rect::default();
+                    app.telemetry_area = Rect::default();
                     render_profile_panel(frame, app, h_chunks[1]);
                     apply_selection_highlight(frame, app, SelectionPane::Profile, h_chunks[1]);
                 }
                 (false, false) => {
                     app.memory_area = Rect::default();
+                    app.telemetry_area = Rect::default();
                 }
             }
         }
@@ -2216,6 +2329,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.profile_area = Rect::default();
         app.todo_area = Rect::default();
         app.memory_area = Rect::default();
+        app.telemetry_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         render_messages(frame, app, chunks[2]);
@@ -4068,6 +4182,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+L", "Toggle log panel visibility"),
     ("Alt+P", "Toggle profiler panel visibility"),
     ("Alt+T", "Toggle TODO panel visibility"),
+    ("Alt+O", "Toggle telemetry panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
@@ -4765,4 +4880,87 @@ fn render_router_save_dialog(frame: &mut Frame, app: &App) {
         .block(block)
         .alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
+}
+
+/// Render the Telemetry side panel (toggled via `Alt+O`).
+///
+/// Displays the same live counter/gauge values as `/telemetry counters`, grouped
+/// by category in a compact, scrollable side panel. The panel reads from the
+/// shared [`TelemetryCountersContent`] builder so it stays in sync with the chat
+/// output without duplicating metric definitions.
+///
+/// # Arguments
+/// - `frame` — the ratatui frame to render into.
+/// - `app` — mutable `App` state; reads `telemetry_scroll_offset`; writes
+///   `telemetry_area`, `telemetry_max_scroll`, and `telemetry_content_lines`.
+/// - `area` — the rect allocated to the panel by the side-panel split.
+fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Telemetry ",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    app.telemetry_area = area;
+
+    let content = App::telemetry_counters_content();
+
+    let header_style = Style::default()
+        .fg(Color::LightGreen)
+        .add_modifier(Modifier::BOLD);
+    let metric_style = Style::default().fg(Color::White);
+    let value_style = Style::default().fg(Color::LightGreen);
+    let desc_style = Style::default().fg(Color::DarkGray);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for (title, group) in [
+        ("Usage metrics", &content.usage),
+        ("Performance metrics", &content.performance),
+        ("Cost metrics", &content.cost),
+        ("Effectiveness metrics", &content.effectiveness),
+    ] {
+        lines.push(Line::from(Span::styled(title.to_string(), header_style)));
+        for (name, desc, value) in group {
+            // Compact line: "name value — description", matching the
+            // `/telemetry counters` chat output as closely as the narrow panel
+            // allows.
+            lines.push(Line::from(vec![
+                Span::styled(format!("{name} "), metric_style),
+                Span::styled(value.to_string(), value_style),
+                Span::styled(format!(" — {desc}"), desc_style),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
+
+    // Cache plain-text content for text selection copy, matching the other
+    // side panels' wrapping behaviour.
+    let telemetry_inner_width = inner.width as usize;
+    app.telemetry_content_lines = build_wrapped_content_lines(&lines, telemetry_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.telemetry_max_scroll = max_scroll;
+    let scroll = app.telemetry_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((scroll, 0));
+    frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows.
+    if total_lines > visible_height {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        // Render in the full panel area so the scrollbar gutter aligns with
+        // the mouse hit-test column used by the drag handler.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }

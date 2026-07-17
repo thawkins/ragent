@@ -277,6 +277,7 @@ impl App {
             SelectionPane::Profile => self.profile_area,
             SelectionPane::Todo => self.todo_area,
             SelectionPane::Memory => self.memory_area,
+            SelectionPane::Telemetry => self.telemetry_area,
             SelectionPane::Input => self.input_area,
         }
     }
@@ -1252,6 +1253,11 @@ impl App {
         } else if self.show_memory && self.memory_area.area() > 0 && self.memory_area.contains(pos)
         {
             Some(SelectionPane::Memory)
+        } else if self.show_telemetry
+            && self.telemetry_area.area() > 0
+            && self.telemetry_area.contains(pos)
+        {
+            Some(SelectionPane::Telemetry)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
             Some(SelectionPane::Input)
         } else {
@@ -1432,6 +1438,7 @@ impl App {
             ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll),
             ScrollbarDragPane::Todo => (self.todo_area, self.todo_max_scroll),
             ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll),
+            ScrollbarDragPane::Telemetry => (self.telemetry_area, self.telemetry_max_scroll),
         };
 
         if area.height <= 1 || max_scroll == 0 {
@@ -1454,6 +1461,7 @@ impl App {
             ScrollbarDragPane::Profile => self.profile_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Todo => self.todo_scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Memory => self.memory_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Telemetry => self.telemetry_scroll_offset = offset.min(max_scroll),
         }
     }
 

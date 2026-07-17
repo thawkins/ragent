@@ -12,6 +12,7 @@ use ragent_agent::{
 use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TeamMember, TeamStore,
 };
+use ragent_telemetry::counters as telemetry_counters;
 
 // Prompt optimization templates
 
@@ -170,6 +171,8 @@ impl App {
                         &session_id[..8.min(session_id.len())]
                     ),
                 );
+                telemetry_counters::increment_sessions_total(1);
+                telemetry_counters::add_sessions_active(1);
             }
             Event::TextDelta {
                 ref session_id,
@@ -213,6 +216,7 @@ impl App {
                 self.compress_in_progress = false;
                 self.last_input_tokens = compressed_tokens as u64;
                 self.needs_redraw = true;
+                telemetry_counters::increment_context_compressions(1);
                 if did_compress {
                     let saved = original_tokens.saturating_sub(compressed_tokens);
                     self.status = format!(
@@ -247,6 +251,7 @@ impl App {
             } if self.is_current_session(session_id) => {
                 self.stream_in_bytes = 0;
                 self.stream_out_bytes = outbound_bytes;
+                telemetry_counters::increment_llm_requests(1);
             }
             Event::ToolCallStart {
                 ref session_id,
@@ -254,6 +259,7 @@ impl App {
                 ref tool,
             } if self.is_current_session(session_id) => {
                 self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
+                telemetry_counters::increment_tool_invocations(1);
                 // Get the current step count from the event bus (single source of truth)
                 let step = self.event_bus.current_step(session_id) as u32;
                 let short_sid = short_session_id(session_id);
@@ -305,6 +311,7 @@ impl App {
                 ref error,
                 duration_ms,
             } if self.is_current_session(session_id) => {
+                telemetry_counters::set_tool_duration_last(duration_ms as f64);
                 self.update_tool_call_status(
                     call_id,
                     error.is_none(),
@@ -346,6 +353,7 @@ impl App {
                 self.is_processing = true;
                 self.agent_halted = false;
                 self.set_status_working("processing");
+                telemetry_counters::increment_messages_user(1);
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
@@ -368,6 +376,7 @@ impl App {
                     self.force_new_message = true;
                     return;
                 }
+                telemetry_counters::add_sessions_active(-1);
                 let was_auto_compaction = self.auto_compact_in_progress;
                 self.is_processing = false;
                 self.cancel_flag = None;
@@ -755,6 +764,8 @@ impl App {
                 self.last_input_tokens = input_tokens;
                 self.token_usage.0 += input_tokens;
                 self.token_usage.1 += output_tokens;
+                telemetry_counters::increment_tokens_input(input_tokens);
+                telemetry_counters::increment_tokens_output(output_tokens);
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
@@ -791,6 +802,7 @@ impl App {
                 input_tokens,
                 output_tokens,
             } if self.is_current_session(session_id) => {
+                telemetry_counters::set_llm_duration_last(elapsed_ms as f64);
                 if let Some(model_ref) = self.active_model_ref_string() {
                     self.llm_request_stats.push(LlmRequestStat {
                         model_ref,
@@ -910,6 +922,8 @@ impl App {
                 background,
                 ..
             } if self.is_current_session(session_id) => {
+                telemetry_counters::increment_subagent_spawns(1);
+                telemetry_counters::add_agents_active(1);
                 // Map the child session's short_sid to the agent name for display
                 let short_sid = short_session_id(child_session_id);
                 self.sid_to_display_name.insert(short_sid, agent.clone());
@@ -954,6 +968,8 @@ impl App {
                 success,
                 ..
             } if self.is_current_session(session_id) => {
+                telemetry_counters::add_agents_active(-1);
+                telemetry_counters::increment_agents_completed(1);
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                     self.active_tasks.remove(idx);
                 }
@@ -1027,6 +1043,7 @@ impl App {
                 ref teammate_name,
                 ref agent_id,
             } if self.is_current_session(session_id) => {
+                telemetry_counters::set_team_members(self.team_members.len() as i64 + 1);
                 // Add new member to team_members if not already present.
                 if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
                     let member =

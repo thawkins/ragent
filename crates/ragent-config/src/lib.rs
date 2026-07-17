@@ -12,6 +12,7 @@ pub mod compression;
 pub mod config;
 pub mod dir_lists;
 pub mod permission;
+pub mod telemetry;
 pub mod yolo;
 
 // Re-export commonly used types
@@ -27,3 +28,4 @@ pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,
     PermissionRule,
 };
+pub use telemetry::{OtelConfig, OtelProtocol, TelemetryConfig};

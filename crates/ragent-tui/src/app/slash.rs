@@ -8,6 +8,9 @@ use ragent_team::team::{
 };
 use ragent_types::ThinkingLevel;
 
+use ragent_config::OtelConfig;
+use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
+
 use crate::research_adapter::RagentCompleter;
 
 // Prompt optimization templates
@@ -234,6 +237,409 @@ impl App {
     /// Execute a slash command from the raw input string (with or without the
     /// leading `/`). Single entry/single exit: logs the invocation, delegates
     /// to the inner implementation, then logs completion and any output lines.
+
+    /// Return the path of the project or global config file that should be
+    /// mutated for telemetry changes. Prefer the project file when a project
+    /// config was loaded; otherwise fall back to the global config file.
+    fn telemetry_config_source_path(&self) -> Option<std::path::PathBuf> {
+        let cfg = ragent_agent::Config::load().unwrap_or_default();
+        let was_project = cfg.config_paths.iter().any(|p| {
+            p.file_name().is_some_and(|f| f == "ragent.json")
+                && p.parent()
+                    .and_then(|parent| parent.file_name())
+                    .is_some_and(|f| f == ".ragent")
+        });
+        if was_project {
+            Some(
+                std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(".ragent/ragent.json"),
+            )
+        } else {
+            dirs::config_dir().map(|d| d.join("ragent/ragent.json"))
+        }
+    }
+
+    /// Atomically update the source `ragent.json` with a new `telemetry.otel`
+    /// block, preserving all other keys. The destination file is chosen based
+    /// on whether a project or global config was loaded.
+    pub(crate) fn save_telemetry_otel(&self, otel: &OtelConfig) -> Result<(), String> {
+        let path = self
+            .telemetry_config_source_path()
+            .ok_or_else(|| "no telemetry config destination found".to_string())?;
+        crate::app::state::atomic_config_update(&path, |json| {
+            // Ensure the top-level "telemetry" object exists.
+            if !json.get("telemetry").map_or(false, |v| v.is_object()) {
+                json.as_object_mut()
+                    .expect("json is an object")
+                    .insert("telemetry".to_string(), serde_json::json!({}));
+            }
+            let telemetry = json
+                .as_object_mut()
+                .and_then(|obj| obj.get_mut("telemetry"))
+                .and_then(|v| v.as_object_mut())
+                .expect("telemetry object");
+            let value =
+                serde_json::to_value(otel).map_err(|e| format!("serialise otel config: {e}"))?;
+            telemetry.insert("otel".to_string(), value);
+            Ok(())
+        })
+    }
+
+    /// Enable or disable telemetry in the source config and invalidate the
+    /// session-processor config cache so the next loop picks up the change.
+    fn set_telemetry_enabled(&mut self, enabled: bool) {
+        let mut cfg = ragent_agent::Config::load().unwrap_or_default();
+        cfg.telemetry.otel.enabled = enabled;
+        match self.save_telemetry_otel(&cfg.telemetry.otel) {
+            Ok(()) => {
+                self.session_processor.invalidate_config_cache();
+            }
+            Err(e) => {
+                self.push_log_no_agent(
+                    LogLevel::Error,
+                    format!("telemetry enable/disable failed: {e}"),
+                );
+            }
+        }
+    }
+
+    /// Build the markdown help message for the `/telemetry counters` command.
+    ///
+    /// The live in-memory counter/gauge values are read from
+    /// [`ragent_telemetry::counters::current_values`] and appended to each
+    /// line so the user can see not only what each metric means, but also its
+    /// current value inside the running process.
+    fn telemetry_counters_help() -> String {
+        Self::telemetry_counters_content().markdown()
+    }
+
+    /// Build the structured counter/gauge content shared by `/telemetry counters`
+    /// and the live telemetry side panel. Returning a content builder avoids
+    /// duplicating the metric definitions and keeps the panel and the chat
+    /// output in sync.
+    pub(crate) fn telemetry_counters_content() -> TelemetryCountersContent {
+        use std::fmt::Write;
+
+        let values = current_values();
+
+        let mut out = String::from("From: /telemetry counters\n\n## Telemetry counters\n\n");
+
+        let fmt_u64 = |v: u64| v.to_string();
+        let fmt_i64 = |v: i64| v.to_string();
+        let fmt_f64 = |v: f64| format!("{v:.2}");
+
+        let usage: [(&str, &str, String); 9] = [
+            (
+                "ragent.llm.requests",
+                "Total LLM requests (tagged by model/provider)",
+                fmt_u64(values.llm_requests),
+            ),
+            (
+                "ragent.sessions.active",
+                "Currently active sessions",
+                fmt_i64(values.sessions_active),
+            ),
+            (
+                "ragent.sessions.total",
+                "Total sessions created",
+                fmt_u64(values.sessions_total),
+            ),
+            (
+                "ragent.messages.user",
+                "User messages submitted",
+                fmt_u64(values.messages_user),
+            ),
+            (
+                "ragent.tool.invocations",
+                "Tool invocations",
+                fmt_u64(values.tool_invocations),
+            ),
+            (
+                "ragent.agents.active",
+                "Currently active sub-agents",
+                fmt_i64(values.agents_active),
+            ),
+            (
+                "ragent.agents.completed",
+                "Completed sub-agents",
+                fmt_u64(values.agents_completed),
+            ),
+            (
+                "ragent.subagent.spawns",
+                "Sub-agent spawn events",
+                fmt_u64(values.subagent_spawns),
+            ),
+            (
+                "ragent.team.members",
+                "Current team members",
+                fmt_i64(values.team_members),
+            ),
+        ];
+        let performance: [(&str, &str, String); 7] = [
+            (
+                "ragent.llm.duration",
+                "LLM call wall-clock duration (ms, tagged by model/provider)",
+                fmt_f64(values.llm_duration_last),
+            ),
+            (
+                "ragent.llm.time_to_first_token",
+                "Time to first token (ms, tagged by model)",
+                fmt_f64(values.llm_ttft_last),
+            ),
+            (
+                "ragent.tool.duration",
+                "Tool execution duration (ms, tagged by tool.name)",
+                fmt_f64(values.tool_duration_last),
+            ),
+            (
+                "ragent.agent_loop.duration",
+                "Agent loop iteration duration (ms)",
+                fmt_f64(values.agent_loop_duration_last),
+            ),
+            (
+                "ragent.agent_loop.iterations",
+                "Iterations in a completed agent loop",
+                fmt_u64(values.agent_loop_iterations_last),
+            ),
+            (
+                "ragent.session.duration",
+                "Session wall-clock duration (ms)",
+                fmt_f64(values.session_duration_last),
+            ),
+            (
+                "ragent.tool.permission_wait",
+                "Time waiting for user permission (ms)",
+                fmt_f64(values.tool_permission_wait_last),
+            ),
+        ];
+        let cost: [(&str, &str, String); 8] = [
+            (
+                "ragent.tokens.input",
+                "Input tokens (tagged by model)",
+                fmt_u64(values.tokens_input),
+            ),
+            (
+                "ragent.tokens.output",
+                "Output tokens (tagged by model)",
+                fmt_u64(values.tokens_output),
+            ),
+            (
+                "ragent.tokens.cache_read",
+                "Cache-read tokens (tagged by model)",
+                fmt_u64(values.tokens_cache_read),
+            ),
+            (
+                "ragent.tokens.cache_write",
+                "Cache-write tokens (tagged by model)",
+                fmt_u64(values.tokens_cache_write),
+            ),
+            (
+                "ragent.cost.estimated",
+                "Estimated cost in USD (tagged by model/provider)",
+                fmt_f64(values.cost_estimated),
+            ),
+            (
+                "ragent.cost.session",
+                "Estimated cost per session",
+                fmt_f64(values.cost_session_last),
+            ),
+            (
+                "ragent.rate_limit.requests_pct",
+                "Request quota percentage (tagged by provider)",
+                fmt_f64(values.rate_limit_requests_pct),
+            ),
+            (
+                "ragent.rate_limit.tokens_pct",
+                "Token quota percentage (tagged by provider)",
+                fmt_f64(values.rate_limit_tokens_pct),
+            ),
+        ];
+        let effectiveness: [(&str, &str, String); 10] = [
+            (
+                "ragent.errors.total",
+                "Total errors (tagged by component)",
+                fmt_u64(values.errors_total),
+            ),
+            (
+                "ragent.timeouts.total",
+                "Total timeout events",
+                fmt_u64(values.timeouts_total),
+            ),
+            (
+                "ragent.permission.denied",
+                "Permission denials (tagged by tool.name)",
+                fmt_u64(values.permission_denied),
+            ),
+            (
+                "ragent.permission.approved",
+                "Permission approvals (tagged by tool.name)",
+                fmt_u64(values.permission_approved),
+            ),
+            (
+                "ragent.context.compressions",
+                "Context compression invocations",
+                fmt_u64(values.context_compressions),
+            ),
+            (
+                "ragent.context.compression_ratio",
+                "Context compression before/after ratio (%)",
+                fmt_f64(values.context_compression_ratio_last),
+            ),
+            (
+                "ragent.tool.calls_per_session",
+                "Tool calls per session",
+                fmt_u64(values.tool_calls_per_session_last),
+            ),
+            (
+                "ragent.task.completions",
+                "Completed sub-agent and team tasks",
+                fmt_u64(values.task_completions),
+            ),
+            (
+                "ragent.retries.llm",
+                "LLM retry attempts (tagged by model)",
+                fmt_u64(values.retries_llm),
+            ),
+            (
+                "ragent.snapshot.restores",
+                "Snapshot undo restores",
+                fmt_u64(values.snapshot_restores),
+            ),
+        ];
+
+        let write_group = |out: &mut String, title: &str, group: &[(&str, &str, String)]| {
+            let _ = writeln!(out, "### {title}");
+            for (name, desc, value) in group {
+                let _ = writeln!(out, "- `{name}` — **{value}** — {desc}");
+            }
+            let _ = writeln!(out);
+        };
+
+        write_group(&mut out, "Usage metrics", &usage);
+        write_group(&mut out, "Performance metrics", &performance);
+        write_group(&mut out, "Cost metrics", &cost);
+        write_group(&mut out, "Effectiveness metrics", &effectiveness);
+
+        out.push_str(
+            "### Logs
+",
+        );
+        out.push_str(
+            "No counters configured — log signals are planned.
+
+",
+        );
+        out.push_str(
+            "### Traces
+",
+        );
+        out.push_str(
+            "No counters configured — trace signals are planned.
+",
+        );
+
+        TelemetryCountersContent {
+            usage: usage
+                .iter()
+                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            performance: performance
+                .iter()
+                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            cost: cost
+                .iter()
+                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            effectiveness: effectiveness
+                .iter()
+                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            markdown: out,
+        }
+    }
+
+    /// Dispatch the `/telemetry` slash-command family.
+    fn handle_telemetry_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("");
+        match sub {
+            "help" | "" => {
+                self.append_assistant_text(
+                    "From: /telemetry help
+
+## /telemetry — Telemetry management
+
+| Subcommand | Description |
+|---|---|
+| `/telemetry help` | Show this help |
+| `/telemetry on` | Enable OpenTelemetry metrics export |
+| `/telemetry off` | Disable OpenTelemetry metrics export |
+| `/telemetry setup` | Open a TUI dialog to configure endpoint, protocol, interval, timeout, and internal port |
+| `/telemetry counters` | List all available metric counters, grouped by category |",
+                );
+                self.status = "telemetry: help".to_string();
+            }
+            "on" => {
+                self.set_telemetry_enabled(true);
+                self.append_assistant_text(
+                    "From: /telemetry on
+
+✅ Telemetry enabled.",
+                );
+                self.status = "telemetry: enabled".to_string();
+            }
+            "off" => {
+                self.set_telemetry_enabled(false);
+                self.append_assistant_text(
+                    "From: /telemetry off
+
+✅ Telemetry disabled.",
+                );
+                self.status = "telemetry: disabled".to_string();
+            }
+            "setup" => {
+                let cfg = ragent_agent::Config::load().unwrap_or_default();
+                let otel = cfg.telemetry.otel;
+                self.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+                    endpoint_field: crate::input_field::InputField::with_text(&otel.endpoint),
+                    protocol: otel.protocol,
+                    interval_field: crate::input_field::InputField::with_text(
+                        &otel.export_interval_seconds.to_string(),
+                    ),
+                    timeout_field: crate::input_field::InputField::with_text(
+                        &otel.export_timeout_seconds.to_string(),
+                    ),
+                    port_field: crate::input_field::InputField::with_text(
+                        &otel
+                            .internal_port
+                            .map(|p| p.to_string())
+                            .unwrap_or_default(),
+                    ),
+                    active_field: 0,
+                    error: None,
+                });
+                self.status = "telemetry: setup".to_string();
+            }
+            "counters" => {
+                self.append_assistant_text(&Self::telemetry_counters_help());
+                self.status = "telemetry: counters".to_string();
+            }
+            _ => {
+                self.append_assistant_text(
+                    "From: /telemetry
+
+Usage: `/telemetry help|on|off|setup|counters`",
+                );
+                self.status = "telemetry: usage".to_string();
+            }
+        }
+    }
+
+    /// Entry point for all slash commands. Logs invocation, records the raw
+    /// command in input history, dispatches to the inner implementation, and
+    /// emits a "Finished" log entry once complete (unless a background task
+    /// is still pending).
     pub fn execute_slash_command(&mut self, raw: &str) {
         // Top-level wrapper: single entry and single exit. Log invocation and
         // call the inner implementation which may return early. On return,
@@ -291,6 +697,7 @@ impl App {
         }
 
         match cmd {
+            "telemetry" => self.handle_telemetry_command(args),
             "about" => {
                 let about = format!(
                     "  ragent — AI Coding Agent\n\
@@ -1133,6 +1540,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.show_profile = false;
                     self.show_todo = false;
                     self.show_memory = false;
+                    self.show_telemetry = false;
                 }
                 self.status = if self.show_log {
                     "log panel visible".to_string()
@@ -1153,6 +1561,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         self.show_log = false;
                         self.show_profile = false;
                         self.show_memory = false;
+                        self.show_telemetry = false;
                     }
                     self.status = if self.show_todo {
                         "todo panel visible".to_string()
@@ -1160,6 +1569,25 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         "todo panel hidden".to_string()
                     };
                 }
+            }
+            "telemetry_panel" => {
+                // `/telemetry_panel` slash alias — toggles the Telemetry side
+                // panel. Mirrors the `/todo` alias and the Alt+O
+                // InputAction::ToggleTelemetry handler. This is purely a UI
+                // toggle; the `/telemetry counters` command still prints the
+                // same values into the chat transcript.
+                self.show_telemetry = !self.show_telemetry;
+                if self.show_telemetry {
+                    self.show_log = false;
+                    self.show_profile = false;
+                    self.show_todo = false;
+                    self.show_memory = false;
+                }
+                self.status = if self.show_telemetry {
+                    "telemetry panel visible".to_string()
+                } else {
+                    "telemetry panel hidden".to_string()
+                };
             }
             "profile" => match args {
                 "on" => {
@@ -4769,6 +5197,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             self.show_log = false;
                             self.show_profile = false;
                             self.show_todo = false;
+                            self.show_telemetry = false;
                         }
                         self.status = if self.show_memory {
                             "memory panel visible".to_string()

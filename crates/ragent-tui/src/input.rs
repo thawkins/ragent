@@ -124,6 +124,8 @@ pub enum InputAction {
     ToggleTodo,
     /// Toggle the Memory side panel visibility (Alt+M).
     ToggleMemory,
+    /// Toggle the Telemetry side panel visibility (Alt+O).
+    ToggleTelemetry,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
     /// Scroll the research markdown viewer up.
@@ -723,6 +725,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // FR-011).
         KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleMemory)
+        }
+        // Alt+O toggles the Telemetry side panel (placed before generic char-insert
+        // handling so the `o` is never inserted into the input buffer — NFR-002).
+        KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleTelemetry)
         }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleYolo)
@@ -1782,6 +1789,190 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
         }
+
+        // ── Telemetry setup (multi-field form) ───────────────────────────
+        ProviderSetupStep::TelemetrySetup {
+            mut endpoint_field,
+            mut protocol,
+            mut interval_field,
+            mut timeout_field,
+            mut port_field,
+            mut active_field,
+            error: _,
+        } => {
+            let is_text_field = active_field != 1;
+            match key.code {
+                KeyCode::Tab => {
+                    active_field = (active_field + 1) % 5;
+                }
+                KeyCode::BackTab => {
+                    active_field = if active_field == 0 {
+                        4
+                    } else {
+                        active_field - 1
+                    };
+                }
+                KeyCode::Up | KeyCode::Down if active_field == 1 => {
+                    protocol = match protocol {
+                        ragent_config::OtelProtocol::Http => ragent_config::OtelProtocol::Grpc,
+                        ragent_config::OtelProtocol::Grpc => ragent_config::OtelProtocol::Http,
+                    };
+                }
+                KeyCode::Enter => {
+                    let endpoint = endpoint_field.text().trim().to_string();
+                    let interval_str = interval_field.text().trim();
+                    let timeout_str = timeout_field.text().trim();
+                    let port_str = port_field.text().trim();
+
+                    let interval = interval_str.parse::<u64>().unwrap_or(0);
+                    let timeout = timeout_str.parse::<u64>().unwrap_or(0);
+                    let internal_port = if port_str.is_empty() {
+                        None
+                    } else {
+                        match port_str.parse::<u16>() {
+                            Ok(p) => Some(p),
+                            Err(_) => {
+                                app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+                                    endpoint_field,
+                                    protocol,
+                                    interval_field,
+                                    timeout_field,
+                                    port_field,
+                                    active_field,
+                                    error: Some(format!(
+                                        "Internal port must be a number between 0 and {}.",
+                                        u16::MAX
+                                    )),
+                                });
+                                return;
+                            }
+                        }
+                    };
+
+                    let draft = ragent_config::OtelConfig {
+                        enabled: true,
+                        endpoint,
+                        protocol,
+                        export_interval_seconds: interval,
+                        export_timeout_seconds: timeout,
+                        service_name: "ragent".to_string(),
+                        resource_attributes: std::collections::HashMap::new(),
+                        metrics: std::collections::HashMap::new(),
+                        internal_port,
+                        cardinality_limit: 1000,
+                    };
+
+                    let problems = draft.validate();
+                    if !problems.is_empty() {
+                        app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+                            endpoint_field,
+                            protocol,
+                            interval_field,
+                            timeout_field,
+                            port_field,
+                            active_field,
+                            error: Some(problems.join("; ")),
+                        });
+                        return;
+                    }
+
+                    match app.save_telemetry_otel(&draft) {
+                        Ok(()) => {
+                            app.session_processor.invalidate_config_cache();
+                            app.provider_setup = None;
+                            app.append_assistant_text(
+                                "From: /telemetry setup\n✅ **Telemetry configuration saved.**\n\nSettings take effect on the next ragent start, or immediately if the telemetry subsystem is already running.",
+                            );
+                            app.status = "telemetry: saved".to_string();
+                        }
+                        Err(e) => {
+                            app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+                                endpoint_field,
+                                protocol,
+                                interval_field,
+                                timeout_field,
+                                port_field,
+                                active_field,
+                                error: Some(e),
+                            });
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Char(c) if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.insert_char(c);
+                }
+                KeyCode::Backspace if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.backspace();
+                }
+                KeyCode::Left if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.move_left();
+                }
+                KeyCode::Right if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.move_right();
+                }
+                KeyCode::Home if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.move_home();
+                }
+                KeyCode::End if is_text_field => {
+                    let target = match active_field {
+                        0 => &mut endpoint_field,
+                        2 => &mut interval_field,
+                        3 => &mut timeout_field,
+                        4 => &mut port_field,
+                        _ => unreachable!(),
+                    };
+                    target.move_end();
+                }
+                _ => {}
+            }
+
+            app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+                endpoint_field,
+                protocol,
+                interval_field,
+                timeout_field,
+                port_field,
+                active_field,
+                error: None,
+            });
+        }
+
         ProviderSetupStep::LoadingModels { .. } => {
             // Loading state is read-only; any key besides Esc just keeps it alive.
             if key.code == KeyCode::Esc {

@@ -21,6 +21,7 @@ use ragent_agent::permission::PermissionRequest;
 use ragent_agent::provider::ProviderRegistry;
 use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
+use ragent_config::OtelProtocol;
 use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
 
@@ -505,6 +506,27 @@ pub enum ProviderSetupStep {
         /// Which tier bucket the model will be assigned to.
         target_tier: ragent_llm::providers::router_config::Tier,
     },
+    // ── Telemetry setup step ─────────────────────────────────────────
+    /// Multi-field telemetry (OpenTelemetry) configuration: endpoint, protocol,
+    /// export interval, timeout, and internal Prometheus port.
+    ///
+    /// Tab cycles between fields; Enter validates and saves.
+    TelemetrySetup {
+        /// OTLP endpoint URL.
+        endpoint_field: crate::input_field::InputField,
+        /// Transport protocol (HTTP or gRPC).
+        protocol: OtelProtocol,
+        /// Metric export interval in seconds.
+        interval_field: crate::input_field::InputField,
+        /// Per-export request timeout in seconds.
+        timeout_field: crate::input_field::InputField,
+        /// Optional internal Prometheus port (`""` means disabled).
+        port_field: crate::input_field::InputField,
+        /// Currently focused field index (0..=4).
+        active_field: u8,
+        /// Optional validation or save error message.
+        error: Option<String>,
+    },
 }
 
 /// Information about a configured provider.
@@ -769,6 +791,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Toggle mouse support: /mouse on | off",
     },
     SlashCommandDef {
+        trigger: "telemetry",
+        description: "Telemetry management: /telemetry help|on|off|setup|counters",
+    },
+    SlashCommandDef {
+        trigger: "telemetry_panel",
+        description: "Toggle the telemetry side panel (Alt+O alias); use `/telemetry counters` to list values",
+    },
+    SlashCommandDef {
         trigger: "tools",
         description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off]",
     },
@@ -862,6 +892,8 @@ pub enum ScrollbarDragPane {
     Todo,
     /// Dragging the Memory pane scrollbar.
     Memory,
+    /// Dragging the Telemetry pane scrollbar.
+    Telemetry,
 }
 
 /// Identifies which pane a text selection lives in.
@@ -877,6 +909,8 @@ pub enum SelectionPane {
     Todo,
     /// Selection in the Memory pane.
     Memory,
+    /// Selection in the Telemetry pane.
+    Telemetry,
     /// Selection in the chat-screen input widget.
     Input,
 }
@@ -1153,6 +1187,8 @@ pub struct App {
     pub show_todo: bool,
     /// Whether the Memory panel is visible (toggled via Alt+M).
     pub show_memory: bool,
+    /// Whether the Telemetry panel is visible (toggled via Alt+O).
+    pub show_telemetry: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
     /// Scroll offset for the log panel (lines from bottom).
@@ -1163,6 +1199,8 @@ pub struct App {
     pub todo_scroll_offset: u16,
     /// Scroll offset for the Memory panel (lines from top).
     pub memory_scroll_offset: u16,
+    /// Scroll offset for the Telemetry panel (lines from top).
+    pub telemetry_scroll_offset: u16,
     /// Cached area of the messages pane (set during render for mouse hit-testing).
     pub message_area: Rect,
     /// Cached area of the log panel (set during render for mouse hit-testing).
@@ -1173,6 +1211,8 @@ pub struct App {
     pub todo_area: Rect,
     /// Cached area of the Memory panel (set during render for mouse hit-testing).
     pub memory_area: Rect,
+    /// Cached area of the Telemetry panel (set during render for mouse hit-testing).
+    pub telemetry_area: Rect,
     /// Maximum scroll value for the messages pane (set during render).
     pub message_max_scroll: u16,
     /// Maximum scroll value for the log pane (set during render).
@@ -1183,6 +1223,8 @@ pub struct App {
     pub todo_max_scroll: u16,
     /// Maximum scroll value for the Memory pane (set during render).
     pub memory_max_scroll: u16,
+    /// Maximum scroll value for the Telemetry pane (set during render).
+    pub telemetry_max_scroll: u16,
     /// Scroll offset for the active-agents subpanel (lines from top).
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
@@ -1211,6 +1253,8 @@ pub struct App {
     pub todo_content_lines: Vec<String>,
     /// Plain-text lines from the last Memory pane render (for copy).
     pub memory_content_lines: Vec<String>,
+    /// Plain-text lines from the last Telemetry pane render (for copy).
+    pub telemetry_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
     /// Cached area of the teams subpanel.
@@ -1481,6 +1525,14 @@ pub struct App {
     /// the results of older research runs remain visible in the message
     /// window instead of being overwritten by the latest run.
     pub research_progress: Vec<crate::research_progress::ResearchProgress>,
+
+    // ── Skill-registry cache (slash autocomplete hot path) ──────────────────
+    /// Cached skill registry, lazily populated by [`App::skill_registry`].
+    pub skill_registry_cache: Option<ragent_agent::skill::SkillRegistry>,
+    /// `skill_dirs` from the last config load, paired with the cache above.
+    pub skill_dirs_cache: Vec<String>,
+    /// When the skill-registry cache was last refreshed from disk.
+    pub skill_registry_last_refresh: std::time::Instant,
 }
 
 /// State for the `/research open` markdown viewer overlay.

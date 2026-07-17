@@ -1,8 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-beta.1
+## Current Version: 0.1.0-beta.2
+
+### Added — Telemetry (OTEL) and ALT-O Telemetry panel
+
+- OpenTelemetry metrics export (`/telemetry` slash command family: `help`, `on`, `off`, `setup`, `counters`) for managing OTLP endpoints, protocol, export interval, timeout, and an internal Prometheus port.
+- TUI **ALT-O Telemetry panel** for live OpenTelemetry metrics and counter inspection.
+- Configuration schema and TUI wiring for telemetry settings in `ragent.json`.
 
 ### Changed — Transition to beta channel
+
+- Workspace version bumped from `0.1.0-beta.1` to `0.1.0-beta.2`.
 
 - Workspace version bumped from `0.1.0-alpha.147` to `0.1.0-beta.1`,
   marking the transition from alpha to beta pre-release channel.

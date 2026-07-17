@@ -294,7 +294,22 @@ Ragent loads configuration from multiple sources (last wins):
   "instructions": [
     "Always write tests for new code",
     "Use descriptive variable names"
-  ]
+  ],
+
+  // OpenTelemetry metrics export (optional)
+  "telemetry": {
+    "otel": {
+      "enabled": false,
+      "endpoint": "http://localhost:4318",
+      "protocol": "http",
+      "export_interval_seconds": 30,
+      "export_timeout_seconds": 10,
+      "service_name": "ragent",
+      "resource_attributes": { "deployment": "local" },
+      "metrics": { "ragent.snapshot.restores": false },
+      "internal_port": null
+    }
+  }
 }
 ```
 
@@ -303,6 +318,65 @@ View the resolved config at any time:
 ```bash
 ragent config
 ```
+
+### OpenTelemetry Metrics Export
+
+Enable background metric export to any OTLP-compatible collector by adding a
+`telemetry.otel` block:
+
+```jsonc
+{
+  "telemetry": {
+    "otel": {
+      "enabled": true,
+      "endpoint": "http://localhost:4318",
+      "protocol": "http",
+      "export_interval_seconds": 30,
+      "export_timeout_seconds": 10,
+      "service_name": "ragent",
+      "resource_attributes": { "deployment": "local" },
+      "metrics": {
+        "ragent.llm.requests": true,
+        "ragent.tool.invocations": true,
+        "ragent.snapshot.restores": false
+      },
+      "internal_port": 9090
+    }
+  }
+}
+```
+
+- `enabled` — master switch. Default `false`; no metrics are recorded or
+  exported when disabled.
+- `endpoint` — OTLP collector base URL. Use `http://host:4318` for HTTP and
+  `http://host:4317` for gRPC.
+- `protocol` — `http` (default) or `grpc`.
+- `export_interval_seconds` — how often buffered metrics are exported.
+- `export_timeout_seconds` — per-export request timeout; a slow endpoint will
+  not block the agent loop.
+- `service_name`/`resource_attributes` — attached to every exported metric.
+- `metrics` — optional per-metric enable/disable toggles. Metrics not listed
+  are enabled by default.
+- `internal_port` — optional in-process Prometheus text endpoint on
+  `127.0.0.1:<port>/metrics` for local scraping.
+
+Inside the TUI you can also run:
+
+```
+/otel on          # enable telemetry for the current session
+/otel off         # disable telemetry for the current session
+/otel status      # show current telemetry state and endpoint
+```
+
+Telemetry is gated behind the `telemetry` Cargo feature. To build with OTEL
+support:
+
+```bash
+cargo build --release --features ragent-telemetry/telemetry
+```
+
+When the feature is off, the crate compiles to zero-overhead no-ops and pulls
+no OpenTelemetry dependencies.
 
 ---
 
