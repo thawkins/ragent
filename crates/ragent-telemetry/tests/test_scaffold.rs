@@ -5,7 +5,7 @@
 //! (NFR-002, NFR-005). They do not require a live OTLP endpoint.
 
 use ragent_telemetry::{
-    OtelConfig, OtelProtocol, TelemetryConfig, TelemetryState, TelemetrySubsystem,
+    OtelConfig, OtelProtocol, TelemetryConfig, TelemetryError, TelemetryState, TelemetrySubsystem,
 };
 
 #[test]

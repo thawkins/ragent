@@ -5,7 +5,8 @@
 //! `RAGENT_CONFIG_CONTENT` env. Provider, agent, MCP server, and permission
 //! settings are all configured here.
 
-use crate::compression::CompressionConfig;
+use crate::compaction::{CompactionConfig, LegacyCompressionConfig};
+use anyhow::bail;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -70,13 +71,21 @@ pub struct Config {
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
-    /// Context compression configuration (Headroom integration).
+    /// Context compaction configuration (OpenCode-derived summarisation).
     ///
-    /// When `enabled` is `true`, the agent uses Headroom-based content-aware
-    /// compression instead of simple truncation. When `false` or absent,
-    /// the existing `compact_history_with_atomic_tool_calls` behaviour is used.
+    /// When `auto` is `true`, the agent summarises conversation history before
+    /// sending a request that would exceed the context window minus the
+    /// configured buffer. This replaces the older Headroom-based `compression`
+    /// section.
     #[serde(default)]
-    pub compression: CompressionConfig,
+    pub compaction: CompactionConfig,
+    /// Deprecated alias for the context compaction configuration.
+    ///
+    /// If present, `compression.enabled` is mapped to `compaction.auto` when the
+    /// new `compaction` section does not explicitly set `auto`. This one-
+    /// release shim eases migration from the Headroom compression scheme.
+    #[serde(default, alias = "compression")]
+    pub compression: LegacyCompressionConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
@@ -1230,6 +1239,210 @@ impl Config {
         Self::write_config_if_changed(&path, &json)
     }
 
+    /// Resolve the global config directory (`<config_dir>/ragent`) using the
+    /// same platform-aware logic as [`Config::load`] and [`Config::save`].
+    ///
+    /// Returns `None` when the platform config directory cannot be determined
+    /// (e.g. `XDG_CONFIG_HOME` unset on a headless Linux box).
+    #[must_use]
+    pub fn global_config_dir() -> Option<PathBuf> {
+        dirs::config_dir().map(|d| d.join("ragent"))
+    }
+
+    /// Resolve the path to the global `ragent.json` file.
+    ///
+    /// This is the canonical path used by [`Config::load`], [`Config::save`],
+    /// and the `/config show` / `/config save` / `/config list` slash commands,
+    /// satisfying FR-001 (single, consistent path resolution).
+    #[must_use]
+    pub fn global_config_path() -> Option<PathBuf> {
+        Self::global_config_dir().map(|d| d.join("ragent.json"))
+    }
+
+    /// Snapshot the current global `ragent.json` into a timestamped backup
+    /// file inside a `saves/` subdirectory of the global config directory.
+    ///
+    /// The backup is named `ragent.json.[date].[time]` where `[date]` is
+    /// `YYYY-MM-DD` and `[time]` is `HH-MM-SS` (hyphens in the time portion
+    /// for Windows NTFS compatibility, where colons are illegal in file names).
+    /// The `saves/` directory is created if it does not already exist. The
+    /// backup is written via a temp-file-then-rename so a crash mid-write never
+    /// leaves a partial backup (FR-003). Each call produces a new, uniquely
+    /// named file — existing backups are never overwritten (FR-011).
+    ///
+    /// # Arguments
+    ///
+    /// * `config_dir` — the global config directory (e.g.
+    ///   `~/.config/ragent`). When `None`, the directory is resolved via
+    ///   [`global_config_dir`](Self::global_config_dir); an error is returned
+    ///   if it cannot be determined. Tests may pass a temp directory so the
+    ///   real global config is not touched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - the global config directory cannot be determined and `config_dir`
+    ///   is `None`,
+    /// - the global `ragent.json` does not exist or cannot be read,
+    /// - the `saves/` directory cannot be created,
+    /// - the backup file cannot be written atomically.
+    ///
+    /// On success, returns the path to the newly created backup file.
+    pub fn backup_global_config(config_dir: Option<&Path>) -> anyhow::Result<PathBuf> {
+        let dir = match config_dir {
+            Some(d) => d.to_path_buf(),
+            None => Self::global_config_dir()
+                .ok_or_else(|| anyhow::anyhow!("no global config directory found"))?,
+        };
+        let source = dir.join("ragent.json");
+
+        // Read the current global config. If it does not exist there is nothing
+        // to back up — surface a clear error rather than creating an empty file.
+        let content = std::fs::read_to_string(&source).map_err(|e| {
+            anyhow::anyhow!("Failed to read global config '{}': {}", source.display(), e)
+        })?;
+
+        // Timestamp: YYYY-MM-DD.HH-MM-SS (hyphens in time for Windows).
+        let timestamp = chrono::Utc::now().format("%Y-%m-%d.%H-%M-%S").to_string();
+        let mut backup_name = format!("ragent.json.{timestamp}");
+
+        let saves_dir = dir.join("saves");
+        std::fs::create_dir_all(&saves_dir).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create saves directory '{}': {}",
+                saves_dir.display(),
+                e
+            )
+        })?;
+
+        // FR-011: if multiple saves happen in the same second, append a
+        // hyphenated counter so existing backups are never overwritten.
+        let mut backup_path = saves_dir.join(&backup_name);
+        let mut counter = 1u32;
+        while backup_path.exists() {
+            backup_name = format!("ragent.json.{timestamp}-{counter}");
+            backup_path = saves_dir.join(&backup_name);
+            counter += 1;
+            if counter > 1000 {
+                bail!(
+                    "Too many backup collisions for timestamp '{}'; cannot create a unique backup name",
+                    timestamp
+                );
+            }
+        }
+
+        // Atomic write: write to a sibling temp file, then rename. A crash
+        // between the write and the rename leaves the temp file behind (which
+        // does not match the `ragent.json.*` backup pattern) but never a
+        // partial backup.
+        let tmp_path = saves_dir.join(format!("{backup_name}.tmp"));
+        std::fs::write(&tmp_path, &content).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to write backup temp file '{}': {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+        std::fs::rename(&tmp_path, &backup_path).map_err(|e| {
+            // Best-effort cleanup of the orphaned temp file on rename failure.
+            let _ = std::fs::remove_file(&tmp_path);
+            anyhow::anyhow!(
+                "Failed to rename temp file to backup '{}': {}",
+                backup_path.display(),
+                e
+            )
+        })?;
+
+        Ok(backup_path)
+    }
+
+    /// Restore a saved backup over the global `ragent.json` atomically.
+    ///
+    /// The `backup` argument may be either a file name (e.g.
+    /// `ragent.json.2024-01-01.12-00-00`) or an absolute path. The destination is
+    /// always the global `ragent.json` inside `config_dir` (or the resolved global
+    /// config directory when `config_dir` is `None`). The restore validates that:
+    ///
+    /// - the backup file exists and is a regular file,
+    /// - the resolved destination path is exactly `<config_dir>/ragent.json`
+    ///   (FR-012: never write to an arbitrary path),
+    /// - the backup content is valid JSON (defence against restoring a corrupt
+    ///   file).
+    ///
+    /// The write uses a temp-file-then-rename so readers never see a partial
+    /// config.
+    ///
+    /// # Arguments
+    ///
+    /// * `config_dir` — the global config directory (e.g. `~/.config/ragent`).
+    ///   When `None`, resolved via [`global_config_dir`].
+    /// * `backup` — backup file name or full path inside the `saves/` subfolder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the global config directory cannot be determined, the
+    /// backup cannot be read, the backup content is not valid JSON, or the
+    /// atomic rename fails.
+    pub fn restore_global_config(
+        config_dir: Option<&Path>,
+        backup: &Path,
+    ) -> anyhow::Result<PathBuf> {
+        let dir = match config_dir {
+            Some(d) => d.to_path_buf(),
+            None => Self::global_config_dir()
+                .ok_or_else(|| anyhow::anyhow!("no global config directory found"))?,
+        };
+        let target = dir.join("ragent.json");
+
+        // Resolve the backup path. If a bare file name is supplied, look inside
+        // the saves/ subdirectory.
+        let backup_path = if backup.file_name().is_some() && backup.components().count() == 1 {
+            dir.join("saves").join(backup)
+        } else {
+            backup.to_path_buf()
+        };
+
+        if !backup_path.exists() || !backup_path.is_file() {
+            bail!(
+                "Backup file '{}' does not exist or is not a file",
+                backup_path.display()
+            );
+        }
+
+        let content = std::fs::read_to_string(&backup_path).map_err(|e| {
+            anyhow::anyhow!("Failed to read backup '{}': {}", backup_path.display(), e)
+        })?;
+
+        // Guard against restoring corrupt/non-JSON backups.
+        let _: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            anyhow::anyhow!(
+                "Backup '{}' is not valid JSON: {}",
+                backup_path.display(),
+                e
+            )
+        })?;
+
+        // Atomic write to the canonical global config path.
+        let tmp_path = target.with_extension("json.tmp");
+        std::fs::write(&tmp_path, &content).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to write restored config temp file '{}': {}",
+                tmp_path.display(),
+                e
+            )
+        })?;
+        std::fs::rename(&tmp_path, &target).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            anyhow::anyhow!(
+                "Failed to rename restored config to '{}': {}",
+                target.display(),
+                e
+            )
+        })?;
+
+        Ok(target)
+    }
+
     /// Write `json` to `path` only if the file does not already contain the same
     /// JSON value.
     ///
@@ -1432,6 +1645,30 @@ impl Config {
         if overlay.tool_visibility.specified.codeindex {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
             base.tool_visibility.specified.codeindex = true;
+        }
+
+        // Compaction: overlay takes precedence.
+        base.compaction = overlay.compaction;
+        base.compression = LegacyCompressionConfig::default();
+
+        // Apply legacy `compression.enabled` -> `compaction.auto` migration when
+        // the overlay config file contains `compression` but not `compaction`.
+        for path in &overlay.config_paths {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let has_compaction = value.get("compaction").is_some();
+                    let has_compression = value.get("compression").is_some();
+                    if !has_compaction && has_compression {
+                        if let Some(enabled) = value
+                            .get("compression")
+                            .and_then(|c| c.get("enabled"))
+                            .and_then(|v| v.as_bool())
+                        {
+                            base.compaction.auto = enabled;
+                        }
+                    }
+                }
+            }
         }
 
         if overlay.yolo {

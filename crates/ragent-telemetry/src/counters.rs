@@ -545,14 +545,14 @@ mod tests {
 /// definitions.
 #[derive(Debug, Clone)]
 pub struct TelemetryCountersContent {
-    /// Usage metrics group: `(metric_name, description, current_value)`.
-    pub usage: Vec<(String, String, String)>,
+    /// Usage metrics group: `(metric_name, instrument_type, description, current_value)`.
+    pub usage: Vec<(String, String, String, String)>,
     /// Performance metrics group.
-    pub performance: Vec<(String, String, String)>,
+    pub performance: Vec<(String, String, String, String)>,
     /// Cost metrics group.
-    pub cost: Vec<(String, String, String)>,
+    pub cost: Vec<(String, String, String, String)>,
     /// Effectiveness metrics group.
-    pub effectiveness: Vec<(String, String, String)>,
+    pub effectiveness: Vec<(String, String, String, String)>,
     /// Pre-rendered markdown suitable for the chat transcript.
     pub markdown: String,
 }

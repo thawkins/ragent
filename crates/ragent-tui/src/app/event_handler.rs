@@ -200,7 +200,9 @@ impl App {
                 self.stream_in_bytes += text.len() as u64;
                 self.append_reasoning_text(text);
             }
-            Event::CompressionStarted { ref session_id } if self.is_current_session(session_id) => {
+            Event::CompressionStarted { ref session_id, .. }
+                if self.is_current_session(session_id) =>
+            {
                 self.compress_in_progress = true;
                 self.status = "compressing context...".to_string();
                 self.needs_redraw = true;
@@ -212,6 +214,7 @@ impl App {
                 compressed_tokens,
                 compression_ratio,
                 did_compress,
+                ..
             } if self.is_current_session(session_id) => {
                 self.compress_in_progress = false;
                 self.last_input_tokens = compressed_tokens as u64;

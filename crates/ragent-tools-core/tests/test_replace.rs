@@ -7,6 +7,14 @@
 //! the `#[path]` module becomes part of the test crate. `replace.rs` has no
 //! `super::` or `crate::` dependencies, so no shims are needed.
 
+// The full `replace` source module is re-imported via `#[path]` (FR-008) so
+// that `pub(crate)` helpers (e.g. `common_leading_ws`) are visible. Only a
+// subset of the module's public surface is exercised here; the remaining
+// public items (`format_match_failure`, `find_batch_normalized_replacement_range`,
+// and the `pass`/`closest_line` fields) are used by the library's `edit` and
+// `multiedit` modules and by `test_multiedit_helpers`. They are dead within
+// this compilation unit only, so we silence the lint.
+#[allow(dead_code)]
 #[path = "../src/replace.rs"]
 mod replace;
 

@@ -94,17 +94,12 @@ optional = true
 version = "0.17"
 optional = true
 
-[dependencies.headroom-core]
-git = "https://github.com/chopratejas/headroom.git"
-tag = "v0.10.17"
-
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tempfile = "3.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
 serial_test = "3.2"
-
 [[bench]]
 name = "agent_loop"
 harness = false

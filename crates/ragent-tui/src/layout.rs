@@ -69,6 +69,11 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
     render_chat(frame, app);
+    // Config-save picker overlay — rendered on top of chat, before history
+    // picker so that whichever picker is open gets drawn last (i.e. on top).
+    if app.config_save_picker.is_some() {
+        render_config_save_picker(frame, app);
+    }
     // History picker overlay — rendered on top of everything.
     if app.history_picker.is_some() {
         render_history_picker(frame, app);
@@ -3737,7 +3742,7 @@ fn messages_to_lines<'a>(
                                 .add_modifier(Modifier::BOLD),
                             5,
                         ),
-                        Role::Assistant => (
+                        Role::Assistant | Role::Compaction => (
                             "● ",
                             Style::default()
                                 .fg(Color::Magenta)
@@ -4795,6 +4800,108 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
     }
 }
 
+/// Render the `/config list` save-picker overlay.
+fn render_config_save_picker(frame: &mut Frame, app: &App) {
+    use ratatui::widgets::{List, ListItem, ListState};
+
+    let picker = match &app.config_save_picker {
+        Some(p) => p,
+        None => return,
+    };
+
+    let area = frame.area();
+    let popup = centered_rect(80, 70, area);
+    frame.render_widget(Clear, popup);
+
+    let visible_height = (popup.height.saturating_sub(2)) as usize; // subtract border
+    let total = picker.entries.len();
+    // Clamp scroll_offset so selected is always visible
+    let scroll_offset = if picker.selected < picker.scroll_offset {
+        picker.selected
+    } else if picker.selected >= picker.scroll_offset + visible_height {
+        picker.selected + 1 - visible_height
+    } else {
+        picker.scroll_offset
+    };
+
+    let items: Vec<ListItem> = picker
+        .entries
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+        .map(|(i, path)| {
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<unknown>")
+                .to_string();
+            let meta_label = match path.metadata().and_then(|m| m.modified()) {
+                Ok(t) => {
+                    let dt: chrono::DateTime<chrono::Local> = t.into();
+                    format!("  {}", dt.format("%Y-%m-%d %H:%M:%S"))
+                }
+                Err(_) => String::new(),
+            };
+            let label = format!("{file_name}{meta_label}");
+            let truncated = if label.len() > (popup.width as usize).saturating_sub(4) {
+                format!(
+                    "{}…",
+                    &label[..label
+                        .char_indices()
+                        .map(|(pos, _)| pos)
+                        .take_while(|&pos| pos < (popup.width as usize).saturating_sub(5))
+                        .last()
+                        .unwrap_or(0)]
+                )
+            } else {
+                label
+            };
+            let style = if i == picker.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(truncated).style(style)
+        })
+        .collect();
+
+    let title = format!(
+        " Saved configurations ({} entries) — ↑/↓ navigate · Enter restore · Esc close ",
+        total
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let list = List::new(items).block(block);
+    let mut list_state = ListState::default();
+    list_state.select(Some(picker.selected.saturating_sub(scroll_offset)));
+    frame.render_stateful_widget(list, popup, &mut list_state);
+
+    // Scrollbar
+    if total > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut sb_state = ScrollbarState::new(total).position(scroll_offset);
+        let sb_area = Rect {
+            x: popup.right().saturating_sub(1),
+            y: popup.y + 1,
+            width: 1,
+            height: popup.height.saturating_sub(2),
+        };
+        frame.render_stateful_widget(scrollbar, sb_area, &mut sb_state);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::messages_to_lines;
@@ -4911,56 +5018,59 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let content = App::telemetry_counters_content();
 
-    let header_style = Style::default()
-        .fg(Color::LightGreen)
-        .add_modifier(Modifier::BOLD);
-    let metric_style = Style::default().fg(Color::White);
-    let value_style = Style::default().fg(Color::LightGreen);
-    let desc_style = Style::default().fg(Color::DarkGray);
-    let mut lines: Vec<Line<'static>> = Vec::new();
+                let header_style = Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD);
+                let metric_style = Style::default().fg(Color::White);
+                let value_style = Style::default().fg(Color::LightGreen);
+                let desc_style = Style::default().fg(Color::DarkGray);
+                let type_style = Style::default().fg(Color::DarkGray);
+                let mut lines: Vec<Line<'static>> = Vec::new();
 
-    for (title, group) in [
-        ("Usage metrics", &content.usage),
-        ("Performance metrics", &content.performance),
-        ("Cost metrics", &content.cost),
-        ("Effectiveness metrics", &content.effectiveness),
-    ] {
-        lines.push(Line::from(Span::styled(title.to_string(), header_style)));
-        for (name, desc, value) in group {
-            // Compact line: "name value — description", matching the
-            // `/telemetry counters` chat output as closely as the narrow panel
-            // allows.
-            lines.push(Line::from(vec![
-                Span::styled(format!("{name} "), metric_style),
-                Span::styled(value.to_string(), value_style),
-                Span::styled(format!(" — {desc}"), desc_style),
-            ]));
-        }
-        lines.push(Line::raw(""));
-    }
+                for (title, group) in [
+                    ("Usage metrics", &content.usage),
+                    ("Performance metrics", &content.performance),
+                    ("Cost metrics", &content.cost),
+                    ("Effectiveness metrics", &content.effectiveness),
+                ] {
+                    lines.push(Line::from(Span::styled(title.to_string(), header_style)));
+                    for (name, kind, desc, value) in group {
+                        // Compact line: "name value — type — description", matching the
+                        // `/telemetry counters` chat output as closely as the narrow panel
+                              // allows.
+                              lines.push(Line::from(vec![
+                                  Span::styled(format!("{name} "), metric_style),
+                                  Span::styled(value.to_string(), value_style),
+                                  Span::styled(format!(" — {kind}"), type_style),
+                                  Span::styled(format!(" — {desc}"), desc_style),
+                              ]));
+                          }
+                          lines.push(Line::raw(""));
+                                  }
 
-    // Cache plain-text content for text selection copy, matching the other
-    // side panels' wrapping behaviour.
-    let telemetry_inner_width = inner.width as usize;
-    app.telemetry_content_lines = build_wrapped_content_lines(&lines, telemetry_inner_width);
+                            // Cache plain-text content for text selection copy, matching the other
+                            // side panels' wrapping behaviour.
+                            let telemetry_inner_width = inner.width as usize;
+                            app.telemetry_content_lines =
+                                build_wrapped_content_lines(&lines, telemetry_inner_width);
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let total_lines = paragraph.line_count(inner.width) as u16;
-    let visible_height = inner.height;
-    let max_scroll = total_lines.saturating_sub(visible_height);
-    app.telemetry_max_scroll = max_scroll;
-    let scroll = app.telemetry_scroll_offset.min(max_scroll);
-    let paragraph = paragraph.scroll((scroll, 0));
-    frame.render_widget(paragraph, inner);
+                                                    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+                                                    let total_lines = paragraph.line_count(inner.width) as u16;
+                                                    let visible_height = inner.height;
+                        let max_scroll = total_lines.saturating_sub(visible_height);
+                        app.telemetry_max_scroll = max_scroll;
+                        let scroll = app.telemetry_scroll_offset.min(max_scroll);
+                        let paragraph = paragraph.scroll((scroll, 0));
+                        frame.render_widget(paragraph, inner);
 
-    // Render scrollbar when content overflows.
-    if total_lines > visible_height {
-        let mut scrollbar_state =
-            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .style(Style::default().fg(Color::DarkGray));
-        // Render in the full panel area so the scrollbar gutter aligns with
-        // the mouse hit-test column used by the drag handler.
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
-    }
-}
+                        // Render scrollbar when content overflows.
+                        if total_lines > visible_height {
+                            let mut scrollbar_state =
+                                ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+                            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                                .style(Style::default().fg(Color::DarkGray));
+                            // Render in the full panel area so the scrollbar gutter aligns with
+                            // the mouse hit-test column used by the drag handler.
+                            frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+                        }
+                    }

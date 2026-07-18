@@ -403,7 +403,7 @@ Key event types include:
 | `PermissionRequested` / `PermissionReplied` | Permission dialog flow |
 | `QuestionRequested` / `QuestionAnswered` | User question tool |
 | `AgentNotice` | Non-blocking status/information message |
-| `CompressionStarted` / `CompressionFinished` | Headroom compression lifecycle |
+| `CompressionStarted` / `CompressionFinished` | Context compaction lifecycle (auto pre-send summarisation and emergency overflow compaction) |
 | `TeammateIdle` / `TeammateFailed` / `TeammateResumed` | Team coordination |
 | `SubagentSpawned` / `SubagentCompleted` / `SubagentKilled` | Background agents |
 
@@ -679,8 +679,7 @@ graph TD
 ```mermaid
 graph LR
     A[Start Turn] --> B[Build Context]
-    B --> C[Compress if Over Threshold]
-    C --> D[Send to LLM]
+          B --> C[Compact if Over Threshold]    C --> D[Send to LLM]
     D --> E[Stream Tokens / Tool Calls]
     E --> F[Execute Tools]
     F --> G[Record Results]
@@ -695,7 +694,7 @@ graph LR
 | Phase | Responsibility |
 |-------|----------------|
 | Build Context | Assemble system prompt, memories, code index, conversation history |
-| Compress | Run Headroom compression if `ctx / max_ctx > auto_threshold` |
+| Compact | Summarise conversation history when estimated request tokens exceed `context_window - max(output_tokens, compaction.buffer)` (FR-003); emergency compaction on provider context-overflow errors (FR-004) |
 | LLM Call | Send request to selected provider |
 | Stream | Emit assistant chunks and tool call events |
 | Execute Tools | Check permissions, run tools, record results |
@@ -885,6 +884,17 @@ The format is compatible with OpenCode's `opencode.json`.
     "structured": { "enabled": true },
     "semantic": { "enabled": false, "dimensions": 384 }
   },
+  // OpenCode-derived summarisation compaction (recommended).
+  // Compaction triggers when estimated request tokens exceed
+  // context_window - max(output_tokens, buffer).
+  "compaction": {
+    "auto": true,
+    "buffer": 20000,
+    "keep": { "tokens": 8000 }
+  },
+  // Deprecated legacy Headroom compression block. Still parsed for
+  // one-release migration: `compression.enabled` maps to
+  // `compaction.auto` when `compaction.auto` is not set explicitly.
   "compression": {
     "enabled": true,
     "mode": "default",
@@ -926,7 +936,52 @@ The format is compatible with OpenCode's `opencode.json`.
 | `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` | Force Foundry Local web-service path |
 | `TAVILY_API_KEY` | Web search (Tavily) |
 
-### 5.4 Thinking Configuration
+### 5.4 Compaction Configuration
+
+The `compaction` block controls OpenCode-derived summarisation-based context-window
+compaction, which replaces the older Headroom `compression` scheme. It satisfies
+FR-008 (auto toggle) and FR-011 (user-overridable buffer, keep-tokens, and summary
+output-token values).
+
+```jsonc
+{
+  "compaction": {
+    // Enable automatic pre-send summarisation. When false, only emergency
+    // overflow compaction runs on provider context-overflow errors (FR-008).
+    "auto": true,
+    // Token buffer reserved for the model response and safety margin.
+    // Compaction triggers when estimated request tokens exceed
+    // context_window - max(output_tokens, buffer). Default: 20000 (FR-011).
+    "buffer": 20000,
+    // Recent conversation turns kept verbatim after compaction.
+    "keep": {
+      // Maximum tokens of recent user/assistant/tool turns to preserve.
+      // Default: 8000 (FR-011).
+      "tokens": 8000
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auto` | bool | `true` | Enable automatic pre-send compaction (FR-008) |
+| `buffer` | usize | `20000` | Response/safety token buffer; compaction trigger threshold (FR-011) |
+| `keep.tokens` | usize | `8000` | Max tokens of recent turns preserved verbatim (FR-011) |
+
+The compaction summary output length is fixed at `4096` tokens and tool outputs
+are truncated to `2000` characters before being serialised into the summarisation
+prompt, matching OpenCode's defaults.
+
+The legacy `compression` block (`compression.enabled`, `compression.mode`,
+`compression.auto_threshold`) is still parsed for one-release migration:
+`compression.enabled` is treated as `compaction.auto` when `compaction.auto` is
+not set explicitly. New configurations should use `compaction`.
+
+Trigger the one-shot compaction manually with the `/compact` slash command
+(`/compress` is a deprecated alias — FR-009).
+
+### 5.5 Thinking Configuration
 
 Thinking/reasoning is configured per model:
 
@@ -975,7 +1030,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/tools` | Toggle tool visibility |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |
-| `/compress` | Run Headroom compression manually |
+| `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
 | `/team create <name>` | Create a team |
@@ -990,6 +1045,8 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/spec list\|search\|show\|impl\|implement` | Spec lifecycle commands |
 | `/research create\|list\|show\|search\|delete` | Research commands |
 | `/config show` | Show resolved configuration |
+| `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
+| `/config list` | Interactive picker to restore a saved backup |
 | `/init config` | Create a default `ragent.json` in the global config directory |
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
@@ -1057,7 +1114,7 @@ The server streams the following event types:
 | `tool_requested` / `tool_executed` | Tool lifecycle |
 | `permission_requested` / `permission_replied` | Permission flow |
 | `question_requested` / `question_answered` | Question tool |
-| `compression_started` / `compression_finished` | Compression lifecycle |
+| `compression_started` / `compression_finished` | Context compaction lifecycle |
 | `subagent_*` / `teammate_*` | Multi-agent lifecycle |
 | `agent_notice` | Status messages |
 
@@ -1979,6 +2036,8 @@ All documentation markdown files are located in `docs/` except for these root fi
 - `/spec impl` and `/spec implement` slash commands
 - YOLO mode persistence — saved to `ragent.json` and restored on startup
 - `compression` config block in `ragent.json`
+- `/config save` and `/config list` slash commands — snapshot global `ragent.json` to `saves/` and restore from an interactive picker, with atomic writes and config-cache invalidation
+- Unicode-safe truncation in compaction serializer — fixes a char-boundary panic that could crash the agent loop on multi-byte input
 - `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` environment escape hatch
 
 ### Removed

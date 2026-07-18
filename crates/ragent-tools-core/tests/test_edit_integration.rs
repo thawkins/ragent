@@ -58,21 +58,6 @@ async fn assert_edit(
     assert_eq!(result, expected, "file content after edit");
 }
 
-/// Helper: run an edit and expect it to fail, returning the error message.
-async fn expect_edit_error(
-    dir: &std::path::Path,
-    file: &str,
-    initial: &str,
-    input: serde_json::Value,
-) -> String {
-    write_file(dir, file, initial);
-    let err = EditTool
-        .execute(input, &ctx(dir))
-        .await
-        .expect_err("edit should fail");
-    format!("{err}")
-}
-
 // ── Exact match (baseline) ───────────────────────────────────────────────────
 
 #[tokio::test]

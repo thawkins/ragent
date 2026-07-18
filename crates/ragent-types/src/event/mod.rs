@@ -242,6 +242,9 @@ pub enum Event {
     CompressionStarted {
         /// Session being compressed.
         session_id: String,
+        /// Reason the compaction was initiated.
+        #[serde(default)]
+        reason: String,
     },
     /// A context compression pipeline has finished for a session.
     CompressionFinished {
@@ -255,6 +258,9 @@ pub enum Event {
         compression_ratio: f64,
         /// True when compression actually reduced token count.
         did_compress: bool,
+        /// Reason the compaction was initiated.
+        #[serde(default)]
+        reason: String,
     },
 
     // ── Provider model-list loading (TUI spinner) ────────────────────────

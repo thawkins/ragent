@@ -18,8 +18,9 @@ use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ConfiguredProvider, LogLevel, McpDiscoverState, PendingForceCleanup, ProviderSetupStep,
-    ProviderSource, RoleMode, SLASH_COMMANDS, SlashMenuEntry, SlashMenuState,
+    App, ConfigSavePickerState, ConfiguredProvider, LogLevel, McpDiscoverState,
+    PendingForceCleanup, ProviderSetupStep, ProviderSource, RoleMode, SLASH_COMMANDS,
+    SlashMenuEntry, SlashMenuState,
 };
 
 // Helpers
@@ -125,7 +126,7 @@ impl App {
                 ]
             }
             "config" => {
-                vec!["show".to_string()]
+                vec!["show".to_string(), "save".to_string(), "list".to_string()]
             }
             "init" => {
                 vec!["config".to_string()]
@@ -329,189 +330,223 @@ impl App {
         let fmt_i64 = |v: i64| v.to_string();
         let fmt_f64 = |v: f64| format!("{v:.2}");
 
-        let usage: [(&str, &str, String); 9] = [
+        let usage: [(&str, &str, &str, String); 9] = [
             (
                 "ragent.llm.requests",
+                "Counter",
                 "Total LLM requests (tagged by model/provider)",
                 fmt_u64(values.llm_requests),
             ),
             (
                 "ragent.sessions.active",
+                "UpDownCounter",
                 "Currently active sessions",
                 fmt_i64(values.sessions_active),
             ),
             (
                 "ragent.sessions.total",
+                "Counter",
                 "Total sessions created",
                 fmt_u64(values.sessions_total),
             ),
             (
                 "ragent.messages.user",
+                "Counter",
                 "User messages submitted",
                 fmt_u64(values.messages_user),
             ),
             (
                 "ragent.tool.invocations",
+                "Counter",
                 "Tool invocations",
                 fmt_u64(values.tool_invocations),
             ),
             (
                 "ragent.agents.active",
+                "UpDownCounter",
                 "Currently active sub-agents",
                 fmt_i64(values.agents_active),
             ),
             (
                 "ragent.agents.completed",
+                "Counter",
                 "Completed sub-agents",
                 fmt_u64(values.agents_completed),
             ),
             (
                 "ragent.subagent.spawns",
+                "Counter",
                 "Sub-agent spawn events",
                 fmt_u64(values.subagent_spawns),
             ),
             (
                 "ragent.team.members",
+                "UpDownCounter",
                 "Current team members",
                 fmt_i64(values.team_members),
             ),
         ];
-        let performance: [(&str, &str, String); 7] = [
+        let performance: [(&str, &str, &str, String); 7] = [
             (
                 "ragent.llm.duration",
+                "Histogram",
                 "LLM call wall-clock duration (ms, tagged by model/provider)",
                 fmt_f64(values.llm_duration_last),
             ),
             (
                 "ragent.llm.time_to_first_token",
+                "Histogram",
                 "Time to first token (ms, tagged by model)",
                 fmt_f64(values.llm_ttft_last),
             ),
             (
                 "ragent.tool.duration",
+                "Histogram",
                 "Tool execution duration (ms, tagged by tool.name)",
                 fmt_f64(values.tool_duration_last),
             ),
             (
                 "ragent.agent_loop.duration",
+                "Histogram",
                 "Agent loop iteration duration (ms)",
                 fmt_f64(values.agent_loop_duration_last),
             ),
             (
                 "ragent.agent_loop.iterations",
+                "Histogram",
                 "Iterations in a completed agent loop",
                 fmt_u64(values.agent_loop_iterations_last),
             ),
             (
                 "ragent.session.duration",
+                "Histogram",
                 "Session wall-clock duration (ms)",
                 fmt_f64(values.session_duration_last),
             ),
             (
                 "ragent.tool.permission_wait",
+                "Histogram",
                 "Time waiting for user permission (ms)",
                 fmt_f64(values.tool_permission_wait_last),
             ),
         ];
-        let cost: [(&str, &str, String); 8] = [
+        let cost: [(&str, &str, &str, String); 8] = [
             (
                 "ragent.tokens.input",
+                "Counter",
                 "Input tokens (tagged by model)",
                 fmt_u64(values.tokens_input),
             ),
             (
                 "ragent.tokens.output",
+                "Counter",
                 "Output tokens (tagged by model)",
                 fmt_u64(values.tokens_output),
             ),
             (
                 "ragent.tokens.cache_read",
+                "Counter",
                 "Cache-read tokens (tagged by model)",
                 fmt_u64(values.tokens_cache_read),
             ),
             (
                 "ragent.tokens.cache_write",
+                "Counter",
                 "Cache-write tokens (tagged by model)",
                 fmt_u64(values.tokens_cache_write),
             ),
             (
                 "ragent.cost.estimated",
+                "Counter",
                 "Estimated cost in USD (tagged by model/provider)",
                 fmt_f64(values.cost_estimated),
             ),
             (
                 "ragent.cost.session",
+                "Histogram",
                 "Estimated cost per session",
                 fmt_f64(values.cost_session_last),
             ),
             (
                 "ragent.rate_limit.requests_pct",
+                "Gauge",
                 "Request quota percentage (tagged by provider)",
                 fmt_f64(values.rate_limit_requests_pct),
             ),
             (
                 "ragent.rate_limit.tokens_pct",
+                "Gauge",
                 "Token quota percentage (tagged by provider)",
                 fmt_f64(values.rate_limit_tokens_pct),
             ),
         ];
-        let effectiveness: [(&str, &str, String); 10] = [
+        let effectiveness: [(&str, &str, &str, String); 10] = [
             (
                 "ragent.errors.total",
+                "Counter",
                 "Total errors (tagged by component)",
                 fmt_u64(values.errors_total),
             ),
             (
                 "ragent.timeouts.total",
+                "Counter",
                 "Total timeout events",
                 fmt_u64(values.timeouts_total),
             ),
             (
                 "ragent.permission.denied",
+                "Counter",
                 "Permission denials (tagged by tool.name)",
                 fmt_u64(values.permission_denied),
             ),
             (
                 "ragent.permission.approved",
+                "Counter",
                 "Permission approvals (tagged by tool.name)",
                 fmt_u64(values.permission_approved),
             ),
             (
                 "ragent.context.compressions",
+                "Counter",
                 "Context compression invocations",
                 fmt_u64(values.context_compressions),
             ),
             (
                 "ragent.context.compression_ratio",
+                "Gauge",
                 "Context compression before/after ratio (%)",
                 fmt_f64(values.context_compression_ratio_last),
             ),
             (
                 "ragent.tool.calls_per_session",
+                "Histogram",
                 "Tool calls per session",
                 fmt_u64(values.tool_calls_per_session_last),
             ),
             (
                 "ragent.task.completions",
+                "Counter",
                 "Completed sub-agent and team tasks",
                 fmt_u64(values.task_completions),
             ),
             (
                 "ragent.retries.llm",
+                "Counter",
                 "LLM retry attempts (tagged by model)",
                 fmt_u64(values.retries_llm),
             ),
             (
                 "ragent.snapshot.restores",
+                "Counter",
                 "Snapshot undo restores",
                 fmt_u64(values.snapshot_restores),
             ),
         ];
 
-        let write_group = |out: &mut String, title: &str, group: &[(&str, &str, String)]| {
+        let write_group = |out: &mut String, title: &str, group: &[(&str, &str, &str, String)]| {
             let _ = writeln!(out, "### {title}");
-            for (name, desc, value) in group {
-                let _ = writeln!(out, "- `{name}` — **{value}** — {desc}");
+            for (name, kind, desc, value) in group {
+                let _ = writeln!(out, "- `{name}` — **{value}** — *{kind}* — {desc}");
             }
             let _ = writeln!(out);
         };
@@ -539,32 +574,32 @@ impl App {
 ",
         );
 
-        TelemetryCountersContent {
-            usage: usage
-                .iter()
-                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            performance: performance
-                .iter()
-                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            cost: cost
-                .iter()
-                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            effectiveness: effectiveness
-                .iter()
-                .map(|(n, d, v)| (n.to_string(), d.to_string(), v.clone()))
-                .collect(),
-            markdown: out,
-        }
-    }
+                  TelemetryCountersContent {
+                      usage: usage
+                          .iter()
+                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                          .collect(),
+                      performance: performance
+                          .iter()
+                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                          .collect(),
+                      cost: cost
+                          .iter()
+                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                          .collect(),
+                            effectiveness: effectiveness
+                                .iter()
+                                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                                .collect(),
+                        markdown: out,
+                    }
+                }
 
-    /// Dispatch the `/telemetry` slash-command family.
-    fn handle_telemetry_command(&mut self, args: &str) {
-        let sub = args.split_whitespace().next().unwrap_or("");
-        match sub {
-            "help" | "" => {
+                                  /// Dispatch the `/telemetry` slash-command family.
+                                  fn handle_telemetry_command(&mut self, args: &str) {
+                                      let sub = args.split_whitespace().next().unwrap_or("");
+                                      match sub {
+                                          "help" | "" => {
                 self.append_assistant_text(
                     "From: /telemetry help
 
@@ -976,9 +1011,129 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     self.append_assistant_text(&output);
                     self.status = "config: show".to_string();
                 }
+                // ── /config save ────────────────────────────────────────────
+                // FR-003: snapshot the current global ragent.json into a
+                // timestamped backup inside `saves/`. The helper creates the
+                // `saves/` directory if needed and writes atomically.
+                "save" => match ragent_config::Config::backup_global_config(None) {
+                    Ok(path) => {
+                        self.append_assistant_text(&format!(
+                            "From: /config save\n✅ **Saved backup to:**\n  `{}`",
+                            path.display()
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!("config save: wrote backup to {}", path.display()),
+                        );
+                        self.status = "config: saved".to_string();
+                    }
+                    Err(e) => {
+                        self.append_assistant_text(&format!(
+                            "From: /config save\n❌ **Failed to back up global config:**\n  \
+                                 {e}\n\nNo changes were made."
+                        ));
+                        self.push_log_no_agent(LogLevel::Error, format!("config save: error: {e}"));
+                        self.status = "config: save error".to_string();
+                    }
+                },
+                // ── /config list ────────────────────────────────────────────
+                // FR-004 / FR-006: scan the `saves/` directory for backups. If
+                // none exist, show a user-facing message instead of an empty
+                // picker. Otherwise open the interactive picker (key handling
+                // and rendering are wired up in T-006/T-007).
+                "list" => {
+                    let config_dir = match ragent_config::Config::global_config_dir() {
+                        Some(d) => d,
+                        None => {
+                            self.append_assistant_text(
+                                "From: /config list\n❌ **Cannot determine the global config \
+                                 directory for this platform.**",
+                            );
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                "config list: no global config directory".to_string(),
+                            );
+                            self.status = "config: list error".to_string();
+                            return;
+                        }
+                    };
+                    let saves_dir = config_dir.join("saves");
+
+                    // Collect files matching the `ragent.json.*` backup pattern,
+                    // excluding the transient `.tmp` temp files written during
+                    // atomic backup.
+                    let mut entries: Vec<std::path::PathBuf> = match std::fs::read_dir(&saves_dir) {
+                        Ok(rd) => rd
+                            .filter_map(Result::ok)
+                            .filter_map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                let path = e.path();
+                                let is_tmp = std::path::Path::new(&name)
+                                    .extension()
+                                    .is_some_and(|ext| ext.eq_ignore_ascii_case("tmp"));
+                                if name.starts_with("ragent.json.") && !is_tmp && path.is_file() {
+                                    Some(path)
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
+                        Err(_) => Vec::new(),
+                    };
+
+                    if entries.is_empty() {
+                        // FR-006: no saved configurations available.
+                        self.append_assistant_text(&format!(
+                            "From: /config list\nℹ️  **No saved configurations found.**\n\n\
+                             Backups are stored in:\n  `{}`\n\nUse `/config save` to create one.",
+                            saves_dir.display()
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!("config list: no saves in {}", saves_dir.display()),
+                        );
+                        self.status = "config: list empty".to_string();
+                    } else {
+                        // Sort newest-first by modification time (FR-010).
+                        entries.sort_by(|a, b| {
+                            b.metadata()
+                                .and_then(|m| m.modified())
+                                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                                .cmp(
+                                    &a.metadata()
+                                        .and_then(|m| m.modified())
+                                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH),
+                                )
+                        });
+                        let count = entries.len();
+                        self.config_save_picker = Some(ConfigSavePickerState {
+                            entries,
+                            selected: 0,
+                            scroll_offset: 0,
+                            config_dir: config_dir.clone(),
+                        });
+                        self.append_assistant_text(&format!(
+                            "From: /config list\n📋 **{} saved configuration(s) found.**\n\n\
+                             Use ↑/↓ (or k/j) to select a backup, Enter to restore, Esc to \
+                             cancel.",
+                            count
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "config list: opened picker ({} backup(s) in {})",
+                                count,
+                                saves_dir.display()
+                            ),
+                        );
+                        self.status = "config: list".to_string();
+                    }
+                }
                 _ => {
                     self.append_assistant_text(
-                        "From: /config\nUsage: `/config show` — display all application paths",
+                        "From: /config\nUsage:\n  `/config show` — display all application \
+                         paths\n  `/config save` — back up the global ragent.json\n  \
+                         `/config list` — browse saved backups and restore one",
                     );
                     self.status = "config: usage".to_string();
                 }
@@ -1347,8 +1502,16 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             "compact" => {
                 let _ = self.start_compaction(false);
             }
+            // `/compress` is a deprecated alias for `/compact` (FR-009).
+            // It forwards to the same LLM summarisation path so existing
+            // muscle memory keeps working, but `/compact` is the canonical
+            // command documented in `/help`.
             "compress" => {
-                self.handle_compress_command(args);
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    "/compress is a deprecated alias for /compact".to_string(),
+                );
+                let _ = self.start_compaction(false);
             }
             "cost" => {
                 let Some(output) = self.cost_summary() else {

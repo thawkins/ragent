@@ -2292,7 +2292,7 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::BOLD),
                             5,
                         ),
-                        Role::Assistant => (
+                        Role::Assistant | Role::Compaction => (
                             "● ",
                             Style::default()
                                 .fg(Color::Magenta)

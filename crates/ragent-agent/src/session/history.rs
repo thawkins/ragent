@@ -18,7 +18,6 @@ use base64::Engine as _;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::event::{Event, EventBus};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
 
@@ -108,9 +107,8 @@ pub async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> 
     for msg in messages {
         let role = match msg.role {
             Role::User => "user",
-            Role::Assistant => "assistant",
+            Role::Assistant | Role::Compaction => "assistant",
         };
-
         let content = if msg.parts.len() == 1 {
             match &msg.parts[0] {
                 MessagePart::Text { text } => ChatContent::Text(text.clone()),
@@ -352,101 +350,6 @@ pub fn is_token_overflow_error_message(error_msg: &str) -> bool {
         || msg.contains("maximum context length")
         || msg.contains("prompt is too long")
         || msg.contains("input too large")
-}
-
-/// Determine whether automatic compression should run for the current chat
-/// payload, preferring the LLM-reported token count from the previous call
-/// when available.
-///
-/// The local `count_tokens` estimate (Headroom's `EstimatingCounter` plus
-/// per-message overhead) can diverge from the provider's actual tokenizer,
-/// causing compression to fire earlier than the configured `auto_threshold`
-/// and to re-fire on every tool-call iteration. When the LLM has reported
-/// its previous `input_tokens` — which matches the provider's tokenizer
-/// exactly — we use that count instead. On the first call within a turn, or
-/// whenever the provider omits usage data, we fall back to the local
-/// estimate.
-///
-/// Returns `true` when the effective token count is at or above
-/// `context_window * auto_threshold`.
-///
-/// # Arguments
-///
-/// * `chat_messages` — provider-facing chat payload to estimate when no
-///   reported count is available.
-/// * `context_window` — the model's context window in tokens.
-/// * `auto_threshold` — fraction of the context window at which compression
-///   should fire (e.g. `0.80`).
-/// * `last_reported_input_tokens` — the `input_tokens` value from the most
-///   recent LLM response, or `0` if no prior call has been made in this
-///   turn (or the provider did not report usage).
-pub fn should_compress_with_reported(
-    chat_messages: &[ChatMessage],
-    context_window: usize,
-    auto_threshold: f64,
-    last_reported_input_tokens: u64,
-) -> bool {
-    if last_reported_input_tokens > 0 {
-        let threshold = (context_window as f64 * auto_threshold) as u64;
-        last_reported_input_tokens >= threshold
-    } else {
-        crate::compression::pipeline::should_compress_chat_messages(
-            chat_messages,
-            context_window,
-            auto_threshold,
-        )
-    }
-}
-
-/// Run the emergency compression pipeline on `chat_messages` after a
-/// token-overflow error, publishing `CompressionStarted`/`CompressionFinished`
-/// events and resetting the per-turn hysteresis flags.
-pub fn emergency_compress_chat_messages(
-    event_bus: &EventBus,
-    session_id: &str,
-    chat_messages: &mut Vec<ChatMessage>,
-    context_window: usize,
-    compression_config: &ragent_config::compression::CompressionConfig,
-    compressed_this_turn: &mut bool,
-    last_reported_input_tokens: &mut u64,
-) {
-    event_bus.publish(Event::CompressionStarted {
-        session_id: session_id.to_string(),
-    });
-    let result = crate::compression::pipeline::compress_chat_messages(
-        chat_messages,
-        context_window,
-        8192,
-        compression_config,
-    );
-    let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
-    if did_compress {
-        tracing::info!(
-            original_tokens = result.stats.original_tokens,
-            compressed_tokens = result.stats.compressed_tokens,
-            compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-            ccr_entries = result.stats.ccr_entries_stashed,
-            messages_compressed = result.stats.messages_compressed,
-            "Emergency compressed chat messages after token overflow"
-        );
-    } else {
-        tracing::warn!(
-            original_tokens = result.stats.original_tokens,
-            compressed_tokens = result.stats.compressed_tokens,
-            threshold = (context_window as f64 * compression_config.auto_threshold) as usize,
-            "Emergency compression did not reduce payload"
-        );
-    }
-    event_bus.publish(Event::CompressionFinished {
-        session_id: session_id.to_string(),
-        original_tokens: result.stats.original_tokens,
-        compressed_tokens: result.stats.compressed_tokens,
-        compression_ratio: result.stats.compression_ratio,
-        did_compress,
-    });
-    *chat_messages = result.chat_messages;
-    *compressed_this_turn = true;
-    *last_reported_input_tokens = 0;
 }
 
 fn extract_error_status_code(error_msg: &str) -> Option<u16> {

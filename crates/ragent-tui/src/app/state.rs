@@ -603,10 +603,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Summarise and compact the conversation history",
     },
     SlashCommandDef {
-        trigger: "compress",
-        description: "Context-aware compression: /compress [default|aggressive|conservative|help|stats]",
-    },
-    SlashCommandDef {
         trigger: "cost",
         description: "Show session token usage and estimated cost",
     },
@@ -850,6 +846,23 @@ pub struct HistoryPickerState {
     pub selected: usize,
     /// Scroll offset for the list (rows from the top).
     pub scroll_offset: usize,
+}
+
+/// State of the `/config list` save-picker overlay.
+///
+/// Lists timestamped backup files discovered in the global config `saves/`
+/// subdirectory. The user navigates with `Up`/`Down`, restores the highlighted
+/// entry with `Enter`, or cancels with `Esc`.
+#[derive(Debug, Clone)]
+pub struct ConfigSavePickerState {
+    /// Backup file paths discovered in the `saves/` directory, newest first.
+    pub entries: Vec<std::path::PathBuf>,
+    /// Currently highlighted row (0 = top = newest).
+    pub selected: usize,
+    /// Scroll offset for the list (rows from the top).
+    pub scroll_offset: usize,
+    /// Resolved global config directory (for the title display and restore target).
+    pub config_dir: std::path::PathBuf,
 }
 
 /// An entry in the `@` file reference autocomplete menu.
@@ -1353,6 +1366,8 @@ pub struct App {
     pub history_file_path: Option<std::path::PathBuf>,
     /// Active history picker dialog, if any.
     pub history_picker: Option<HistoryPickerState>,
+    /// Active config-save picker dialog (`/config list`), if any.
+    pub config_save_picker: Option<ConfigSavePickerState>,
     /// Session ID of the currently selected agent in the agents panel.
     /// When set, messages and logs are filtered to show only from this session.
     /// When `None`, shows primary session messages/logs.

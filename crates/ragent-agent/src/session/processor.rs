@@ -41,8 +41,6 @@ use crate::tool::{McpToolWrapper, ToolContext, ToolRegistry};
 
 // Re-export the public helpers that external callers (tests, benches) import
 // from `session::processor::...` so the extraction does not break those paths.
-pub use crate::session::history::emergency_compress_chat_messages;
-pub use crate::session::history::should_compress_with_reported;
 pub use crate::session::history::{
     chat_request_payload_bytes, estimate_request_bytes, estimate_tool_definition_bytes,
     history_to_chat_messages, is_permanent_llm_api_error, is_token_overflow_error_message,
@@ -638,60 +636,89 @@ impl SessionProcessor {
                 });
             }
 
-            // Maybe compress (per-iteration check)
+            // Maybe compact (per-iteration pre-send check) — T-008, FR-003,
+            // FR-006, FR-008. When `compaction.auto` is enabled and compaction
+            // has not already run this turn, estimate the request token load
+            // and — if it exceeds `context_window - max(output, buffer)` —
+            // invoke the OpenCode-derived summarisation runner before sending
+            // the user prompt to the LLM.
             let _max_retries = self.stream_config.max_retries;
             let _backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
 
-            let should_run_compression = turn.session_config.compression.enabled
-                && !compressed_this_turn
-                && should_compress_with_reported(
+            if turn.session_config.compaction.auto && !compressed_this_turn {
+                let estimate = crate::compaction::estimate_request_tokens(
+                    Some(system_prompt.as_ref()),
                     &chat_messages,
-                    context_window,
-                    turn.session_config.compression.auto_threshold,
+                    &tool_definitions[..],
+                );
+                let decision = crate::compaction::evaluate_trigger(
+                    &turn.session_config.compaction,
+                    estimate,
                     last_reported_input_tokens,
-                );
-            if should_run_compression {
-                let _scope = profiler.scope("history.compress");
-                self.event_bus.publish(Event::CompressionStarted {
-                    session_id: session_id.to_string(),
-                });
-                let result = crate::compression::pipeline::compress_chat_messages(
-                    &chat_messages,
                     context_window,
-                    8192,
-                    &turn.session_config.compression,
+                    0,
                 );
-                let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
-                if did_compress {
-                    tracing::info!(
-                        original_tokens = result.stats.original_tokens,
-                        compressed_tokens = result.stats.compressed_tokens,
-                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-                        ccr_entries = result.stats.ccr_entries_stashed,
-                        messages_compressed = result.stats.messages_compressed,
-                        "Compressed chat messages with Headroom pipeline"
-                    );
-                } else {
-                    tracing::debug!(
-                        original_tokens = result.stats.original_tokens,
-                        compressed_tokens = result.stats.compressed_tokens,
-                        threshold = (context_window as f64
-                            * turn.session_config.compression.auto_threshold)
-                            as usize,
-                        "Context compression run completed without reduction"
-                    );
+                if decision.should_compact {
+                    // Convert the provider-facing chat messages into the
+                    // internal `Message` form the compaction runner expects,
+                    // run summarisation, persist the synthetic compaction
+                    // message, and replace the in-memory history with the
+                    // compaction message plus the verbatim recent tail.
+                    let messages =
+                        crate::compaction::convert::chat_messages_to_messages(&chat_messages);
+                    let previous_summary = messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == Role::Compaction)
+                        .map(|m| m.text_content());
+                    let compact_result = crate::compaction::compact(
+                        session_id,
+                        messages,
+                        &turn.model_ref.model_id,
+                        context_window,
+                        0,
+                        &turn.session_config.compaction,
+                        previous_summary.as_deref(),
+                        &turn.client,
+                        &self.event_bus,
+                        "auto",
+                    )
+                    .await;
+                    match compact_result {
+                        Ok(outcome) => {
+                            // Persist the synthetic compaction message so
+                            // future turns load history from the compaction
+                            // point forward (FR-005 / FR-007).
+                            let compaction_msg = outcome.compaction_message.clone();
+                            let persist_err = self
+                                .storage_op(move |s| s.create_message(&compaction_msg))
+                                .await
+                                .err();
+                            if let Some(e) = persist_err {
+                                warn!(error = %e, "failed to persist compaction message");
+                            }
+                            let new_chat = crate::compaction::convert::messages_to_chat_messages(
+                                &outcome.new_messages,
+                            );
+                            chat_messages = Arc::new(new_chat);
+                            compressed_this_turn = true;
+                            last_reported_input_tokens = 0;
+                            tracing::info!(
+                                original_tokens = outcome.original_tokens,
+                                compressed_tokens = outcome.compressed_tokens,
+                                kept_messages = outcome.kept_message_count,
+                                "pre-send compaction applied"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                error = %e,
+                                "pre-send compaction failed; continuing with uncompressed history"
+                            );
+                        }
+                    }
                 }
-                self.event_bus.publish(Event::CompressionFinished {
-                    session_id: session_id.to_string(),
-                    original_tokens: result.stats.original_tokens,
-                    compressed_tokens: result.stats.compressed_tokens,
-                    compression_ratio: result.stats.compression_ratio,
-                    did_compress,
-                });
-                chat_messages = Arc::new(result.chat_messages);
-                compressed_this_turn = true;
-                last_reported_input_tokens = 0;
             }
 
             // Call LLM with retry + handle stream events

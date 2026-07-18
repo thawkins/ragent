@@ -77,5 +77,5 @@ wildcards = "warn"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# headroom-core is pulled from a Git tag until it is published to crates.io.
-allow-git = ["https://github.com/chopratejas/headroom.git"]
+# No git dependencies are allowed; all third-party crates come from crates.io.
+allow-git = []

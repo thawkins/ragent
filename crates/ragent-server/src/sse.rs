@@ -919,8 +919,8 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "session_id": session_id,
             "error": error,
         })),
-        Event::CompressionStarted { session_id } => {
-            to_data(&serde_json::json!({"session_id": session_id}))
+        Event::CompressionStarted { session_id, reason } => {
+            to_data(&serde_json::json!({"session_id": session_id, "reason": reason}))
         }
         Event::CompressionFinished {
             session_id,
@@ -928,12 +928,14 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             compressed_tokens,
             compression_ratio,
             did_compress,
+            reason,
         } => to_data(&serde_json::json!({
             "session_id": session_id,
             "original_tokens": original_tokens,
             "compressed_tokens": compressed_tokens,
             "compression_ratio": compression_ratio,
             "did_compress": did_compress,
+            "reason": reason,
         })),
         Event::OpenResearchView {
             name,

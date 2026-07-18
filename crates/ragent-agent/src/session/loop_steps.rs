@@ -37,7 +37,6 @@ use crate::agent::AgentInfo;
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
-use crate::session::history::emergency_compress_chat_messages;
 use crate::session::history::{
     PendingToolCall, chat_request_payload_bytes, detect_incomplete_file_task,
     history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
@@ -579,9 +578,8 @@ impl SessionProcessor {
         Ok(Arc::from(system_prompt))
     }
 
-    /// Load the session history, optionally run the Headroom compression
-    /// pipeline, and convert to provider-facing `ChatMessage`s with the
-    /// per-session version cache (FR-006 / PERF-007).
+    /// Load the session history and convert to provider-facing `ChatMessage`s
+    /// with the per-session version cache (FR-006 / PERF-007).
     ///
     /// Returns `(chat_messages, compressed_this_turn, last_reported_input_tokens, context_window)`.
     pub(crate) async fn build_turn_chat_messages(
@@ -601,7 +599,7 @@ impl SessionProcessor {
             self.storage_op(move |s| s.get_messages(&sid)).await?
         };
 
-        let mut compressed_this_turn = false;
+        let compressed_this_turn = false;
         let last_reported_input_tokens: u64 = 0;
 
         let context_window = self
@@ -616,36 +614,10 @@ impl SessionProcessor {
             .unwrap_or(128_000);
 
         let history = {
-            let compression_config = &session_config.compression;
-            if compression_config.enabled
-                && crate::compression::pipeline::should_compress(
-                    &history,
-                    context_window,
-                    compression_config.auto_threshold,
-                )
-            {
-                let _scope = profiler.scope("history.compress");
-                let result = crate::compression::pipeline::compress_history(
-                    &history,
-                    context_window,
-                    8192,
-                    compression_config,
-                );
-                if result.stats.original_tokens > result.stats.compressed_tokens {
-                    tracing::info!(
-                        original_tokens = result.stats.original_tokens,
-                        compressed_tokens = result.stats.compressed_tokens,
-                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-                        ccr_entries = result.stats.ccr_entries_stashed,
-                        messages_compressed = result.stats.messages_compressed,
-                        "Compressed history with Headroom pipeline"
-                    );
-                }
-                compressed_this_turn = true;
-                result.messages
-            } else {
-                history
-            }
+            let _compression_config = &session_config.compaction;
+            let _context_window = context_window;
+            let _ = &history;
+            history
         };
 
         let history_version = history_version_of(&history);
@@ -869,22 +841,66 @@ impl SessionProcessor {
                             crate::sanitize::redact_secrets(&error_message)
                         );
                         if attempt < max_retries && !is_permanent_llm_api_error(&error_message) {
-                            if turn.session_config.compression.enabled
-                                && is_token_overflow_error_message(&error_message)
+                            // FR-004 / FR-008: emergency overflow compaction is
+                            // always eligible regardless of `compaction.auto`.
+                            // When `auto` is false the pre-send path is skipped
+                            // (FR-008) and the runner relies solely on this
+                            // emergency path; when `auto` is true and pre-send
+                            // already compacted this turn, the
+                            // `compressed_this_turn` guard prevents a second
+                            // compaction.
+                            if is_token_overflow_error_message(&error_message)
+                                && !loop_state.compressed_this_turn
                             {
-                                // P-21: consolidated emergency-compress helper
-                                // (single implementation shared with the stream
-                                // Error path below).
-                                emergency_compress_on_overflow(
-                                    &self.event_bus,
+                                // FR-004: emergency overflow compaction. The
+                                // `chat()` call failed before any assistant
+                                // tokens were produced, so run the summarisation
+                                // runner with reason "overflow" and retry the
+                                // turn once with the compacted history.
+                                let compact_result = crate::compaction::emergency_compact(
                                     session_id,
                                     Arc::make_mut(&mut loop_state.chat_messages),
+                                    &turn.model_ref.model_id,
                                     context_window,
-                                    &turn.session_config.compression,
-                                    &mut loop_state.compressed_this_turn,
-                                    &mut loop_state.last_reported_input_tokens,
-                                    &error_message,
-                                );
+                                    0,
+                                    &turn.session_config.compaction,
+                                    &turn.client,
+                                    &self.event_bus,
+                                )
+                                .await;
+                                match compact_result {
+                                    Ok(outcome) => {
+                                        loop_state.compressed_this_turn = true;
+                                        loop_state.last_reported_input_tokens = 0;
+                                        tracing::info!(
+                                            original_tokens = outcome.original_tokens,
+                                            compressed_tokens = outcome.compressed_tokens,
+                                            kept_messages = outcome.kept_message_count,
+                                            "emergency overflow compaction applied"
+                                        );
+                                        self.event_bus.publish(Event::AgentNotice {
+                                            session_id: session_id.to_string(),
+                                            message: format!(
+                                                "{error_message} — emergency-compacted, will retry"
+                                            ),
+                                        });
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "emergency overflow compaction failed; surfacing original error"
+                                        );
+                                        self.event_bus.publish(Event::AgentError {
+                                            session_id: session_id.to_string(),
+                                            error: error_message.clone(),
+                                        });
+                                        bail!(
+                                            "LLM call failed after {} attempts: {}",
+                                            max_retries + 1,
+                                            error_message
+                                        );
+                                    }
+                                }
                             } else {
                                 self.event_bus.publish(Event::AgentNotice {
                                     session_id: session_id.to_string(),
@@ -1070,23 +1086,64 @@ impl SessionProcessor {
                                     saw_completed_tool_call,
                                 );
                             let is_emergency_overflow: bool = {
-                                turn.session_config.compression.enabled
-                                    && attempt < max_retries
+                                attempt < max_retries
+                                    && !loop_state.compressed_this_turn
+                                    && !has_meaningful_partial_output
                                     && is_token_overflow_error_message(&message)
                             };
                             if is_emergency_overflow {
-                                // P-21: consolidated emergency-compress helper.
-                                emergency_compress_on_overflow(
-                                    &self.event_bus,
+                                // FR-004 / FR-008: emergency overflow compaction.
+                                // The stream failed with a context-overflow error
+                                // before any assistant tokens were produced, so
+                                // run the OpenCode-derived summarisation runner
+                                // with reason "overflow" and retry the turn once
+                                // with the compacted history. This path is
+                                // eligible regardless of `compaction.auto` (when
+                                // `auto` is false the runner relies solely on
+                                // emergency summarisation — FR-008). The
+                                // `compressed_this_turn` guard ensures only a
+                                // single emergency compaction per turn.
+                                let compact_result = crate::compaction::emergency_compact(
                                     session_id,
                                     Arc::make_mut(&mut loop_state.chat_messages),
+                                    &turn.model_ref.model_id,
                                     context_window,
-                                    &turn.session_config.compression,
-                                    &mut loop_state.compressed_this_turn,
-                                    &mut loop_state.last_reported_input_tokens,
-                                    &message,
-                                );
-                                had_retryable_error = true;
+                                    0,
+                                    &turn.session_config.compaction,
+                                    &turn.client,
+                                    &self.event_bus,
+                                )
+                                .await;
+                                match compact_result {
+                                    Ok(outcome) => {
+                                        loop_state.compressed_this_turn = true;
+                                        loop_state.last_reported_input_tokens = 0;
+                                        tracing::info!(
+                                            original_tokens = outcome.original_tokens,
+                                            compressed_tokens = outcome.compressed_tokens,
+                                            kept_messages = outcome.kept_message_count,
+                                            "emergency overflow compaction applied (stream error)"
+                                        );
+                                        self.event_bus.publish(Event::AgentNotice {
+                                            session_id: session_id.to_string(),
+                                            message: format!(
+                                                "{message} — emergency-compacted, will retry"
+                                            ),
+                                        });
+                                        had_retryable_error = true;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "emergency overflow compaction failed; surfacing original error"
+                                        );
+                                        self.event_bus.publish(Event::AgentError {
+                                            session_id: session_id.to_string(),
+                                            error: message.clone(),
+                                        });
+                                        fatal_stream_error = Some(message);
+                                    }
+                                }
                             } else if should_retry_stream_error(
                                 &message,
                                 attempt,
@@ -1308,38 +1365,4 @@ impl SessionProcessor {
 
         Ok(assistant_msg)
     }
-}
-
-/// P-21: consolidated emergency-compression helper used by both the
-/// `chat()`-error path and the stream-`Error`-event path in
-/// [`SessionProcessor::call_llm_step`].
-///
-/// Runs [`emergency_compress_chat_messages`] and then publishes a single
-/// `AgentNotice` describing the overflow + retry. Consolidating the two
-/// previous call sites means the compress logic lives in one place and the
-/// notice message format is consistent.
-#[allow(clippy::too_many_arguments)]
-fn emergency_compress_on_overflow(
-    event_bus: &EventBus,
-    session_id: &str,
-    chat_messages: &mut Vec<ChatMessage>,
-    context_window: usize,
-    compression_config: &ragent_config::compression::CompressionConfig,
-    compressed_this_turn: &mut bool,
-    last_reported_input_tokens: &mut u64,
-    error_message: &str,
-) {
-    emergency_compress_chat_messages(
-        event_bus,
-        session_id,
-        chat_messages,
-        context_window,
-        compression_config,
-        compressed_this_turn,
-        last_reported_input_tokens,
-    );
-    event_bus.publish(Event::AgentNotice {
-        session_id: session_id.to_string(),
-        message: format!("{error_message} — will emergency-compress and retry"),
-    });
 }

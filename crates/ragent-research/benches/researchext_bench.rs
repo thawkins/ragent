@@ -19,6 +19,7 @@ impl WebSearchTool for FixedSearch {
             url: "https://example.com/fake".into(),
             title: "Fake source".into(),
             snippet: "snippet".into(),
+            matched_query: String::new(),
         }])
     }
 }

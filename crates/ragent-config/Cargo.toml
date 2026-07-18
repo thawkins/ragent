@@ -18,6 +18,7 @@ thiserror = "1"
 globset = "0.4"
 dirs = "5"
 tracing = "0.1"
+chrono = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

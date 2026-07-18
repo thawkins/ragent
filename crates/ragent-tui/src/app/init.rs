@@ -246,6 +246,7 @@ impl App {
             pending_attachments: Vec::new(),
             history_file_path: None,
             history_picker: None,
+            config_save_picker: None,
             selected_agent_session_id: None,
             selected_agent_index: None,
             custom_agent_defs: custom_defs,

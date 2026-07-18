@@ -185,31 +185,47 @@ fn test_router_config_report_renders_tiers() {
 
 #[test]
 fn test_router_config_report_includes_entries() {
-    let app = make_app();
-    let mut config = RouterConfig {
+    let mut app = make_app();
+    let config = RouterConfig {
         enabled: true,
+        tiers: {
+            let mut tiers = HashMap::new();
+            tiers.insert(
+                "MEDIUM".to_string(),
+                ragent_llm::providers::router_config::TierConfig {
+                    models: vec![TierEntry {
+                        provider: "anthropic".to_string(),
+                        model: "claude-sonnet-4-20250514".to_string(),
+                    }],
+                    timeout_ms: None,
+                },
+            );
+            tiers
+        },
         ..RouterConfig::default()
     };
-    config.tiers.insert(
-        "MEDIUM".to_string(),
-        ragent_llm::providers::router_config::TierConfig {
-            models: vec![TierEntry {
-                provider: "anthropic".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            }],
-            timeout_ms: None,
-        },
-    );
 
-    // Inject the config into ragent.json options via a temporary in-memory path is
-    // not practical; instead verify the report helper accepts explicit tier entries
-    // by checking the default report has no entries (default tiers may have entries).
+    // `router_config_report` reads the router block from the on-disk
+    // `ragent.json` referenced by `app.config_paths` (FR-010), so persist the
+    // constructed config under `provider.router` in a temp file before
+    // generating the report.
+    let config_path = temp_config_path();
+    let wrapper = serde_json::json!({ "provider": { "router": config } });
+    std::fs::write(
+        &config_path,
+        serde_json::to_vec(&wrapper).expect("serialize router config wrapper"),
+    )
+    .expect("write temp router config");
+    app.config_paths = vec![config_path];
+
     let report = app.router_config_report(&app.provider_registry);
-    // The default RouterConfig has built-in defaults for every tier, so the report
-    // should contain at least one model reference.
     assert!(
         report.contains("via **"),
         "report should list assigned model entries: {report}"
+    );
+    assert!(
+        report.contains("claude-sonnet-4-20250514"),
+        "report should name the assigned model: {report}"
     );
 }
 

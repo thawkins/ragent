@@ -10,6 +10,11 @@ configuration, and common workflows.
 - **Amazon Bedrock support** — New provider for AWS-hosted models (Claude, Nova, Llama, Mistral) with AWS SigV4 authentication and dual API support.
 - **Azure AI Foundry support** — New provider for Microsoft Azure AI Foundry models with OpenAI-compatible endpoints.
 - **`/config show`** — Display current resolved configuration in the TUI.
+- **`/config save`** — Snapshot the current global `ragent.json` into a
+  timestamped backup in `~/.config/ragent/saves/` (atomic write, never
+  overwrites an existing backup).
+- **`/config list`** — Open an interactive picker of saved backups; press Enter
+  to restore a backup over the active global config, Esc to cancel.
 - **Image attachment support (Alt+V)**: paste images from clipboard or file URIs; pending attachments are displayed before sending.
 - Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
 - New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
@@ -296,10 +301,16 @@ Ragent loads configuration from multiple sources (last wins):
     "Use descriptive variable names"
   ],
 
-  // OpenTelemetry metrics export (optional)
-  "telemetry": {
-    "otel": {
-      "enabled": false,
+      // Context-window compaction (OpenCode-derived summarisation)
+      "compaction": {
+        "auto": true,          // auto-summarise before send (FR-008)
+        "buffer": 20000,       // response/safety token buffer (FR-011)
+        "keep": { "tokens": 8000 }  // recent turns kept verbatim (FR-011)
+      },
+
+      // OpenTelemetry metrics export (optional)
+      "telemetry": {
+        "otel": {      "enabled": false,
       "endpoint": "http://localhost:4318",
       "protocol": "http",
       "export_interval_seconds": 30,
@@ -318,6 +329,29 @@ View the resolved config at any time:
 ```bash
 ragent config
 ```
+
+### Backing Up and Restoring Configuration
+
+Before making risky edits, snapshot the current global config:
+
+```bash
+# Inside the TUI
+/config save
+```
+
+This writes a timestamped copy to `~/.config/ragent/saves/ragent.json.YYYY-MM-DD.HH-MM-SS`.
+
+To view or restore a previous snapshot:
+
+```bash
+# Inside the TUI
+/config list
+```
+
+Use ↑/↓ (or `k`/`j`) to choose a backup, **Enter** to restore it over the active
+`ragent.json`, or **Esc**/**q** to cancel. Restore is atomic and the running
+session's cached configuration is invalidated so the next agent turn picks up
+the restored values.
 
 ### OpenTelemetry Metrics Export
 

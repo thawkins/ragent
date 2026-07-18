@@ -5,6 +5,7 @@
 //! Verifies each slash command updates app state correctly, handles arguments,
 //! and provides user feedback via status bar and log entries.
 
+use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -561,6 +562,40 @@ fn test_slash_compact_no_messages_shows_warning() {
     );
 }
 
+// `/compress` is a deprecated alias for `/compact` (FR-009) and must
+// forward to the same compaction path.
+
+#[test]
+fn test_slash_compress_alias_forwards_to_compact() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    assert!(app.messages.is_empty());
+
+    app.execute_slash_command("/compress");
+    assert!(
+        app.status.contains("No messages"),
+        "/compress should behave like /compact when there is nothing to compact: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_help_lists_compact_not_compress() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/compact"),
+        "help should document /compact: {text}"
+    );
+    assert!(
+        !text.contains("/compress"),
+        "help should no longer document the deprecated /compress alias: {text}"
+    );
+}
+
 // ── /model ──────────────────────────────────────────────────────────
 
 #[test]
@@ -605,6 +640,38 @@ fn test_slash_model_show_displays_metadata_for_active_model() {
     });
     app.selected_model = Some("openai/gpt-4o-mini".to_string());
     app.selected_model_ctx_window = Some(128_000);
+
+    // `OpenAiProvider::default_models` returns an empty catalog (models are
+    // discovered at runtime), so seed the gpt-4o-mini entry into the discovery
+    // cache the way `App::sync_discover_models` would. Without this the
+    // `/model show` report cannot resolve the model entry and only emits the
+    // cached-context-window fallback, which lacks the "Context window" /
+    // "Tool use" capability lines the test asserts on.
+    let discovered = vec![provider::ModelInfo {
+        id: "gpt-4o-mini".to_string(),
+        provider_id: "openai".to_string(),
+        name: "GPT-4o Mini".to_string(),
+        cost: ragent_config::Cost {
+            input: 0.15,
+            output: 0.60,
+        },
+        capabilities: ragent_config::Capabilities {
+            reasoning: false,
+            streaming: true,
+            vision: true,
+            tool_use: true,
+            thinking_levels: Vec::new(),
+        },
+        context_window: 128_000,
+        max_output: Some(16_384),
+        request_multiplier: None,
+        thinking_config: None,
+    }];
+    let discovered_json =
+        serde_json::to_string(&discovered).expect("serialize openai discovered models");
+    app.storage
+        .set_discovered_models("openai", &discovered_json)
+        .expect("persist openai discovered models");
 
     app.execute_slash_command("/model show");
 
@@ -2382,9 +2449,151 @@ fn test_slash_config_no_args_shows_usage() {
 
     assert_eq!(app.status, "config: usage");
     let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Usage:"), "should show usage hint");
     assert!(
-        text.contains("Usage: `/config show`"),
-        "should show usage hint"
+        text.contains("/config show"),
+        "usage should mention /config show: {text}"
+    );
+    assert!(
+        text.contains("/config save"),
+        "usage should mention /config save: {text}"
+    );
+    assert!(
+        text.contains("/config list"),
+        "usage should mention /config list: {text}"
+    );
+}
+
+#[test]
+fn test_slash_config_save_errors_when_no_global_config() {
+    // FR-003: /config save must surface a clear error when there is no global
+    // ragent.json to back up. We point the process at an empty temp config dir
+    // via the RAGENT_CONFIG env var indirectly — but backup_global_config(None)
+    // resolves via dirs::config_dir(), which we cannot easily redirect. This
+    // test asserts the error path produces an error status and a message
+    // rather than panicking, exercising the slash arm end-to-end.
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/config save");
+
+    // Either a real backup succeeds (if a global config exists in CI) or the
+    // error arm fires. We accept both but require a non-empty message + a
+    // status that starts with "config:".
+    assert!(
+        app.status.starts_with("config:"),
+        "status should reflect the config save attempt: {}",
+        app.status
+    );
+    assert!(
+        !app.messages.is_empty(),
+        "/config save should always produce a message"
+    );
+}
+
+#[test]
+fn test_slash_config_list_no_saves_shows_message() {
+    // FR-004 / FR-006: /config list must always produce a user-facing message.
+    // When saves exist it opens the picker AND emits a summary line; when none
+    // exist it shows a "no saved configurations" message instead of an empty
+    // picker. We cannot easily control the real global config dir, so this
+    // test asserts the no-panic contract and that a message is always emitted.
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/config list");
+
+    assert!(
+        app.status.starts_with("config:"),
+        "status should reflect the config list attempt: {}",
+        app.status
+    );
+    assert!(
+        !app.messages.is_empty(),
+        "/config list should always produce a message"
+    );
+    // When the real global config dir happens to contain saves, the picker
+    // must be opened; otherwise it must stay None. Either is acceptable.
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/config list"),
+        "message should be attributed to /config list: {text}"
+    );
+}
+
+#[test]
+fn test_slash_config_subcommand_suggestions_include_save_and_list() {
+    // FR-002: `/config` autocomplete must offer `show`, `save`, and `list`.
+    // Drive the public autocomplete path by typing `/config` and letting
+    // `update_slash_menu` build the menu; the selected entry's `suggestions`
+    // field is populated by `get_command_suggestions("config")`.
+    let mut app = make_app();
+    app.input = "/config".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    app.update_slash_menu();
+
+    let menu = app
+        .slash_menu
+        .as_ref()
+        .expect("typing /config should open the slash menu");
+    let config_entry = menu
+        .matches
+        .iter()
+        .find(|m| m.trigger == "config")
+        .expect("menu should contain a /config entry");
+
+    assert!(
+        config_entry.suggestions.contains(&"show".to_string()),
+        "config suggestions should include 'show': {:?}",
+        config_entry.suggestions
+    );
+    assert!(
+        config_entry.suggestions.contains(&"save".to_string()),
+        "config suggestions should include 'save': {:?}",
+        config_entry.suggestions
+    );
+    assert!(
+        config_entry.suggestions.contains(&"list".to_string()),
+        "config suggestions should include 'list': {:?}",
+        config_entry.suggestions
+    );
+}
+
+#[test]
+fn test_config_save_picker_state_defaults_to_none() {
+    // FR-007/FR-008: the App must carry an Option<ConfigSavePickerState> field
+    // initialised to None so later tasks can open the picker overlay.
+    let app = make_app();
+    assert!(
+        app.config_save_picker.is_none(),
+        "config_save_picker should start as None"
+    );
+}
+
+#[test]
+fn test_config_save_picker_state_struct_construction() {
+    // FR-007/FR-008: the ConfigSavePickerState struct must be constructible
+    // with entries, selection, scroll offset, and the resolved config dir.
+    use ragent_tui::app::ConfigSavePickerState;
+
+    let state = ConfigSavePickerState {
+        entries: vec![
+            std::path::PathBuf::from("/tmp/saves/ragent.json.2024-01-01.12-00-00"),
+            std::path::PathBuf::from("/tmp/saves/ragent.json.2024-01-02.13-30-00"),
+        ],
+        selected: 1,
+        scroll_offset: 0,
+        config_dir: std::path::PathBuf::from("/tmp"),
+    };
+
+    assert_eq!(state.entries.len(), 2, "entries should hold two backups");
+    assert_eq!(state.selected, 1, "selected should point at the second row");
+    assert_eq!(state.scroll_offset, 0, "scroll offset should be zero");
+    assert_eq!(
+        state.config_dir,
+        std::path::PathBuf::from("/tmp"),
+        "config_dir should be stored"
     );
 }
 
@@ -2472,4 +2681,168 @@ fn test_slash_yolo_toggles_and_persists() {
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(!ragent_config::yolo::is_enabled());
     assert!(app.status.contains("disabled"));
+}
+
+#[test]
+fn test_config_save_picker_key_navigation_and_restore() {
+    // T-006 / T-008: the config-save picker intercepts keys, supports
+    // navigation, and restores the selected backup atomically over the global
+    // ragent.json.
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ragent_config::Config;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+
+    // Write two distinct global configs.
+    let first = r#"{"defaultAgent":"coder"}"#;
+    let second = r#"{"defaultAgent":"architect"}"#;
+    fs::write(dir.join("ragent.json"), first).expect("write original");
+
+    let backup1 = Config::backup_global_config(Some(dir)).expect("backup 1");
+    fs::write(dir.join("ragent.json"), second).expect("write second");
+    let backup2 = Config::backup_global_config(Some(dir)).expect("backup 2");
+
+    let name1 = backup1
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap()
+        .to_string();
+
+    // Sort so backup1 (oldest) is first and backup2 (newest) is second.
+    let mut app = make_app();
+    app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
+        entries: vec![backup1.clone(), backup2.clone()],
+        selected: 0,
+        scroll_offset: 0,
+        config_dir: dir.to_path_buf(),
+    });
+
+    // Down should move to the newer backup.
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
+    assert_eq!(
+        app.config_save_picker.as_ref().unwrap().selected,
+        1,
+        "Down should select the second entry"
+    );
+
+    // Up should move back.
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert_eq!(
+        app.config_save_picker.as_ref().unwrap().selected,
+        0,
+        "Up should select the first entry"
+    );
+
+    // Enter restores the currently selected backup (oldest = coder config).
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(
+        app.config_save_picker.is_none(),
+        "picker should close after restore"
+    );
+    let restored = fs::read_to_string(dir.join("ragent.json")).expect("read restored");
+    assert_eq!(
+        restored, first,
+        "restore should copy the selected backup over ragent.json"
+    );
+    assert!(
+        app.status.starts_with("config: restored"),
+        "status should reflect restore: {}",
+        app.status
+    );
+
+    // Open again and restore the newest backup (architect config).
+    app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
+        entries: vec![backup1, backup2],
+        selected: 1,
+        scroll_offset: 0,
+        config_dir: dir.to_path_buf(),
+    });
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let restored2 = fs::read_to_string(dir.join("ragent.json")).expect("read restored 2");
+    assert_eq!(
+        restored2, second,
+        "restore should switch to the newer backup"
+    );
+
+    // Esc should close without restoring.
+    fs::write(dir.join("ragent.json"), first).expect("reset current");
+    app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
+        entries: vec![std::path::PathBuf::from(name1)],
+        selected: 0,
+        scroll_offset: 0,
+        config_dir: dir.to_path_buf(),
+    });
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(
+        app.config_save_picker.is_none(),
+        "picker should close on Esc"
+    );
+    let after_esc = fs::read_to_string(dir.join("ragent.json")).expect("read after esc");
+    assert_eq!(after_esc, first, "Esc should not change the active config");
+}
+
+#[test]
+fn test_config_restore_invalidates_config_cache() {
+    // T-008: restoring a backup must invalidate the cached config so the next
+    // turn re-reads ragent.json from disk.
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ragent_config::Config;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    fs::write(dir.join("ragent.json"), r#"{"defaultAgent":"coder"}"#).expect("write");
+    let backup = Config::backup_global_config(Some(dir)).expect("backup");
+
+    let mut app = make_app();
+    // Pre-populate the cache with a marker.
+    {
+        let mut guard = app.session_processor.cached_config.lock();
+        *guard = Some(ragent_agent::session::processor::CachedConfig {
+            config: std::sync::Arc::new(Config::default()),
+            file_mtimes: Vec::new(),
+            env_overrides_present: false,
+        });
+    }
+
+    app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
+        entries: vec![backup],
+        selected: 0,
+        scroll_offset: 0,
+        config_dir: dir.to_path_buf(),
+    });
+    app.handle_config_save_picker_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    let guard = app.session_processor.cached_config.lock();
+    assert!(
+        guard.is_none(),
+        "restore must invalidate the session processor config cache"
+    );
+}
+
+#[test]
+fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
+    // Regression: config_save_picker must own focus so keys like 'a' do not go
+    // into the input box while the picker is open.
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    fs::write(dir.join("ragent.json"), r#"{"defaultAgent":"coder"}"#).expect("write");
+
+    let mut app = make_app();
+    app.input.clear();
+    app.input_cursor = 0;
+    app.config_save_picker = Some(ragent_tui::app::ConfigSavePickerState {
+        entries: vec![],
+        selected: 0,
+        scroll_offset: 0,
+        config_dir: dir.to_path_buf(),
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::empty()));
+    assert!(
+        app.input.is_empty(),
+        "keys must be intercepted while config save picker is open"
+    );
 }

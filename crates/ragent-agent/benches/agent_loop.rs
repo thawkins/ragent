@@ -93,67 +93,6 @@ fn bench_chat_request_payload_bytes(c: &mut Criterion) {
     });
 }
 
-fn bench_compress_history(c: &mut Criterion) {
-    use ragent_agent::compression::compress_history;
-    use ragent_agent::message::{Message, MessagePart, Role};
-    use ragent_config::compression::CompressionConfig;
-
-    let config = CompressionConfig::default();
-
-    // Small history that fits in context window
-    let small: Vec<Message> = (0..10)
-        .map(|i| {
-            let text = if i % 2 == 0 {
-                format!("User message {i}")
-            } else {
-                format!("Assistant response {i}")
-            };
-            Message::new(
-                "bench",
-                if i % 2 == 0 {
-                    Role::User
-                } else {
-                    Role::Assistant
-                },
-                vec![MessagePart::Text { text }],
-            )
-        })
-        .collect();
-
-    // Large history that exceeds context window
-    let large: Vec<Message> = (0..100)
-        .map(|i| {
-            let text = format!(
-                "Message content that is reasonably long to simulate real chat history. Index: {}",
-                i
-            );
-            Message::new(
-                "bench",
-                if i % 2 == 0 {
-                    Role::User
-                } else {
-                    Role::Assistant
-                },
-                vec![MessagePart::Text { text }],
-            )
-        })
-        .collect();
-
-    c.bench_function("compress_small_fits", |b| {
-        b.iter(|| {
-            let result = compress_history(black_box(&small), 128_000, 8192, &config);
-            black_box(result);
-        })
-    });
-
-    c.bench_function("compress_large_exceeds", |b| {
-        b.iter(|| {
-            let result = compress_history(black_box(&large), 128_000, 8192, &config);
-            black_box(result);
-        })
-    });
-}
-
 fn bench_compiled_dir_lists(c: &mut Criterion) {
     use globset::GlobSet;
     use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
@@ -201,7 +140,6 @@ criterion_group!(
     benches,
     bench_estimate_request_bytes,
     bench_chat_request_payload_bytes,
-    bench_compress_history,
     bench_compiled_dir_lists,
     bench_tool_result_truncation
 );

@@ -11,9 +11,7 @@
 use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root};
 
 mod replace {
-    pub use ragent_tools_core::replace::{
-        FindError, find_exact_replacement_range, find_replacement_range_diag, format_match_failure,
-    };
+    pub use ragent_tools_core::replace::{find_replacement_range_diag, format_match_failure};
 }
 
 mod file_lock {

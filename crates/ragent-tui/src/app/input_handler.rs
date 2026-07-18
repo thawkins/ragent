@@ -50,6 +50,80 @@ impl App {
         }
     }
 
+    /// Dispatch keyboard navigation for the `/config list` save-picker overlay.
+    ///
+    /// Mirrors the history picker: Up/Down (or k/j) move the selection,
+    /// Enter restores the highlighted backup over the global `ragent.json`,
+    /// and Esc/q close the picker without taking any action.
+    pub fn handle_config_save_picker_key(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyCode;
+
+        let picker = match self.config_save_picker.as_mut() {
+            Some(p) => p,
+            None => return,
+        };
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.config_save_picker = None;
+                self.status = "config list: cancelled".to_string();
+            }
+            KeyCode::Up | KeyCode::Char('k') if picker.selected > 0 => {
+                picker.selected -= 1;
+                if picker.selected < picker.scroll_offset {
+                    picker.scroll_offset = picker.selected;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') if picker.selected + 1 < picker.entries.len() => {
+                picker.selected += 1;
+            }
+            KeyCode::Enter => {
+                let backup = picker.entries[picker.selected].clone();
+                let config_dir = picker.config_dir.clone();
+                self.config_save_picker = None;
+
+                match ragent_config::Config::restore_global_config(Some(&config_dir), &backup) {
+                    Ok(target) => {
+                        self.session_processor.invalidate_config_cache();
+                        let name = backup
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("<unknown>");
+                        self.append_assistant_text(&format!(
+                            "From: /config list\n✅ **Restored configuration from `{name}`**\n\n\
+                             Active config file updated:\n  `{}`",
+                            target.display()
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "config list: restored {} -> {}",
+                                backup.display(),
+                                target.display()
+                            ),
+                        );
+                        self.status = "config: restored".to_string();
+                    }
+                    Err(e) => {
+                        let name = backup
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("<unknown>");
+                        self.append_assistant_text(&format!(
+                            "From: /config list\n❌ **Failed to restore `{name}`:**\n  {e}"
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Error,
+                            format!("config list: restore failed: {e}"),
+                        );
+                        self.status = "config: restore error".to_string();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Dispatch a mouse event to the appropriate UI region, updating the input
     /// buffer / cursor / scroll / context menu as needed. Asserts UI
     /// invariants and logs the transition for diagnostics.
@@ -659,6 +733,13 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // Config-save picker intercepts all keys while it is open.
+        if self.config_save_picker.is_some() {
+            self.handle_config_save_picker_key(key);
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("key-config-save-picker", &before_input, before_cursor);
+            return;
+        }
         // History picker intercepts all keys while it is open
         if self.history_picker.is_some() {
             self.handle_history_picker_key(key);
@@ -666,7 +747,6 @@ impl App {
             self.debug_log_input_transition("key-history-picker", &before_input, before_cursor);
             return;
         }
-
         // Agent / Teams dialog keyboard shortcuts
         if self.show_agents_window {
             if key.code == KeyCode::Char(' ') {

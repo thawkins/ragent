@@ -129,8 +129,20 @@ fn test_telemetry_counters_appends_catalogue() {
         "counters should include ragent.llm.requests: {last}"
     );
     assert!(
-        last.contains("Logs"),
-        "counters should mention Logs section: {last}"
+        last.contains("*Counter*"),
+        "counters should include Counter type label: {last}"
+    );
+    assert!(
+        last.contains("*UpDownCounter*"),
+        "counters should include UpDownCounter type label: {last}"
+    );
+    assert!(
+        last.contains("*Gauge*"),
+        "counters should include Gauge type label: {last}"
+    );
+    assert!(
+        last.contains("*Histogram*"),
+        "counters should include Histogram type label: {last}"
     );
     assert!(
         last.contains("Traces"),

@@ -1,6 +1,22 @@
 # Changelog
 
-## Unreleased
+## Version: 0.1.0-beta.3
+
+### Added — Context-window compaction and `/config save`
+
+- New context-window compaction pipeline replacing the Headroom-based compression
+  scheme. Includes `compaction` config block, `/compact` slash command (with
+  `/compress` alias), `CompactionStarted/CompactionFinished` events, and
+  Unicode-safe truncation.
+- `/config save` and `/config list` slash commands for backing up and restoring
+  global `ragent.json`.
+- Updates to telemetry counters and TUI wiring.
+
+### Removed — Headroom dependency, CCR store, and compression pipeline
+
+- Dropped the `headroom-core` git dependency, deleted the `compression` modules,
+  removed CCR markers and the `headroom_retrieve` bridge, and added a legacy
+  `compression` → `compaction` config alias.
 
 ## Version: 0.1.0-beta.2
 

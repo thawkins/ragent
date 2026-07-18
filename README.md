@@ -179,13 +179,17 @@ with OpenCode's `opencode.json`.
   "permissions": [
     { "permission": "file:write", "pattern": "src/**", "action": "allow" }
   ],
-  "memory": {
-    "enabled": true,
-    "structured": { "enabled": true },
-    "semantic": { "enabled": false, "dimensions": 384 }
-  },
-  "tool_visibility": {
-    "office": true,
+      "memory": {
+        "enabled": true,
+        "structured": { "enabled": true },
+        "semantic": { "enabled": false, "dimensions": 384 }
+      },
+      "compaction": {
+        "auto": true,
+        "buffer": 20000,
+        "keep": { "tokens": 8000 }
+      },
+      "tool_visibility": {    "office": true,
     "github": true,
     "gitlab": true,
     "teams": true,
@@ -350,7 +354,7 @@ Recent highlights:
   - TODO side panel added (Alt+T) with `/todo` slash alias
   - Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
   - All 279 compiler warnings eliminated (build, tests, benches, examples)
-  - Context compression pipeline added (`/compress` slash command)
+  - Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
   - `read` tool instructions clarified (`end_line` is absolute line number)
   - Remote push prohibitions strengthened in `AGENTS.md`
 - SPEC.md reorganized, audited, and brought up to date with actual implementation

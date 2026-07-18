@@ -51,6 +51,7 @@ fn test_compression_finished_updates_last_input_tokens_and_status() {
 
     app.handle_event(Event::CompressionStarted {
         session_id: "session-1".to_string(),
+        reason: "test".to_string(),
     });
     assert!(app.compress_in_progress);
     assert_eq!(app.status, "compressing context...");
@@ -62,6 +63,7 @@ fn test_compression_finished_updates_last_input_tokens_and_status() {
         compressed_tokens: 45_000,
         compression_ratio: 2.0,
         did_compress: true,
+        reason: "test".to_string(),
     });
     assert!(!app.compress_in_progress);
     assert_eq!(app.last_input_tokens, 45_000);
@@ -81,6 +83,7 @@ fn test_compression_finished_no_change_updates_status() {
         compressed_tokens: 1_000,
         compression_ratio: 1.0,
         did_compress: false,
+        reason: "test".to_string(),
     });
     assert!(!app.compress_in_progress);
     assert_eq!(app.last_input_tokens, 1_000);
@@ -94,6 +97,7 @@ fn test_compression_events_ignored_for_other_session() {
 
     app.handle_event(Event::CompressionStarted {
         session_id: "session-2".to_string(),
+        reason: "test".to_string(),
     });
     assert!(!app.compress_in_progress);
 }

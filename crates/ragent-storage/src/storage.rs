@@ -800,6 +800,7 @@ impl Storage {
         for (id, sid, role_str, parts_json, created_str, updated_str) in rows {
             let role = match role_str.as_str() {
                 "user" => Role::User,
+                "compaction" => Role::Compaction,
                 _ => Role::Assistant,
             };
             let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
@@ -2068,7 +2069,7 @@ impl Storage {
         let conn = lock_conn!(self)?;
         let exists: Option<i64> = conn
             .query_row(
-                "SELECT 1 FROM messages WHERE session_id = ?1 AND role = 'assistant' LIMIT 1",
+                "SELECT 1 FROM messages WHERE session_id = ?1 AND role IN ('assistant', 'compaction') LIMIT 1",
                 params![session_id],
                 |row| row.get::<_, i64>(0),
             )

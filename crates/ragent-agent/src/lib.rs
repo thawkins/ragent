@@ -5,7 +5,7 @@
 //! primitives that the moved modules still reference through `crate::*`.
 
 pub mod agent;
-pub mod compression;
+pub mod compaction;
 pub mod error;
 pub mod event;
 

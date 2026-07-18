@@ -13,12 +13,6 @@ pub mod profiler;
 pub mod prompt_builders;
 pub mod stream_buffer;
 
-// Re-export compression types.
-pub use crate::compression::{
-    ccr_store::SharedCcrStore, pipeline::CompressionResult, pipeline::CompressionStats,
-    pipeline::compress_history, pipeline::count_tokens, pipeline::should_compress,
-};
-
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

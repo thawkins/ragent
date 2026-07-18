@@ -17,6 +17,14 @@ pub enum Role {
     User,
     /// An AI assistant.
     Assistant,
+    /// A synthetic compaction summary message.
+    ///
+    /// Compaction messages are produced by the OpenCode-derived summarisation
+    /// pipeline and contain a structured summary plus the verbatim recent
+    /// conversation tail. They behave like assistant messages for display but
+    /// are tagged distinctly so storage and the runner can anchor history
+    /// around them.
+    Compaction,
 }
 
 impl fmt::Display for Role {
@@ -29,6 +37,7 @@ impl fmt::Display for Role {
         match self {
             Self::User => write!(f, "user"),
             Self::Assistant => write!(f, "assistant"),
+            Self::Compaction => write!(f, "compaction"),
         }
     }
 }

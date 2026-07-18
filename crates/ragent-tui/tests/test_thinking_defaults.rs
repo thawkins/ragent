@@ -2,7 +2,8 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use ragent_agent::agent;
+use ragent_agent::{agent, provider};
+use ragent_tui::App;
 use ragent_tui::app::{ConfiguredProvider, ProviderSource};
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
@@ -27,6 +28,61 @@ fn enter_temp_config_dir() -> tempfile::TempDir {
     std::env::set_current_dir(temp.path()).expect("set cwd");
     std::fs::create_dir_all(temp.path().join(".ragent")).expect("create .ragent");
     temp
+}
+
+/// Seed the Anthropic discovery cache with the two models these tests assert on.
+///
+/// `AnthropicProvider::default_models` returns an empty catalog (models are
+/// discovered at runtime from the `/v1/models` endpoint), so without seeding
+/// `models_for_provider("anthropic")` / `active_model_entry()` resolve no
+/// entries and the config-driven thinking overlay never applies.
+fn seed_anthropic_models(app: &App) {
+    let models = vec![
+        provider::ModelInfo {
+            id: "claude-sonnet-4-20250514".to_string(),
+            provider_id: "anthropic".to_string(),
+            name: "Claude Sonnet 4".to_string(),
+            cost: ragent_config::Cost {
+                input: 3.0,
+                output: 15.0,
+            },
+            capabilities: ragent_config::Capabilities {
+                reasoning: true,
+                streaming: true,
+                vision: true,
+                tool_use: true,
+                thinking_levels: vec![ThinkingLevel::Low, ThinkingLevel::High],
+            },
+            context_window: 200_000,
+            max_output: Some(16_384),
+            request_multiplier: None,
+            thinking_config: None,
+        },
+        provider::ModelInfo {
+            id: "claude-3-5-haiku-latest".to_string(),
+            provider_id: "anthropic".to_string(),
+            name: "Claude 3.5 Haiku".to_string(),
+            cost: ragent_config::Cost {
+                input: 0.25,
+                output: 1.25,
+            },
+            capabilities: ragent_config::Capabilities {
+                reasoning: false,
+                streaming: true,
+                vision: false,
+                tool_use: true,
+                thinking_levels: vec![ThinkingLevel::Low, ThinkingLevel::High],
+            },
+            context_window: 200_000,
+            max_output: Some(8_192),
+            request_multiplier: None,
+            thinking_config: None,
+        },
+    ];
+    let json = serde_json::to_string(&models).expect("serialize anthropic models");
+    app.storage
+        .set_discovered_models("anthropic", &json)
+        .expect("seed anthropic discovered models");
 }
 
 #[test]
@@ -61,6 +117,7 @@ fn test_models_for_provider_applies_model_and_provider_thinking_defaults() {
     .expect("write config");
 
     let app = support::make_app();
+    seed_anthropic_models(&app);
     let models = app.models_for_provider("anthropic");
 
     let sonnet = models
@@ -106,6 +163,7 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
     .expect("write config");
 
     let mut app = support::make_app();
+    seed_anthropic_models(&app);
     app.agent_info = agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent");
     // detect_provider() relies on ambient env vars / auto-discovery (e.g. gh
     // CLI tokens) which are not present in CI. Set the configured provider

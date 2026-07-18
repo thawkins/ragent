@@ -1161,7 +1161,13 @@ pub fn default_thinking_config_for_levels(levels: &[ThinkingLevel]) -> ThinkingC
 
 /// Returns the fallback thinking configuration for a resolved provider/model.
 ///
-/// Precedence: config per-model → config per-provider → model metadata → built-in default.
+/// Precedence: config per-model → config per-provider → model metadata →
+/// built-in default. The built-in default is always [`ThinkingConfig::off`]
+/// (no thinking), matching the behaviour of
+/// [`default_thinking_config_for_levels`] and the bench resolution path
+/// (`ragent-bench::model`), so callers always receive a concrete
+/// configuration even when the model is not present in the static registry
+/// (e.g. Anthropic models that are discovered at runtime).
 #[must_use]
 pub fn fallback_thinking_for_model_ref(
     config: &crate::Config,
@@ -1179,6 +1185,7 @@ pub fn fallback_thinking_for_model_ref(
                     })
                 })
         })
+        .or(Some(ThinkingConfig::off()))
 }
 
 /// Applies fallback thinking to an agent when it has a resolved model but no explicit default.

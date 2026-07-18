@@ -92,6 +92,7 @@ fn make_hits(n: usize) -> Vec<WebSearchHit> {
             url: format!("https://example.com/{i}"),
             title: format!("Hit {i}"),
             snippet: String::new(),
+            matched_query: String::new(),
         })
         .collect()
 }
