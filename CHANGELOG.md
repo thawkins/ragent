@@ -1,5 +1,14 @@
 # Changelog
 
+## Version: 0.1.0-beta.4
+
+### Added — Telemetry panel styling and release tooling
+
+- Telemetry metric type labels now render in bold blue for better visual
+  distinction in the ALT-O Telemetry panel.
+- Automated release skill increments workspace version, updates release notes,
+  and tags the repository.
+
 ## Version: 0.1.0-beta.3
 
 ### Added — Context-window compaction and `/config save`

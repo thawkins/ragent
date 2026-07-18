@@ -5024,7 +5024,7 @@ fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 let metric_style = Style::default().fg(Color::White);
                 let value_style = Style::default().fg(Color::LightGreen);
                 let desc_style = Style::default().fg(Color::DarkGray);
-                let type_style = Style::default().fg(Color::DarkGray);
+                let type_style = Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD);
                 let mut lines: Vec<Line<'static>> = Vec::new();
 
                 for (title, group) in [
