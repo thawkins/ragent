@@ -1,15 +1,30 @@
 # Release
 
-## Current Version: 0.1.0-beta.4
+## Current Version: 0.1.0-beta.5
 
-### Added — Telemetry panel styling and release tooling
+### Added — Live telemetry reconfiguration, agent metric recording, and sudo askpass broker
 
-- Telemetry metric type labels now render in bold blue for better visual
-  distinction in the ALT-O Telemetry panel.
-- Automated release skill increments workspace version, updates release notes,
-  and tags the repository.
+- `/telemetry on|off` now reconfigures the live `TelemetrySubsystem` in place
+  (shuts down the meter provider on `off`, builds a fresh one on `on`) so the
+  toggle takes effect immediately instead of requiring a restart. The
+  subsystem's runtime state is held behind a `parking_lot::Mutex` and the
+  provider wrapped in `Arc` for safe interior mutability.
+- New `ragent-agent` telemetry module (`LlmRecorder`, `SessionRecorder`,
+  `ToolRecorder`) records LLM call duration, tool invocation counts/durations,
+  session start/end, and agent-loop timing into the telemetry subsystem.
+  `SessionProcessor` is wired to the subsystem via an `Arc<TelemetrySubsystem>`.
+- New `askpass` module in `ragent-tools-core` routes `sudo` password prompts
+  through ragent's interactive question dialog instead of hanging on the
+  controlling tty. The bash tool now detaches stdin (`Stdio::null()`) and sets
+  `SUDO_ASKPASS` environment variables when a broker is active.
+- `ragent-telemetry` re-exports `LlmRecorder`, `SessionRecorder`, and
+  `ToolRecorder` for cross-crate use.
+- `ShutdownGuard` keeps the meter provider alive for the process lifetime and
+  flushes pending metrics on normal or panic exit paths.
+- Telemetry panel rendering and `/telemetry` slash-command code reformatted
+  (indentation and trailing-newline fixes).
 
-### Previous Version: 0.1.0-beta.3
+### Previous Version: 0.1.0-beta.4
 
 ### Added — Context-window compaction and `/config save`
 

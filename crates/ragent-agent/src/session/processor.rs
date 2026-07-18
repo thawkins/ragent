@@ -37,6 +37,7 @@ use crate::session::history::PendingToolCall;
 use crate::session::permissions::{
     extract_command_name, extract_resource_from_input, split_bash_command,
 };
+use crate::telemetry::{LlmRecorder, SessionRecorder, ToolRecorder};
 use crate::tool::{McpToolWrapper, ToolContext, ToolRegistry};
 
 // Re-export the public helpers that external callers (tests, benches) import
@@ -137,6 +138,9 @@ pub struct SessionProcessor {
     /// (`RAGENT_CONFIG` / `RAGENT_CONFIG_CONTENT`) is present, which
     /// disables the cache because env vars have no mtime to track).
     pub cached_config: parking_lot::Mutex<Option<CachedConfig>>,
+    /// Telemetry subsystem for recording LLM, tool, session, and permission
+    /// metrics. Wired into the binary unconditionally.
+    pub telemetry: Arc<crate::telemetry::TelemetrySubsystem>,
 }
 
 /// P-2: the cached resolved config plus the inputs used to build it.
@@ -448,6 +452,8 @@ impl SessionProcessor {
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
         let profiler = crate::session::profiler::agent_loop_profiler();
+        let session_recorder = SessionRecorder::from_subsystem(&self.telemetry);
+        session_recorder.record_session_start();
 
         let session_id_arc: std::sync::Arc<str> = std::sync::Arc::from(session_id);
         #[allow(clippy::needless_borrow)]
@@ -769,6 +775,12 @@ impl SessionProcessor {
                         ragent_types::truncate_bytes(&llm_result.text_buffer, 200);
                     let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
                     cumulative_model_wait_ms += model_elapsed_ms;
+                    let llm_recorder = LlmRecorder::from_subsystem(&self.telemetry);
+                    llm_recorder.record_duration(
+                        &turn.model_ref.model_id,
+                        &turn.model_ref.provider_id,
+                        model_elapsed_ms as f64,
+                    );
                     self.event_bus.publish(Event::ModelResponse {
                         session_id: session_id.to_string(),
                         text: response_preview,
@@ -988,6 +1000,7 @@ impl SessionProcessor {
                     let profiler_clone = profiler.clone();
                     let auto_approve = self.auto_approve;
                     let team_context_cache = self.team_context_cache.clone();
+                    let telemetry_clone = Arc::clone(&self.telemetry);
                     let fut = tokio::spawn(async move {
                         let _tool_total_scope =
                             profiler_clone.scope_with(|| format!("tool.total:{}", tc_clone.name));
@@ -1142,6 +1155,9 @@ impl SessionProcessor {
                             Err(e) => Err(e),
                         };
                         let duration_ms = start.elapsed().as_millis() as u64;
+                        let tool_recorder = ToolRecorder::from_subsystem(&telemetry_clone);
+                        tool_recorder.record_invocation(&tc_clone.name);
+                        tool_recorder.record_duration(&tc_clone.name, duration_ms as f64);
                         if tc_clone.name.starts_with("team_") {
                             team_context_cache.write().clear();
                         }
@@ -1485,6 +1501,9 @@ impl SessionProcessor {
             "Agent loop finished - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
             total_elapsed_ms, cumulative_model_wait_ms, other_ms
         );
+        let iterations = self.event_bus.current_step(session_id) as u64;
+        session_recorder.record_session_end();
+        session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
             message_id: msg_id_for_end,

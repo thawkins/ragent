@@ -63,6 +63,7 @@ fn make_app() -> App {
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

@@ -34,6 +34,7 @@ pub mod subsystem;
 // Re-export the config types from ragent-config so consumers can use a
 // single import path. The canonical definitions live in `ragent_config::telemetry`.
 pub use ragent_config::{OtelConfig, OtelProtocol, TelemetryConfig};
+pub use recorder::{LlmRecorder, SessionRecorder, ToolRecorder};
 pub use subsystem::{TelemetryState, TelemetrySubsystem};
 
 #[cfg(feature = "telemetry")]

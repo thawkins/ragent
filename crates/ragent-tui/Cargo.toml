@@ -51,6 +51,8 @@ lru = { workspace = true }
 
 [features]
 default = []
+# Kept for backward compatibility; telemetry is now enabled by default.
+telemetry = []
 
 [dev-dependencies]
 tempfile = "3.5"

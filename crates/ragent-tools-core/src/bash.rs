@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::process::Command;
 
@@ -1050,7 +1050,7 @@ impl Tool for BashTool {
         // Acquire a process-spawn permit to bound concurrency.
         let _permit = crate::resource::acquire_process_permit().await?;
 
-        // ── Persistent shell state ────────────────────────────────────────
+        // ── Persistent shell state ────────────────────��───────────────────
         let state_file = state_file_path(&ctx.session_id);
         let script_file = script_file_path(&ctx.session_id, shell)?;
 
@@ -1066,32 +1066,44 @@ impl Tool for BashTool {
             ShellType::PowerShell(_) => build_powershell_wrapper(&state_file, &script_file),
         };
 
+        // ── sudo askpass broker ──────────────────────────────────────────
+        // On POSIX systems, install an askpass helper so that any `sudo`
+        // invocation inside the command (including in child scripts) routes
+        // its password prompt through ragent's question dialog instead of
+        // hanging on the controlling tty. See `askpass` module docs.
+        let mut broker = crate::askpass::AskPassBroker::start(&ctx.session_id);
         let start = Instant::now();
 
         let result = match shell {
             ShellType::Bash => {
                 // Standard Unix bash execution
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    Command::new("bash")
-                        .arg("-c")
-                        .arg(&wrapper)
-                        .current_dir(&ctx.working_dir)
-                        .output(),
-                )
-                .await
+                let mut cmd = Command::new("bash");
+                cmd.arg("-c").arg(&wrapper).current_dir(&ctx.working_dir);
+                // Detach stdin from the tty so nothing can block on it; sudo
+                // is handled via SUDO_ASKPASS instead.
+                cmd.stdin(std::process::Stdio::null());
+                if let Some(ref mut b) = broker {
+                    for (k, v) in b.env_vars() {
+                        cmd.env(k, v);
+                    }
+                    b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
+                }
+                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
+                    .await
             }
             ShellType::GitBash(path) => {
                 // Git Bash on Windows
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    Command::new(path)
-                        .arg("-c")
-                        .arg(&wrapper)
-                        .current_dir(&ctx.working_dir)
-                        .output(),
-                )
-                .await
+                let mut cmd = Command::new(path);
+                cmd.arg("-c").arg(&wrapper).current_dir(&ctx.working_dir);
+                cmd.stdin(std::process::Stdio::null());
+                if let Some(ref mut b) = broker {
+                    for (k, v) in b.env_vars() {
+                        cmd.env(k, v);
+                    }
+                    b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
+                }
+                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
+                    .await
             }
             ShellType::PowerShell(path) => {
                 // PowerShell on Windows — use -Command to pass inline command
@@ -1109,6 +1121,12 @@ impl Tool for BashTool {
                 .await
             }
         };
+
+        // Tear down the askpass broker (cancels the watcher, removes temp
+        // files) once the command has finished.
+        if let Some(b) = broker {
+            b.stop();
+        }
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 

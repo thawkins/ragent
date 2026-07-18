@@ -37,14 +37,37 @@ pub enum TelemetryState {
 /// When enabled and the `telemetry` feature is active, the subsystem
 /// constructs a real `SdkMeterProvider` with a periodic reader backed by an
 /// OTLP/HTTP exporter (T-003, T-004).
+///
+/// # Runtime reconfiguration
+///
+/// The live provider state is held behind a `parking_lot::Mutex` so the
+/// subsystem can be reconfigured at runtime through a shared
+/// `Arc<TelemetrySubsystem>` via [`reconfigure`](Self::reconfigure). This is
+/// what powers the `/telemetry on|off` slash commands: toggling off shuts
+/// down the live provider (stopping the periodic OTLP reader and therefore
+/// the "Failed to export metrics" log noise) without restarting the process.
 pub struct TelemetrySubsystem {
+    /// Interior-mutable runtime state so [`reconfigure`](Self::reconfigure)
+    /// can swap providers through `&self` while the subsystem is shared via
+    /// `Arc<TelemetrySubsystem>`.
+    runtime: parking_lot::Mutex<RuntimeState>,
+}
+
+/// Mutable runtime state owned by [`TelemetrySubsystem`], held under a mutex.
+struct RuntimeState {
+    /// Whether the subsystem is actively exporting or running as a no-op.
     state: TelemetryState,
+    /// The resolved [`OtelConfig`] that built (or last reconfigured) this
+    /// subsystem. Kept in sync with the live provider so [`instruments`]
+    /// can apply the cardinality limit and per-metric toggles.
     config: OtelConfig,
-    /// The live meter provider, held to keep the SDK alive for the lifetime of
-    /// the subsystem. `None` when disabled or when the `telemetry` feature is
-    /// not compiled in.
+    /// The live meter provider, held to keep the SDK alive for the lifetime
+    /// of the subsystem. `None` when disabled or when the `telemetry`
+    /// feature is not compiled in. Wrapped in `Arc` so [`provider`] can
+    /// return a cheap clone and so [`InstrumentRegistry`] handles can keep
+    /// the (possibly shut-down) provider alive independently.
     #[cfg(feature = "telemetry")]
-    provider: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
+    provider: Option<std::sync::Arc<opentelemetry_sdk::metrics::SdkMeterProvider>>,
     /// The [`SharedManualReader`] used by the optional Prometheus endpoint
     /// (FR-028). `None` when `telemetry.otel.internal_port` is `None` or
     /// telemetry is disabled. Held so the subsystem can extract the
@@ -55,13 +78,46 @@ pub struct TelemetrySubsystem {
     /// The join handle for the Prometheus HTTP server task (FR-028).
     /// `None` when no `internal_port` is configured. The handle is for the
     /// outer task that resolves to the inner server handle (or a bind
-    /// error); we store it so it can be aborted on shutdown.
+    /// error); we store it so it can be aborted on shutdown/reconfigure.
     #[cfg(feature = "telemetry")]
     prometheus_handle:
         Option<tokio::task::JoinHandle<std::io::Result<tokio::task::JoinHandle<()>>>>,
 }
 
+impl RuntimeState {
+    /// Construct a disabled runtime state with the given config.
+    #[cfg(feature = "telemetry")]
+    fn disabled(config: OtelConfig) -> Self {
+        Self {
+            state: TelemetryState::Disabled,
+            config,
+            provider: None,
+            prometheus_reader: None,
+            prometheus_handle: None,
+        }
+    }
+
+    /// Construct a disabled runtime state with the given config
+    /// (feature-off variant — no provider fields exist).
+    #[cfg(not(feature = "telemetry"))]
+    fn disabled(config: OtelConfig) -> Self {
+        Self {
+            state: TelemetryState::Disabled,
+            config,
+        }
+    }
+}
+
 impl TelemetrySubsystem {
+    /// Return a disabled copy of this subsystem with the same config.
+    /// Used when the subsystem is shared via `Arc` but a by-value copy is
+    /// needed for a shutdown guard.
+    #[must_use]
+    pub fn clone_disabled(&self) -> Self {
+        let config = self.runtime.lock().config.clone();
+        Self::disabled_with_config(config)
+    }
+
     /// Construct a subsystem from the given [`OtelConfig`].
     ///
     /// When `config.enabled` is `false`, returns a [`Disabled`](TelemetryState::Disabled)
@@ -112,41 +168,16 @@ impl TelemetrySubsystem {
                     provider
                 };
 
-                // Spawn the HTTP server if a port is configured.
-                // `serve` is async (binds a TcpListener), so we spawn it
-                // as a background task and await that task to get the
-                // JoinHandle for the server loop.
+                // Spawn the HTTP server if a port is configured. `serve` is
+                // async, so spawn it as a background task on the caller's
+                // tokio runtime and store the outer JoinHandle for later
+                // abort on shutdown/reconfigure.
                 let prometheus_handle = if let Some(port) = config.internal_port {
                     if let Some(reader) = &prometheus_reader {
-                        let serve_handle =
-                            tokio::spawn(crate::prometheus::serve(reader.handle(), port));
-                        // The outer spawn returns a JoinHandle<io::Result<JoinHandle<()>>>,
-                        // but we are inside `new()` which is sync. We cannot
-                        // `.await` here. Instead, store the outer handle; the
-                        // caller drops it on shutdown.
-                        // Actually `new()` is sync, so we cannot await. We
-                        // restructure: `serve` is called via `tokio::spawn`
-                        // which itself returns a JoinHandle immediately. But
-                        // `serve` returns a Future, not a JoinHandle.
-                        //
-                        // The correct approach: spawn `serve` as a task that
-                        // returns the server JoinHandle once the bind
-                        // succeeds. But since `new()` is sync and we're
-                        // inside a tokio runtime (the caller's), we can use
-                        // `tokio::spawn` which schedules the future and
-                        // returns immediately.
-                        //
-                        // Actually `serve` is `async fn` returning
-                        // `io::Result<JoinHandle<()>>`. We need to spawn the
-                        // inner future. The simplest correct approach: spawn
-                        // the whole `serve` call as a task; its returned
-                        // `JoinHandle<io::Result<JoinHandle<()>>>` resolves
-                        // to the server handle (or a bind error).
-                        //
-                        // But we can't await that here. So we store the
-                        // outer JoinHandle and the caller can ignore it. For
-                        // the common case (bind succeeds), the server runs.
-                        Some(serve_handle)
+                        Some(tokio::spawn(crate::prometheus::serve(
+                            reader.handle(),
+                            port,
+                        )))
                     } else {
                         None
                     }
@@ -155,11 +186,13 @@ impl TelemetrySubsystem {
                 };
 
                 Ok(Self {
-                    state: TelemetryState::Enabled,
-                    config,
-                    provider: Some(provider),
-                    prometheus_reader,
-                    prometheus_handle,
+                    runtime: parking_lot::Mutex::new(RuntimeState {
+                        state: TelemetryState::Enabled,
+                        config,
+                        provider: Some(std::sync::Arc::new(provider)),
+                        prometheus_reader,
+                        prometheus_handle,
+                    }),
                 })
             }
             #[cfg(not(feature = "telemetry"))]
@@ -190,11 +223,13 @@ impl TelemetrySubsystem {
     #[must_use]
     pub fn from_provider(config: OtelConfig, provider: SdkMeterProvider) -> Self {
         Self {
-            state: TelemetryState::Enabled,
-            config,
-            provider: Some(provider),
-            prometheus_reader: None,
-            prometheus_handle: None,
+            runtime: parking_lot::Mutex::new(RuntimeState {
+                state: TelemetryState::Enabled,
+                config,
+                provider: Some(std::sync::Arc::new(provider)),
+                prometheus_reader: None,
+                prometheus_handle: None,
+            }),
         }
     }
     /// Construct a no-op subsystem that discards all metrics.
@@ -208,45 +243,43 @@ impl TelemetrySubsystem {
 
     fn disabled_with_config(config: OtelConfig) -> Self {
         Self {
-            state: TelemetryState::Disabled,
-            config,
-            #[cfg(feature = "telemetry")]
-            provider: None,
-            #[cfg(feature = "telemetry")]
-            prometheus_reader: None,
-            #[cfg(feature = "telemetry")]
-            prometheus_handle: None,
+            runtime: parking_lot::Mutex::new(RuntimeState::disabled(config)),
         }
     }
 
     /// Returns the current telemetry state.
     #[must_use]
     pub fn state(&self) -> TelemetryState {
-        self.state
+        self.runtime.lock().state
     }
 
     /// Returns `true` when the subsystem is actively exporting metrics.
     #[must_use]
     pub fn is_enabled(&self) -> bool {
-        self.state == TelemetryState::Enabled
+        self.runtime.lock().state == TelemetryState::Enabled
     }
 
-    /// Returns a reference to the resolved [`OtelConfig`].
-    #[must_use]
-    pub fn config(&self) -> &OtelConfig {
-        &self.config
-    }
-
-    /// Returns the live meter provider, if telemetry is enabled and the
-    /// `telemetry` feature is compiled in.
+    /// Returns a clone of the resolved [`OtelConfig`].
     ///
-    /// Returns `None` when disabled or when the feature is off. Callers
-    /// should use this to obtain a [`Meter`](opentelemetry::metrics::Meter)
-    /// for creating instruments.
+    /// Returns an owned copy (rather than a reference) because the config
+    /// lives behind the interior-mutability mutex; cloning is cheap and
+    /// avoids exposing a locked guard to callers.
+    #[must_use]
+    pub fn config(&self) -> OtelConfig {
+        self.runtime.lock().config.clone()
+    }
+
+    /// Returns a cheap clone of the live meter provider, if telemetry is
+    /// enabled and the `telemetry` feature is compiled in.
+    ///
+    /// Returns `None` when disabled or when the feature is off. The
+    /// returned [`Arc`] keeps the provider alive independently of the
+    /// subsystem, so callers can build [`InstrumentRegistry`] handles from
+    /// it even if the subsystem is later reconfigured.
     #[must_use]
     #[cfg(feature = "telemetry")]
-    pub fn provider(&self) -> Option<&opentelemetry_sdk::metrics::SdkMeterProvider> {
-        self.provider.as_ref()
+    pub fn provider(&self) -> Option<std::sync::Arc<SdkMeterProvider>> {
+        self.runtime.lock().provider.clone()
     }
 
     /// Build and return an [`InstrumentRegistry`] backed by this subsystem's
@@ -272,11 +305,105 @@ impl TelemetrySubsystem {
     #[must_use]
     #[cfg(feature = "telemetry")]
     pub fn instruments(&self) -> Option<crate::instruments::InstrumentRegistry> {
-        self.provider.as_ref().map(|p| {
-            crate::instruments::InstrumentRegistry::from_provider(p)
-                .with_cardinality_limit(self.config.cardinality_limit)
-                .with_metric_toggles(self.config.metrics.clone())
-        })
+        let guard = self.runtime.lock();
+        let provider = guard.provider.as_ref()?;
+        Some(
+            crate::instruments::InstrumentRegistry::from_provider(provider)
+                .with_cardinality_limit(guard.config.cardinality_limit)
+                .with_metric_toggles(guard.config.metrics.clone()),
+        )
+    }
+
+    /// Reconfigure the subsystem at runtime from a new [`OtelConfig`].
+    ///
+    /// This is the runtime-toggle entry point used by the `/telemetry on|off`
+    /// slash commands. It atomically (under the runtime mutex):
+    ///
+    /// 1. Shuts down the currently live provider (if any), which stops the
+    ///    periodic OTLP reader and therefore the "Failed to export metrics"
+    ///    log noise that would otherwise continue after `/telemetry off`.
+    /// 2. Aborts any Prometheus HTTP server task so its TCP listener is
+    ///    released.
+    /// 3. If the new config is enabled (and the `telemetry` feature is
+    ///    active), builds a fresh provider and Prometheus endpoint.
+    /// 4. Updates the stored state and config so subsequent calls to
+    ///    [`is_enabled`](Self::is_enabled), [`config`](Self::config), and
+    ///    [`instruments`](Self::instruments) reflect the new state.
+    ///
+    /// When the `telemetry` Cargo feature is off, only the config/state are
+    /// updated (there is no provider to shut down or build).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TelemetryError::InvalidEndpoint`] or
+    /// [`TelemetryError::ExporterInit`] if building a new enabled provider
+    /// fails. On such a failure the subsystem is left in the **disabled**
+    /// state (the old provider has already been shut down) so the agent
+    /// loop never continues with a half-initialised provider.
+    pub fn reconfigure(&self, config: OtelConfig) -> Result<()> {
+        let mut guard = self.runtime.lock();
+
+        // 1. Shut down the existing live provider (stops the periodic reader).
+        #[cfg(feature = "telemetry")]
+        {
+            if let Some(handle) = &guard.prometheus_handle {
+                handle.abort();
+            }
+            guard.prometheus_handle = None;
+            guard.prometheus_reader = None;
+            if let Some(provider) = guard.provider.take() {
+                // `SdkMeterProvider::shutdown` takes `&self`; call it through
+                // the Arc. Errors are logged but non-fatal — the provider is
+                // being discarded regardless.
+                if let Err(e) = provider.shutdown() {
+                    tracing::warn!(error = %e, "OTEL meter provider shutdown during reconfigure");
+                }
+            }
+        }
+
+        // 2. Build the new provider if enabled.
+        if config.enabled {
+            #[cfg(feature = "telemetry")]
+            {
+                match build_enabled_provider(&config) {
+                    Ok((provider, prometheus_reader, prometheus_handle)) => {
+                        guard.state = TelemetryState::Enabled;
+                        guard.config = config;
+                        guard.provider = Some(std::sync::Arc::new(provider));
+                        guard.prometheus_reader = prometheus_reader;
+                        guard.prometheus_handle = prometheus_handle;
+                    }
+                    Err(e) => {
+                        // Building the new provider failed — leave the
+                        // subsystem disabled so the agent loop never runs
+                        // with a half-initialised provider.
+                        tracing::warn!(error = %e, "reconfigure: provider build failed; leaving telemetry disabled");
+                        guard.state = TelemetryState::Disabled;
+                        guard.config = config;
+                        guard.provider = None;
+                        return Err(e);
+                    }
+                }
+            }
+            #[cfg(not(feature = "telemetry"))]
+            {
+                tracing::warn!(
+                    "reconfigure: telemetry.otel.enabled is true but the 'telemetry' \
+                       Cargo feature is not enabled; remaining in no-op mode."
+                );
+                guard.state = TelemetryState::Disabled;
+                guard.config = config;
+                return Err(TelemetryError::FeatureNotEnabled);
+            }
+        } else {
+            guard.state = TelemetryState::Disabled;
+            guard.config = config;
+            #[cfg(feature = "telemetry")]
+            {
+                guard.provider = None;
+            }
+        }
+        Ok(())
     }
 
     /// Force-flush all pending metric exports immediately (FR-006).
@@ -310,7 +437,8 @@ impl TelemetrySubsystem {
     pub fn flush(&self) -> Result<()> {
         #[cfg(feature = "telemetry")]
         {
-            if let Some(provider) = &self.provider {
+            let guard = self.runtime.lock();
+            if let Some(provider) = &guard.provider {
                 if let Err(e) = provider.force_flush() {
                     tracing::warn!("OTEL meter provider force_flush error: {e}");
                     return Err(crate::TelemetryError::ExporterInit(format!(
@@ -319,7 +447,6 @@ impl TelemetrySubsystem {
                 }
             }
         }
-        let _ = self.state;
         Ok(())
     }
 
@@ -345,15 +472,11 @@ impl TelemetrySubsystem {
     pub fn shutdown(&self) -> Result<()> {
         #[cfg(feature = "telemetry")]
         {
-            // Abort the Prometheus HTTP server task if present (FR-028).
-            // We cannot move out of `&self`, so we use `Option::take` on a
-            // Cell — but `JoinHandle::abort` takes `&self`, so we can call
-            // it directly.
-            #[cfg(feature = "telemetry")]
-            if let Some(handle) = &self.prometheus_handle {
+            let guard = self.runtime.lock();
+            if let Some(handle) = &guard.prometheus_handle {
                 handle.abort();
             }
-            if let Some(provider) = &self.provider {
+            if let Some(provider) = &guard.provider {
                 if let Err(e) = provider.shutdown() {
                     tracing::warn!("OTEL meter provider shutdown error: {e}");
                     return Err(crate::TelemetryError::ExporterInit(format!(
@@ -362,7 +485,6 @@ impl TelemetrySubsystem {
                 }
             }
         }
-        let _ = self.state;
         Ok(())
     }
 }
@@ -375,10 +497,11 @@ impl Default for TelemetrySubsystem {
 
 impl std::fmt::Debug for TelemetrySubsystem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let guard = self.runtime.lock();
         f.debug_struct("TelemetrySubsystem")
-            .field("state", &self.state)
-            .field("endpoint", &self.config.endpoint)
-            .field("protocol", &self.config.protocol)
+            .field("state", &guard.state)
+            .field("endpoint", &guard.config.endpoint)
+            .field("protocol", &guard.config.protocol)
             .finish()
     }
 }
@@ -477,6 +600,54 @@ fn build_provider_with_prometheus(
         .build();
 
     Ok(provider)
+}
+
+/// Build the live provider plus optional Prometheus reader/handle from a
+/// config that is known to be enabled.
+///
+/// This is the shared construction path used by both [`TelemetrySubsystem::new`]
+/// (indirectly, inlined) and [`TelemetrySubsystem::reconfigure`]. It returns
+/// the three pieces a caller needs to populate [`RuntimeState`].
+///
+/// Must be called from within a tokio runtime context because the Prometheus
+/// `serve` future is spawned via [`tokio::spawn`].
+#[cfg(feature = "telemetry")]
+fn build_enabled_provider(
+    config: &OtelConfig,
+) -> Result<(
+    SdkMeterProvider,
+    Option<crate::prometheus::SharedManualReader>,
+    Option<tokio::task::JoinHandle<std::io::Result<tokio::task::JoinHandle<()>>>>,
+)> {
+    let provider = build_provider(config)?;
+
+    let prometheus_reader: Option<crate::prometheus::SharedManualReader> =
+        if config.internal_port.is_some() {
+            Some(crate::prometheus::SharedManualReader::new())
+        } else {
+            None
+        };
+
+    let provider = if let Some(reader) = &prometheus_reader {
+        build_provider_with_prometheus(config, reader.clone())?
+    } else {
+        provider
+    };
+
+    let prometheus_handle = if let Some(port) = config.internal_port {
+        if let Some(reader) = &prometheus_reader {
+            Some(tokio::spawn(crate::prometheus::serve(
+                reader.handle(),
+                port,
+            )))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    Ok((provider, prometheus_reader, prometheus_handle))
 }
 
 /// Construct the OTLP metric exporter based on the configured protocol

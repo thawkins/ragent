@@ -56,6 +56,7 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
     };
     (processor, storage)
 }

@@ -54,6 +54,7 @@ fn make_app_with_manager() -> (App, Arc<SessionManager>) {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

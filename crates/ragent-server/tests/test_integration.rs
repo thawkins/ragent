@@ -50,6 +50,7 @@ fn test_state(token: &str) -> AppState {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
     });
     AppState {
         event_bus,

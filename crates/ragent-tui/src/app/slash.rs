@@ -289,12 +289,34 @@ impl App {
 
     /// Enable or disable telemetry in the source config and invalidate the
     /// session-processor config cache so the next loop picks up the change.
+    ///
+    /// In addition to persisting the new `telemetry.otel.enabled` flag to
+    /// `ragent.json`, this reconfigures the live [`TelemetrySubsystem`] in
+    /// place so the change takes effect immediately:
+    ///
+    /// - `/telemetry off` shuts down the running meter provider, which stops
+    ///   the periodic OTLP reader and therefore the "Failed to export
+    ///   metrics" log noise that would otherwise continue until restart.
+    /// - `/telemetry on` builds a fresh provider from the persisted config.
     fn set_telemetry_enabled(&mut self, enabled: bool) {
         let mut cfg = ragent_agent::Config::load().unwrap_or_default();
         cfg.telemetry.otel.enabled = enabled;
         match self.save_telemetry_otel(&cfg.telemetry.otel) {
             Ok(()) => {
                 self.session_processor.invalidate_config_cache();
+                // Reconfigure the live subsystem so the toggle takes effect
+                // immediately (shut down the old provider on `off`, build a
+                // fresh one on `on`) rather than waiting for a restart.
+                if let Err(e) = self
+                    .session_processor
+                    .telemetry
+                    .reconfigure(cfg.telemetry.otel)
+                {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("telemetry reconfigure failed: {e}"),
+                    );
+                }
             }
             Err(e) => {
                 self.push_log_no_agent(
@@ -574,32 +596,32 @@ impl App {
 ",
         );
 
-                  TelemetryCountersContent {
-                      usage: usage
-                          .iter()
-                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                          .collect(),
-                      performance: performance
-                          .iter()
-                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                          .collect(),
-                      cost: cost
-                          .iter()
-                          .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                          .collect(),
-                            effectiveness: effectiveness
-                                .iter()
-                                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
-                                .collect(),
-                        markdown: out,
-                    }
-                }
+        TelemetryCountersContent {
+            usage: usage
+                .iter()
+                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            performance: performance
+                .iter()
+                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            cost: cost
+                .iter()
+                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            effectiveness: effectiveness
+                .iter()
+                .map(|(n, k, d, v)| (n.to_string(), k.to_string(), d.to_string(), v.clone()))
+                .collect(),
+            markdown: out,
+        }
+    }
 
-                                  /// Dispatch the `/telemetry` slash-command family.
-                                  fn handle_telemetry_command(&mut self, args: &str) {
-                                      let sub = args.split_whitespace().next().unwrap_or("");
-                                      match sub {
-                                          "help" | "" => {
+    /// Dispatch the `/telemetry` slash-command family.
+    fn handle_telemetry_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("");
+        match sub {
+            "help" | "" => {
                 self.append_assistant_text(
                     "From: /telemetry help
 

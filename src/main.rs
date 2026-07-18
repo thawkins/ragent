@@ -22,6 +22,7 @@ use ragent_agent::{
     provider,
     session::{SessionManager, processor::SessionProcessor},
     storage::Storage,
+    telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
 
@@ -380,6 +381,29 @@ async fn main() -> Result<()> {
 
     let config = Arc::new(tokio::sync::RwLock::new(config));
 
+    // Initialise telemetry subsystem from configuration.
+    // A ShutdownGuard keeps the provider alive for the process lifetime and
+    // flushes pending metrics on normal or panic exit paths.
+    let telemetry_config = config.read().await.telemetry.otel.clone();
+    let telemetry = match TelemetrySubsystem::new(telemetry_config) {
+        Ok(sub) => {
+            tracing::info!(
+                enabled = sub.is_enabled(),
+                endpoint = %sub.config().endpoint,
+                "Telemetry subsystem initialised"
+            );
+            Arc::new(sub)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to initialise telemetry subsystem; continuing disabled");
+            Arc::new(TelemetrySubsystem::disabled())
+        }
+    };
+    let telemetry_guard_holder = Arc::clone(&telemetry);
+    let _telemetry_guard = ShutdownGuard::new(
+        Arc::try_unwrap(telemetry_guard_holder).unwrap_or_else(|arc| (*arc).clone_disabled()),
+    );
+
     // Create session manager and processor
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     tracing::debug!("Session manager created");
@@ -409,6 +433,7 @@ async fn main() -> Result<()> {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        telemetry,
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
 

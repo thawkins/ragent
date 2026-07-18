@@ -137,6 +137,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

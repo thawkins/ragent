@@ -8,10 +8,10 @@ description = "OpenTelemetry metrics export subsystem for ragent"
 repository = "https://github.com/thawkins/ragent"
 
 [features]
-default = []
-# Enable the real OpenTelemetry meter provider and OTLP exporters.
-# When disabled, the crate compiles with zero-overhead no-op stubs and
-# pulls no opentelemetry dependencies.
+# The real OpenTelemetry meter provider and OTLP exporters are enabled by
+# default. Telemetry is hardwired into the ragent binary; this feature can be
+# disabled for a zero-dependency build if absolutely required.
+default = ["telemetry"]
 telemetry = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
@@ -28,6 +28,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+parking_lot = { workspace = true }
 
 # Optional OTEL dependencies — only pulled in when the `telemetry` feature is
 # enabled, satisfying NFR-006 (users who do not need OTEL can build without

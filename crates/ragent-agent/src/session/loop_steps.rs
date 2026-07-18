@@ -780,6 +780,7 @@ impl SessionProcessor {
         let mut last_output_tokens: u64 = 0;
 
         let _scope = profiler.scope("loop.llm.total");
+        let llm_recorder = crate::telemetry::LlmRecorder::from_subsystem(&self.telemetry);
         'retry: for attempt in 0..=max_retries {
             let mut saw_completed_tool_call = false;
             if attempt > 0 {
@@ -829,6 +830,7 @@ impl SessionProcessor {
                 session_id: session_id.to_string(),
                 outbound_bytes: chat_request_payload_bytes(&attempt_request),
             });
+            llm_recorder.record_request(&turn.model_ref.model_id, &turn.model_ref.provider_id);
             let mut stream = {
                 let _scope = profiler.scope("loop.llm.create_stream");
                 match turn.client.chat(attempt_request).await {
@@ -1067,6 +1069,12 @@ impl SessionProcessor {
                         } => {
                             last_input_tokens = input_tokens;
                             last_output_tokens = output_tokens;
+                            llm_recorder.record_usage(
+                                &turn.model_ref.model_id,
+                                &turn.model_ref.provider_id,
+                                input_tokens,
+                                output_tokens,
+                            );
                             self.event_bus.publish(Event::TokenUsage {
                                 session_id: session_id.to_string(),
                                 input_tokens,

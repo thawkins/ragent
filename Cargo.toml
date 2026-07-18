@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-beta.4"
+version = "0.1.0-beta.5"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -115,6 +115,8 @@ ragent-agent = { path = "crates/ragent-agent" }
 ragent-llm = { path = "crates/ragent-llm" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
+
+ragent-telemetry = { path = "crates/ragent-telemetry" }
 
 # ── Hashing / file-locking ───────────────────────────────────────────────
 num_cpus = "1.16"
@@ -240,8 +242,10 @@ path = "src/main.rs"
 
 [features]
 default = []
-
-
+# The `telemetry` feature is no longer required; telemetry is hardwired into the
+# binary by default via `ragent-telemetry`'s own default feature. Kept as an
+# alias for compatibility with any scripts still passing --features telemetry.
+telemetry = ["ragent-tui/telemetry", "ragent-telemetry/telemetry"]
 
 [profile.release]
 lto = true
@@ -255,7 +259,8 @@ ragent-llm = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }
-ragent-research = { path = "crates/ragent-research" }
+ragent-research = { workspace = true }
+ragent-telemetry = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }

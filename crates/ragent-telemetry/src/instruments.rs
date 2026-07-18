@@ -649,7 +649,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         let sub = rt
             .block_on(async { crate::TelemetrySubsystem::new(config).expect("enabled subsystem") });
-        InstrumentRegistry::from_provider(sub.provider().unwrap())
+        InstrumentRegistry::from_provider(&sub.provider().unwrap())
     }
 
     /// Build an [`InstrumentRegistry`] backed by an [`SdkMeterProvider`] that

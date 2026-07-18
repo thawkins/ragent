@@ -35,6 +35,7 @@ pub mod snapshot;
 pub mod storage;
 pub mod task;
 pub mod team;
+pub mod telemetry;
 pub mod tool;
 pub mod updater;
 

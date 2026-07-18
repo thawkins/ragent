@@ -33,6 +33,7 @@ pub mod grep;
 pub mod list;
 
 // Shell tools
+mod askpass;
 pub mod bash;
 pub mod bash_reset;
 

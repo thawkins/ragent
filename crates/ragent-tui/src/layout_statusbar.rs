@@ -603,6 +603,19 @@ fn build_line2_right(
         ));
     }
 
+    // Telemetry (OpenTelemetry metrics export) status
+    {
+        let (icon, color) = if app.session_processor.telemetry.is_enabled() {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        spans.push(Span::styled(
+            format!("Telemetry:{icon} "),
+            Style::default().fg(color),
+        ));
+    }
+
     // YOLO mode status
     {
         let enabled = ragent_config::yolo::is_enabled();

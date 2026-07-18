@@ -5,7 +5,8 @@ mod app_tests {
     use crate::app::{App, ModelPickerEntry};
     use ragent_agent::{
         agent, event::EventBus, permission::PermissionChecker, provider, session::SessionManager,
-        session::processor::SessionProcessor, storage::Storage, tool,
+        session::processor::SessionProcessor, storage::Storage, telemetry::TelemetrySubsystem,
+        tool,
     };
     use ragent_types::{ThinkingConfig, ThinkingLevel};
     use std::sync::Arc;
@@ -45,6 +46,7 @@ mod app_tests {
             read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            telemetry: std::sync::Arc::new(TelemetrySubsystem::disabled()),
         });
         let agent_info =
             agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
