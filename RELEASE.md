@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-beta.5
+## Current Version: 0.1.0-beta.6
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.5` to `0.1.0-beta.6`.
+- `cargo check` passes cleanly with the new version.
+
+### Previous Version: 0.1.0-beta.5
 
 ### Added — Live telemetry reconfiguration, agent metric recording, and sudo askpass broker
 
