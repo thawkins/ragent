@@ -43,6 +43,7 @@
 pub mod adaptive;
 pub mod analysis;
 pub mod cli;
+pub mod diagram;
 pub mod document;
 pub mod engine;
 pub mod io;
@@ -71,6 +72,7 @@ pub use cli::{
     FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
     render_session_event_json, render_show_output,
 };
+pub use diagram::render_findings_diagram;
 pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
     assemble_document, fence_source_body, mark_complete, mark_in_progress, render_skeleton,
