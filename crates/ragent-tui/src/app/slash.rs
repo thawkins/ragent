@@ -5162,6 +5162,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     task_ids,
                                                     current_rank: 1,
                                                     total,
+                                                    runner: runner.clone(),
                                                 });
 
                                             // Dispatch the first task's prompt.

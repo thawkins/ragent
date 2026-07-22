@@ -7,6 +7,16 @@ use crate::engine::EngineConfig;
 use std::str::FromStr;
 
 /// Output artifact requested via `--format` (FR-012).
+///
+/// Supported artifacts:
+///
+/// - `report` — the default multi-section research report.
+/// - `executive-summary` — one-page summary.
+/// - `comparison-table` — comparison table across key entities.
+/// - `source-bibliography` — bibliography of all captured sources.
+/// - `imrad` — IMRaD-compliant scientific/technical report format
+///   (Abstract, Introduction, Methods, Results, Discussion, References Index),
+///   as specified in `specs/imradreport/SPEC.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
     /// Full multi-section research report (default).
@@ -18,6 +28,9 @@ pub enum OutputFormat {
     ComparisonTable,
     /// Bibliography of all captured sources.
     SourceBibliography,
+    /// IMRaD-compliant scientific/technical report format (Introduction, Methods,
+    /// Results, and Discussion) — FR-001 / FR-002 of specs/imradreport.
+    Imrad,
 }
 
 impl OutputFormat {
@@ -30,6 +43,7 @@ impl OutputFormat {
             "source-bibliography" | "source_bibliography" | "bibliography" => {
                 Some(Self::SourceBibliography)
             }
+            "imrad" | "im-rad" | "scientific" => Some(Self::Imrad),
             _ => None,
         }
     }
@@ -41,6 +55,7 @@ impl OutputFormat {
             Self::ExecutiveSummary => "executive-summary",
             Self::ComparisonTable => "comparison-table",
             Self::SourceBibliography => "source-bibliography",
+            Self::Imrad => "imrad",
         }
     }
 }
@@ -145,6 +160,10 @@ mod tests {
             OutputFormat::parse("source-bibliography"),
             Some(OutputFormat::SourceBibliography)
         );
+        assert_eq!(OutputFormat::parse("imrad"), Some(OutputFormat::Imrad));
+        assert_eq!(OutputFormat::parse("im-rad"), Some(OutputFormat::Imrad));
+        assert_eq!(OutputFormat::parse("scientific"), Some(OutputFormat::Imrad));
+        assert_eq!(OutputFormat::Imrad.as_str(), "imrad");
         assert_eq!(OutputFormat::parse("nonsense"), None);
     }
 

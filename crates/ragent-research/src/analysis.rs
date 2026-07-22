@@ -442,10 +442,11 @@ fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
 /// per-finding labeled-paragraph template. With the default config this is
 /// byte-identical to the legacy middle of `build_synthesis_prompt`.
 ///
-/// Tasks T-003 (date-spread paragraph) and T-004 (recency rule) extend this
-/// function by gating new instruction blocks on
-/// `config.date_spread_paragraph` and `config.recency_rule` respectively; the
-/// default (both `false`) path is unchanged.
+/// The IMRaD output format (FR-012 / specs/imradreport) is handled specially:
+/// the model is still asked for the same four raw sections (Summary, Findings,
+/// In-Project Cross-References, Open Questions) so the parser remains unchanged,
+/// and an extra paragraph encourages results-oriented phrasing so the final
+/// IMRaD layout reads naturally in the `## Results` section.
 fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
@@ -523,6 +524,17 @@ fn render_output_template(config: &SynthesisPromptConfig) -> String {
                       parse. Put each finding on its own line starting with `1. `, `2. `, etc.\n\n"
             );
         }
+    }
+    // FR-012 / specs/imradreport: IMRaD format uses the same four raw sections,
+    // but the model should phrase findings as results-oriented statements.
+    if config.output_format == Some(OutputFormat::Imrad) {
+        out.push_str(
+            "\nThe final report will be restructured into IMRaD order by the document assembler, \
+             so continue to use the section headings above. Phrase each finding as a results-oriented \
+             statement suitable for an IMRaD Results section: state the discovery, support it with \
+             `[#N]` citations, and reserve interpretation and broader implications for the \
+             Analysis and Implication paragraphs.\n\n"
+        );
     }
     // T-003 (FR-003): require a sixth **Sources Cited / Date Spread**
     // paragraph in every finding. Gated on `config.date_spread_paragraph` so

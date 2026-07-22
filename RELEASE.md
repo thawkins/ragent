@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-beta.6
+## Current Version: 0.1.0-beta.7
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.6` to `0.1.0-beta.7`.
+- `cargo check` passes cleanly with the new version.
+
+### Previous Version: 0.1.0-beta.6
 
 ### Changed — Version bump
 

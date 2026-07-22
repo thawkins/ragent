@@ -122,15 +122,35 @@ impl ResearchManager {
     ///
     /// `name` is validated per FR-002; duplicate names fail per FR-016; the
     /// directory tree, `RESEARCH.md`, and INDEX.md cache are all updated
-    /// atomically.
+    /// atomically. The skeleton uses the legacy report layout; use
+    /// [`Self::create_with_format`] to request a different output artifact.
     pub async fn create(&self, name: &str, title: &str, topic: &str) -> Result<ResearchItem> {
+        self.create_with_format(name, title, topic, crate::run_config::OutputFormat::Report)
+            .await
+    }
+
+    /// Create a fresh research item, selecting the skeleton layout via
+    /// `output_format` (FR-011 / FR-012).
+    ///
+    /// Non-default formats are persisted in the frontmatter so the requested
+    /// artifact is recorded from the moment the file lands on disk.
+    pub async fn create_with_format(
+        &self,
+        name: &str,
+        title: &str,
+        topic: &str,
+        output_format: crate::run_config::OutputFormat,
+    ) -> Result<ResearchItem> {
         let name = ResearchName::try_new(name)?;
         if ResearchIo::item_exists(&self.research_root, &name).await {
             return Err(ResearchError::AlreadyExists(name.to_string()));
         }
-        let item = ResearchItem::new(name.clone(), title, topic);
+        let mut item = ResearchItem::new(name.clone(), title, topic);
+        if output_format != crate::run_config::OutputFormat::Report {
+            item.output_format = Some(output_format.as_str().to_string());
+        }
         ResearchIo::create_item_dirs(&self.research_root, &name).await?;
-        let content = render_skeleton(&name, title, topic);
+        let content = render_skeleton(&name, title, topic, output_format);
         ResearchIo::atomic_write(
             ResearchIo::research_md_path(&self.research_root, &name),
             &content,
@@ -139,6 +159,7 @@ impl ResearchManager {
         tracing::info!(
             name = %name,
             title = %title,
+            format = %output_format.as_str(),
             "research: created research item"
         );
         self.refresh_index().await?;

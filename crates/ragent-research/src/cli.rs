@@ -10,7 +10,7 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
@@ -316,7 +316,7 @@ impl ResearchCliCommand {
                \n\
                SUBCOMMANDS:\n\
                                    create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
-                                         [--format report|executive-summary|comparison-table|source-bibliography]\n\
+                                         [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
                                          [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
                                          --from-url            Fetch the URL and use its content as the research subject\n\
@@ -324,7 +324,7 @@ impl ResearchCliCommand {
                                                                the primary source; web search still runs.\n\
                                          --iterations          Override the default maximum number of iterations.\n\
                                          --depth               Choose a preset: shallow, standard, or deep (default: standard).\n\
-                                         --format              Select the output artifact format (default: report).\n\
+                                         --format              Select the output artifact format. Values: report, executive-summary, comparison-table, source-bibliography, imrad (default: report).\n\
                                          --fetch-concurrently  Override the maximum number of candidate pages fetched\n\
                                                                in parallel during the web-gathering phase (default 10).\n\
                                          --use-local           Enable local-file scanning (in-project + extras).\n\
@@ -429,6 +429,20 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
         SessionEvent::Done { total_sources } => (
             "done",
             serde_json::json!({ "total_sources": total_sources }),
+        ),
+        SessionEvent::ConfigSnapshot {
+            output_format,
+            depth,
+            iterations,
+            from_url,
+        } => (
+            "config",
+            serde_json::json!({
+                "output_format": output_format,
+                "depth": depth,
+                "iterations": iterations,
+                "from_url": from_url,
+            }),
         ),
     };
     format!(
@@ -865,6 +879,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_create_with_imrad_format() {
+        let cmd = ResearchCliCommand::parse("create foo topic words --format imrad");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                format,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "topic words");
+                assert_eq!(format.as_deref(), Some("imrad"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_create_with_fetch_concurrently() {
         let cmd = ResearchCliCommand::parse("create foo topic words --fetch-concurrently 20");
         match cmd {
@@ -1031,6 +1063,15 @@ mod tests {
         ] {
             assert!(h.contains(sub), "help missing `{sub}`");
         }
+    }
+
+    #[test]
+    fn help_message_lists_imrad_format_option() {
+        let h = ResearchCliCommand::build_help_message();
+        assert!(
+            h.contains("imrad"),
+            "help missing `imrad` format option: {h}"
+        );
     }
 
     #[test]

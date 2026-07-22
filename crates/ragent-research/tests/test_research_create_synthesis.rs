@@ -394,3 +394,166 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
     assert!(body.contains("**Implication:**"));
     assert!(body.contains("https://example.com/async"));
 }
+
+#[tokio::test]
+async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
+    let tmp = TempDir::new().unwrap();
+    let research_root = tmp.path().join("research");
+    tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+    let session = session_with_engine(&research_root, Arc::new(WellFormedMockEngine));
+    let observer = Arc::new(CaptureSynthesize::default());
+
+    let cfg = SessionConfig {
+        topic: "Rust async".into(),
+        output_format: OutputFormat::Imrad,
+        max_web_results: 5,
+        max_local_sources: 5,
+        disable_local: true,
+        disable_specs: true,
+        ..SessionConfig::default()
+    };
+
+    let _outcome = session
+        .run("imrad-test", "IMRaD Test", &cfg, observer.clone())
+        .await
+        .unwrap();
+
+    // The LLM-synthesized path should be tagged as Llm.
+    let has_llm;
+    {
+        let outcomes = observer.outcomes.lock().unwrap();
+        has_llm = outcomes.contains(&SynthesizeOutcome::Llm);
+    }
+    assert!(
+        has_llm,
+        "expected at least one Llm outcome for IMRaD format, got {:?}",
+        observer.outcomes.lock().unwrap()
+    );
+
+    let body = tokio::fs::read_to_string(research_root.join("imrad-test/RESEARCH.md"))
+        .await
+        .unwrap();
+
+    // FR-002 / FR-012: non-default format is recorded in frontmatter.
+    assert!(
+        body.contains("requested_format: imrad"),
+        "frontmatter should record requested IMRaD format, got:\n{body}"
+    );
+
+    // FR-004: exact H2 section order.
+    let h2: Vec<&str> = body
+        .lines()
+        .filter(|line| line.starts_with("## "))
+        .map(|line| line.trim())
+        .collect();
+    assert_eq!(
+        h2,
+        vec![
+            "## Abstract",
+            "## Introduction",
+            "## Methods",
+            "## Results",
+            "## Discussion",
+            "## References Index",
+        ],
+        "IMRaD output must use the canonical H2 order:\ngot: {h2:?}\nbody:\n{body}"
+    );
+
+    // Legacy report H2 headings must not appear.
+    let forbidden = ["## Topic", "## Search Queries", "## Summary", "## Findings"];
+    for heading in forbidden {
+        assert!(
+            !h2.contains(&heading),
+            "legacy top-level heading `{heading}` must not appear in IMRaD H2 headings: {h2:?}\nbody:\n{body}"
+        );
+    }
+
+    // FR-005 / FR-008: the same summary populates Abstract and Results/Summary.
+    assert!(
+        body.contains("LLM-synthesized summary of Rust async."),
+        "Abstract/Results must contain the LLM summary verbatim, got:\n{body}"
+    );
+
+    // FR-006: Introduction contains the topic and objective framing.
+    assert!(
+        body.contains("## Introduction"),
+        "IMRaD output must contain an Introduction section, got:\n{body}"
+    );
+    assert!(
+        body.contains("Rust async"),
+        "Introduction must contain the topic, got:\n{body}"
+    );
+    assert!(
+        body.contains("objective is to produce evidence-based findings"),
+        "Introduction must contain the research objective framing, got:\n{body}"
+    );
+
+    // FR-007: Methods lists the decomposed web query and configuration note.
+    assert!(
+        body.contains("### Search Queries"),
+        "Methods section must contain Search Queries sub-section, got:\n{body}"
+    );
+    assert!(
+        body.contains("- Rust async"),
+        "Methods Search Queries must list the decomposed query, got:\n{body}"
+    );
+    assert!(
+        body.contains("### Research Configuration"),
+        "Methods section must contain Research Configuration sub-section, got:\n{body}"
+    );
+
+    // FR-008: Results has Summary, Findings, and Findings Relationship Diagram.
+    let results_idx = body.find("## Results").expect("Results section exists");
+    let discussion_idx = body
+        .find("## Discussion")
+        .expect("Discussion section exists");
+    let results_section = &body[results_idx..discussion_idx];
+    assert!(
+        results_section.contains("### Summary"),
+        "Results must contain Summary sub-section, got:\n{results_section}"
+    );
+    assert!(
+        results_section.contains("### Findings"),
+        "Results must contain Findings sub-section, got:\n{results_section}"
+    );
+    assert!(
+        results_section.contains("### Findings Relationship Diagram"),
+        "Results must contain Findings Relationship Diagram sub-section, got:\n{results_section}"
+    );
+    assert!(
+        results_section.contains("The source describes async/await idioms [#1]"),
+        "Results Findings must contain the LLM finding verbatim, got:\n{results_section}"
+    );
+    assert!(
+        results_section.contains("### Finding 1 — The source describes async/await idioms"),
+        "Results Findings must have a derived headline heading, got:\n{results_section}"
+    );
+
+    // FR-009: Discussion contains cross-references and open questions.
+    let discussion_idx = body
+        .find("## Discussion")
+        .expect("Discussion section exists");
+    let refs_idx = body
+        .find("## References Index")
+        .expect("References Index section exists");
+    let discussion_section = &body[discussion_idx..refs_idx];
+    assert!(
+        discussion_section.contains("### In-Project Cross-References"),
+        "Discussion must contain In-Project Cross-References sub-section, got:\n{discussion_section}"
+    );
+    assert!(
+        discussion_section.contains("### Open Questions"),
+        "Discussion must contain Open Questions sub-section, got:\n{discussion_section}"
+    );
+
+    // FR-010: References Index is identical in content to the legacy format.
+    assert!(
+        body.contains("## References Index"),
+        "IMRaD output must contain References Index, got:\n{body}"
+    );
+    assert!(
+        body.contains("https://example.com/async"),
+        "References Index must list the captured web source, got:\n{body}"
+    );
+}

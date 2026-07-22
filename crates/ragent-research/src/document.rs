@@ -1,53 +1,32 @@
-//! RESEARCH.md document assembly — the 8 required sections (T-020, T-021, T-022, T-024, T-049).
+//! RESEARCH.md document assembly — legacy report layout and IMRaD layout.
 //!
 //! `RESEARCH.md` is the single, self-contained deliverable for each
-//! research item. The shape is fixed by FR-010:
+//! research item. Two layouts are supported:
 //!
-//! ```text
-//! ---
-//! <YAML frontmatter>
-//! ---
+//! 1. **Report** (default) — the original multi-section layout:
 //!
-//! # Title: <title>
+//!    ```text
+//!    # Title: <title>
 //!
-//! ## Topic
+//!    ## Topic
+//!    ## Search Queries
+//!    ## Summary
+//!    ## Findings
+//!    ## Findings Relationship Diagram
+//!    ## In-Project Cross-References
+//!    ## Open Questions
+//!    ## References Index
+//!    ```
 //!
-//! <topic description>
+//! 2. **IMRaD** — selected via [`OutputFormat::Imrad`](crate::run_config::OutputFormat);
+//!    restructures the same content into the scientific/technical report
+//!    convention (Abstract, Introduction, Methods, Results, Discussion,
+//!    References Index) while preserving all existing finding paragraphs,
+//!    the relationship diagram, cross-references, open questions, and
+//!    references index (specs/imradreport).
 //!
-//! ## Summary
-//!
-//! <one-paragraph summary of the gathered evidence>
-//!
-//! ## Findings
-//!
-//! <numbered findings, each citing references>
-//!
-//! ## In-Project Cross-References
-//!
-//! <relevant in-project files with one-line relevance notes>
-//!
-//! ## Open Questions
-//!
-//! <bulleted open questions>
-//!
-//! ## References Index
-//!
-//! | # | Type | Path/URL | Title | Published | Relevance | Captured |
-//! |---|------|----------|-------|-----------|-----------|----------|
-//! | 1 | web  | https://... | ... | 2024-03-22 | ... | ... |
-//! | 2 | local | src/lib.rs | ... | — | ... | ... |
-//! | 3 | spec  | foo | ... | — | ... | ... |
-//! ```
-//!
-//! The **Published** column shows each web source's publication date (parsed
-//! from the page's embedded metadata at fetch time) and `—` for sources that
-//! have no publication date. Each finding also carries a `**Source date
-//! range:**` line summarising the earliest–latest publication dates of its
-//! cited web sources so the relative age of the evidence is visible at a
-//! glance.
-//!
-//! All sections are always present (even if empty) so a downstream tool that
-//! reads `RESEARCH.md` can rely on a stable structure.
+//! In both layouts all sections are always present (even if empty) so a
+//! downstream tool that reads `RESEARCH.md` can rely on a stable structure.
 
 use crate::io::ResearchIo;
 use crate::item::ResearchItem;
@@ -62,12 +41,13 @@ use regex::Regex;
 /// (NFR-006 + the size-cap risk in the PLAN.md Risks table).
 pub const MAX_SOURCE_BODY_BYTES: usize = 256 * 1024;
 
-/// The 8 sections that appear in every `RESEARCH.md`, in order (FR-010).
+/// The 9 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
 pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
     "Search Queries",
     "Summary",
     "Findings",
+    "Findings Relationship Diagram",
     "In-Project Cross-References",
     "Open Questions",
     "References Index",
@@ -201,17 +181,25 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
     headline
 }
 
-/// Assemble a `RESEARCH.md` document from the supplied [`ResearchDocument`].
+/// Assemble a `RESEARCH.md` payload from a populated `ResearchDocument`.
 ///
-/// The output always contains the 8 FR-010 sections, in order, even when
-/// the caller passes no findings/questions — empty sections render as
-/// "(none yet)" placeholders so downstream tooling can rely on the
-/// structure.
+/// The returned [`AssembledDocument`] always contains the YAML frontmatter,
+/// the `# Title:` line, and a body whose section order depends on
+/// `doc.output_format`:
 ///
-/// References are numbered 1..=N in the order they appear in
-/// `ResearchItem::sources`. Any `[#N]` marker in the body is preserved as
-/// written by the caller (T-022); the assembler does not invent or rewrite
-/// citation numbers.
+/// * [`OutputFormat::Report`](crate::run_config::OutputFormat::Report)
+///   (default) and all other existing formats emit the legacy multi-section
+///   layout: Topic, Search Queries, Summary, Findings, Findings Relationship
+///   Diagram, In-Project Cross-References, Open Questions, References Index.
+/// * [`OutputFormat::Imrad`](crate::run_config::OutputFormat::Imrad) emits
+///   the IMRaD layout required by specs/imradreport: Abstract, Introduction,
+///   Methods, Results, Discussion, References Index. The same `summary`,
+///   `findings`, `cross_references`, `open_questions`, and `sources` fields feed
+///   the corresponding sections, and the findings relationship diagram is
+///   rendered as a sub-section of Results.
+///
+/// Empty sections always render a placeholder so the file structure is stable
+/// for downstream tooling.
 pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     let frontmatter = doc.item.render_frontmatter();
     let title = doc.item.title.clone();
@@ -219,26 +207,44 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 
     let mut body = String::new();
 
-    // FR-020: if a template body was supplied, use it as the skeleton after
-    // substituting the standard placeholders.
-    //
-    // FR-007 / T-006: the template is MERGED with the standard sections, not
-    // a replacement for them. The substituted template body is prepended, and
-    // the eight FR-010 sections (Topic, Search Queries, Summary, Findings,
-    // In-Project Cross-References, Open Questions, References Index) are
-    // always appended below in their canonical order. In particular, the
-    // Findings section and its five required labeled paragraphs (Headline,
-    // Observation, Analysis, Cross-reference / Dependencies, Implication) remain mandatory
-    // regardless of what the template provides.
+    // FR-020 / imradreport: if a template body was supplied, use it as the
+    // skeleton after substituting the standard placeholders.
     if let Some(template) = &doc.template_body {
         body.push_str(&apply_template(template, &title, &topic));
         body.push_str("\n\n");
     }
 
-    // ── Title ────────────────────────────────────────────────────────────
+    // ── Title ──────────────────────��─────────────────────────────────────
     body.push_str(&format!("# Title: {}\n\n", title));
 
-    // ── Topic ────────────────────────────────────────────────────────────
+    // FR-004 / specs/imradreport: choose between the legacy report layout and
+    // the IMRaD layout based on the configured output format.
+    if doc.output_format == crate::run_config::OutputFormat::Imrad {
+        body.push_str(&assemble_imrad_body(doc, &topic));
+    } else {
+        body.push_str(&assemble_report_body(doc, &topic));
+    }
+
+    let content = format!("{frontmatter}\n{body}");
+    AssembledDocument {
+        content,
+        frontmatter: frontmatter
+            .trim_start_matches("---\n")
+            .trim_end_matches("---\n")
+            .to_string(),
+        body,
+    }
+}
+
+/// Build the body of a legacy multi-section `RESEARCH.md` report.
+///
+/// This preserves the original section order: Topic, Search Queries, Summary,
+/// Findings, Findings Relationship Diagram, In-Project Cross-References,
+/// Open Questions, References Index.
+fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
+    let mut body = String::new();
+
+    // ── Topic ────────────────────────────────────────────���───────────────
     body.push_str("## Topic\n\n");
     body.push_str(topic.trim());
     body.push_str("\n\n");
@@ -266,22 +272,15 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     }
     body.push('\n');
 
-    // ── Findings ─────────────────────────────────────────────────────────
+    // ── Findings ───────────────────────────────────���─────────────────────
     body.push_str("## Findings\n\n");
     if doc.findings.is_empty() {
         body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
             let n = idx + 1;
-            // Findings contain at least the five required bold-labeled paragraphs.
-            // Ensure the required labels start on their own line and are separated
-            // by a blank line. Preserve any additional labeled paragraphs beyond
-            // the five required ones.
             let normalized = normalize_finding_labels(finding.trim());
             let (headline, mut remainder) = extract_headline(&normalized, n);
-            // Append a Sources list for any [#N] citations present in the finding.
-            // This makes the evidence backing each finding explicit without
-            // requiring the LLM to also emit a separate Sources paragraph.
             if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
                 remainder.push_str("\n\n");
                 remainder.push_str(&sources_list);
@@ -289,6 +288,9 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
             body.push_str(&format!("### Finding {n} — {headline}\n\n{remainder}\n\n"));
         }
     }
+    // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
+    body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
+
     // ── In-Project Cross-References ─────────────────────────────────────
     body.push_str("## In-Project Cross-References\n\n");
     if doc.cross_references.is_empty() {
@@ -324,23 +326,151 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
         Utc::now(),
     ));
 
-    let content = format!("{frontmatter}\n{body}");
-    AssembledDocument {
-        content,
-        frontmatter: frontmatter
-            .trim_start_matches("---\n")
-            .trim_end_matches("---\n")
-            .to_string(),
-        body,
+    body
+}
+
+/// Build the body of an IMRaD-compliant `RESEARCH.md` report.
+///
+/// Section order follows the IMRaD convention: Abstract, Introduction, Methods,
+/// Results, Discussion, References Index. The same `ResearchDocument` fields are
+/// reused; only the headings and grouping change.
+fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
+    let mut body = String::new();
+
+    // ── Abstract (FR-005) ───────────────────────────────────────────────
+    body.push_str("## Abstract\n\n");
+    if doc.summary.trim().is_empty() {
+        body.push_str(
+            "_(no abstract recorded yet — run a gathering pass to populate this section)_\n\n",
+        );
+    } else {
+        body.push_str(doc.summary.trim());
+        body.push_str("\n\n");
     }
+
+    // ── Introduction (FR-006) ─────────────────────────────────────────────
+    body.push_str("## Introduction\n\n");
+    if topic.trim().is_empty() {
+        body.push_str("_(no research topic specified)_\n\n");
+    } else {
+        body.push_str(topic.trim());
+        body.push_str("\n\n");
+        body.push_str(
+            "This research item investigates the topic above by gathering and synthesizing \
+             web sources, local project files, and related specifications. The objective is \
+             to produce evidence-based findings that can be mapped back to the project \
+             context.\n\n",
+        );
+    }
+
+    // ── Methods (FR-007) ──────────────────────────────────────────────────
+    body.push_str("## Methods\n\n");
+    body.push_str("### Search Queries\n\n");
+    if doc.decomposed_queries.is_empty() {
+        body.push_str(
+            "_(no query decomposition was used — the original topic was searched as a single query)_\n\n",
+        );
+    } else {
+        for q in &doc.decomposed_queries {
+            body.push_str(&format!("- {}\n", q.trim()));
+        }
+        body.push('\n');
+    }
+    body.push_str("### Research Configuration\n\n");
+    body.push_str(
+        "Evidence was gathered through automated web search and local cross-reference \
+                 scanning; the resulting corpus was synthesized into structured findings. \
+                 Empty sections below indicate that the corresponding evidence was not yet \
+                 produced by the gathering pass.\n\n",
+    );
+
+    // ── Results (FR-008) ───────────────────────────────────────────────────
+    body.push_str("## Results\n\n");
+    body.push_str("### Summary\n\n");
+    if doc.summary.trim().is_empty() {
+        body.push_str("_(no summary recorded yet — run a gathering pass to populate)_\n\n");
+    } else {
+        body.push_str(doc.summary.trim());
+        body.push_str("\n\n");
+    }
+    body.push_str("### Findings\n\n");
+    if doc.findings.is_empty() {
+        body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
+    } else {
+        for (idx, finding) in doc.findings.iter().enumerate() {
+            let n = idx + 1;
+            let normalized = normalize_finding_labels(finding.trim());
+            let (headline, mut remainder) = extract_headline(&normalized, n);
+            if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
+                remainder.push_str("\n\n");
+                remainder.push_str(&sources_list);
+            }
+            body.push_str(&format!("### Finding {n} — {headline}\n\n{remainder}\n\n"));
+        }
+    }
+    // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012). In the
+    // IMRaD layout it is a sub-section of Results, so we use a `###` heading
+    // and ask the diagram renderer to return only the body.
+    body.push_str("### Findings Relationship Diagram\n\n");
+    body.push_str(&crate::diagram::render_findings_diagram_body(&doc.findings));
+
+    // ── Discussion (FR-009) ────────────────────────────────────────────────
+    body.push_str("## Discussion\n\n");
+    body.push_str("### In-Project Cross-References\n\n");
+    if doc.cross_references.is_empty() {
+        body.push_str(
+            "_(no relevant in-project files were identified during the gathering pass)_\n\n",
+        );
+    } else {
+        body.push_str("| Path | Relevance |\n|------|-----------|\n");
+        for cr in &doc.cross_references {
+            body.push_str(&format!(
+                "| `{}` | {} |\n",
+                escape_pipe(&cr.path),
+                escape_pipe(&cr.relevance),
+            ));
+        }
+        body.push('\n');
+    }
+    body.push_str("### Open Questions\n\n");
+    if doc.open_questions.is_empty() {
+        body.push_str("_(none)_\n\n");
+    } else {
+        for q in &doc.open_questions {
+            body.push_str(&format!("- {}\n", q.trim()));
+        }
+        body.push('\n');
+    }
+
+    // ── References Index (FR-010) ─────────────────────────────────────────
+    body.push_str(&ResearchIo::render_references_index(
+        &doc.item.sources,
+        Utc::now(),
+    ));
+
+    body
 }
 
 /// Render the empty `RESEARCH.md` skeleton that [`crate::manager::ResearchManager::create`]
-/// writes before any gathering has run (FR-005). All sections are present
-/// in the placeholder form so the file is well-formed from the moment it
-/// lands on disk.
-pub fn render_skeleton(name: &ResearchName, title: &str, topic: &str) -> String {
-    let placeholder = ResearchItem::new(name.clone(), title, topic);
+/// writes before any gathering has run (FR-005 / FR-011). All sections are
+/// present in the placeholder form so the file is well-formed from the moment
+/// it lands on disk.
+///
+/// The `output_format` argument selects between the legacy report layout and
+/// the IMRaD layout; callers that do not care should pass
+/// [`OutputFormat::Report`].
+pub fn render_skeleton(
+    name: &ResearchName,
+    title: &str,
+    topic: &str,
+    output_format: crate::run_config::OutputFormat,
+) -> String {
+    let mut placeholder = ResearchItem::new(name.clone(), title, topic);
+    // Persist non-default formats in the frontmatter (FR-012) so the skeleton
+    // records the requested artifact from the moment it is created.
+    if output_format != crate::run_config::OutputFormat::Report {
+        placeholder.output_format = Some(output_format.as_str().to_string());
+    }
     let doc = ResearchDocument {
         item: placeholder,
         summary: String::new(),
@@ -349,7 +479,7 @@ pub fn render_skeleton(name: &ResearchName, title: &str, topic: &str) -> String 
         open_questions: Vec::new(),
         template_body: None,
         decomposed_queries: Vec::new(),
-        output_format: crate::run_config::OutputFormat::Report,
+        output_format,
     };
     assemble_document(&doc).content
 }
@@ -951,7 +1081,12 @@ mod tests {
 
     #[test]
     fn render_skeleton_produces_well_formed_document() {
-        let skeleton = render_skeleton(&sample_name(), "Rust Async", "topic");
+        let skeleton = render_skeleton(
+            &sample_name(),
+            "Rust Async",
+            "topic",
+            crate::run_config::OutputFormat::Report,
+        );
         assert!(skeleton.starts_with("---\n"));
         assert!(skeleton.contains("status: draft"));
         assert!(skeleton.contains("## Topic"));

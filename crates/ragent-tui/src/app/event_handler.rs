@@ -2104,27 +2104,54 @@ impl App {
             .map(|t| t.status)
             .unwrap_or(ragent_specs::spec::TaskStatus::Pending);
 
-        if task_status != ragent_specs::spec::TaskStatus::Completed {
-            // Task did not complete — stop the run so the user can resume.
+        // Only `Blocked` stops the run — the agent explicitly signalled it
+        // cannot proceed. For `Pending` or `InProgress` (the agent finished
+        // its turn but forgot to call `spec_task_update`), auto-mark the task
+        // as `Completed` and continue to the next task. This is the common
+        // case: agents implement the task, end their turn (often via
+        // `task_complete`), but don't update the spec task status.
+        if task_status == ragent_specs::spec::TaskStatus::Blocked {
             self.spec_impl_state = None;
             self.append_assistant_text(&format!(
-                "From: /spec impl\n\n🚫 Task **{}** ({}/{}) is **{}** — run stopped.\n\n\
+                "From: /spec impl\n\n🚫 Task **{}** ({}/{}) is **blocked** — run stopped.\n\n\
                  Re-run `/spec impl {}` to resume from this task.",
-                current_task_id,
-                state.current_rank,
-                state.total,
-                task_status.as_str(),
-                state.spec_id,
+                current_task_id, state.current_rank, state.total, state.spec_id,
             ));
             self.push_log_no_agent(
                 LogLevel::Warn,
-                format!(
-                    "spec impl: task {} not completed (status={})",
-                    current_task_id,
-                    task_status.as_str(),
-                ),
+                format!("spec impl: task {} blocked — run stopped", current_task_id,),
             );
             return;
+        }
+
+        // If the agent didn't mark the task as completed itself, do it now
+        // so the PLAN.md reflects reality and the run can continue.
+        let mut spec = spec;
+        if task_status != ragent_specs::spec::TaskStatus::Completed {
+            if let Err(e) = tokio::task::block_in_place(|| {
+                rt.block_on(async {
+                    mgr.update_task_status(
+                        &mut spec,
+                        &current_task_id,
+                        ragent_specs::spec::TaskStatus::Completed,
+                    )
+                    .await
+                })
+            }) {
+                self.spec_impl_state = None;
+                self.append_assistant_text(&format!(
+                    "From: /spec impl\n\n⚠️ Failed to auto-complete task **{}**: {e}",
+                    current_task_id,
+                ));
+                return;
+            }
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!(
+                    "spec impl: auto-marked task {} as completed (agent did not call spec_task_update)",
+                    current_task_id,
+                ),
+            );
         }
 
         // Task completed — advance to the next task or finish the run.
@@ -2132,7 +2159,6 @@ impl App {
         if next_rank > state.total {
             // All tasks done — transition the spec to `implemented`.
             self.spec_impl_state = None;
-            let mut spec = spec;
             if spec.status == SpecStatus::InProgress {
                 if let Err(e) = tokio::task::block_in_place(|| {
                     rt.block_on(async {
@@ -2155,32 +2181,15 @@ impl App {
             return;
         }
 
-        // Dispatch the next task's prompt.
+        // Dispatch the next task's prompt using the original runner so the
+        // rank/total reflect the original execution plan, even as tasks are
+        // completed and filtered out of a rebuilt runner.
         let next_task_id = state
             .task_ids
             .get(next_rank.saturating_sub(1))
             .cloned()
             .unwrap_or_default();
-        // Build the next task's prompt via a fresh runner so we don't need to
-        // carry the `SpecImplRunner` across turns (it owns the parsed tasks).
-        let opts = ragent_specs::ImplOptions::new();
-        let runner = match tokio::task::block_in_place(|| {
-            rt.block_on(async {
-                ragent_specs::SpecImplRunner::new(&state.spec_id, state.specs_root.clone(), opts)
-                    .await
-            })
-        }) {
-            Ok(r) => r,
-            Err(e) => {
-                self.spec_impl_state = None;
-                self.append_assistant_text(&format!(
-                    "From: /spec impl\n\n⚠️ Failed to rebuild runner for task {}: {}",
-                    next_rank, e,
-                ));
-                return;
-            }
-        };
-        let prompt = match runner.task_prompt(next_rank) {
+        let prompt = match state.runner.task_prompt(next_rank) {
             Some(p) => p,
             None => {
                 self.spec_impl_state = None;

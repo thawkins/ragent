@@ -150,14 +150,28 @@ impl App {
                         }),
                     }
                 });
+                let resolved_format = format
+                    .as_deref()
+                    .and_then(OutputFormat::parse)
+                    .unwrap_or(OutputFormat::Report)
+                    .as_str();
                 let subject_line = if topic_for_assistant.is_empty() {
                     format!("URL: {}", from_url_for_msg.as_deref().unwrap_or(""))
                 } else {
                     format!("Topic: {topic_for_assistant}")
                 };
-                let rendered = format!(
-                    "From: /research create\n📝 **Gathering sources for `{name}`…**\n\n{subject_line}\n\nWatch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\nTip: run `/research list` once finished, or `/research open {name}` to view the result."
-                );
+                let rendered = {
+                    let mut s = format!("From: /research create\n");
+                    s.push_str(&format!(
+                        "📝 **Gathering sources for `{name}`…**\n\n{subject_line}\n"
+                    ));
+                    s.push_str(&format!("Format: `{resolved_format}`\n\n"));
+                    s.push_str("Watch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\n");
+                    s.push_str(
+                                          "Tip: run `/research list` once finished, or `/research open {name}` to view the result.",
+                                      );
+                    s
+                };
                 self.append_assistant_text(&rendered);
             }
             ResearchCliCommand::List { all } => {

@@ -95,13 +95,15 @@ fn test_resume_from_partial_completion() {
     let order = resolve_execution_order(&tasks).unwrap();
     let resumed = ragent_specs::plan_parser::filter_for_resume(&tasks, &order);
 
-    // T-003 depends on T-001 (completed) → included
-    // T-004 depends on T-002 (completed) → included
-    // T-005 depends on T-002 (completed) AND T-003 (pending) → NOT included
-    assert_eq!(resumed.len(), 2);
+    // T-001 and T-002 are completed and skipped.
+    // T-003, T-004 and T-005 remain in topological order even if some
+    // dependencies are still pending — the sequential driver will stop on any
+    // blocked task before its dependents run.
+    assert_eq!(resumed.len(), 3);
     let ids: Vec<&str> = resumed.iter().map(|&i| tasks[i].id.as_str()).collect();
     assert!(ids.contains(&"T-003"));
     assert!(ids.contains(&"T-004"));
+    assert!(ids.contains(&"T-005"));
 }
 
 #[test]

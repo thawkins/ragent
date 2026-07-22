@@ -317,6 +317,19 @@ pub enum SessionEvent {
         /// Total number of sources captured.
         total_sources: usize,
     },
+    /// Resolved run options, emitted once at the start of a session so that
+    /// every observer (CLI JSON, TUI progress log, HTTP response) can confirm
+    /// the output format and other flags that are in effect (FR-012).
+    ConfigSnapshot {
+        /// Output artifact selected via `--format`.
+        output_format: String,
+        /// Depth preset selected via `--depth`, if any.
+        depth: Option<String>,
+        /// Iteration override selected via `--iterations`, if any.
+        iterations: Option<u32>,
+        /// `--from-url` primary source, if any.
+        from_url: Option<String>,
+    },
 }
 
 /// Outcome of the synthesis phase, surfaced via
@@ -917,6 +930,15 @@ impl ResearchSession {
             phase: SessionPhase::Setup,
         });
 
+        // Confirm resolved options up front so callers can verify the expected
+        // output format and other flags before any expensive work runs.
+        observer.on_event(SessionEvent::ConfigSnapshot {
+            output_format: config.output_format.as_str().to_string(),
+            depth: config.depth.map(|d| d.as_str().to_string()),
+            iterations: config.iterations,
+            from_url: config.from_url.clone(),
+        });
+
         // ── --from-url pre-step ──────────────────────────────────────────
         //
         // Fetch the primary page up front and capture it as the first web
@@ -1036,7 +1058,9 @@ impl ResearchSession {
         let mut item = if item_exists {
             self.manager.show(name_str).await?
         } else {
-            self.manager.create(name_str, &item_title, &topic).await?
+            self.manager
+                .create_with_format(name_str, &item_title, &topic, config.output_format)
+                .await?
         };
         mark_in_progress(&mut item);
         self.manager.start_gathering(name_str).await?;

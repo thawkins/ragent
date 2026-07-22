@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-beta.7
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.6` to `0.1.0-beta.7`.
+- `cargo check` passes cleanly with the new version.
+
 ## Version: 0.1.0-beta.6
 
 ### Changed — Version bump
@@ -10,7 +17,6 @@
 ## Version: 0.1.0-beta.5
 
 ### Added — Live telemetry reconfiguration, agent metric recording, and sudo askpass broker
-
 - `/telemetry on|off` now reconfigures the live `TelemetrySubsystem` in place
   (shuts down the meter provider on `off`, builds a fresh one on `on`) so the
   toggle takes effect immediately instead of requiring a restart. The
@@ -2099,6 +2105,18 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 - **Initial commit** — Project created.
 
 ## [Unreleased]
+
+### Fixed — Mermaid findings diagram now renders when labels contain quotes or backticks
+
+- `crates/ragent-research/src/diagram.rs::escape_mermaid_label` now replaces
+  both `"` and `` ` `` with `'` instead of trying to escape them.
+  Mermaid's double-quoted node labels (`F["..."]`) do **not** support
+  backslash-escaped quotes or backticks, so the previous `\"` output and any
+  inline code spans caused a parser error (visible in GitHub/GitLab previews and
+  `mermaid-cli`).
+- Updated the quote-escaping unit test and added a new regression test covering
+  backtick-laden labels such as `` `rlms` ``.
+- Verified the generated diagram renders with `@mermaid-js/mermaid-cli`.
 
 ### researchprompt — improved `/research create` synthesis prompt
 

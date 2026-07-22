@@ -399,28 +399,15 @@ pub fn filter_for_task(tasks: &[PlanTask], target_id: &str) -> Result<Vec<usize>
 
 /// Skip already-completed tasks for resume support (FR-020).
 ///
-/// Returns execution order with completed tasks removed and blocked tasks
-/// whose dependencies are now all completed unblocked.
+/// Returns the execution order with completed tasks removed. Tasks that are
+/// still pending or blocked are kept in their topological order; the
+/// sequential driver processes them one at a time so dependencies are satisfied
+/// naturally, and any blocked task stops the run before its dependents run.
 pub fn filter_for_resume(tasks: &[PlanTask], order: &[usize]) -> Vec<usize> {
-    let completed: HashSet<&str> = tasks
-        .iter()
-        .filter(|t| t.status == TaskStatus::Completed)
-        .map(|t| t.id.as_str())
-        .collect();
-
     order
         .iter()
         .copied()
-        .filter(|&i| {
-            let task = &tasks[i];
-            if task.status == TaskStatus::Completed {
-                return false;
-            }
-            // Check if all dependencies are completed
-            task.dependencies
-                .iter()
-                .all(|dep| completed.contains(dep.as_str()))
-        })
+        .filter(|&i| tasks[i].status != TaskStatus::Completed)
         .collect()
 }
 
@@ -748,10 +735,10 @@ mod tests {
         ];
         let order = resolve_execution_order(&tasks).unwrap();
         let resumed = filter_for_resume(&tasks, &order);
-        // T-002 is included (its dep T-001 is completed)
-        // T-003 is NOT included (its dep T-002 is still in_progress, not completed)
-        assert_eq!(resumed.len(), 1);
+        // Completed T-001 is skipped; T-002 and T-003 remain in topological order.
+        assert_eq!(resumed.len(), 2);
         assert_eq!(tasks[resumed[0]].id, "T-002");
+        assert_eq!(tasks[resumed[1]].id, "T-003");
     }
     #[test]
     fn test_filter_for_resume_blocked_unblocked() {

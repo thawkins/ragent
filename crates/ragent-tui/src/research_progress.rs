@@ -285,6 +285,29 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
             "marked complete".to_string(),
             Some(*total_sources),
         ),
+        SessionEvent::ConfigSnapshot {
+            output_format,
+            depth,
+            iterations,
+            from_url,
+        } => {
+            let mut parts = vec![format!("output format: {output_format}")];
+            if let Some(d) = depth {
+                parts.push(format!("depth: {d}"));
+            }
+            if let Some(i) = iterations {
+                parts.push(format!("iterations: {i}"));
+            }
+            if let Some(url) = from_url {
+                parts.push(format!("from-url: {}", sanitize_for_display(url)));
+            }
+            (
+                SessionPhase::Setup,
+                "config",
+                format!("options in use: {}", parts.join(", ")),
+                None,
+            )
+        }
         _ => (SessionPhase::Setup, "event", format!("{event:?}"), None),
     };
     let payload = ProgressPayload {
@@ -338,7 +361,7 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
     let phase = parse_phase(&payload.phase)?;
     let status = match payload.status.as_str() {
         "started" => StepStatus::Started,
-        "captured" | "done" | "queries" | "preview" => StepStatus::Done,
+        "captured" | "done" | "queries" | "preview" | "config" => StepStatus::Done,
         "failed_url" | "error" => StepStatus::Error,
         _ => return None,
     };

@@ -1594,6 +1594,10 @@ pub struct SpecImplState {
     pub current_rank: usize,
     /// Total number of tasks to execute (`task_ids.len()`).
     pub total: usize,
+    /// Snapshot of the runner used to build per-task prompts. Kept so the
+    /// sequential driver can advance through the original execution order
+    /// without rebuilding the runner after every task.
+    pub runner: ragent_specs::SpecImplRunner,
 }
 
 /// Specialised agent behaviour modes (M2 Task 2.3).

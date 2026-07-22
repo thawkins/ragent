@@ -210,6 +210,7 @@ async fn create_research(
                 StatusCode::CREATED,
                 Json(serde_json::json!({
                     "name": outcome.research_name,
+                    "format": config.output_format.as_str(),
                     "total_sources": outcome.sources.len(),
                     "events": events_json,
                 })),
