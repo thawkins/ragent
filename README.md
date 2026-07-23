@@ -70,16 +70,17 @@ It is implemented in Rust as a learning exercise for the author.
   full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
   tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
   Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
-      language filtering via `/codeindex lang <language>`
-      - **Memory system** — three-tier system with file blocks, structured SQLite store,
-        and optional embedding-based semantic search; automatic extraction, decay,
-        compression, and knowledge graph support- **Spec management** — `/spec` slash commands for creating, listing, searching,
-      validating, and tracking specification lifecycles
-      - **Research system** — `/research` slash command family and `ragent research` CLI for
-        structured information gathering (web search + local file cross-referencing) with
-        self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
-      - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
-        prompts, and file context into agent sessions- **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
+  language filtering via `/codeindex lang <language>`
+- **Memory system** — three-tier system with file blocks, structured SQLite store,
+  and optional embedding-based semantic search; automatic extraction, decay,
+  compression, and knowledge graph support
+- **Spec management** — `/spec` slash commands for creating, listing, searching,
+  validating, and tracking specification lifecycles
+- **Research system** — `/research` slash command family and `ragent research` CLI for
+  structured information gathering (web search + local file cross-referencing) with
+  self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
+- **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
+  prompts, and file context into agent sessions- **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
   mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
   permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
