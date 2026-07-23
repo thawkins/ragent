@@ -80,7 +80,8 @@ It is implemented in Rust as a learning exercise for the author.
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
-  prompts, and file context into agent sessions- **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
+  prompts, and file context into agent sessions
+- **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
   mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
 - **Autopilot mode** — autonomous operation with configurable iteration limits and
   permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
