@@ -120,17 +120,11 @@ impl Default for KeepConfig {
 /// A `CompactionConfig` with `auto` set from the legacy `enabled` field when the
 /// new `compaction.auto` was not explicitly provided. All other fields come
 /// from `current`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LegacyCompressionConfig {
     /// Deprecated field mapped to `CompactionConfig::auto`.
     pub enabled: Option<bool>,
-}
-
-impl Default for LegacyCompressionConfig {
-    fn default() -> Self {
-        Self { enabled: None }
-    }
 }
 
 /// Merge a legacy `compression.enabled` flag into a new `CompactionConfig`.

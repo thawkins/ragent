@@ -23,13 +23,13 @@ middle, and status information at the top. You can start typing immediately.
 
 ### Useful startup flags
 
-| Flag | What it does |
-|------|--------------|
-| `--model ollamacloud/kimi-k2.7-code` | Start with a specific model |
-| `--agent coder` | Start with the `coder` agent profile |
-| `--yes` | Auto-approve all permission prompts (YOLO-style) |
-| `--no-tui` | Skip the TUI and run a single prompt in the terminal |
-| `--log` | Open the TUI with the log panel already visible |
+| Flag                                   | What it does                                         |
+| -------------------------------------- | ---------------------------------------------------- |
+| `--model ollamacloud/kimi-k2.7-code` | Start with a specific model                          |
+| `--agent coder`                      | Start with the`coder` agent profile                |
+| `--yes`                              | Auto-approve all permission prompts (YOLO-style)     |
+| `--no-tui`                           | Skip the TUI and run a single prompt in the terminal |
+| `--log`                              | Open the TUI with the log panel already visible      |
 
 ### Example
 
@@ -105,7 +105,7 @@ files can consume context window.
 ### Provider setup dialog
 
 1. Start ragent.
-2. Press **`p`** to open the **Provider Setup** dialog, **or** type
+2. Type
    `/provider` in the input box.
 3. Select a provider from the list.
 4. Enter the API key when asked (or skip if not required, e.g. local Ollama).
@@ -121,7 +121,7 @@ indicator:
 
 ### Example: Ollama Cloud with `kimi-k2.7-code`
 
-1. Press `p` or type `/provider`.
+1. Type `/provider`.
 2. Choose **Ollama Cloud**.
 3. Enter your Ollama Cloud API key if prompted.
 4. Select **`kimi-k2.7-code`** from the model list.
@@ -140,21 +140,21 @@ required credentials differ.
 
 ragent supports these providers out of the box:
 
-| Provider | Typical credential | Notes |
-|----------|--------------------|-------|
-| Anthropic | `ANTHROPIC_API_KEY` | Claude family |
-| OpenAI | `OPENAI_API_KEY` | GPT family |
-| Google Gemini | `GEMINI_API_KEY` | Gemini models |
-| Hugging Face | `HF_TOKEN` | Open-source models via Inference API |
-| GitHub Copilot | IDE token (auto-discovered) | No separate API key |
-| Ollama | none (local) | Local or remote Ollama server |
-| Ollama Cloud | `OLLAMA_API_KEY` | Managed Ollama endpoints |
-| Azure AI Foundry | `AZURE_AI_FOUNDRY_API_KEY` | Microsoft Azure-hosted models |
-| Azure Resource | `AZURE_RESOURCE_API_KEY` | File-based Azure deployment config |
-| Amazon Bedrock | AWS credentials | AWS SigV4 signing |
-| Generic OpenAI | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
-| Microsoft Foundry Local | local endpoint | Local Windows AI backend |
-| XAI | `XAI_API_KEY` | xAI / Grok models |
+| Provider                | Typical credential           | Notes                                |
+| ----------------------- | ---------------------------- | ------------------------------------ |
+| Anthropic               | `ANTHROPIC_API_KEY`        | Claude family                        |
+| OpenAI                  | `OPENAI_API_KEY`           | GPT family                           |
+| Google Gemini           | `GEMINI_API_KEY`           | Gemini models                        |
+| Hugging Face            | `HF_TOKEN`                 | Open-source models via Inference API |
+| GitHub Copilot          | IDE token (auto-discovered)  | No separate API key                  |
+| Ollama                  | none (local)                 | Local or remote Ollama server        |
+| Ollama Cloud            | `OLLAMA_API_KEY`           | Managed Ollama endpoints             |
+| Azure AI Foundry        | `AZURE_AI_FOUNDRY_API_KEY` | Microsoft Azure-hosted models        |
+| Azure Resource          | `AZURE_RESOURCE_API_KEY`   | File-based Azure deployment config   |
+| Amazon Bedrock          | AWS credentials              | AWS SigV4 signing                    |
+| Generic OpenAI          | `GENERIC_OPENAI_API_KEY`   | Any OpenAI-compatible endpoint       |
+| Microsoft Foundry Local | local endpoint               | Local Windows AI backend             |
+| XAI                     | `XAI_API_KEY`              | xAI / Grok models                    |
 
 ---
 
@@ -231,7 +231,7 @@ The report is saved in your working directory and can be read back with
 `memory_read` or by opening the resulting file directly.
 
 > Note: web research requires a `TAVILY_API_KEY` environment variable or the
-corresponding key in `ragent.json`.
+> corresponding key in `ragent.json`.
 
 ---
 
@@ -311,12 +311,12 @@ Press **`Alt+L`** to toggle the **Log panel** on the right side of the screen.
 
 The Log panel shows a time-stamped, color-coded stream of runtime events:
 
-| Prefix | Meaning |
-|--------|---------|
-| `INF` | General information |
-| `TUL` | Tool call / tool result |
-| `WRN` | Warning |
-| `ERR` | Error |
+| Prefix  | Meaning                  |
+| ------- | ------------------------ |
+| `INF` | General information      |
+| `TUL` | Tool call / tool result  |
+| `WRN` | Warning                  |
+| `ERR` | Error                    |
 | `CMP` | Context-compaction event |
 
 Log entries include the short session ID and step number when available, e.g.
@@ -389,12 +389,12 @@ SQLite-backed storage on every render. Each row shows:
 
 Status colors:
 
-| Status | Color |
-|--------|-------|
-| `PENDING` | Yellow |
-| `IN_PROGRESS` | Cyan |
-| `DONE` | Green |
-| `BLOCKED` | Red |
+| Status          | Color  |
+| --------------- | ------ |
+| `PENDING`     | Yellow |
+| `IN_PROGRESS` | Cyan   |
+| `DONE`        | Green  |
+| `BLOCKED`     | Red    |
 
 ### Managing TODOs
 
@@ -477,12 +477,12 @@ The scrollbar gutter runs along the right edge of the panel.
 
 ## Side panel quick reference
 
-| Key | Panel | Purpose |
-|-----|-------|---------|
-| `Alt+L` | Log | Runtime events, tool calls, warnings, errors |
-| `Alt+P` | Profile | Live agent-loop profiler output |
-| `Alt+T` | TODO | Session TODO items and status |
-| `Alt+M` | Memory | Project/user memory and structured-memory summary |
+| Key       | Panel   | Purpose                                           |
+| --------- | ------- | ------------------------------------------------- |
+| `Alt+L` | Log     | Runtime events, tool calls, warnings, errors      |
+| `Alt+P` | Profile | Live agent-loop profiler output                   |
+| `Alt+T` | TODO    | Session TODO items and status                     |
+| `Alt+M` | Memory  | Project/user memory and structured-memory summary |
 
 All side panels support mouse scrolling and scrollbar dragging. Press the same
 shortcut again to close the panel.
@@ -491,21 +491,22 @@ shortcut again to close the panel.
 
 ## Common keybindings
 
-| Key | Action |
-|-----|--------|
-| `Enter` | Send prompt |
-| `Shift+Enter` / `Alt+Enter` | New line in input |
-| `Escape` | Cancel current agent operation |
-| `Ctrl+D` | Quit ragent |
-| `Ctrl+C` | Copy selection / arm quit |
-| `Alt+L` | Toggle Log panel |
-| `Alt+P` | Toggle Profile panel |
-| `Alt+T` | Toggle TODO panel |
-| `Alt+M` | Toggle Memory panel |
-| `Alt+V` | Paste image from clipboard |
-| `@` | Open file mention picker |
-| `/` | Open slash-command menu |
-| `?` | Show keybindings help (when input is empty) |
+| Key                             | Action                                      |
+| ------------------------------- | ------------------------------------------- |
+| `Enter`                       | Send prompt                                 |
+| `Shift+Enter` / `Alt+Enter`   | New line in input                           |
+| `Escape`                      | Cancel current agent operation              |
+| `Ctrl+D`                      | Quit ragent                                 |
+| `Ctrl+C`                      | Copy selection / arm quit                   |
+| `Alt+L`                       | Toggle Log panel                            |
+| `Alt+P`                       | Toggle Profile panel                        |
+| `Alt+T`                       | Toggle TODO panel                           |
+| `Alt+M`                       | Toggle Memory panel                         |
+| `Alt+V`                       | Paste image from clipboard                  |
+| `Alt+Y`                       | Toggle YOLO mode on/off                     |
+| `@`                           | Open file mention picker                    |
+| `/`                           | Open slash-command menu                     |
+| `?`                           | Show keybindings help (when input is empty) |
 
 ---
 

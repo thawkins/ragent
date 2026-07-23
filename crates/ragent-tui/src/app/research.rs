@@ -160,18 +160,14 @@ impl App {
                 } else {
                     format!("Topic: {topic_for_assistant}")
                 };
-                let rendered = {
-                    let mut s = format!("From: /research create\n");
-                    s.push_str(&format!(
-                        "📝 **Gathering sources for `{name}`…**\n\n{subject_line}\n"
-                    ));
-                    s.push_str(&format!("Format: `{resolved_format}`\n\n"));
-                    s.push_str("Watch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\n");
-                    s.push_str(
-                                          "Tip: run `/research list` once finished, or `/research open {name}` to view the result.",
-                                      );
-                    s
-                };
+                let rendered = format!(
+                    "From: /research create\n\
+                     📝 **Gathering sources for `{name}`…**\n\n\
+                     {subject_line}\n\
+                     Format: `{resolved_format}`\n\n\
+                     Watch the progress log below for each phase (setup, web, local, specs, synthesize, assemble, finalize).\n\
+                     Tip: run `/research list` once finished, or `/research open {name}` to view the result."
+                );
                 self.append_assistant_text(&rendered);
             }
             ResearchCliCommand::List { all } => {

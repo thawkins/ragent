@@ -1,13 +1,13 @@
 # Changelog
 
-## Version: 0.1.0-beta.7
+## Version: 0.1.0-beta.8
 
 ### Changed — Version bump
 
-- Workspace version bumped from `0.1.0-beta.6` to `0.1.0-beta.7`.
+- Workspace version bumped from `0.1.0-beta.7` to `0.1.0-beta.8`.
 - `cargo check` passes cleanly with the new version.
 
-## Version: 0.1.0-beta.6
+## Version: 0.1.0-beta.7
 
 ### Changed — Version bump
 

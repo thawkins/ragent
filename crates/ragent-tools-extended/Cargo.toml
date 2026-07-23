@@ -34,7 +34,7 @@ html2text = { workspace = true }
 readability-rs = { workspace = true }
 base64 = { workspace = true }
 
-reqwest = { workspace = true, features = ["cookies"] }
+reqwest = { workspace = true, features = ["cookies", "gzip", "deflate"] }
 regex = { workspace = true }
 percent-encoding = "2"
 docx-rust = { workspace = true }
@@ -48,6 +48,8 @@ printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }
 url = { workspace = true }
+rusqlite = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3.14"
 axum = { workspace = true }

@@ -151,6 +151,8 @@ pub struct ToolVisibilitySpecified {
     pub plan: bool,
     /// `true` when `codeindex` was explicitly set in the source JSON or via a setter.
     pub codeindex: bool,
+    /// `true` when `masterfetch` was explicitly set in the source JSON or via a setter.
+    pub masterfetch: bool,
 }
 
 /// Tool-family visibility configuration.
@@ -183,6 +185,12 @@ pub struct ToolVisibilityConfig {
     /// (via [`ToolVisibilityConfig::set_codeindex`] or by having it present in the
     /// loaded JSON).
     pub codeindex: bool,
+    /// Masterfetch web-access tools (mf_fetch, mf_crawl, mf_search,
+    /// mf_screenshot, mf_cache_clear, mf_version).
+    /// Default `true` — masterfetch tools are visible by default.
+    /// When serialised, this field is only written if the user explicitly set it
+    /// (tracked by [`ToolVisibilitySpecified::masterfetch`]).
+    pub masterfetch: bool,
     /// Tracks which switches were explicitly set, so merge/serialise can
     /// distinguish "user set this" from "this is just the default".
     pub specified: ToolVisibilitySpecified,
@@ -199,6 +207,7 @@ impl ToolVisibilityConfig {
             ("agents", self.agents),
             ("plan", self.plan),
             ("codeindex", self.codeindex),
+            ("masterfetch", self.masterfetch),
         ]
         .into_iter()
     }
@@ -227,6 +236,9 @@ impl Serialize for ToolVisibilityConfig {
         if self.specified.codeindex {
             count += 1;
         }
+        if self.specified.masterfetch {
+            count += 1;
+        }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
         s.serialize_field("office", &self.office)?;
         s.serialize_field("github", &self.github)?;
@@ -236,6 +248,9 @@ impl Serialize for ToolVisibilityConfig {
         s.serialize_field("plan", &self.plan)?;
         if self.specified.codeindex {
             s.serialize_field("codeindex", &self.codeindex)?;
+        }
+        if self.specified.masterfetch {
+            s.serialize_field("masterfetch", &self.masterfetch)?;
         }
         s.end()
     }
@@ -356,6 +371,7 @@ impl Default for ToolVisibilityConfig {
             agents: false,
             plan: false,
             codeindex: true,
+            masterfetch: true,
             specified: ToolVisibilitySpecified::default(),
         }
     }
@@ -375,6 +391,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             agents: Option<bool>,
             plan: Option<bool>,
             codeindex: Option<bool>,
+            masterfetch: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
@@ -386,6 +403,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             agents: raw.agents.unwrap_or_else(default_false),
             plan: raw.plan.unwrap_or_else(default_false),
             codeindex: raw.codeindex.unwrap_or_else(default_true),
+            masterfetch: raw.masterfetch.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
                 github: raw.github.is_some(),
@@ -394,6 +412,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 agents: raw.agents.is_some(),
                 plan: raw.plan.is_some(),
                 codeindex: raw.codeindex.is_some(),
+                masterfetch: raw.masterfetch.is_some(),
             },
         })
     }
@@ -487,10 +506,17 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "codeindex_dependencies",
             "codeindex_reindex",
         ]),
+        "masterfetch" => Some(&[
+            "mf_fetch",
+            "mf_crawl",
+            "mf_search",
+            "mf_screenshot",
+            "mf_cache_clear",
+            "mf_version",
+        ]),
         _ => None,
     }
 }
-
 /// Configuration for LLM streaming behaviour (timeouts, retries).
 ///
 /// The two timeouts serve distinct purposes:
@@ -1646,27 +1672,30 @@ impl Config {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
             base.tool_visibility.specified.codeindex = true;
         }
+        if overlay.tool_visibility.specified.masterfetch {
+            base.tool_visibility.masterfetch = overlay.tool_visibility.masterfetch;
+            base.tool_visibility.specified.masterfetch = true;
+        }
 
-        // Compaction: overlay takes precedence.
-        base.compaction = overlay.compaction;
+        // Compaction: overlay takes precedence.        base.compaction = overlay.compaction;
         base.compression = LegacyCompressionConfig::default();
 
         // Apply legacy `compression.enabled` -> `compaction.auto` migration when
         // the overlay config file contains `compression` but not `compaction`.
         for path in &overlay.config_paths {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) {
-                    let has_compaction = value.get("compaction").is_some();
-                    let has_compression = value.get("compression").is_some();
-                    if !has_compaction && has_compression {
-                        if let Some(enabled) = value
-                            .get("compression")
-                            .and_then(|c| c.get("enabled"))
-                            .and_then(|v| v.as_bool())
-                        {
-                            base.compaction.auto = enabled;
-                        }
-                    }
+            if let Ok(content) = std::fs::read_to_string(path)
+                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
+            {
+                let has_compaction = value.get("compaction").is_some();
+                let has_compression = value.get("compression").is_some();
+                if !has_compaction
+                    && has_compression
+                    && let Some(enabled) = value
+                        .get("compression")
+                        .and_then(|c| c.get("enabled"))
+                        .and_then(|v| v.as_bool())
+                {
+                    base.compaction.auto = enabled;
                 }
             }
         }

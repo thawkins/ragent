@@ -15,6 +15,7 @@ pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
 pub mod libreoffice_write;
+pub mod masterfetch;
 pub mod memory_migrate;
 pub mod memory_replace;
 pub mod memory_search;
@@ -326,6 +327,14 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
     registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
     registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
+
+    // MasterFetch tools (FR-020)
+    registry.register(Arc::new(masterfetch::tools::fetch::MfFetchTool));
+    registry.register(Arc::new(masterfetch::tools::crawl_tool::MfCrawlTool));
+    registry.register(Arc::new(masterfetch::tools::search_tool::MfSearchTool));
+    registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
+    registry.register(Arc::new(masterfetch::tools::cache_clear::MfCacheClearTool));
+    registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
 
     registry
 }

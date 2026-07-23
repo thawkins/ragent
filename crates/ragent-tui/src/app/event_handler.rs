@@ -2119,7 +2119,7 @@ impl App {
             ));
             self.push_log_no_agent(
                 LogLevel::Warn,
-                format!("spec impl: task {} blocked — run stopped", current_task_id,),
+                format!("spec impl: task {} blocked — run stopped", current_task_id),
             );
             return;
         }
