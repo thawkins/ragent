@@ -366,9 +366,20 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
         SessionEvent::QueriesDecomposed { queries } => {
             ("queries", serde_json::json!({ "queries": queries }))
         }
-        SessionEvent::WebCaptured { url, title } => {
-            ("web", serde_json::json!({ "url": url, "title": title }))
-        }
+        SessionEvent::WebCaptured {
+            url,
+            title,
+            search_tool,
+            search_engine,
+        } => (
+            "web",
+            serde_json::json!({
+                "url": url,
+                "title": title,
+                "search_tool": search_tool,
+                "search_engine": search_engine,
+            }),
+        ),
         SessionEvent::FromUrlBodyPreview { url, body_preview } => (
             "from_url_body_preview",
             serde_json::json!({ "url": url, "body_preview": body_preview }),

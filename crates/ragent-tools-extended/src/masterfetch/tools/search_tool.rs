@@ -23,8 +23,9 @@
 //!
 //! The tool is **keyless by default** (FR-023): it scrapes public search-engine
 //! HTML result pages via DuckDuckGo and Brave. No API keys are required for
-//! those backends. If a `langsearch_api_key` is configured in `ragent.json`, an
-//! optional LangSearch backend is added for higher-quality results; the key is
+//! those backends. If a `langsearch_api_key` or `tavily_api_key` is configured
+//! in `ragent.json` (or the corresponding environment variable is set), an
+//! optional API-backed engine is added for higher-quality results; the keys are
 //! masked in diagnostics and never logged.
 
 use anyhow::Result;
@@ -35,6 +36,7 @@ use std::sync::Arc;
 use super::super::MASTERFETCH_VERSION;
 use super::super::search::consensus::MergeOutput;
 use super::super::search::langsearch::LangSearchEngine;
+use super::super::search::tavily::TavilyEngine;
 use super::super::search::{Freshness, SearchEngine, SearchOptions, SearchOrchestrator};
 
 use crate::{Tool, ToolContext, ToolOutput};
@@ -57,7 +59,9 @@ impl MfSearchTool {
     ///
     /// The orchestrator always includes the keyless `DuckDuckGo` and Brave
     /// backends. If `ctx.config` contains a non-empty `langsearch_api_key`, a
-    /// [`LangSearchEngine`] is added as a third backend.
+    /// [`LangSearchEngine`] is added as a third backend. If `ctx.config`
+    /// contains a non-empty `tavily_api_key` (or `TAVILY_API_KEY` environment
+    /// variable), a [`TavilyEngine`] is added as an additional backend.
     ///
     /// This helper is public so integration tests can verify backend wiring
     /// without making network requests.
@@ -67,6 +71,14 @@ impl MfSearchTool {
             .config
             .as_ref()
             .and_then(|cfg| cfg.langsearch_api_key.as_deref());
+        let tavily_key = std::env::var("TAVILY_API_KEY")
+            .ok()
+            .or_else(|| {
+                ctx.config
+                    .as_ref()
+                    .and_then(|cfg| cfg.tavily_api_key.clone())
+            })
+            .filter(|k| !k.is_empty());
         let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
             Arc::new(super::super::search::duckduckgo::DuckDuckGoEngine::new()),
             Arc::new(super::super::search::brave::BraveEngine::new()),
@@ -75,6 +87,9 @@ impl MfSearchTool {
             && !key.is_empty()
         {
             engines.push(Arc::new(LangSearchEngine::new(key)));
+        }
+        if let Some(key) = tavily_key {
+            engines.push(Arc::new(TavilyEngine::new(key)));
         }
         SearchOrchestrator::with_engines(engines)
     }
@@ -88,13 +103,14 @@ impl Tool for MfSearchTool {
 
     fn description(&self) -> &'static str {
         "Local keyless web search. Multiple backends run in parallel (DuckDuckGo, \
-             Brave, and optionally LangSearch when a `langsearch_api_key` is configured), \
-             merges + ranks with cross-engine consensus. No API keys required. Each \
-             result carries `relevance_score`, `fetch_relevance` (high/med/low), and \
-             `engines_consensus`. Supports `site`, `exclude_sites`, `freshness`, \
-             `max_results`, and `page` filters."
+                 Brave, and optional LangSearch / Tavily when their API keys are \
+                 configured; use `langsearch_api_key` or `tavily_api_key` in config), \
+                 merges + ranks with cross-engine consensus. Tavily and LangSearch \
+                 require API keys; the keyless backends do not. Each result carries \
+                 `relevance_score`, `fetch_relevance` (high/med/low), and \
+                 `engines_consensus`. Supports `site`, `exclude_sites`, `freshness`, \
+                 `max_results`, and `page` filters."
     }
-
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -279,9 +295,11 @@ fn build_search_metadata(output: &super::super::search::SearchOutput) -> Option<
                 "title": r.title,
                 "url": r.url,
                 "snippet": r.snippet,
-                "source": r.source,
-                "position": r.position,
-                "relevance_score": r.relevance_score,
+                                    "source": r.source,
+                                    "search_tool": "mf_search",
+                                    "search_engine": r.source,
+                                    "position": r.position,
+                  "relevance_score": r.relevance_score,
                 "fetch_relevance": r.fetch_relevance,
                 "engines_consensus": r.engines_consensus,
                 "fetch_hint": r.fetch_hint,

@@ -179,6 +179,8 @@ fn session_with_engine(
                 title: "Rust Async Guide".into(),
                 snippet: "async/await idioms".into(),
                 matched_query: "Rust async".into(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             }],
         }),
         Arc::new(FakeFetch {

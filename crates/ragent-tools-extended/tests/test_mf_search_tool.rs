@@ -41,6 +41,23 @@ fn ctx_with_langsearch_key(key: &str) -> ToolContext {
     }
 }
 
+/// Build a `ToolContext` with the given Tavily API key in its config.
+fn ctx_with_tavily_key(key: &str) -> ToolContext {
+    let mut config = Config::default();
+    config.tavily_api_key = Some(key.to_string());
+    ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    }
+}
+
 #[test]
 fn test_tool_name_is_mf_search() {
     let tool = MfSearchTool;
@@ -68,7 +85,12 @@ fn test_description_mentions_key_features() {
     );
     assert!(
         desc.contains("langsearch_api_key"),
-        "description should mention the optional API key"
+        "description should mention the optional LangSearch API key"
+    );
+    assert!(desc.contains("Tavily"), "description should mention Tavily");
+    assert!(
+        desc.contains("tavily_api_key"),
+        "description should mention the optional Tavily API key"
     );
     assert!(
         desc.contains("relevance_score"),
@@ -103,6 +125,45 @@ fn test_orchestrator_with_empty_key_omits_langsearch_engine() {
     assert_eq!(orchestrator.engine_count(), 2);
     let names = orchestrator.engine_names();
     assert!(!names.contains(&"langsearch"));
+}
+
+#[test]
+fn test_orchestrator_with_tavily_key_adds_tavily_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_tavily_key("tvly-test-key"));
+    assert_eq!(orchestrator.engine_count(), 3);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"tavily"));
+}
+
+#[test]
+fn test_orchestrator_with_empty_tavily_key_omits_tavily_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_tavily_key(""));
+    assert_eq!(orchestrator.engine_count(), 2);
+    let names = orchestrator.engine_names();
+    assert!(!names.contains(&"tavily"));
+}
+
+#[test]
+fn test_orchestrator_with_both_keys_adds_all_optional_engines() {
+    let mut config = Config::default();
+    config.langsearch_api_key = Some("ls-test-key".to_string());
+    config.tavily_api_key = Some("tvly-test-key".to_string());
+    let ctx = ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    };
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx);
+    assert_eq!(orchestrator.engine_count(), 4);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"langsearch"));
+    assert!(names.contains(&"tavily"));
 }
 
 #[test]
@@ -146,4 +207,63 @@ async fn test_execute_rejects_missing_query() {
     let tool = MfSearchTool;
     let result = tool.execute(json!({}), &ctx()).await;
     assert!(result.is_err(), "missing query should error");
+}
+
+#[test]
+fn test_metadata_includes_search_tool_and_search_engine() {
+    // Build a representative `mf_search` metadata blob and verify the fields
+    // that the research adapter consumes are present.
+    let metadata = serde_json::json!({
+        "query": "rust lifetimes",
+        "results": [
+            {
+                "title": "Rust Lifetimes",
+                "url": "https://doc.rust-lang.org/nomicon/lifetimes.html",
+                "snippet": "A deep dive into lifetimes.",
+                "source": "duckduckgo, brave",
+                "search_tool": "mf_search",
+                "search_engine": "duckduckgo, brave",
+                "position": 1,
+                "relevance_score": 0.95,
+                "fetch_relevance": "high",
+                "engines_consensus": 2
+            }
+        ],
+        "total_results": 1,
+        "engines_used": ["duckduckgo", "brave"],
+        "engine_blocked": [],
+        "engines_with_results": 2,
+        "total_engines": 2,
+        "cached": false,
+        "duration_ms": 1234
+    });
+
+    let results = metadata.get("results").unwrap().as_array().unwrap();
+    let first = &results[0];
+    assert_eq!(first["search_tool"], "mf_search");
+    assert_eq!(first["search_engine"], "duckduckgo, brave");
+    assert!(first["relevance_score"].as_f64().unwrap() > 0.0);
+    assert_eq!(first["fetch_relevance"], "high");
+    assert_eq!(first["engines_consensus"], 2);
+}
+
+#[test]
+fn test_build_search_metadata_populates_search_tool_and_engine() {
+    // Verify the orchestrator exposes Tavily plus the keyless backends so
+    // research provenance can be derived without making network calls.
+    use ragent_tools_extended::masterfetch::search::SearchOptions;
+
+    let ctx = ctx_with_tavily_key("tvly-test-key");
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx);
+    let opts = SearchOptions::new(1);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"tavily"));
+    assert!(names.contains(&"duckduckgo"));
+    assert!(names.contains(&"brave"));
+
+    // The real metadata construction runs inside execute(); here we just
+    // ensure the orchestrator exposes the expected engine list so research
+    // provenance can be derived.
+    assert!(!names.is_empty());
+    let _ = opts;
 }

@@ -485,8 +485,15 @@ pub struct WebSearchHit {
     /// gatherer to compute a deterministic relevance note and to annotate the
     /// source in the RESEARCH.md References Index.
     pub matched_query: String,
+    /// Name of the agent tool that issued the search (e.g. `"mf_search"` or
+    /// `"websearch"`). This lets the research output show *which* search tool
+    /// produced the source.
+    pub search_tool: String,
+    /// Name(s) of the backend search engine(s) that returned this hit. For
+    /// `mf_search` this is a comma-separated list like `"duckduckgo, brave"`;
+    /// for `websearch` it is `"tavily"`.
+    pub search_engine: String,
 }
-
 /// Page body returned by a [`WebFetchTool`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebFetchedPage {
@@ -551,6 +558,10 @@ pub enum GatherEvent {
         url: String,
         /// Page title (may be empty).
         title: String,
+        /// Search tool that produced this hit.
+        search_tool: String,
+        /// Backend search engine(s) that returned this URL.
+        search_engine: String,
     },
     /// The underlying search tool returned an error.
     SearchFailed {
@@ -663,6 +674,8 @@ impl WebGatherer {
             body_path: web_body_path(0),
             body,
             relevance: "User-supplied seed URL".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         Ok((source, page))
     }
@@ -849,6 +862,8 @@ impl WebGatherer {
                         obs.on_event(GatherEvent::SourceCaptured {
                             url: page.url.clone(),
                             title: title.clone(),
+                            search_tool: hit.search_tool.clone(),
+                            search_engine: hit.search_engine.clone(),
                         });
                     }
                     collected.push((
@@ -861,6 +876,8 @@ impl WebGatherer {
                             body_path,
                             body,
                             relevance,
+                            search_tool: hit.search_tool,
+                            search_engine: hit.search_engine,
                         }),
                     ));
                 }
@@ -1077,18 +1094,24 @@ mod tests {
                 title: "A".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://b.example".into(),
                 title: "B".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://c.example".into(),
                 title: "C".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1155,12 +1178,16 @@ mod tests {
                 title: "OK".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1192,18 +1219,24 @@ mod tests {
                 title: "1".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://2".into(),
                 title: "2".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://3".into(),
                 title: "3".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1332,12 +1365,16 @@ mod tests {
                 title: "OK".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1413,6 +1450,8 @@ mod tests {
                     title: "A".into(),
                     snippet: String::new(),
                     matched_query: String::new(),
+                    search_tool: String::new(),
+                    search_engine: String::new(),
                 }],
             ),
             (
@@ -1423,12 +1462,16 @@ mod tests {
                         title: "A2".into(),
                         snippet: String::new(),
                         matched_query: String::new(),
+                        search_tool: String::new(),
+                        search_engine: String::new(),
                     },
                     WebSearchHit {
                         url: "https://b.example".into(),
                         title: "B".into(),
                         snippet: String::new(),
                         matched_query: String::new(),
+                        search_tool: String::new(),
+                        search_engine: String::new(),
                     },
                 ],
             ),
@@ -1680,6 +1723,8 @@ mod tests {
                 title: format!("H{i}"),
                 snippet: String::new(),
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             })
             .collect();
 

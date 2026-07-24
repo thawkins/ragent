@@ -1,76 +1,18 @@
-# Release
+# Release Notes
 
-## Current Version: 0.1.0-beta.9
+## v0.1.0-beta.10
 
-### Added — LangSearch backend for `mf_search`
+### Added
+- Tavily search backend migrated into the `mf_search` multi-engine framework; it now runs in parallel with DuckDuckGo, Brave, and optional LangSearch.
+- New `TavilyEngine` implementing the `SearchEngine` trait in `ragent-tools-extended`.
+- `mf_search` description updated to mention Tavily and both optional API keys.
+- Research system (`ragent-research`) now depends on `ragent-tools-extended` and its web-gathering adapter prefers `mf_search`, falling back to legacy `websearch`.
+- New `parse_mf_search_metadata` helper maps `mf_search` JSON metadata into research-layer `WebSearchHit` rows while preserving `search_tool` and `search_engine` provenance.
+- TUI now recognises `mf_search` in tool input/result summaries.
+- Fixed missing `tempfile` and `calamine` dev-dependencies in `ragent-bench` so the workspace test suite compiles.
 
-- New optional `langsearch_api_key` top-level config field in `ragent.json`.
-- New `LangSearchEngine` calling `https://api.langsearch.com/v1/web-search`, integrated into `mf_search`.
-- Existing keyless DuckDuckGo and Brave backends continue to work when no key is configured.
-- API key is masked in diagnostics and never logged or surfaced in error messages.
+### Changed
+- Legacy `websearch` tool docs now clarify it is retained for direct agent use and backwards compatibility; research workflows prefer `mf_search`.
 
-## Previous Version: 0.1.0-beta.8
-
-### Changed — Version bump
-
-- Workspace version bumped from `0.1.0-beta.7` to `0.1.0-beta.8`.
-- `cargo check` passes cleanly with the new version.
-
-### Added — Live telemetry reconfiguration, agent metric recording, and sudo askpass broker
-
-- `/telemetry on|off` now reconfigures the live `TelemetrySubsystem` in place
-  (shuts down the meter provider on `off`, builds a fresh one on `on`) so the
-  toggle takes effect immediately instead of requiring a restart. The
-  subsystem's runtime state is held behind a `parking_lot::Mutex` and the
-  provider wrapped in `Arc` for safe interior mutability.
-- New `ragent-agent` telemetry module (`LlmRecorder`, `SessionRecorder`,
-  `ToolRecorder`) records LLM call duration, tool invocation counts/durations,
-  session start/end, and agent-loop timing into the telemetry subsystem.
-  `SessionProcessor` is wired to the subsystem via an `Arc<TelemetrySubsystem>`.
-- New `askpass` module in `ragent-tools-core` routes `sudo` password prompts
-  through ragent's interactive question dialog instead of hanging on the
-  controlling tty. The bash tool now detaches stdin (`Stdio::null()`) and sets
-  `SUDO_ASKPASS` environment variables when a broker is active.
-- `ragent-telemetry` re-exports `LlmRecorder`, `SessionRecorder`, and
-  `ToolRecorder` for cross-crate use.
-- `ShutdownGuard` keeps the meter provider alive for the process lifetime and
-  flushes pending metrics on normal or panic exit paths.
-- Telemetry panel rendering and `/telemetry` slash-command code reformatted
-  (indentation and trailing-newline fixes).
-
-### Previous Version: 0.1.0-beta.4
-
-### Added — Context-window compaction and `/config save`
-
-- New context-window compaction pipeline replacing the Headroom-based compression
-  scheme. Includes `compaction` config block, `/compact` slash command (with
-  `/compress` alias), `CompactionStarted/CompactionFinished` events, and
-  Unicode-safe truncation.
-- `/config save` and `/config list` slash commands for backing up and restoring
-  global `ragent.json`.
-- Updates to telemetry counters and TUI wiring.
-
-### Removed — Headroom dependency, CCR store, and compression pipeline
-
-- Dropped the `headroom-core` git dependency, deleted the `compression` modules,
-  removed CCR markers and the `headroom_retrieve` bridge, and added a legacy
-  `compression` → `compaction` config alias.
-
-- Workspace version bumped from `0.1.0-beta.2` to `0.1.0-beta.3`.
-- `cargo check` passes cleanly with the new version.
-
-## Previous Version: 0.1.0-beta.2
-
-### Added — Telemetry (OTEL) and ALT-O Telemetry panel
-
-- OpenTelemetry metrics export (`/telemetry` slash command family: `help`, `on`, `off`, `setup`, `counters`) for managing OTLP endpoints, protocol, export interval, timeout, and an internal Prometheus port.
-- TUI **ALT-O Telemetry panel** for live OpenTelemetry metrics and counter inspection.
-- Configuration schema and TUI wiring for telemetry settings in `ragent.json`.
-
-## Previous Version: 0.1.0-beta.1
-
-### Changed — Transition to beta channel
-
-- Workspace version bumped from `0.1.0-alpha.147` to `0.1.0-beta.1`, marking
-  the transition from the alpha pre-release channel to the beta pre-release
-  channel.
+### Fixed
+- `WebSearchHit` provenance fields are now populated consistently across `websearch`, `mf_search`, and research output.

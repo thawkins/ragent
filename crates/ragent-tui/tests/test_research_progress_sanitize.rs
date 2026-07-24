@@ -42,6 +42,8 @@ fn test_encode_progress_event_sanitizes_web_captured() {
         &ragent_research::session::SessionEvent::WebCaptured {
             url: url.to_string(),
             title: title.to_string(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         },
     );
     let decoded = decode_progress_event(&encoded).expect("decode");

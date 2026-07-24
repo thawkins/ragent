@@ -518,3 +518,14 @@ fn test_result_summary_task_complete_empty_summary() {
         "Should show default message: {summary}"
     );
 }
+
+#[test]
+fn test_input_summary_mf_search_tool() {
+    let input = json!({"query": "rust documentation"});
+    let summary = tool_input_summary("mf_search", &input, "/home/user/project");
+    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(
+        summary.contains("rust documentation"),
+        "Should contain query"
+    );
+}

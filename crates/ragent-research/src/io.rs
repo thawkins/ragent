@@ -218,16 +218,16 @@ impl ResearchIo {
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
-                "## References Index\n\n| # | Type | Path/URL | Title | Published | Relevance | Captured |\n\
-                 |---|------|----------|-------|-----------|-----------|----------|\n\
-                 | 1 | other | — | No sources captured | — | (no gathering run) | {} |\n",
+                "## References Index\n\n| # | Type | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+                           |---|------|----------|-------|-----------|-----------|-------------|--------|----------|\n\
+                           | 1 | other | — | No sources captured | — | (no gathering run) | — | — | {} |\n",
                 captured_at.to_rfc3339()
             );
         }
         let mut out = String::from(
             "## References Index\n\n\
-             | # | Type | Path/URL | Title | Published | Relevance | Captured |\n\
-             |---|------|----------|-------|-----------|-----------|----------|\n",
+             | # | Type | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+             |---|------|----------|-------|-----------|-----------|-------------|--------|----------|\n",
         );
         for (idx, source) in sources.iter().enumerate() {
             let n = idx + 1;
@@ -247,9 +247,17 @@ impl ResearchIo {
                 }
                 _ => "—".to_string(),
             };
+            let (search_tool, search_engine) = match source {
+                Source::Web {
+                    search_tool,
+                    search_engine,
+                    ..
+                } => (sanitize_inline(search_tool), sanitize_inline(search_engine)),
+                _ => ("—".to_string(), "—".to_string()),
+            };
             let captured = source.captured_at().to_rfc3339();
             out.push_str(&format!(
-                "| {n} | {kind} | {path} | {title} | {published} | {relevance} | {captured} |\n"
+                "| {n} | {kind} | {path} | {title} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
             ));
         }
         out
@@ -496,6 +504,8 @@ mod tests {
                 relevance: String::new(),
 
                 body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             Source::Web {
                 url: "https://undated.example".into(),
@@ -506,6 +516,8 @@ mod tests {
                 relevance: String::new(),
 
                 body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
         ];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());

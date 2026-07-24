@@ -21,6 +21,8 @@ reqwest.workspace = true
 flate2 = "1"
 async-trait = { workspace = true }
 rustc-hash = { workspace = true }
+calamine = { workspace = true }
+tempfile = "3.14"
 
 # Internal crates
 ragent-agent = { path = "../ragent-agent" }

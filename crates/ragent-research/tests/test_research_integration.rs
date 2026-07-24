@@ -73,6 +73,8 @@ async fn write_document_persists_supports_files_and_index() {
         body_path: PathBuf::from("sources/web-01.md"),
         body: "page text".into(),
         relevance: "User-supplied seed URL".into(),
+        search_tool: String::new(),
+        search_engine: String::new(),
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -327,6 +329,8 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 title: "Example Page".into(),
                 snippet: String::new(),
                 matched_query: "Rust lifetimes".into(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             }])
         }
     }

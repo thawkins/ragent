@@ -93,6 +93,8 @@ fn make_hits(n: usize) -> Vec<WebSearchHit> {
             title: format!("Hit {i}"),
             snippet: String::new(),
             matched_query: String::new(),
+            search_tool: "mf_search".to_string(),
+            search_engine: "duckduckgo, brave".to_string(),
         })
         .collect()
 }

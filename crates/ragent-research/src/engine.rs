@@ -163,9 +163,18 @@ impl GatherObserver for StateGatherForwarder {
                 self.observer
                     .on_event(SessionEvent::QueriesDecomposed { queries });
             }
-            GatherEvent::SourceCaptured { url, title } => {
-                self.observer
-                    .on_event(SessionEvent::WebCaptured { url, title });
+            GatherEvent::SourceCaptured {
+                url,
+                title,
+                search_tool,
+                search_engine,
+            } => {
+                self.observer.on_event(SessionEvent::WebCaptured {
+                    url,
+                    title,
+                    search_tool,
+                    search_engine,
+                });
             }
             _ => {}
         }
@@ -372,10 +381,19 @@ impl IterativeEngine {
                         });
                     } else {
                         for src in sources {
-                            if let Source::Web { url, title, .. } = &src {
+                            if let Source::Web {
+                                url,
+                                title,
+                                search_tool,
+                                search_engine,
+                                ..
+                            } = &src
+                            {
                                 observer.on_event(SessionEvent::WebCaptured {
                                     url: url.clone(),
                                     title: title.clone(),
+                                    search_tool: search_tool.clone(),
+                                    search_engine: search_engine.clone(),
                                 });
                             }
                             state.add_source(src);
@@ -531,6 +549,8 @@ mod tests {
             title: "Rust".to_string(),
             snippet: "snip".to_string(),
             matched_query: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         }]];
         let engine = engine_with_fake(hits);
         let state = engine.run("Rust", Arc::new(NoopObserver)).await.unwrap();

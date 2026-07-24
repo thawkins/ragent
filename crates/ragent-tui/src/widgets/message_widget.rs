@@ -363,6 +363,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .and_then(|v| v.as_str())
             .map(|q| format!("🌐 \"{}\"", trunc120(q)))
             .unwrap_or_else(|| "🌐 search".to_string()),
+        "mf_search" => input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|q| format!("🌐 \"{}\"", trunc120(q)))
+            .unwrap_or_else(|| "🌐 search".to_string()),
 
         // ═══════════════════════════════════════════════════════════════════
         // 🔧 ENVIRONMENT
@@ -1394,6 +1399,13 @@ pub fn tool_result_summary(
         }
         "websearch" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "result", "results")))
+        }
+        "mf_search" => {
+            let count = out
+                .get("total_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
             Some(format!("{} found", pluralize(count, "result", "results")))
         }
         "http_request" | "web_request" => {

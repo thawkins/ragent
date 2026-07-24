@@ -918,6 +918,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -957,6 +959,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let doc = ResearchDocument {
             item,
@@ -1000,6 +1004,8 @@ mod frontmatter_tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
         let doc = ResearchDocument {

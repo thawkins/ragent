@@ -1280,6 +1280,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "page body content".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
@@ -1297,6 +1299,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("no body captured"));
@@ -1349,6 +1353,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "page body content".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         let out = render_bibliography(&[source]);
         assert!(out.contains("Example"));
@@ -1387,6 +1393,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1424,6 +1432,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1433,6 +1443,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-02.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
@@ -1464,6 +1476,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         item.add_source(Source::Web {
             published_at: Some(
@@ -1477,6 +1491,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-02.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1486,6 +1502,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-03.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1520,6 +1538,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1559,6 +1579,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "body".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.

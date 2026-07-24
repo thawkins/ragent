@@ -89,6 +89,17 @@ pub enum Source {
         /// field or was supplied directly via `--from-url`.
         #[serde(default)]
         relevance: String,
+        /// Name of the search tool that discovered this source (e.g.
+        /// `"mf_search"` or `"websearch"`). Empty when the source predates
+        /// this field or was supplied directly via `--from-url`.
+        #[serde(default)]
+        search_tool: String,
+        /// Name(s) of the backend search engine(s) that returned this URL.
+        /// For `mf_search` this is a comma-separated list like
+        /// `"duckduckgo, brave"`; for `websearch` it is `"tavily"`. Empty when
+        /// the source predates this field or was supplied directly via `--from-url`.
+        #[serde(default)]
+        search_engine: String,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -246,6 +257,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: "page text".into(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(web.type_str(), "web");
 
@@ -295,6 +308,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -330,6 +345,8 @@ mod tests {
             body_path: PathBuf::from("x"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -344,6 +361,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: "page text".into(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -436,6 +455,8 @@ mod tests {
             body_path: PathBuf::from("x"),
             body: "hello".into(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -448,6 +469,8 @@ mod tests {
             body_path: PathBuf::from("x"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -476,6 +499,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: "page text".into(),
             relevance: "High — title matches query terms".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -493,6 +518,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: String::new(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         };
         assert_eq!(s.relevance(), Some(""));
     }

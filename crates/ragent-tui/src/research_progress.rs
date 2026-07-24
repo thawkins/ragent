@@ -229,16 +229,30 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
             ),
             None,
         ),
-        SessionEvent::WebCaptured { url, title } => (
-            SessionPhase::Web,
-            "captured",
-            format!(
-                "captured {} — {}",
-                sanitize_for_display(url),
-                sanitize_for_display(title)
-            ),
-            None,
-        ),
+        SessionEvent::WebCaptured {
+            url,
+            title,
+            search_tool,
+            search_engine,
+        } => {
+            let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
+                (true, true) => String::new(),
+                (false, true) => format!(" via {search_tool}"),
+                (true, false) => format!(" via {search_engine}"),
+                (false, false) => format!(" via {search_tool} ({search_engine})"),
+            };
+            (
+                SessionPhase::Web,
+                "captured",
+                format!(
+                    "captured {}{} — {}",
+                    sanitize_for_display(url),
+                    provenance,
+                    sanitize_for_display(title)
+                ),
+                None,
+            )
+        }
         SessionEvent::FromUrlBodyPreview { url, body_preview } => (
             SessionPhase::Setup,
             "preview",

@@ -364,6 +364,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             body: "body".to_string(),
             relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         }
     }
 

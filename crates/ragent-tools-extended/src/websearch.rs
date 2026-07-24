@@ -1,7 +1,10 @@
-//! Web search tool for querying search engines.
+//! Legacy web search tool (Tavily-backed).
 //!
-//! Provides [`WebSearchTool`], which performs web searches using external search
-//! APIs and returns structured results with titles, URLs, and snippets.
+//! [`WebSearchTool`] is retained for direct agent use and backwards
+//! compatibility. New research workflows use the multi-engine `mf_search`
+//! tool; the research adapter selects `mf_search` when present and falls
+//! back to this tool otherwise.
+//!
 //! Currently supports the [Tavily](https://tavily.com/) search API.
 
 use anyhow::{Context, Result, bail};
@@ -154,8 +157,15 @@ pub struct SearchResult {
     pub url: String,
     /// A short snippet/summary from the search result.
     pub snippet: String,
+    /// Search tool that produced this result. Always `"websearch"` for the
+    /// Tavily-backed tool, present so the research layer can show provenance
+    /// without special-casing the tool.
+    #[serde(default)]
+    pub search_tool: String,
+    /// Backend search engine that returned this result. Always `"tavily"`.
+    #[serde(default)]
+    pub search_engine: String,
 }
-
 /// Extract structured search results from the JSON metadata emitted by
 /// [`WebSearchTool`].
 ///
@@ -241,6 +251,8 @@ async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<V
                 title: r.title,
                 url: r.url,
                 snippet,
+                search_tool: "websearch".to_string(),
+                search_engine: "tavily".to_string(),
             }
         })
         .collect();

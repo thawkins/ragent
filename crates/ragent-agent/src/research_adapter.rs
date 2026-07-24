@@ -192,8 +192,11 @@ fn build_web_gatherer(
     provider_registry: Option<Arc<ProviderRegistry>>,
     active_model: Option<ModelRef>,
 ) -> Option<WebGatherer> {
-    let search = registry.get("websearch")?;
+    let search = registry
+        .get("mf_search")
+        .or_else(|| registry.get("websearch"))?;
     let fetch = registry.get("webfetch")?;
+    let search_tool_name = search.name().to_string();
     let ctx = build_tool_context(
         session_id,
         working_dir,
@@ -227,6 +230,7 @@ fn build_web_gatherer(
             Arc::new(AgentWebSearchTool {
                 tool: search,
                 ctx: ctx.clone(),
+                tool_name: search_tool_name,
             }),
             Arc::new(AgentWebFetchTool { tool: fetch, ctx }),
         )
@@ -259,20 +263,22 @@ fn build_local_gatherer(
 struct AgentWebSearchTool {
     tool: Arc<dyn AgentTool>,
     ctx: AgentToolContext,
+    tool_name: String,
 }
 
 #[async_trait]
 impl WebSearchTool for AgentWebSearchTool {
     async fn search(&self, query: &str, max_results: usize) -> Result<Vec<WebSearchHit>> {
-        let input = json!({
+        let input = serde_json::json!({
             "query": query,
-            "num_results": max_results,
+            "max_results": max_results,
         });
         let output = self.tool.execute(input, &self.ctx).await?;
 
-        // Prefer the structured JSON metadata emitted by the websearch tool,
-        // which carries the raw Tavily results without loss. Fall back to
-        // parsing the human-readable text so older tool versions still work.
+        // Prefer the structured JSON metadata emitted by the underlying
+        // search tool. `mf_search` populates a `results` array with engine
+        // provenance; legacy `websearch` populates a Tavily-only `results`
+        // array. Fall back to parsing the human-readable text.
         if let Some(ref metadata) = output.metadata {
             let from_json: Vec<WebSearchHit> =
                 ragent_tools_extended::websearch::hits_from_metadata(metadata)
@@ -282,15 +288,71 @@ impl WebSearchTool for AgentWebSearchTool {
                         url: r.url,
                         snippet: r.snippet,
                         matched_query: String::new(),
+                        search_tool: if r.search_tool.is_empty() {
+                            self.tool_name.clone()
+                        } else {
+                            r.search_tool
+                        },
+                        search_engine: if r.search_engine.is_empty() {
+                            self.tool_name.clone()
+                        } else {
+                            r.search_engine
+                        },
                     })
                     .collect();
             if !from_json.is_empty() {
                 return Ok(from_json);
             }
+
+            // Try the `mf_search`-specific metadata shape if the legacy
+            // `results` key was absent or empty.
+            let from_mf = parse_mf_search_metadata(metadata, &self.tool_name);
+            if !from_mf.is_empty() {
+                return Ok(from_mf);
+            }
         }
 
-        Ok(parse_websearch_output(&output.content))
+        // Legacy websearch plain-text fallback.
+        let mut hits = parse_websearch_output(&output.content);
+        for hit in &mut hits {
+            hit.search_tool = self.tool_name.clone();
+        }
+        Ok(hits)
     }
+}
+
+/// Parse the structured metadata produced by the `mf_search` tool into
+/// research-layer [`WebSearchHit`] rows.
+fn parse_mf_search_metadata(metadata: &serde_json::Value, tool_name: &str) -> Vec<WebSearchHit> {
+    metadata
+        .get("results")
+        .and_then(|r| serde_json::from_value::<Vec<serde_json::Value>>(r.clone()).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| {
+            let title = v.get("title")?.as_str()?.to_string();
+            let url = v.get("url")?.as_str()?.to_string();
+            let snippet = v
+                .get("snippet")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let search_engine = v
+                .get("search_engine")
+                .and_then(|s| s.as_str())
+                .or_else(|| v.get("source").and_then(|s| s.as_str()))
+                .unwrap_or(tool_name)
+                .to_string();
+            Some(WebSearchHit {
+                title,
+                url,
+                snippet,
+                matched_query: String::new(),
+                search_tool: tool_name.to_string(),
+                search_engine,
+            })
+        })
+        .collect()
 }
 
 struct AgentWebFetchTool {
@@ -495,6 +557,8 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
                         url,
                         snippet: current_snippet.trim().to_string(),
                         matched_query: String::new(),
+                        search_tool: "websearch".to_string(),
+                        search_engine: "tavily".to_string(),
                     });
                 }
                 current_snippet.clear();
@@ -520,6 +584,8 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
             url,
             snippet: current_snippet.trim().to_string(),
             matched_query: String::new(),
+            search_tool: "websearch".to_string(),
+            search_engine: "tavily".to_string(),
         });
     }
 
@@ -598,6 +664,8 @@ mod tests {
                 url: r.url,
                 snippet: r.snippet,
                 matched_query: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             })
             .collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);
@@ -670,4 +738,57 @@ mod tests {
             "default registry should provide glob/grep/read/list tools: {debug}"
         );
     }
+}
+
+#[test]
+fn test_parse_mf_search_metadata_extracts_hits_and_engine_provenance() {
+    let metadata = serde_json::json!({
+        "query": "rust lifetimes",
+        "results": [
+            {
+                "title": "Rust Lifetimes",
+                "url": "https://doc.rust-lang.org/nomicon/lifetimes.html",
+                "snippet": "A deep dive into lifetimes.",
+                "source": "duckduckgo, brave",
+                "search_engine": "duckduckgo, brave",
+                "position": 1,
+                "relevance_score": 0.95,
+                "fetch_relevance": "high",
+                "engines_consensus": 2
+            }
+        ]
+    });
+    let hits = parse_mf_search_metadata(&metadata, "mf_search");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].title, "Rust Lifetimes");
+    assert_eq!(
+        hits[0].url,
+        "https://doc.rust-lang.org/nomicon/lifetimes.html"
+    );
+    assert_eq!(hits[0].snippet, "A deep dive into lifetimes.");
+    assert_eq!(hits[0].search_tool, "mf_search");
+    assert_eq!(hits[0].search_engine, "duckduckgo, brave");
+}
+
+#[test]
+fn test_parse_mf_search_metadata_falls_back_to_source_field() {
+    let metadata = serde_json::json!({
+        "results": [
+            {
+                "title": "No engine field",
+                "url": "https://example.com",
+                "snippet": "fallback",
+                "source": "brave"
+            }
+        ]
+    });
+    let hits = parse_mf_search_metadata(&metadata, "mf_search");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].search_engine, "brave");
+}
+
+#[test]
+fn test_parse_mf_search_metadata_returns_empty_on_missing_results() {
+    let hits = parse_mf_search_metadata(&serde_json::json!({"query": "x"}), "mf_search");
+    assert!(hits.is_empty());
 }

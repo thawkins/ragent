@@ -21,6 +21,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+ragent-tools-extended = { path = "../ragent-tools-extended" }
 tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros"] }
 similar = { workspace = true }
 regex = { workspace = true }

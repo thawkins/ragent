@@ -56,17 +56,25 @@ impl GatherObserver for GatherEventForwarder {
                 self.observer
                     .on_event(SessionEvent::QueriesDecomposed { queries });
             }
-            GatherEvent::SourceCaptured { url, title } => {
+            GatherEvent::SourceCaptured {
+                url,
+                title,
+                search_tool,
+                search_engine,
+            } => {
                 // Forward inline so the UI shows each successfully retrieved
                 // URL as it arrives, rather than only at the end of the
                 // gather pass.
-                self.observer
-                    .on_event(SessionEvent::WebCaptured { url, title });
+                self.observer.on_event(SessionEvent::WebCaptured {
+                    url,
+                    title,
+                    search_tool,
+                    search_engine,
+                });
             }
         }
     }
 }
-
 /// Inputs the caller supplies to [`ResearchSession::run`].
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
@@ -222,6 +230,12 @@ pub enum SessionEvent {
         url: String,
         /// Page title (may be empty).
         title: String,
+        /// Search tool that produced this hit (e.g. `"mf_search"` or
+        /// `"websearch"`). Empty for `--from-url` seeds.
+        search_tool: String,
+        /// Backend search engine(s) that returned this URL. Empty for
+        /// `--from-url` seeds.
+        search_engine: String,
     },
     /// The `--from-url` primary page was fetched. Carries a short preview of
     /// the extracted article body so the UI can show what topic was derived
@@ -1005,6 +1019,8 @@ impl ResearchSession {
                     observer.on_event(SessionEvent::WebCaptured {
                         url: src_url.clone(),
                         title: src_title.clone(),
+                        search_tool: String::new(),
+                        search_engine: String::new(),
                     });
                     if topic.trim().is_empty() {
                         if let Some(derived) =
@@ -1920,6 +1936,8 @@ mod tests {
                     title: "Example".into(),
                     snippet: "snippet".into(),
                     matched_query: String::new(),
+                    search_tool: String::new(),
+                    search_engine: String::new(),
                 }],
             }),
             Arc::new(FakeFetch {
@@ -2086,6 +2104,8 @@ mod tests {
                     title: "Example".into(),
                     snippet: String::new(),
                     matched_query: String::new(),
+                    search_tool: String::new(),
+                    search_engine: String::new(),
                 }])
             }
         }
@@ -2252,7 +2272,7 @@ mod tests {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                SessionEvent::WebCaptured { url, title }
+                SessionEvent::WebCaptured { url, title, .. }
                     if url == "https://example.com/guide"
                         && title == "Rust Async Programming Guide"
             )),
@@ -2709,6 +2729,8 @@ mod tests {
                 body_path: PathBuf::from("sources/web-01.md"),
                 relevance: String::new(),
                 body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             Source::Local {
                 path: "x.md".into(),
@@ -2738,6 +2760,8 @@ mod tests {
                 body_path: PathBuf::from("sources/web-01.md"),
                 relevance: String::new(),
                 body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             Source::Web {
                 published_at: None,
@@ -2747,6 +2771,8 @@ mod tests {
                 body_path: PathBuf::from("sources/web-02.md"),
                 relevance: String::new(),
                 body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -2792,6 +2818,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);
@@ -2813,6 +2841,8 @@ mod tests {
                 body_path: PathBuf::from("sources/web-01.md"),
                 relevance: String::new(),
                 body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
+                search_tool: String::new(),
+                search_engine: String::new(),
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -2876,6 +2906,8 @@ mod tests {
             body_path: PathBuf::from("sources/web-01.md"),
             relevance: String::new(),
             body: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);

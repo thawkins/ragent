@@ -216,6 +216,8 @@ fn imrad_references_index_unchanged() {
         body_path: std::path::PathBuf::from("sources/web-01.md"),
         relevance: String::new(),
         body: "body".into(),
+        search_tool: String::new(),
+        search_engine: String::new(),
     });
 
     let assembled = assemble_document(&doc);

@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Added — Tavily backend for `mf_search` and research migration
+
+- New `TavilyEngine` in `crates/ragent-tools-extended/src/masterfetch/search/tavily.rs`
+  implementing the `SearchEngine` trait. It calls `https://api.tavily.com/search`
+  with `Authorization: Bearer {key}`, maps `SearchOptions` to Tavily JSON fields
+  (`query` truncated to 400 chars, `max_results` clamped 1–20, `include_answer: false`),
+  parses the `results` array, and reports non-2xx responses as `engine_blocked`.
+- `mf_search` now includes the Tavily backend automatically when `tavily_api_key`
+  is configured in `ragent.json` or `TAVILY_API_KEY` is set; it runs in parallel
+  with the existing DuckDuckGo, Brave, and optional LangSearch backends.
+- `mf_search` description updated to mention Tavily and both optional API keys.
+- Legacy `websearch` tool is retained for direct agent use and now documents that
+  research workflows prefer `mf_search`.
+- `ragent-research` now depends on `ragent-tools-extended` so the research layer
+  can understand the `mf_search` metadata shape.
+- `AgentWebSearchTool` now prefers the `mf_search` tool when available and falls
+  back to `websearch`, mapping structured metadata and plain-text output into
+  `WebSearchHit` while preserving `search_tool` and `search_engine` provenance.
+- New helper `parse_mf_search_metadata` converts `mf_search` JSON metadata into
+  research-layer hits, falling back from `search_engine` to `source` to the
+  tool name.
+- TUI `tool_input_summary` and `tool_result_summary` now handle `mf_search` like
+  `websearch`, and the tool-category doc comment lists `mf_search`.
+
+### Added — Research source provenance
+
+- `WebSearchHit` and `Source::Web` now carry `search_tool` and `search_engine`
+  fields so every web source produced by the research system records *which*
+  search tool (e.g. `mf_search`, `websearch`) and backend engine(s) (e.g.
+  `tavily`, `duckduckgo, brave`) discovered the URL.
+- `AgentWebSearchTool` populates provenance from the `websearch` tool's
+  structured metadata and from the text fallback parser; the `websearch`
+  `SearchResult` now emits `search_tool`/`search_engine` defaults, and
+  `mf_search` metadata includes them per result.
+- `WebGatherer` propagates provenance into `Source::Web`, and `GatherEvent::SourceCaptured`
+  forwards it so both the non-iterative and iterative research engines surface it.
+- `SessionEvent::WebCaptured` now includes `search_tool`/`search_engine`; the CLI
+  JSON renderer and TUI progress encoder display provenance in capture lines
+  (e.g. `captured https://example.com via websearch (tavily) — Title`).
+- `ResearchIo::render_references_index` adds **Search tool** and **Engine**
+  columns to the References Index table in `RESEARCH.md`.
+- All new fields use `serde(default)` so existing `RESEARCH.md` files and older
+  metadata load without migration.
+
 ## Version: 0.1.0-beta.9
 
 ### Added — LangSearch backend for `mf_search`

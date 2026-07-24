@@ -20,6 +20,8 @@ impl WebSearchTool for FixedSearch {
             title: "Fake source".into(),
             snippet: "snippet".into(),
             matched_query: String::new(),
+            search_tool: "mf_search".to_string(),
+            search_engine: "duckduckgo, brave".to_string(),
         }])
     }
 }
