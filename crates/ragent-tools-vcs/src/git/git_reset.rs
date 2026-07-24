@@ -77,15 +77,14 @@ impl Tool for GitResetTool {
                 "keep" => args.push("--keep".to_string()),
                 other => {
                     return Err(anyhow::anyhow!(
-                        "Unknown reset mode: {}. Use 'soft', 'mixed', 'hard', or 'keep'.",
-                        other
+                        "Unknown reset mode: {other}. Use 'soft', 'mixed', 'hard', or 'keep'."
                     ));
                 }
             }
             args.push(target.to_string());
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -101,7 +100,7 @@ impl Tool for GitResetTool {
             } else {
                 let mode = input["mode"].as_str().unwrap_or("mixed");
                 let target = input["target"].as_str().unwrap_or("HEAD");
-                format!("Reset to {} ({} mode).", target, mode)
+                format!("Reset to {target} ({mode} mode).")
             }
         } else {
             stdout

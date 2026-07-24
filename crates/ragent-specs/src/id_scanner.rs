@@ -32,6 +32,7 @@ static RE_TASK_ID: LazyLock<Regex> =
 /// assert_eq!(highest_id("FR-001, FR-003, FR-007", "FR"), 7);
 /// assert_eq!(highest_id("no IDs here", "FR"), 0);
 /// ```
+#[must_use]
 pub fn highest_id(markdown: &str, prefix: &str) -> u32 {
     let re: &Regex = match prefix.to_uppercase().as_str() {
         "FR" => &RE_FR_ID,
@@ -57,6 +58,7 @@ pub fn highest_id(markdown: &str, prefix: &str) -> u32 {
 /// assert_eq!(highest_fr("FR-001 through FR-012"), 12);
 /// assert_eq!(highest_fr("FR-1, FR-01, FR-001"), 1);
 /// ```
+#[must_use]
 pub fn highest_fr(spec_md: &str) -> u32 {
     highest_id(spec_md, "FR")
 }
@@ -73,6 +75,7 @@ pub fn highest_fr(spec_md: &str) -> u32 {
 /// assert_eq!(highest_nfr("NFR-001, NFR-002"), 2);
 /// assert_eq!(highest_nfr("no non-functional requirements"), 0);
 /// ```
+#[must_use]
 pub fn highest_nfr(spec_md: &str) -> u32 {
     highest_id(spec_md, "NFR")
 }
@@ -89,6 +92,7 @@ pub fn highest_nfr(spec_md: &str) -> u32 {
 /// assert_eq!(highest_task("T-001, T-010"), 10);
 /// assert_eq!(highest_task("no tasks"), 0);
 /// ```
+#[must_use]
 pub fn highest_task(plan_md: &str) -> u32 {
     highest_id(plan_md, "T")
 }
@@ -167,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_highest_fr_in_full_spec() {
-        let spec = r#"---
+        let spec = r"---
 status: draft
 ---
 # My Spec
@@ -183,7 +187,7 @@ status: draft
 ### Non-Functional Requirements
 
 **NFR-001** (Ubiquitous) The system shall respond within 200ms.
-"#;
+";
         assert_eq!(highest_fr(spec), 2);
         assert_eq!(highest_nfr(spec), 1);
         assert_eq!(highest_task(spec), 0);
@@ -191,7 +195,7 @@ status: draft
 
     #[test]
     fn test_highest_task_in_full_plan() {
-        let plan = r#"# Plan
+        let plan = r"# Plan
 
 ## Tasks
 
@@ -200,7 +204,7 @@ status: draft
 | T-001 | Define types | FR-003 | S | Critical | — |
 | T-002 | Build parser | FR-004 | M | High | T-001 |
 | T-010 | Add tests | FR-005 | M | High | T-002 |
-"#;
+";
         assert_eq!(highest_task(plan), 10);
     }
 

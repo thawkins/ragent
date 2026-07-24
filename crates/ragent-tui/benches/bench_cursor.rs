@@ -1,8 +1,8 @@
 //! Criterion benchmarks for cursor operations and text editing.
 //!
 //! Covers COMPLIANCE.md Section 5.C:
-//! - cursor_byte_pos_at_char_index on strings of 1k, 10k, 100k chars (ASCII + multibyte)
-//! - insert_char_at_cursor, insert_text_at_cursor, delete_prev_char, delete_next_char
+//! - `cursor_byte_pos_at_char_index` on strings of 1k, 10k, 100k chars (ASCII + multibyte)
+//! - `insert_char_at_cursor`, `insert_text_at_cursor`, `delete_prev_char`, `delete_next_char`
 
 #![allow(missing_docs)]
 

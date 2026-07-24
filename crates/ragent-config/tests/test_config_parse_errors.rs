@@ -42,29 +42,25 @@ fn test_invalid_json_shows_line_and_column() {
     // 1. File path reference
     assert!(
         err_msg.contains("ragent.json"),
-        "Error should contain file reference. Error was:\n{}",
-        err_msg
+        "Error should contain file reference. Error was:\n{err_msg}"
     );
 
     // 2. Line number
     assert!(
         err_msg.contains("line"),
-        "Error should contain line number. Error was:\n{}",
-        err_msg
+        "Error should contain line number. Error was:\n{err_msg}"
     );
 
     // 3. Visual indicator (^) showing where error is
     assert!(
-        err_msg.contains("^"),
-        "Error should have a caret indicator. Error was:\n{}",
-        err_msg
+        err_msg.contains('^'),
+        "Error should have a caret indicator. Error was:\n{err_msg}"
     );
 
     // 4. Separator line
     assert!(
         err_msg.contains("─"),
-        "Error should have a separator. Error was:\n{}",
-        err_msg
+        "Error should have a separator. Error was:\n{err_msg}"
     );
 }
 
@@ -97,8 +93,7 @@ fn test_unknown_field_shows_clear_error() {
         let err_msg = result.unwrap_err().to_string();
         assert!(
             err_msg.contains("line"),
-            "Error should identify line. Error was:\n{}",
-            err_msg
+            "Error should identify line. Error was:\n{err_msg}"
         );
     }
 }
@@ -132,13 +127,11 @@ fn test_type_mismatch_shows_clear_error() {
     // Should identify the problem with clear line reference
     assert!(
         err_msg.contains("line"),
-        "Error should contain line number. Error was:\n{}",
-        err_msg
+        "Error should contain line number. Error was:\n{err_msg}"
     );
     assert!(
-        err_msg.contains("^"),
-        "Error should contain caret indicator. Error was:\n{}",
-        err_msg
+        err_msg.contains('^'),
+        "Error should contain caret indicator. Error was:\n{err_msg}"
     );
 }
 

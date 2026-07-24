@@ -1,5 +1,5 @@
 //! Integration tests for the `SharedChatRequest` type
-//! (AgentPerf T-009 / FR-014).
+//! (`AgentPerf` T-009 / FR-014).
 
 use std::sync::Arc;
 

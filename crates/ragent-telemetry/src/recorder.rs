@@ -78,7 +78,7 @@ impl LlmRecorder {
     /// already has an instrument registry in hand. Prefer
     /// [`from_subsystem`](Self::from_subsystem) in production code.
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -98,13 +98,13 @@ impl LlmRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -263,20 +263,20 @@ impl LlmRecorder {
     ) {
         if let Some(reg) = &self.registry {
             let attr = [InstrumentRegistry::attr_provider(provider)];
-            if let Some(pct) = requests_used_pct {
-                if reg.is_metric_enabled(names::RATE_LIMIT_REQUESTS_PCT) {
-                    let resolved = reg.resolve_attrs(names::RATE_LIMIT_REQUESTS_PCT, &attr);
-                    reg.rate_limit_requests_pct
-                        .record(f64::from(pct), &resolved);
-                    crate::counters::set_rate_limit_requests_pct(f64::from(pct));
-                }
+            if let Some(pct) = requests_used_pct
+                && reg.is_metric_enabled(names::RATE_LIMIT_REQUESTS_PCT)
+            {
+                let resolved = reg.resolve_attrs(names::RATE_LIMIT_REQUESTS_PCT, &attr);
+                reg.rate_limit_requests_pct
+                    .record(f64::from(pct), &resolved);
+                crate::counters::set_rate_limit_requests_pct(f64::from(pct));
             }
-            if let Some(pct) = tokens_used_pct {
-                if reg.is_metric_enabled(names::RATE_LIMIT_TOKENS_PCT) {
-                    let resolved = reg.resolve_attrs(names::RATE_LIMIT_TOKENS_PCT, &attr);
-                    reg.rate_limit_tokens_pct.record(f64::from(pct), &resolved);
-                    crate::counters::set_rate_limit_tokens_pct(f64::from(pct));
-                }
+            if let Some(pct) = tokens_used_pct
+                && reg.is_metric_enabled(names::RATE_LIMIT_TOKENS_PCT)
+            {
+                let resolved = reg.resolve_attrs(names::RATE_LIMIT_TOKENS_PCT, &attr);
+                reg.rate_limit_tokens_pct.record(f64::from(pct), &resolved);
+                crate::counters::set_rate_limit_tokens_pct(f64::from(pct));
             }
         }
     }
@@ -394,7 +394,7 @@ pub struct ToolRecorder;
 impl ToolRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -414,13 +414,13 @@ impl ToolRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -516,7 +516,7 @@ pub struct SessionRecorder;
 impl SessionRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -532,13 +532,13 @@ impl SessionRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -645,7 +645,7 @@ pub struct CoordinatorRecorder;
 impl CoordinatorRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -661,13 +661,13 @@ impl CoordinatorRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -786,7 +786,7 @@ pub struct PermissionRecorder;
 impl PermissionRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -806,13 +806,13 @@ impl PermissionRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -915,7 +915,7 @@ pub struct CompressionRecorder;
 impl CompressionRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -935,13 +935,13 @@ impl CompressionRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -1034,7 +1034,7 @@ pub struct SnapshotRecorder;
 impl SnapshotRecorder {
     /// Create a recorder from a live [`InstrumentRegistry`].
     #[must_use]
-    pub fn new(registry: InstrumentRegistry) -> Self {
+    pub const fn new(registry: InstrumentRegistry) -> Self {
         Self {
             registry: Some(registry),
         }
@@ -1054,13 +1054,13 @@ impl SnapshotRecorder {
 
     /// Create a disabled recorder (all methods are no-ops).
     #[must_use]
-    pub fn disabled() -> Self {
+    pub const fn disabled() -> Self {
         Self { registry: None }
     }
 
     /// Returns `true` if this recorder has live instruments.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.registry.is_some()
     }
 
@@ -1136,7 +1136,7 @@ mod tests {
         let exporter_clone = exporter.clone();
         let provider = rt.block_on(async {
             let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-                .with_interval(Duration::from_secs(3600))
+                .with_interval(Duration::from_hours(1))
                 .build();
             SdkMeterProvider::builder().with_reader(reader).build()
         });
@@ -1440,7 +1440,7 @@ mod tests {
                         .as_any()
                         .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
                     {
-                        sum.data_points.iter().cloned().collect()
+                        sum.data_points.to_vec()
                     } else {
                         Vec::new()
                     }
@@ -1553,7 +1553,7 @@ mod tests {
                         .as_any()
                         .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
                     {
-                        sum.data_points.iter().cloned().collect()
+                        sum.data_points.to_vec()
                     } else {
                         Vec::new()
                     }
@@ -1856,7 +1856,7 @@ mod tests {
                         .as_any()
                         .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
                     {
-                        sum.data_points.iter().cloned().collect()
+                        sum.data_points.to_vec()
                     } else {
                         Vec::new()
                     }
@@ -2010,7 +2010,7 @@ mod tests {
                         .as_any()
                         .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
                     {
-                        sum.data_points.iter().cloned().collect()
+                        sum.data_points.to_vec()
                     } else {
                         Vec::new()
                     }
@@ -2038,7 +2038,7 @@ mod tests {
                         .as_any()
                         .downcast_ref::<opentelemetry_sdk::metrics::data::Sum<u64>>()
                     {
-                        sum.data_points.iter().cloned().collect()
+                        sum.data_points.to_vec()
                     } else {
                         Vec::new()
                     }
@@ -2058,7 +2058,7 @@ mod tests {
     #[test]
     fn test_permission_recorder_is_clone() {
         let rec = PermissionRecorder::disabled();
-        let _clone = rec.clone();
+        let _clone = rec;
     }
 
     // ── CompressionRecorder tests (T-017, FR-017) ──────────────────────────
@@ -2133,7 +2133,7 @@ mod tests {
     #[test]
     fn test_compression_recorder_is_clone() {
         let rec = CompressionRecorder::disabled();
-        let _clone = rec.clone();
+        let _clone = rec;
     }
 
     // ── SnapshotRecorder tests (T-027, FR-029) ─────────────────────────────

@@ -83,10 +83,10 @@ impl Tool for GitMergeTool {
 
         args.push(branch.to_string());
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
-        let combined = format!("{}\n{}", stdout, stderr).trim().to_string();
+        let combined = format!("{stdout}\n{stderr}").trim().to_string();
 
         // Detect conflicts from stderr
         let mut conflicted: Vec<String> = Vec::new();
@@ -105,7 +105,7 @@ impl Tool for GitMergeTool {
         }
 
         let content = if stdout.trim().is_empty() && stderr.trim().is_empty() {
-            format!("Merged '{}' into current branch.", branch)
+            format!("Merged '{branch}' into current branch.")
         } else {
             combined
         };
@@ -118,7 +118,7 @@ impl Tool for GitMergeTool {
                     "\n\nConflicted files:\n{}",
                     conflicted
                         .iter()
-                        .map(|f| format!("  - {}", f))
+                        .map(|f| format!("  - {f}"))
                         .collect::<Vec<_>>()
                         .join("\n")
                 )

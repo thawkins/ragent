@@ -133,7 +133,7 @@ fn test_parse_missing_file() {
 
 #[test]
 fn test_parse_malformed_json() {
-    let json = r#"{ not valid json }"#;
+    let json = r"{ not valid json }";
     let file = temp_file(json);
     let result = parse_azure_resources(file.path());
     assert!(result.is_err());

@@ -1,4 +1,4 @@
-//! Tests for test_agent_switching.rs
+//! Tests for `test_agent_switching.rs`
 
 //! Tests for TUI agent switching (TASK-005).
 //!
@@ -158,7 +158,7 @@ fn test_agent_switch_publishes_event_with_session() {
             assert_eq!(from, prev_name);
             assert_eq!(to, new_name);
         }
-        other => panic!("expected AgentSwitched, got: {:?}", other),
+        other => panic!("expected AgentSwitched, got: {other:?}"),
     }
 }
 
@@ -238,7 +238,7 @@ fn test_agent_switch_full_cycle_names() {
     assert_eq!(app.agent_name, expected_names[start]);
     // All cycleable agents should have been visited
     for name in &expected_names {
-        assert!(seen.contains(name), "agent '{}' was not visited", name);
+        assert!(seen.contains(name), "agent '{name}' was not visited");
     }
 }
 

@@ -75,15 +75,12 @@ impl Tool for GitStatusTool {
             if line.starts_with("1 ") && line.len() >= 4 {
                 let xy = &line[2..4];
                 let path = line[4..].trim_start();
-                match xy.chars().next() {
-                    Some('M') | Some('A') | Some('D') | Some('R') | Some('C') => {
-                        staged.push(path.to_string())
-                    }
-                    _ => {}
+                if let Some('M' | 'A' | 'D' | 'R' | 'C') = xy.chars().next() {
+                    staged.push(path.to_string());
                 }
                 match xy.chars().nth(1) {
-                    Some('M') | Some('D') => modified.push(path.to_string()),
-                    Some('U') | Some('A') if xy == "UU" || xy == "AA" || xy == "DD" => {
+                    Some('M' | 'D') => modified.push(path.to_string()),
+                    Some('U' | 'A') if xy == "UU" || xy == "AA" || xy == "DD" => {
                         conflicted.push(path.to_string());
                     }
                     _ => {}
@@ -120,7 +117,7 @@ impl Tool for GitStatusTool {
                 "Working tree clean{}.",
                 branch_name
                     .as_ref()
-                    .map(|b| format!(" on branch {}", b))
+                    .map(|b| format!(" on branch {b}"))
                     .unwrap_or_default()
             )
         } else {

@@ -1,4 +1,4 @@
-//! Tests for the TUI research progress encoding of the ConfigSnapshot event.
+//! Tests for the TUI research progress encoding of the `ConfigSnapshot` event.
 
 #[path = "support/mod.rs"]
 mod support;

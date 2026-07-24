@@ -291,12 +291,14 @@ impl LlmQueryDecomposer {
     }
 
     /// Provide an API key for the provider.
+    #[must_use]
     pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
         self
     }
 
     /// Override the API base URL.
+    #[must_use]
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
         self
@@ -325,8 +327,7 @@ impl LlmQueryDecomposer {
             })?;
 
         let prompt = format!(
-            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {max} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:",
-            max = MAX_DECOMPOSED_QUERIES
+            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {MAX_DECOMPOSED_QUERIES} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
         );
 
         let request = ChatRequest {
@@ -391,7 +392,7 @@ impl QueryDecomposer for LlmQueryDecomposer {
 /// Parse the model's JSON response into a list of queries.
 ///
 /// Accepts `{ "queries": [...] }`, markdown-fenced JSON, and strips trailing
-/// commas before delegating to serde_json.
+/// commas before delegating to `serde_json`.
 fn parse_query_decomposition(raw: &str) -> anyhow::Result<Vec<String>> {
     let trimmed = raw.trim();
     let json_str = if trimmed.starts_with("```") {
@@ -462,7 +463,8 @@ pub struct GatherResult {
 
 impl GatherResult {
     /// Empty result with no queries and no sources.
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             queries: Vec::new(),
             sources: Vec::new(),
@@ -790,10 +792,8 @@ impl WebGatherer {
                 if let Some(obs) = observer {
                     obs.on_event(GatherEvent::SearchFailed { error: err });
                 }
-            } else {
-                if let Some(obs) = observer {
-                    obs.on_event(GatherEvent::SearchReturnedNoHits);
-                }
+            } else if let Some(obs) = observer {
+                obs.on_event(GatherEvent::SearchReturnedNoHits);
             }
             tracing::info!("research: websearch returned 0 hits");
             return Ok(GatherResult {
@@ -903,8 +903,8 @@ fn compute_relevance_note(query: &str, title: &str, snippet: &str, url: &str) ->
     let query_lc = query.to_lowercase();
     let query_terms: Vec<String> = query_lc
         .split_whitespace()
-        .filter(|t| t.len() > 2 || t.chars().any(|c| c.is_alphabetic()))
-        .map(|t| t.to_string())
+        .filter(|t| t.len() > 2 || t.chars().any(char::is_alphabetic))
+        .map(std::string::ToString::to_string)
         .collect();
     if query_terms.is_empty() {
         return "Match score unavailable".into();
@@ -1075,20 +1075,20 @@ mod tests {
             WebSearchHit {
                 url: "https://a.example".into(),
                 title: "A".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://b.example".into(),
                 title: "B".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://c.example".into(),
                 title: "C".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1115,7 +1115,7 @@ mod tests {
             WebFetchedPage {
                 published_at: None,
                 url: "https://c.example".into(),
-                title: "".into(), // empty title should fall back to search hit title
+                title: String::new(), // empty title should fall back to search hit title
                 body: "body c".into(),
             },
         );
@@ -1153,14 +1153,14 @@ mod tests {
             WebSearchHit {
                 url: "https://ok".into(),
                 title: "OK".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1190,20 +1190,20 @@ mod tests {
             WebSearchHit {
                 url: "https://1".into(),
                 title: "1".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://2".into(),
                 title: "2".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://3".into(),
                 title: "3".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1330,14 +1330,14 @@ mod tests {
             WebSearchHit {
                 url: "https://ok".into(),
                 title: "OK".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
-                snippet: "".into(),
-                matched_query: "".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -1411,8 +1411,8 @@ mod tests {
                 vec![WebSearchHit {
                     url: "https://a.example".into(),
                     title: "A".into(),
-                    snippet: "".into(),
-                    matched_query: "".into(),
+                    snippet: String::new(),
+                    matched_query: String::new(),
                 }],
             ),
             (
@@ -1421,14 +1421,14 @@ mod tests {
                     WebSearchHit {
                         url: "https://a.example".into(), // duplicate URL
                         title: "A2".into(),
-                        snippet: "".into(),
-                        matched_query: "".into(),
+                        snippet: String::new(),
+                        matched_query: String::new(),
                     },
                     WebSearchHit {
                         url: "https://b.example".into(),
                         title: "B".into(),
-                        snippet: "".into(),
-                        matched_query: "".into(),
+                        snippet: String::new(),
+                        matched_query: String::new(),
                     },
                 ],
             ),
@@ -1493,11 +1493,11 @@ mod tests {
 
         #[async_trait]
         impl ragent_llm::provider::Provider for JsonProvider {
-            fn id(&self) -> &str {
+            fn id(&self) -> &'static str {
                 "json"
             }
 
-            fn name(&self) -> &str {
+            fn name(&self) -> &'static str {
                 "JSON"
             }
 
@@ -1570,11 +1570,11 @@ mod tests {
 
         #[async_trait]
         impl ragent_llm::provider::Provider for BadJsonProvider {
-            fn id(&self) -> &str {
+            fn id(&self) -> &'static str {
                 "badjson"
             }
 
-            fn name(&self) -> &str {
+            fn name(&self) -> &'static str {
                 "Bad JSON"
             }
 

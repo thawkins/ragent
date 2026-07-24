@@ -393,7 +393,7 @@ async fn test_edit_returns_snippet_with_line_numbers() {
     let tmp = TempDir::new().unwrap();
     let mut initial = String::new();
     for i in 1..=12 {
-        initial.push_str(&format!("line {}\n", i));
+        initial.push_str(&format!("line {i}\n"));
     }
     write_file(tmp.path(), "a.rs", &initial);
 
@@ -408,7 +408,7 @@ async fn test_edit_returns_snippet_with_line_numbers() {
 
     // Snippet should include line numbers and the edited line marker.
     assert!(
-        snippet.contains("6"),
+        snippet.contains('6'),
         "snippet should reference line 6: {snippet}"
     );
     assert!(

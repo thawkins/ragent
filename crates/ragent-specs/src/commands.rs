@@ -238,6 +238,7 @@ impl SpecCommand {
     }
 
     /// Returns `true` if this is a usage-error variant.
+    #[must_use]
     pub fn is_usage_error(&self) -> bool {
         matches!(
             self,
@@ -254,7 +255,8 @@ impl SpecCommand {
     }
 
     /// Build the static help message shown by `/spec help`.
-    pub fn build_help_message() -> &'static str {
+    #[must_use]
+    pub const fn build_help_message() -> &'static str {
         "From: /spec help\n\
                     ## /spec command reference\n\n\
                     | Command | Arguments | Description |\n\
@@ -275,52 +277,49 @@ impl SpecCommand {
                     Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets --from-research realtime-collab`"
     }
     /// Build the user-facing status string for a create operation.
+    #[must_use]
     pub fn build_create_status(specname: &str) -> String {
-        format!(
-            "spec: writing specs/{}/SPEC.md + specs/{}/PLAN.md…",
-            specname, specname
-        )
+        format!("spec: writing specs/{specname}/SPEC.md + specs/{specname}/PLAN.md…")
     }
 
     /// Build the assistant message shown when a spec generation starts.
+    #[must_use]
     pub fn build_create_message(specname: &str, _feature: &str) -> String {
         format!(
             "From: /spec\n📝 **Generating specification and plan…**\n\n\
-             Creating spec directory `specs/{}` with:\n\
-             - `specs/{}/SPEC.md` — EARS requirements specification\n\
-             - `specs/{}/PLAN.md` — implementation plan with tasks\n\n\
+             Creating spec directory `specs/{specname}` with:\n\
+             - `specs/{specname}/SPEC.md` — EARS requirements specification\n\
+             - `specs/{specname}/PLAN.md` — implementation plan with tasks\n\n\
              This may take a few moments.\n\
-             ⚠️ **Tip:** After creation, you can validate with `/spec validate {}`.",
-            specname, specname, specname, specname
+             ⚠️ **Tip:** After creation, you can validate with `/spec validate {specname}`."
         )
     }
 
     /// Build the log entry for a create operation.
+    #[must_use]
     pub fn build_create_log(specname: &str, feature: &str) -> String {
-        format!(
-            "Creating spec '{}' for feature: {} → specs/{}/SPEC.md",
-            specname, feature, specname
-        )
+        format!("Creating spec '{specname}' for feature: {feature} → specs/{specname}/SPEC.md")
     }
 
     /// Build the prompt sent to the explore agent for spec generation.
+    #[must_use]
     pub fn build_create_prompt(specname: &str, feature: &str) -> String {
         format!(
-            r#"You are an expert specification writer. Create a specification and implementation plan for the following feature.
+            r"You are an expert specification writer. Create a specification and implementation plan for the following feature.
           
-                         **Feature:** {}
+                         **Feature:** {feature}
           
-                         **Spec ID:** {}
+                         **Spec ID:** {specname}
           
                          Write the following files:
           
-                         1. `specs/{}/SPEC.md` — A requirements specification using EARS notation:
+                         1. `specs/{specname}/SPEC.md` — A requirements specification using EARS notation:
                             - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
                             - Number requirements as FR-001, FR-002, etc.
                             - Include a '## Requirements' section
                             - Start with YAML frontmatter containing `status: draft`
           
-                         2. `specs/{}/PLAN.md` — An implementation plan with:
+                         2. `specs/{specname}/PLAN.md` — An implementation plan with:
                             - A '## Tasks' section with a markdown table
                             - Columns: ID, Title, Requirement, Effort, Priority, Dependencies
                             - Task IDs as T-001, T-002, etc.
@@ -328,41 +327,36 @@ impl SpecCommand {
                             - Effort values: S, M, L
                             - Priority values: Critical, High, Medium, Low
           
-                         Use the `write` tool to create both files. Ensure the spec is clear, testable, and complete."#,
-            feature, specname, specname, specname
+                         Use the `write` tool to create both files. Ensure the spec is clear, testable, and complete."
         )
     }
 
     // ── Add helpers ────────────────────────────────────────────────────────
 
     /// Build the user-facing status string for an add operation.
+    #[must_use]
     pub fn build_add_status(spec_id: &str) -> String {
-        format!(
-            "spec: updating specs/{}/SPEC.md + specs/{}/PLAN.md…",
-            spec_id, spec_id
-        )
+        format!("spec: updating specs/{spec_id}/SPEC.md + specs/{spec_id}/PLAN.md…")
     }
 
     /// Build the assistant message shown when an incremental spec update starts.
+    #[must_use]
     pub fn build_add_message(spec_id: &str, feature: &str) -> String {
         format!(
             "From: /spec add\n📝 **Adding requirements to spec…**\n\n\
-                   Updating spec `specs/{}/` with new feature:\n\
-                   > {}\n\n\
+                   Updating spec `specs/{spec_id}/` with new feature:\n\
+                   > {feature}\n\n\
                    - Reading existing `SPEC.md` and `PLAN.md`\n\
                    - Generating incremental requirements and tasks\n\
                    - Inserting new content without modifying existing sections\n\n\
-                   This may take a few moments.",
-            spec_id, feature
+                   This may take a few moments."
         )
     }
 
     /// Build the log entry for an add operation.
+    #[must_use]
     pub fn build_add_log(spec_id: &str, feature: &str) -> String {
-        format!(
-            "Adding requirements to spec '{}' for feature: {}",
-            spec_id, feature
-        )
+        format!("Adding requirements to spec '{spec_id}' for feature: {feature}")
     }
 
     /// Build the prompt sent to the LLM agent for incremental spec updates.
@@ -381,6 +375,7 @@ impl SpecCommand {
     /// * `next_fr` — The next available `FR-NNN` number.
     /// * `next_nfr` — The next available `NFR-NNN` number.
     /// * `next_task` — The next available `T-NNN` number.
+    #[must_use]
     pub fn build_add_prompt(
         spec_id: &str,
         feature: &str,
@@ -391,11 +386,11 @@ impl SpecCommand {
         next_task: u32,
     ) -> String {
         format!(
-            r#"You are an expert specification writer. Incrementally add new requirements to an existing spec.
+            r"You are an expert specification writer. Incrementally add new requirements to an existing spec.
     
-    **Feature to add:** {}
+    **Feature to add:** {feature}
     
-    **Spec ID:** {}
+    **Spec ID:** {spec_id}
     
     **IMPORTANT:** You are UPDATING an existing spec, NOT creating a new one. Generate ONLY the new requirement blocks and task rows that should be inserted. Do NOT rewrite the entire spec or plan. Do NOT modify, reorder, or delete any existing content.
     
@@ -429,18 +424,12 @@ impl SpecCommand {
     
     ---END---
     
-    Ensure the spec is clear, testable, and complete."#,
-            feature,
-            spec_id,
-            spec_md = spec_md,
-            plan_md = plan_md,
-            next_fr = next_fr,
-            next_nfr = next_nfr,
-            next_task = next_task,
+    Ensure the spec is clear, testable, and complete.",
         )
     }
 
     /// Build the completion summary shown after a successful add operation.
+    #[must_use]
     pub fn build_add_completion_summary(
         spec_id: &str,
         new_req_ids: &[String],
@@ -874,7 +863,7 @@ mod tests {
         assert!(s.contains("my-spec"));
         assert!(s.contains("FR-002, FR-003"));
         assert!(s.contains("T-002"));
-        assert!(s.contains("2"));
+        assert!(s.contains('2'));
     }
 
     #[test]

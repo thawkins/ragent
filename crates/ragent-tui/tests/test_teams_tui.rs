@@ -1,4 +1,4 @@
-//! Tests for test_teams_tui.rs
+//! Tests for `test_teams_tui.rs`
 
 //! TUI tests for Teams integration (M4-T9).
 //!
@@ -114,7 +114,9 @@ fn test_team_create_no_name_shows_usage() {
 
 #[test]
 fn test_team_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -149,7 +151,9 @@ fn test_team_show_no_name_lists_all_registered_teams() {
 
 #[test]
 fn test_team_show_no_name_empty_registry_message() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -196,7 +200,9 @@ fn test_team_show_no_name_empty_registry_message() {
 
 #[test]
 fn test_team_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -231,7 +237,9 @@ fn test_team_show_loads_named_team_details() {
 
 #[test]
 fn test_teams_alias_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -256,7 +264,9 @@ fn test_teams_alias_show_loads_named_team_details() {
 
 #[test]
 fn test_teams_alias_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -388,7 +398,9 @@ fn test_team_delete_no_name_shows_usage() {
 
 #[test]
 fn test_team_delete_removes_existing_team() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -417,7 +429,9 @@ fn test_team_delete_removes_existing_team() {
 
 #[test]
 fn test_team_delete_active_team_clears_session_state() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -453,7 +467,9 @@ fn test_team_delete_active_team_clears_session_state() {
 
 #[test]
 fn test_team_delete_active_team_blocked_when_teammates_working() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -487,7 +503,9 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
 
 #[test]
 fn test_team_create_sets_active_team() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     // Change into the temp dir so the project-local team is created there.
@@ -546,7 +564,9 @@ fn test_team_tasks_no_active_team() {
 
 #[test]
 fn test_team_tasks_renders_table_with_status() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -614,7 +634,9 @@ fn test_team_clear_no_active_team() {
 
 #[test]
 fn test_team_clear_removes_tasks_for_active_team() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -797,7 +819,7 @@ fn test_event_teammate_spawned_adds_member_and_shows_panel() {
     app.session_id = Some(sid.clone());
 
     let event = Event::TeammateSpawned {
-        session_id: sid.clone(),
+        session_id: sid,
         team_name: "alpha".to_string(),
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
@@ -823,7 +845,7 @@ fn test_event_teammate_spawned_deduplicates() {
     app.session_id = Some(sid.clone());
 
     let event = Event::TeammateSpawned {
-        session_id: sid.clone(),
+        session_id: sid,
         team_name: "alpha".to_string(),
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
@@ -840,7 +862,9 @@ fn test_event_teammate_spawned_deduplicates() {
 
 #[test]
 fn test_event_teammate_spawned_hydrates_session_id_from_store() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -860,7 +884,7 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
 
     app.handle_event(Event::TeammateSpawned {
         session_id: "sess-lead".to_string(),
-        team_name: team_name.clone(),
+        team_name,
         teammate_name: "writer".to_string(),
         agent_id: "tm-001".to_string(),
     });
@@ -874,7 +898,9 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
 
 #[tokio::test]
 async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
-    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _cwd_guard = CWD_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -923,7 +949,7 @@ fn test_event_teammate_idle_updates_status() {
     app.team_members.push(m);
 
     let event = Event::TeammateIdle {
-        session_id: sid.clone(),
+        session_id: sid,
         team_name: "alpha".to_string(),
         agent_id: "tm-002".to_string(),
     };
@@ -947,7 +973,7 @@ fn test_event_team_task_claimed_sets_current_task() {
         .push(TeamMember::new("tm-a", "tm-001", "general"));
 
     app.handle_event(Event::TeamTaskClaimed {
-        session_id: sid.clone(),
+        session_id: sid,
         team_name: "t".to_string(),
         agent_id: "tm-001".to_string(),
         task_id: "task-007".to_string(),
@@ -971,7 +997,7 @@ fn test_event_team_task_completed_clears_current_task() {
     app.team_members.push(m);
 
     app.handle_event(Event::TeamTaskCompleted {
-        session_id: sid.clone(),
+        session_id: sid,
         team_name: "t".to_string(),
         agent_id: "tm-001".to_string(),
         task_id: "task-007".to_string(),

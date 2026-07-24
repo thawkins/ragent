@@ -371,7 +371,7 @@ async fn test_multi_edit_canonical_name() {
 }
 
 /// The canonical parameter names `file_path` / `old_string` / `new_string`
-/// must be accepted by the multi_edit tool.
+/// must be accepted by the `multi_edit` tool.
 #[tokio::test]
 async fn test_multi_edit_canonical_param_names() {
     let tmp = TempDir::new().unwrap();
@@ -457,7 +457,7 @@ fn test_multi_edit_schema_declares_canonical_params() {
 }
 // ── Atomic rollback (editrenewal FR-009, FR-013) ──────────────────────────────
 
-/// When one edit in a batch fails validation (here: old_string not found in
+/// When one edit in a batch fails validation (here: `old_string` not found in
 /// the second file), NO files may be modified — including the first file whose
 /// edit would have succeeded on its own.
 #[tokio::test]

@@ -156,7 +156,7 @@ impl GatherObserver for StateGatherForwarder {
                 });
                 self.observer.on_event(SessionEvent::WebFetchFailed {
                     url,
-                    error: "".into(),
+                    error: String::new(),
                 });
             }
             GatherEvent::QueriesDecomposed { queries } => {
@@ -530,7 +530,7 @@ mod tests {
             url: "https://rust-lang.org".to_string(),
             title: "Rust".to_string(),
             snippet: "snip".to_string(),
-            matched_query: "".to_string(),
+            matched_query: String::new(),
         }]];
         let engine = engine_with_fake(hits);
         let state = engine.run("Rust", Arc::new(NoopObserver)).await.unwrap();

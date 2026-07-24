@@ -18,7 +18,7 @@ use tracing::debug;
 /// Current schema version — bump when migrating.
 const SCHEMA_VERSION: i32 = 2;
 
-/// Persistent store for the code index, backed by SQLite.
+/// Persistent store for the code index, backed by `SQLite`.
 pub struct IndexStore {
     conn: Connection,
 }
@@ -292,7 +292,7 @@ impl IndexStore {
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         // Build a set of scanned paths for removal detection.
@@ -425,10 +425,10 @@ impl IndexStore {
                 sym.qualified_name,
                 sym.kind.to_string(),
                 sym.visibility.to_string(),
-                sym.start_line as i64,
-                sym.end_line as i64,
-                sym.start_col as i64,
-                sym.end_col as i64,
+                i64::from(sym.start_line),
+                i64::from(sym.end_line),
+                i64::from(sym.start_col),
+                i64::from(sym.end_col),
                 Option::<i64>::None,
                 sym.signature,
                 sym.doc_comment,
@@ -451,10 +451,10 @@ impl IndexStore {
                 sym.qualified_name,
                 sym.kind.to_string(),
                 sym.visibility.to_string(),
-                sym.start_line as i64,
-                sym.end_line as i64,
-                sym.start_col as i64,
-                sym.end_col as i64,
+                i64::from(sym.start_line),
+                i64::from(sym.end_line),
+                i64::from(sym.start_col),
+                i64::from(sym.end_col),
                 real_parent_id,
                 sym.signature,
                 sym.doc_comment,
@@ -595,7 +595,7 @@ impl IndexStore {
                 imp.imported_name,
                 imp.source_module,
                 imp.alias,
-                imp.line as i64,
+                i64::from(imp.line),
                 imp.kind,
             ])?;
         }
@@ -671,8 +671,8 @@ impl IndexStore {
             stmt.execute(params![
                 r.symbol_name,
                 file_id,
-                r.line as i64,
-                r.col as i64,
+                i64::from(r.line),
+                i64::from(r.col),
                 r.kind,
             ])?;
         }
@@ -749,7 +749,7 @@ impl IndexStore {
 
     // ── Aggregate stats ─────────────────────────────────────────────────────
 
-    /// Get the file_id for a given path.
+    /// Get the `file_id` for a given path.
     pub fn get_file_id(&self, path: &str) -> Result<Option<i64>> {
         self.conn
             .query_row(
@@ -785,7 +785,7 @@ impl IndexStore {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Raw row from SQLite before type conversion.
+/// Raw row from `SQLite` before type conversion.
 struct RawFileRow {
     path: String,
     content_hash: String,
@@ -799,8 +799,7 @@ struct RawFileRow {
 /// Convert a raw database row to a [`FileEntry`].
 fn raw_to_file_entry(r: RawFileRow) -> Result<FileEntry> {
     let last_indexed: DateTime<Utc> = DateTime::parse_from_rfc3339(&r.last_indexed)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now());
+        .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
     Ok(FileEntry {
         path: r.path,
         content_hash: r.content_hash,
@@ -825,7 +824,7 @@ fn scanned_to_entry(file: &ScannedFile) -> FileEntry {
     }
 }
 
-/// Raw symbol row from SQLite before type conversion.
+/// Raw symbol row from `SQLite` before type conversion.
 struct RawSymbolRow {
     id: i64,
     file_id: i64,

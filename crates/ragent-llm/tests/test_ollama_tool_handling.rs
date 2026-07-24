@@ -106,12 +106,7 @@ async fn test_ollama_request_includes_tool_choice_and_stream_options() {
         json!({"include_usage": true}),
         "stream_options should request usage"
     );
-    assert!(
-        body["tools"]
-            .as_array()
-            .map(|a| !a.is_empty())
-            .unwrap_or(false)
-    );
+    assert!(body["tools"].as_array().is_some_and(|a| !a.is_empty()));
 }
 
 #[tokio::test]

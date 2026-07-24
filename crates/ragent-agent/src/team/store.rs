@@ -37,10 +37,7 @@ pub fn find_project_teams_dir(working_dir: &Path) -> Option<PathBuf> {
         if candidate.is_dir() {
             return Some(candidate.join("teams"));
         }
-        match current.parent() {
-            Some(p) => current = p,
-            None => return None,
-        }
+        current = current.parent()?;
     }
 }
 

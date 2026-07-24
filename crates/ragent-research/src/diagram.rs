@@ -28,11 +28,12 @@ pub enum EdgeStrength {
 
 impl EdgeStrength {
     /// Return the Mermaid `stroke-width` value for this strength.
-    pub fn stroke_width(self) -> &'static str {
+    #[must_use]
+    pub const fn stroke_width(self) -> &'static str {
         match self {
-            EdgeStrength::Strong => "4px",
-            EdgeStrength::Weak => "1.5px",
-            EdgeStrength::Default => "2px",
+            Self::Strong => "4px",
+            Self::Weak => "1.5px",
+            Self::Default => "2px",
         }
     }
 }
@@ -75,6 +76,7 @@ use regex::Regex;
 ///
 /// A deduplicated, topologically-ordered-by-encounter list of directed
 /// edges. The list is empty when there are no valid dependencies.
+#[must_use]
 pub fn extract_finding_edges(findings: &[String]) -> Vec<FindingEdge> {
     if findings.len() <= 1 {
         return Vec::new();
@@ -89,7 +91,7 @@ pub fn extract_finding_edges(findings: &[String]) -> Vec<FindingEdge> {
             if to == 0 || to > findings.len() || to == from {
                 continue;
             }
-            let start = cap.get(0).map(|m| m.start()).unwrap_or(0);
+            let start = cap.get(0).map_or(0, |m| m.start());
             let strength = classify_edge_strength(&deps, start);
             let candidate = FindingEdge { from, to, strength };
             if !edges
@@ -107,9 +109,10 @@ pub fn extract_finding_edges(findings: &[String]) -> Vec<FindingEdge> {
 /// section heading.
 ///
 /// This helper is used when the caller already supplies its own heading (for
-/// example, `### Findings Relationship Diagram` inside the IMRaD `## Results`
+/// example, `### Findings Relationship Diagram` inside the `IMRaD` `## Results`
 /// section). It emits the same Mermaid code or empty-state placeholder as
 /// [`render_findings_diagram`], but omits the leading `##` heading line.
+#[must_use]
 pub fn render_findings_diagram_body(findings: &[String]) -> String {
     let mut out = String::new();
     if findings.is_empty() {
@@ -176,6 +179,7 @@ pub fn render_findings_diagram_body(findings: &[String]) -> String {
 /// string operations, and performs no I/O or LLM calls (NFR-001, NFR-003).
 /// The output starts with a blank line, the `##` heading, a blank line, and
 /// then the diagram body produced by [`render_findings_diagram_body`].
+#[must_use]
 pub fn render_findings_diagram(findings: &[String]) -> String {
     let body = render_findings_diagram_body(findings);
     format!("\n## Findings Relationship Diagram\n\n{body}")
@@ -222,15 +226,15 @@ fn extract_headline_for_diagram(finding: &str, finding_number: usize) -> String 
     });
 
     let headline = headline.unwrap_or_else(|| {
-        finding
-            .find("**Observation:**")
-            .map(|start| {
+        finding.find("**Observation:**").map_or_else(
+            || format!("Finding {finding_number}"),
+            |start| {
                 let after = &finding[start + "**Observation:**".len()..];
                 let end = find_label_boundary(after);
                 let body = after[..end].trim();
                 crate::document::make_headline_from_observation(body)
-            })
-            .unwrap_or_else(|| format!("Finding {finding_number}"))
+            },
+        )
     });
 
     escape_mermaid_label(&headline)
@@ -313,13 +317,11 @@ fn clause_around(paragraph: &str, match_start: usize) -> &str {
     let start = bytes[..match_start]
         .iter()
         .rposition(|&b| matches!(b, b'.' | b'!' | b'?' | b'\n' | b'\r'))
-        .map(|pos| pos + 1)
-        .unwrap_or(0);
+        .map_or(0, |pos| pos + 1);
     let end = bytes[match_start..]
         .iter()
         .position(|&b| matches!(b, b'.' | b'!' | b'?' | b'\n' | b'\r'))
-        .map(|pos| match_start + pos)
-        .unwrap_or(paragraph.len());
+        .map_or(paragraph.len(), |pos| match_start + pos);
     &paragraph[start..end]
 }
 

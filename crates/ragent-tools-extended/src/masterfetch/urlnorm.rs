@@ -116,6 +116,7 @@ pub fn normalise_url(raw: &str) -> Result<String, UrlNormError> {
 /// let deduped = dedup_urls(&urls);
 /// assert_eq!(deduped, vec!["https://example.com/page", "https://other.com/"]);
 /// ```
+#[must_use]
 pub fn dedup_urls(urls: &[&str]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::with_capacity(urls.len());

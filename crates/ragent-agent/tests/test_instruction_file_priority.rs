@@ -25,8 +25,8 @@ fn test_global_fallback_when_no_local_files() {
 
     // The first candidate should be the global file
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
-    candidates.extend(local_files.clone());
-    candidates.extend(global_files.clone());
+    candidates.extend(local_files);
+    candidates.extend(global_files);
 
     let loaded = candidates.first().map(|(_, p)| p.clone());
     assert!(
@@ -166,8 +166,8 @@ fn test_full_priority_chain() {
     let sub_files: Vec<(usize, std::path::PathBuf)> = vec![(1, subdir.join("AGENTS.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
-    candidates.extend(root_files.clone());
-    candidates.extend(global_files.clone());
+    candidates.extend(root_files);
+    candidates.extend(global_files);
     candidates.extend(sub_files);
 
     // Sort by AGENT_FILE_NAMES priority

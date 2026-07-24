@@ -315,12 +315,14 @@ fn test_flush_on_signal_arc_constructs_without_panic() {
 fn test_flush_on_signal_arc_disabled_installs_cleanly() {
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
 
-    let handle = rt.block_on(async {
+    rt.block_on(async {
         let sub = Arc::new(TelemetrySubsystem::disabled());
-        ragent_telemetry::shutdown::flush_on_signal_arc(sub).expect("signal handler should install")
+        ragent_telemetry::shutdown::flush_on_signal_arc(sub)
+            .expect("signal handler should install")
+            .await
+            .expect("signal handler task completed")
     });
 
-    handle.abort();
     drop(rt);
 }
 

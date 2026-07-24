@@ -55,16 +55,19 @@ pub struct ResearchIo;
 
 impl ResearchIo {
     /// Compute the absolute path of a research item directory.
+    #[must_use]
     pub fn item_dir(research_root: &Path, name: &ResearchName) -> PathBuf {
         research_root.join(name.dir_name())
     }
 
     /// Compute the path of the `RESEARCH.md` file for a research item.
+    #[must_use]
     pub fn research_md_path(research_root: &Path, name: &ResearchName) -> PathBuf {
         Self::item_dir(research_root, name).join("RESEARCH.md")
     }
 
     /// Compute the path of the `sources/` subdirectory for a research item.
+    #[must_use]
     pub fn sources_dir(research_root: &Path, name: &ResearchName) -> PathBuf {
         Self::item_dir(research_root, name).join("sources")
     }
@@ -73,6 +76,7 @@ impl ResearchIo {
     ///
     /// `prefix` is one of `"web"`, `"local"`, `"spec"`, or `"other"`. Index
     /// is 1-based for human-friendly filenames (`web-01.md`).
+    #[must_use]
     pub fn source_body_path(
         research_root: &Path,
         name: &ResearchName,
@@ -83,6 +87,7 @@ impl ResearchIo {
     }
 
     /// Compute the path of the `research/_templates/<name>.md` template file.
+    #[must_use]
     pub fn template_path(research_root: &Path, template_name: &str) -> PathBuf {
         research_root
             .join("_templates")
@@ -90,6 +95,7 @@ impl ResearchIo {
     }
 
     /// Compute the path of the per-item serialized state file (`state.json`).
+    #[must_use]
     pub fn state_json_path(research_root: &Path, name: &ResearchName) -> PathBuf {
         Self::item_dir(research_root, name).join("state.json")
     }
@@ -118,6 +124,7 @@ impl ResearchIo {
     }
 
     /// Compute the path of the global index file.
+    #[must_use]
     pub fn index_path(research_root: &Path) -> PathBuf {
         research_root.join("INDEX.md")
     }
@@ -171,6 +178,7 @@ impl ResearchIo {
     /// The frontmatter is the leading YAML between `---` fences; the body is
     /// everything after the closing `---`. If the file has no frontmatter,
     /// the body is the whole file and `frontmatter` is empty.
+    #[must_use]
     pub fn split_frontmatter(content: &str) -> (String, String) {
         // Accept either:
         //   ---             (leading, immediately followed by newline)
@@ -206,6 +214,7 @@ impl ResearchIo {
     /// **Relevance**) showing each web source's publication date when it
     /// could be parsed from the page's embedded metadata, and `—` otherwise.
     /// Non-web sources have no publication date and always show `—`.
+    #[must_use]
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
@@ -227,8 +236,7 @@ impl ResearchIo {
             let title = sanitize_inline(source.title());
             let published = source
                 .published_at()
-                .map(|dt| dt.format("%Y-%m-%d").to_string())
-                .unwrap_or_else(|| "—".to_string());
+                .map_or_else(|| "—".to_string(), |dt| dt.format("%Y-%m-%d").to_string());
             let relevance = match source {
                 Source::Local { relevance, .. } => sanitize_inline(relevance),
                 Source::Spec { relevance, .. } if !relevance.is_empty() => {
@@ -252,6 +260,7 @@ impl ResearchIo {
     /// `items` is the list of items to include; pass an empty slice to render
     /// the "no research yet" placeholder. Items are emitted in the order
     /// they are passed — callers are responsible for sorting.
+    #[must_use]
     pub fn render_index(items: &[IndexEntry]) -> String {
         if items.is_empty() {
             return String::from(

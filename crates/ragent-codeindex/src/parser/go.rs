@@ -16,7 +16,8 @@ pub struct GoParser {
 
 impl GoParser {
     /// Create a new Go parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -64,7 +65,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -183,13 +184,11 @@ fn extract_type_spec(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[St
     }
 
     let type_node = node.child_by_field_name("type");
-    let kind = type_node
-        .map(|t| match t.kind() {
-            "struct_type" => SymbolKind::Struct,
-            "interface_type" => SymbolKind::Interface,
-            _ => SymbolKind::TypeAlias,
-        })
-        .unwrap_or(SymbolKind::TypeAlias);
+    let kind = type_node.map_or(SymbolKind::TypeAlias, |t| match t.kind() {
+        "struct_type" => SymbolKind::Struct,
+        "interface_type" => SymbolKind::Interface,
+        _ => SymbolKind::TypeAlias,
+    });
 
     let visibility = go_visibility(&name);
     let doc =
@@ -217,11 +216,11 @@ fn extract_type_spec(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[St
     });
 
     // Extract struct fields.
-    if kind == SymbolKind::Struct {
-        if let Some(type_n) = type_node {
-            let new_scope = ext_scope(scope, &name);
-            extract_struct_fields(ctx, type_n, id, &new_scope);
-        }
+    if kind == SymbolKind::Struct
+        && let Some(type_n) = type_node
+    {
+        let new_scope = ext_scope(scope, &name);
+        extract_struct_fields(ctx, type_n, id, &new_scope);
     }
 }
 

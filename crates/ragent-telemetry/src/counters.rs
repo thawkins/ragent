@@ -511,8 +511,8 @@ mod tests {
     #[test]
     fn test_atomic_f64_store_load() {
         let a = AtomicF64::default();
-        a.store(3.14);
-        assert!((a.load() - 3.14).abs() < 1e-9);
+        a.store(std::f64::consts::PI);
+        assert!((a.load() - std::f64::consts::PI).abs() < 1e-9);
     }
 
     #[test]

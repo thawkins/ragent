@@ -179,9 +179,9 @@ trait PartTextContent {
 impl PartTextContent for MessagePart {
     fn text_content(&self) -> String {
         match self {
-            MessagePart::Text { text } => text.clone(),
-            MessagePart::Reasoning { text } => text.clone(),
-            MessagePart::ToolCall { tool, state, .. } => {
+            Self::Text { text } => text.clone(),
+            Self::Reasoning { text } => text.clone(),
+            Self::ToolCall { tool, state, .. } => {
                 let mut parts = vec![format!(
                     "tool={tool} input={}",
                     serialize_json_value(&state.input)
@@ -194,7 +194,7 @@ impl PartTextContent for MessagePart {
                 }
                 parts.join(" ")
             }
-            MessagePart::Image(image) => {
+            Self::Image(image) => {
                 format!("[image {}]", image.path.display())
             }
         }

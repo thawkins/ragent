@@ -108,7 +108,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
             .metadata
             .as_ref()
             .and_then(|m| m.get("completed"))
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             == Some(true),
         "tool should report completed=true"
     );

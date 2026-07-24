@@ -48,7 +48,7 @@ fn safe_session_id(session_id: &str) -> String {
 
 /// Returns `true` when running on Windows.
 #[must_use]
-pub fn is_windows() -> bool {
+pub const fn is_windows() -> bool {
     cfg!(target_os = "windows")
 }
 
@@ -67,8 +67,8 @@ enum ShellType {
 
 impl ShellType {
     /// Returns `true` if this is a POSIX-compatible shell (Bash or Git Bash).
-    fn is_posix(&self) -> bool {
-        matches!(self, ShellType::Bash | ShellType::GitBash(_))
+    const fn is_posix(&self) -> bool {
+        matches!(self, Self::Bash | Self::GitBash(_))
     }
 }
 
@@ -162,12 +162,13 @@ fn get_shell() -> &'static ShellType {
 /// Uses `%LOCALAPPDATA%\ragent\shell\` on Windows and `/tmp` on Unix.
 /// Creates the directory (and parents) if it does not exist.
 fn windows_state_dir() -> Result<PathBuf> {
-    let base = std::env::var("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("LOCALAPPDATA").map_or_else(
+        |_| {
             // Fallback: use HOME/.local/share on Unix, or USERPROFILE on Windows
             dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
-        });
+        },
+        PathBuf::from,
+    );
     let dir = base.join("ragent").join("shell");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create state directory {}", dir.display()))?;
@@ -471,7 +472,7 @@ pub fn get_safe_commands() -> Vec<&'static str> {
 /// Returns the built-in banned commands, denied commands, denied command patterns, and denied patterns.
 ///
 /// Used by the TUI to display the complete security policy in `/bash show`.
-/// Returns: (banned_commands, denied_commands, denied_command_patterns, denied_patterns)
+/// Returns: (`banned_commands`, `denied_commands`, `denied_command_patterns`, `denied_patterns`)
 #[must_use]
 pub fn get_builtin_lists() -> (
     Vec<&'static str>,

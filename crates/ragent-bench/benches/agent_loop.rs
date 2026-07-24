@@ -15,16 +15,14 @@
 //! - `estimate_request_bytes` — per-step request-size estimate (P-7).
 //! - `estimate_tool_definition_bytes` — one-time tool-definition byte sum.
 //! - `interim_save_hash` — per-step change-detection hash (P-12).
-//! - `mock_llm_chat_stream` — MockLlmClient stream throughput (F-1).
+//! - `mock_llm_chat_stream` — `MockLlmClient` stream throughput (F-1).
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::StreamExt;
-use ragent_agent::llm::{
-    ChatContent, ChatMessage, ChatRequest, ContentPart, LlmClient, ToolDefinition,
-};
+use ragent_agent::llm::{ChatContent, ChatMessage, ChatRequest, LlmClient, ToolDefinition};
 use ragent_agent::message::{Message, MessagePart, Role};
 use ragent_agent::session::processor::{
     estimate_request_bytes, estimate_tool_definition_bytes, history_to_chat_messages,
@@ -38,7 +36,7 @@ use serde_json::json;
 fn synthetic_history(n: usize) -> Vec<Message> {
     let mut messages = Vec::with_capacity(n * 2);
     for i in 0..n {
-        let user = Message::user_text("session-bench", &format!("turn {i}: do work"));
+        let user = Message::user_text("session-bench", format!("turn {i}: do work"));
         messages.push(user);
         let assistant = Message::new(
             "session-bench",
@@ -131,10 +129,10 @@ fn interim_save_hash(parts: &[MessagePart]) -> u64 {
                 if let Ok(bytes) = serde_json::to_vec(&state.input) {
                     bytes.hash(&mut hasher);
                 }
-                if let Some(out) = &state.output {
-                    if let Ok(bytes) = serde_json::to_vec(out) {
-                        bytes.hash(&mut hasher);
-                    }
+                if let Some(out) = &state.output
+                    && let Ok(bytes) = serde_json::to_vec(out)
+                {
+                    bytes.hash(&mut hasher);
                 }
                 if let Some(err) = &state.error {
                     err.hash(&mut hasher);

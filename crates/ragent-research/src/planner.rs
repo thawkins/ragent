@@ -45,7 +45,8 @@ pub struct HeuristicPlanner;
 
 impl HeuristicPlanner {
     /// Create a new heuristic planner.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 
@@ -177,12 +178,14 @@ impl LlmPlanner {
     }
 
     /// Provide an API key for the provider.
+    #[must_use]
     pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
         self
     }
 
     /// Override the API base URL.
+    #[must_use]
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
         self
@@ -285,7 +288,7 @@ fn parse_llm_questions(text: &str, topic: &str) -> Option<Vec<LlmSubQuestion>> {
         .and_then(|c| c.get(1).map(|m| m.as_str()))
         .unwrap_or(text);
     let mut questions: Vec<LlmSubQuestion> = serde_json::from_str(inner).ok()?;
-    for q in questions.iter_mut() {
+    for q in &mut questions {
         if q.question.is_empty() {
             q.question = format!("What is the role of '{topic}' in this topic?");
         }

@@ -1,4 +1,4 @@
-//! BigCodeBench benchmark adapter.
+//! `BigCodeBench` benchmark adapter.
 
 use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;

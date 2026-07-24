@@ -162,6 +162,7 @@ pub struct SearchResult {
 /// The metadata is a JSON object with a `results` array, where each element
 /// has `title`, `url`, and `snippet` fields. Returns an empty vector if the
 /// metadata is missing the `results` key or if parsing fails.
+#[must_use]
 pub fn hits_from_metadata(metadata: &serde_json::Value) -> Vec<SearchResult> {
     metadata
         .get("results")

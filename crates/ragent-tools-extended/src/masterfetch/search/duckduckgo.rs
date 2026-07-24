@@ -1,23 +1,23 @@
-//! DuckDuckGo keyless search backend.
+//! `DuckDuckGo` keyless search backend.
 //!
 //! Implements **FR-008** and **NFR-003** (T-013).
 //!
 //! This module provides a [`DuckDuckGoEngine`] that implements the
-//! [`SearchEngine`] trait by scraping DuckDuckGo's lightweight HTML results page
+//! [`SearchEngine`] trait by scraping `DuckDuckGo`'s lightweight HTML results page
 //! at `https://html.duckduckgo.com/html/`. No API key is required — the engine
 //! sends a POST request with the query as a form field and parses the returned
 //! HTML to extract result titles, URLs, and snippets.
 //!
 //! # Rate-limiting
 //!
-//! DuckDuckGo may return HTTP 202 (soft rate-limit / challenge) or 429 (hard
+//! `DuckDuckGo` may return HTTP 202 (soft rate-limit / challenge) or 429 (hard
 //! rate-limit). Both are detected and reported as `engine_blocked = true` in
 //! the [`EngineReport`], with an honest error message. The caller (consensus
 //! merger) uses this to populate the `engine_blocked` signal for the agent.
 //!
 //! # URL unwrapping
 //!
-//! DuckDuckGo wraps result URLs in a redirect link of the form
+//! `DuckDuckGo` wraps result URLs in a redirect link of the form
 //! `//duckduckgo.com/l/?uddg=<encoded-url>&rut=...`. The parser unwraps these
 //! to recover the original target URL via the `uddg` query parameter.
 //!
@@ -33,7 +33,7 @@
 //!
 //! The search URL and POST form body are built by [`build_form_params`], a pure
 //! function that maps [`SearchOptions`] (query, site filter, freshness, page)
-//! to DuckDuckGo's form parameters (`q`, `df`, `s`).
+//! to `DuckDuckGo`'s form parameters (`q`, `df`, `s`).
 //!
 //! # Examples
 //!
@@ -67,13 +67,13 @@ use super::engine::{
 // Constants
 // ---------------------------------------------------------------------------
 
-/// The DuckDuckGo HTML search endpoint (lightweight, no JS required).
+/// The `DuckDuckGo` HTML search endpoint (lightweight, no JS required).
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 
 /// Engine display name.
 const ENGINE_NAME: &str = "duckduckgo";
 
-/// DuckDuckGo's rate-limit / challenge HTTP status code (soft block).
+/// `DuckDuckGo`'s rate-limit / challenge HTTP status code (soft block).
 const RATE_LIMIT_STATUS: u16 = 202;
 
 /// Standard rate-limit HTTP status code (hard block).
@@ -83,7 +83,7 @@ const TOO_MANY_REQUESTS_STATUS: u16 = 429;
 // Engine struct
 // ---------------------------------------------------------------------------
 
-/// DuckDuckGo keyless search backend.
+/// `DuckDuckGo` keyless search backend.
 ///
 /// Implements [`SearchEngine`] by scraping `https://html.duckduckgo.com/html/`.
 /// The HTTP client is injectable for testing; when `None`, the shared
@@ -103,14 +103,14 @@ impl DuckDuckGoEngine {
     /// Create a new `DuckDuckGoEngine` that uses the shared masterfetch HTTP
     /// client.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { client: None }
     }
 
     /// Create a new `DuckDuckGoEngine` with a custom HTTP client (for testing
     /// or custom timeout/redirect configuration).
     #[must_use]
-    pub fn with_client(client: reqwest::Client) -> Self {
+    pub const fn with_client(client: reqwest::Client) -> Self {
         Self {
             client: Some(client),
         }
@@ -138,7 +138,7 @@ impl SearchEngine for DuckDuckGoEngine {
         ENGINE_NAME
     }
 
-    /// Execute a keyless search against DuckDuckGo's HTML endpoint.
+    /// Execute a keyless search against `DuckDuckGo`'s HTML endpoint.
     ///
     /// Sends a POST to `https://html.duckduckgo.com/html/` with the query and
     /// filters as form fields, then parses the returned HTML. Rate-limit
@@ -248,9 +248,9 @@ impl SearchEngine for DuckDuckGoEngine {
 // Form parameter construction (pure, testable)
 // ---------------------------------------------------------------------------
 
-/// Build the POST form parameters for a DuckDuckGo HTML search.
+/// Build the POST form parameters for a `DuckDuckGo` HTML search.
 ///
-/// Maps the query and [`SearchOptions`] to DuckDuckGo's form fields:
+/// Maps the query and [`SearchOptions`] to `DuckDuckGo`'s form fields:
 ///
 /// - `q` — the search query, with `site:` and `-site:` operators appended.
 /// - `df` — the date filter (`d`=day, `w`=week, `m`=month, `y`=year; omitted
@@ -300,10 +300,10 @@ pub fn build_form_params(query: &str, opts: &SearchOptions) -> Vec<(String, Stri
     form
 }
 
-/// Map a [`Freshness`] value to DuckDuckGo's `df` parameter.
+/// Map a [`Freshness`] value to `DuckDuckGo`'s `df` parameter.
 ///
 /// Returns `None` for [`Freshness::Any`] (no date filter).
-fn freshness_to_df(freshness: Freshness) -> Option<&'static str> {
+const fn freshness_to_df(freshness: Freshness) -> Option<&'static str> {
     match freshness {
         Freshness::Day => Some("d"),
         Freshness::Week => Some("w"),
@@ -317,12 +317,12 @@ fn freshness_to_df(freshness: Freshness) -> Option<&'static str> {
 // HTML parsing (pure, testable — NFR-003)
 // ---------------------------------------------------------------------------
 
-/// Parse DuckDuckGo HTML search results into [`RawResult`]s.
+/// Parse `DuckDuckGo` HTML search results into [`RawResult`]s.
 ///
 /// This is a **pure function** — no network I/O. It extracts result blocks
 /// from the HTML page returned by `https://html.duckduckgo.com/html/`.
 ///
-/// # DuckDuckGo HTML structure
+/// # `DuckDuckGo` HTML structure
 ///
 /// Each result is contained in a `<div class="result">` block:
 ///
@@ -335,13 +335,13 @@ fn freshness_to_df(freshness: Freshness) -> Option<&'static str> {
 /// </div>
 /// ```
 ///
-/// The `href` on `result__a` may be a direct URL or a DuckDuckGo redirect link
+/// The `href` on `result__a` may be a direct URL or a `DuckDuckGo` redirect link
 /// of the form `//duckduckgo.com/l/?uddg=<encoded-url>&rut=...`. Redirect links
 /// are unwrapped to recover the original target URL via the `uddg` parameter.
 ///
 /// # Arguments
 ///
-/// - `html` — the raw HTML body from DuckDuckGo's results page.
+/// - `html` — the raw HTML body from `DuckDuckGo`'s results page.
 /// - `source` — the engine name to set on each [`RawResult`] (e.g.
 ///   `"duckduckgo"`).
 ///
@@ -392,8 +392,8 @@ pub fn parse_results_html(html: &str, source: &str) -> Vec<RawResult> {
     let titles: Vec<(String, String)> = title_re
         .captures_iter(html)
         .map(|cap| {
-            let href = cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-            let title_html = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+            let href = cap.get(1).map_or("", |m| m.as_str()).to_string();
+            let title_html = cap.get(2).map_or("", |m| m.as_str());
             let title = strip_html_tags(title_html).trim().to_string();
             (href, title)
         })
@@ -427,15 +427,15 @@ pub fn parse_results_html(html: &str, source: &str) -> Vec<RawResult> {
     results
 }
 
-/// Unwrap a DuckDuckGo redirect URL to recover the original target.
+/// Unwrap a `DuckDuckGo` redirect URL to recover the original target.
 ///
-/// DuckDuckGo wraps result URLs in a redirect link:
+/// `DuckDuckGo` wraps result URLs in a redirect link:
 ///
 /// - `//duckduckgo.com/l/?uddg=<encoded-url>&rut=...`
 /// - `https://duckduckgo.com/l/?uddg=<encoded-url>&rut=...`
 ///
 /// This function extracts the `uddg` parameter and URL-decodes it. If the
-/// input is not a DuckDuckGo redirect, it is returned unchanged.
+/// input is not a `DuckDuckGo` redirect, it is returned unchanged.
 fn unwrap_ddg_url(href: &str) -> String {
     // Check if this is a DuckDuckGo redirect link.
     if !href.contains("duckduckgo.com/l/") && !href.contains("/l/?uddg=") {
@@ -474,8 +474,7 @@ fn extract_query_param(url: &str, param: &str) -> Option<String> {
             let value_start = abs_pos + needle.len();
             let value_end = url[value_start..]
                 .find('&')
-                .map(|p| value_start + p)
-                .unwrap_or(url.len());
+                .map_or(url.len(), |p| value_start + p);
             let raw_value = &url[value_start..value_end];
             return Some(percent_decode(raw_value));
         }
@@ -520,7 +519,7 @@ fn percent_decode(s: &str) -> String {
 /// (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`).
 fn strip_html_tags(s: &str) -> String {
     // Remove all <...> sequences.
-    let tag_re = Regex::new(r#"<[^>]*>"#).unwrap_or_else(|e| panic!("invalid tag regex: {e}"));
+    let tag_re = Regex::new(r"<[^>]*>").unwrap_or_else(|e| panic!("invalid tag regex: {e}"));
     let stripped = tag_re.replace_all(s, "");
 
     // Decode common HTML entities.

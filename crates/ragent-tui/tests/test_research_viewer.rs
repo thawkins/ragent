@@ -12,7 +12,7 @@ use ragent_tui::layout::markdown_to_lines_testable;
 fn test_markdown_to_lines_renders_headings() {
     let base = PathBuf::from("/");
     let lines = markdown_to_lines_testable("# Title\n\n## Subtitle\nbody", &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(rendered.iter().any(|l| l.contains("Title")));
     assert!(rendered.iter().any(|l| l.contains("Subtitle")));
     assert!(rendered.iter().any(|l| l.contains("body")));
@@ -23,7 +23,7 @@ fn test_markdown_to_lines_renders_code_block() {
     let base = PathBuf::from("/");
     let md = "```rust\nlet x = 1;\n```";
     let lines = markdown_to_lines_testable(md, &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(rendered.iter().any(|l| l.contains("let x = 1;")));
 }
 
@@ -32,7 +32,7 @@ fn test_markdown_to_lines_mermaid_block_shows_label() {
     let base = PathBuf::from("/");
     let md = "```mermaid\ngraph TD;\nA-->B;\n```";
     let lines = markdown_to_lines_testable(md, &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(
         rendered.iter().any(|l| l.contains("Mermaid diagram")),
         "expected mermaid label, got: {rendered:?}"
@@ -45,7 +45,7 @@ fn test_markdown_to_lines_image_renders_placeholder() {
     let base = PathBuf::from("/tmp");
     let md = "![diagram](assets/diagram.png)";
     let lines = markdown_to_lines_testable(md, &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     let joined = rendered.join(" ");
     assert!(
         joined.contains("[Image: diagram"),
@@ -58,7 +58,7 @@ fn test_markdown_to_lines_link_renders_text_and_url() {
     let base = PathBuf::from("/");
     let md = "See [docs](https://example.com/docs).";
     let lines = markdown_to_lines_testable(md, &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     let joined = rendered.join(" ");
     assert!(
         joined.contains("[docs]"),
@@ -75,7 +75,7 @@ fn test_markdown_to_lists_renders_bullet() {
     let base = PathBuf::from("/");
     let md = "- first\n- second";
     let lines = markdown_to_lines_testable(md, &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(
         rendered.iter().any(|l| l.contains("• first")),
         "expected bullet list, got: {rendered:?}"
@@ -86,7 +86,7 @@ fn test_markdown_to_lists_renders_bullet() {
 fn test_markdown_to_lines_footer_note_present() {
     let base = PathBuf::from("/");
     let lines = markdown_to_lines_testable("hello", &base, 80);
-    let rendered: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    let rendered: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
     assert!(
         rendered.iter().any(|l| l.contains("Esc to close")),
         "expected footer note, got: {rendered:?}"

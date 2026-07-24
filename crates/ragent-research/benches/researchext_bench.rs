@@ -62,7 +62,7 @@ fn researchext_benchmark(c: &mut Criterion) {
                 "Rust async runtimes benchmark topic",
                 Arc::new(NoopObserver),
             ))
-        })
+        });
     });
 }
 

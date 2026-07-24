@@ -206,8 +206,8 @@ pub use ragent_types::permission::PermissionDecision;
 /// Rules are evaluated last-match-wins. Permanent grants recorded via
 /// [`record_always`](Self::record_always) take precedence over ruleset entries.
 /// The ruleset is pre-compiled and indexed by [`Permission`] type on
-/// construction so [`check`](Self::check) is O(rules_for_permission) rather
-/// than O(total_rules).
+/// construction so [`check`](Self::check) is `O(rules_for_permission)` rather
+/// than `O(total_rules)`.
 pub struct PermissionChecker {
     /// Indexed rules by permission type for efficient lookup.
     rules_by_permission: HashMap<Permission, Vec<(globset::GlobMatcher, PermissionAction)>>,

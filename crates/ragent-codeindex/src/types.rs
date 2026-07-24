@@ -234,14 +234,14 @@ pub struct SymbolRef {
     pub symbol_name: String,
     /// Foreign key to the file containing the reference.
     pub file_id: i64,
-    /// Resolved file path (populated by find_references, empty during parsing).
+    /// Resolved file path (populated by `find_references`, empty during parsing).
     #[serde(default)]
     pub file_path: String,
     /// Line number of the reference.
     pub line: u32,
     /// Column of the reference.
     pub col: u32,
-    /// Kind of reference (e.g. "call", "type", "field_access").
+    /// Kind of reference (e.g. "call", "type", "`field_access`").
     pub kind: String,
 }
 
@@ -382,12 +382,14 @@ pub struct StaleDiff {
 
 impl StaleDiff {
     /// Returns `true` if there are no changes.
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.to_add.is_empty() && self.to_update.is_empty() && self.to_remove.is_empty()
     }
 
     /// Total number of changes.
-    pub fn total(&self) -> usize {
+    #[must_use]
+    pub const fn total(&self) -> usize {
         self.to_add.len() + self.to_update.len() + self.to_remove.len()
     }
 }

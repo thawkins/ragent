@@ -56,7 +56,7 @@ fn build_in_memory_provider() -> (
 
     let provider = rt.block_on(async {
         let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-            .with_interval(Duration::from_secs(3600))
+            .with_interval(Duration::from_hours(1))
             .build();
         SdkMeterProvider::builder().with_reader(reader).build()
     });
@@ -118,6 +118,7 @@ fn registry_with_toggles(
 /// Since we can't build a recorder from a raw registry directly, the
 /// recorder-level tests below build a full `TelemetrySubsystem` with the
 /// toggles in the config and use `from_subsystem`.
+#[allow(dead_code)]
 fn build_subsystem_with_toggles(
     toggles: HashMap<String, bool>,
 ) -> (
@@ -260,7 +261,7 @@ fn test_toggles_shared_across_clones() {
     toggles.insert("ragent.llm.requests".to_string(), false);
     let registry = registry_with_toggles(&provider, toggles);
 
-    let clone = registry.clone();
+    let clone = registry;
     assert!(!clone.is_metric_enabled("ragent.llm.requests"));
     assert!(clone.is_metric_enabled("ragent.tokens.input"));
 }
@@ -477,7 +478,7 @@ fn test_metrics_map_deserializes_from_json() {
         "ragent.tool.invocations should be disabled"
     );
     // A metric absent from the map is not present (and thus enabled by default).
-    assert!(config.metrics.get("ragent.sessions.active").is_none());
+    assert!(!config.metrics.contains_key("ragent.sessions.active"));
 }
 
 /// An absent `metrics` field deserialises to an empty map (all enabled).

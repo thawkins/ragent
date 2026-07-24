@@ -13,19 +13,19 @@ use ragent_tools_extended::masterfetch::extractor::{
 // Helper: generate article-length HTML for readability tests
 // ---------------------------------------------------------------------------
 
-/// Build an HTML page with enough text to exceed the MIN_READABILITY_CHARS
+/// Build an HTML page with enough text to exceed the `MIN_READABILITY_CHARS`
 /// threshold (500 chars).
 fn article_html(body: &str) -> String {
     let long_text = body.repeat(20);
     format!(
-        r#"<html><head><title>Test Article</title></head>
+        r"<html><head><title>Test Article</title></head>
 <body>
 <nav>Navigation links</nav>
 <article>
 <p>{long_text}</p>
 </article>
 <footer>Footer text</footer>
-</body></html>"#
+</body></html>"
     )
 }
 
@@ -35,7 +35,7 @@ fn article_html(body: &str) -> String {
 
 #[test]
 fn test_format_raw_returns_html_unchanged() {
-    let html = r#"<html><body><p>Hello</p></body></html>"#;
+    let html = r"<html><body><p>Hello</p></body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Raw,
         ..Default::default()
@@ -48,7 +48,7 @@ fn test_format_raw_returns_html_unchanged() {
 
 #[test]
 fn test_format_text_strips_all_tags() {
-    let html = r#"<html><body><p>Hello <b>world</b></p><div>Foo</div></body></html>"#;
+    let html = r"<html><body><p>Hello <b>world</b></p><div>Foo</div></body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Text,
         ..Default::default()
@@ -64,8 +64,8 @@ fn test_format_text_strips_all_tags() {
 
 #[test]
 fn test_format_html_strips_noise_tags() {
-    let html = r#"<html><head><script>alert(1)</script></head>
-<body><nav>Nav</nav><p>Content</p><footer>Foot</footer></body></html>"#;
+    let html = r"<html><head><script>alert(1)</script></head>
+<body><nav>Nav</nav><p>Content</p><footer>Foot</footer></body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Html,
         ..Default::default()
@@ -167,7 +167,7 @@ fn test_readability_extracts_long_article() {
 
 #[test]
 fn test_short_html_falls_back_to_html2text() {
-    let html = r#"<html><body><p>Short</p></body></html>"#;
+    let html = r"<html><body><p>Short</p></body></html>";
     let opts = ExtractOptions::default();
     let result = extract(html, "https://example.com", "text/html", &opts).unwrap();
     // Short content should not trigger readability (under 500 chars).
@@ -191,11 +191,11 @@ fn test_empty_html_returns_empty_content() {
 
 #[test]
 fn test_css_selector_by_tag() {
-    let html = r#"<html><body>
+    let html = r"<html><body>
 <nav>Navigation</nav>
 <article><p>Article content here that is long enough to be meaningful.</p></article>
 <footer>Footer</footer>
-</body></html>"#;
+</body></html>";
     let opts = ExtractOptions {
         css_selector: Some("article".to_string()),
         ..Default::default()
@@ -268,7 +268,7 @@ fn test_css_selector_compound_tag_id() {
 
 #[test]
 fn test_css_selector_no_match_returns_full_html() {
-    let html = r#"<html><body><p>Content</p></body></html>"#;
+    let html = r"<html><body><p>Content</p></body></html>";
     let opts = ExtractOptions {
         css_selector: Some(".nonexistent".to_string()),
         ..Default::default()
@@ -280,7 +280,7 @@ fn test_css_selector_no_match_returns_full_html() {
 
 #[test]
 fn test_css_selector_empty_returns_error() {
-    let html = r#"<html><body><p>Content</p></body></html>"#;
+    let html = r"<html><body><p>Content</p></body></html>";
     let opts = ExtractOptions {
         css_selector: Some("   ".to_string()),
         ..Default::default()
@@ -291,7 +291,7 @@ fn test_css_selector_empty_returns_error() {
 
 #[test]
 fn test_css_selector_with_descendant_combinator_returns_error() {
-    let html = r#"<html><body><p>Content</p></body></html>"#;
+    let html = r"<html><body><p>Content</p></body></html>";
     let opts = ExtractOptions {
         css_selector: Some("div p".to_string()),
         ..Default::default()
@@ -302,7 +302,7 @@ fn test_css_selector_with_descendant_combinator_returns_error() {
 
 #[test]
 fn test_css_selector_with_child_combinator_returns_error() {
-    let html = r#"<html><body><p>Content</p></body></html>"#;
+    let html = r"<html><body><p>Content</p></body></html>";
     let opts = ExtractOptions {
         css_selector: Some("div > p".to_string()),
         ..Default::default()
@@ -313,7 +313,7 @@ fn test_css_selector_with_child_combinator_returns_error() {
 
 #[test]
 fn test_css_selector_with_multiple_selectors_returns_error() {
-    let html = r#"<html><body><p>Content</p></body></html>"#;
+    let html = r"<html><body><p>Content</p></body></html>";
     let opts = ExtractOptions {
         css_selector: Some("div, p".to_string()),
         ..Default::default()
@@ -377,12 +377,12 @@ fn test_noise_tags_stripped_from_html() {
 
 #[test]
 fn test_noise_tags_stripped_preserves_other_tags() {
-    let html = r#"<html><body>
+    let html = r"<html><body>
 <script>bad</script>
 <h1>Heading</h1>
 <p>Paragraph</p>
 <ul><li>Item</li></ul>
-</body></html>"#;
+</body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Html,
         ..Default::default()
@@ -414,7 +414,7 @@ fn test_truncation_at_max_content_chars() {
 
 #[test]
 fn test_no_truncation_when_under_limit() {
-    let html = r#"<html><body><p>Short content</p></body></html>"#;
+    let html = r"<html><body><p>Short content</p></body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Text,
         max_content_chars: 40_000,
@@ -428,7 +428,7 @@ fn test_no_truncation_when_under_limit() {
 fn test_max_content_chars_clamped_to_minimum() {
     // Setting max_content_chars below MIN_MAX_CONTENT_CHARS (500) should be
     // clamped up, so content under 500 chars should not be truncated.
-    let html = r#"<html><body><p>Short</p></body></html>"#;
+    let html = r"<html><body><p>Short</p></body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Text,
         max_content_chars: 10, // below minimum
@@ -494,7 +494,7 @@ fn test_extract_method_display() {
 
 #[test]
 fn test_malformed_html_does_not_panic() {
-    let html = r#"<html><body><p>Unclosed paragraph<div>Nested</body></html>"#;
+    let html = r"<html><body><p>Unclosed paragraph<div>Nested</body></html>";
     let opts = ExtractOptions::default();
     let result = extract(html, "https://example.com", "text/html", &opts);
     assert!(result.is_ok());
@@ -502,7 +502,7 @@ fn test_malformed_html_does_not_panic() {
 
 #[test]
 fn test_html_with_only_script_tags() {
-    let html = r#"<html><head><script>alert(1)</script></head><body></body></html>"#;
+    let html = r"<html><head><script>alert(1)</script></head><body></body></html>";
     let opts = ExtractOptions::default();
     let result = extract(html, "https://example.com", "text/html", &opts).unwrap();
     // Should produce some content (even if empty) without panicking.
@@ -575,11 +575,11 @@ fn test_self_closing_tags_preserved_in_html_format() {
 
 #[test]
 fn test_text_format_collapses_whitespace() {
-    let html = r#"<html><body>
+    let html = r"<html><body>
 <p>  Multiple    spaces   </p>
 <div>
 \n\n\nNewlines\n\n\n</div>
-</body></html>"#;
+</body></html>";
     let opts = ExtractOptions {
         format: OutputFormat::Text,
         ..Default::default()

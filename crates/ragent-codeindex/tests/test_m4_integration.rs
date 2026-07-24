@@ -74,7 +74,7 @@ fn test_watcher_create_event() {
     let mut got_event = false;
     for _ in 0..40 {
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(WatchEvent::Created(p)) | Ok(WatchEvent::Changed(p)) => {
+            Ok(WatchEvent::Created(p) | WatchEvent::Changed(p)) => {
                 if p.to_string_lossy().contains("new.rs") {
                     got_event = true;
                     break;
@@ -308,7 +308,7 @@ fn test_watch_session_start_stop() {
 
     // The initial reindex runs in a background thread; wait for it.
     for _ in 0..50 {
-        if index.status().map_or(false, |s| s.files_indexed > 0) {
+        if index.status().is_ok_and(|s| s.files_indexed > 0) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

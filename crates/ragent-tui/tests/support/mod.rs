@@ -25,6 +25,7 @@ use ragent_tui::App;
 ///
 /// Files that need a customised `App` (e.g. with a shared `EventBus`, a custom
 /// `Storage`, or a debug flag) should define their own local helper.
+#[allow(dead_code)]
 #[must_use]
 pub fn make_app() -> App {
     let event_bus = Arc::new(EventBus::default());

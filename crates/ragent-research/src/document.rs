@@ -1,4 +1,4 @@
-//! RESEARCH.md document assembly — legacy report layout and IMRaD layout.
+//! RESEARCH.md document assembly — legacy report layout and `IMRaD` layout.
 //!
 //! `RESEARCH.md` is the single, self-contained deliverable for each
 //! research item. Two layouts are supported:
@@ -18,7 +18,7 @@
 //!    ## References Index
 //!    ```
 //!
-//! 2. **IMRaD** — selected via [`OutputFormat::Imrad`](crate::run_config::OutputFormat);
+//! 2. **`IMRaD`** — selected via [`OutputFormat::Imrad`](crate::run_config::OutputFormat);
 //!    restructures the same content into the scientific/technical report
 //!    convention (Abstract, Introduction, Methods, Results, Discussion,
 //!    References Index) while preserving all existing finding paragraphs,
@@ -94,7 +94,7 @@ pub struct CrossReference {
 }
 
 /// Result of `assemble_document` — the body text plus the rendered file
-/// payload (frontmatter + body) ready for atomic_write.
+/// payload (frontmatter + body) ready for `atomic_write`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssembledDocument {
     /// Full `RESEARCH.md` payload (frontmatter + body).
@@ -132,10 +132,10 @@ fn extract_headline(finding: &str, finding_number: usize) -> (String, String) {
         remainder = format!("{}{}", &finding[..start], after_headline)
             .trim()
             .to_string();
-        if !extracted.is_empty() {
-            Some(extracted)
-        } else {
+        if extracted.is_empty() {
             None
+        } else {
+            Some(extracted)
         }
     } else {
         None
@@ -166,17 +166,14 @@ pub(crate) fn make_headline_from_observation(observation: &str) -> String {
 }
 
 fn derive_headline_from_observation(finding: &str, finding_number: usize) -> String {
-    let observation_body = finding
-        .find("**Observation:**")
-        .map(|start| {
-            let after = &finding[start + "**Observation:**".len()..];
-            let end = after.find("\n\n**").unwrap_or(after.len());
-            &after[..end]
-        })
-        .unwrap_or(finding);
+    let observation_body = finding.find("**Observation:**").map_or(finding, |start| {
+        let after = &finding[start + "**Observation:**".len()..];
+        let end = after.find("\n\n**").unwrap_or(after.len());
+        &after[..end]
+    });
     let headline = make_headline_from_observation(observation_body);
     if headline.is_empty() || headline == "(no headline available)" {
-        return format!("Finding {}", finding_number);
+        return format!("Finding {finding_number}");
     }
     headline
 }
@@ -192,7 +189,7 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 ///   layout: Topic, Search Queries, Summary, Findings, Findings Relationship
 ///   Diagram, In-Project Cross-References, Open Questions, References Index.
 /// * [`OutputFormat::Imrad`](crate::run_config::OutputFormat::Imrad) emits
-///   the IMRaD layout required by specs/imradreport: Abstract, Introduction,
+///   the `IMRaD` layout required by specs/imradreport: Abstract, Introduction,
 ///   Methods, Results, Discussion, References Index. The same `summary`,
 ///   `findings`, `cross_references`, `open_questions`, and `sources` fields feed
 ///   the corresponding sections, and the findings relationship diagram is
@@ -200,6 +197,7 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 ///
 /// Empty sections always render a placeholder so the file structure is stable
 /// for downstream tooling.
+#[must_use]
 pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     let frontmatter = doc.item.render_frontmatter();
     let title = doc.item.title.clone();
@@ -215,7 +213,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     }
 
     // ── Title ──────────────────────��─────────────────────────────────────
-    body.push_str(&format!("# Title: {}\n\n", title));
+    body.push_str(&format!("# Title: {title}\n\n"));
 
     // FR-004 / specs/imradreport: choose between the legacy report layout and
     // the IMRaD layout based on the configured output format.
@@ -224,6 +222,10 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     } else {
         body.push_str(&assemble_report_body(doc, &topic));
     }
+
+    // Make every bare URL in the rendered body clickable, while leaving URLs
+    // inside code spans, fenced blocks, and existing Markdown links untouched.
+    let body = linkify_urls(&body);
 
     let content = format!("{frontmatter}\n{body}");
     AssembledDocument {
@@ -331,7 +333,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
 
 /// Build the body of an IMRaD-compliant `RESEARCH.md` report.
 ///
-/// Section order follows the IMRaD convention: Abstract, Introduction, Methods,
+/// Section order follows the `IMRaD` convention: Abstract, Introduction, Methods,
 /// Results, Discussion, References Index. The same `ResearchDocument` fields are
 /// reused; only the headings and grouping change.
 fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
@@ -457,8 +459,9 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
 /// it lands on disk.
 ///
 /// The `output_format` argument selects between the legacy report layout and
-/// the IMRaD layout; callers that do not care should pass
+/// the `IMRaD` layout; callers that do not care should pass
 /// [`OutputFormat::Report`].
+#[must_use]
 pub fn render_skeleton(
     name: &ResearchName,
     title: &str,
@@ -495,6 +498,7 @@ pub fn render_skeleton(
 ///
 /// Unknown placeholders are left untouched so authors can use other
 /// `{{var}}` syntax (e.g. inside a code fence) without surprises.
+#[must_use]
 pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
     let date = Utc::now().format("%Y-%m-%d").to_string();
     template
@@ -634,9 +638,150 @@ fn escape_pipe(s: &str) -> String {
     out
 }
 
+/// Make every bare `http://`/`https://` URL in Markdown text clickable,
+/// returning a new string where each raw URL is rewritten as `[url](url)`.
+///
+/// URLs that already sit inside code fences, inline backtick spans, or
+/// existing Markdown links (`[text](url)`) are left untouched so the output
+/// stays valid Markdown.
+pub(crate) fn linkify_urls(text: &str) -> String {
+    let fence_re = Regex::new(r"(?m)^```.*$").expect("valid fence regex");
+
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut in_fence = false;
+    let mut last_end = 0;
+    for m in fence_re.find_iter(text) {
+        let segment = &text[last_end..m.start()];
+        if in_fence {
+            out.push_str(segment);
+        } else {
+            out.push_str(&linkify_outside_code(segment));
+        }
+        out.push_str(m.as_str());
+        in_fence = !in_fence;
+        last_end = m.end();
+    }
+    let segment = &text[last_end..];
+    if in_fence {
+        out.push_str(segment);
+    } else {
+        out.push_str(&linkify_outside_code(segment));
+    }
+    out
+}
+
+/// URL-matching regex. The allowed character set is conservative: it includes
+/// the unreserved/sub-delimiters plus the common path/query characters that
+/// appear in real URLs, while stopping at whitespace and Markdown delimiter
+/// characters.
+fn url_regex() -> Regex {
+    Regex::new(r"(?i)\bhttps?://[a-zA-Z0-9_~:/.?#@!$&'()*+,;=%-]+").expect("valid url regex")
+}
+
+/// Convert bare URLs in a segment that is known to be outside fenced code
+/// blocks. Inline backtick spans and existing Markdown links are still
+/// protected.
+fn linkify_outside_code(text: &str) -> String {
+    let url_re = url_regex();
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut i = 0;
+    while i < chars.len() {
+        let (byte, ch) = chars[i];
+
+        // Protect inline code spans: `...`.
+        if ch == '`' {
+            let after = &text[byte + ch.len_utf8()..];
+            if let Some(skip) = after.find('`') {
+                let end_byte = byte + ch.len_utf8() + skip + 1;
+                out.push_str(&text[byte..end_byte]);
+                i = char_index_at(&chars, end_byte);
+                continue;
+            }
+        }
+
+        // Protect existing Markdown links: [text](url).
+        if ch == '[' {
+            let after = &text[byte + 1..];
+            if let Some(close_text) = after.find(']') {
+                let close_byte = byte + 1 + close_text;
+                if text.as_bytes().get(close_byte + 1) == Some(&b'(')
+                    && let Some(close_url) = text[close_byte + 2..].find(')')
+                {
+                    let end_byte = close_byte + 2 + close_url + 1;
+                    out.push_str(&text[byte..end_byte]);
+                    i = char_index_at(&chars, end_byte);
+                    continue;
+                }
+            }
+        }
+
+        // If a URL starts here, rewrite it.
+        if let Some(m) = url_re.find_at(text, byte)
+            && m.start() == byte
+        {
+            let raw = m.as_str();
+            let (url, trailing) = trim_url_trailing(raw);
+
+            // Leave autolink-style `<url>` untouched; it is already
+            // clickable in most Markdown renderers.
+            let prev = text[..byte].chars().next_back();
+            let next_char = text[m.end()..].chars().next();
+            if prev == Some('<') && next_char == Some('>') {
+                out.push_str(raw);
+                out.push_str(trailing);
+                i = char_index_at(&chars, m.end());
+                continue;
+            }
+            out.push_str(&format!("[{url}]({url}){trailing}"));
+            i = char_index_at(&chars, m.end() + trailing.len());
+            continue;
+        }
+
+        out.push(ch);
+        i += 1;
+    }
+    out
+}
+/// Find the index in `chars` whose byte offset equals `target_byte`.
+/// If `target_byte` is past the end, return `chars.len()`.
+fn char_index_at(chars: &[(usize, char)], target_byte: usize) -> usize {
+    chars
+        .binary_search_by_key(&target_byte, |(b, _)| *b)
+        .unwrap_or_else(|e| e)
+}
+
+/// Trim trailing punctuation that is unlikely to be part of a URL.
+///
+/// Trailing `.`, `,`, `;`, `:`, `!`, `?`, quotes, and unbalanced closing
+/// parentheses are returned as a separate suffix so the punctuation stays
+/// outside the link.
+fn trim_url_trailing(raw: &str) -> (&str, &str) {
+    let mut end = raw.len();
+    while end > 0 {
+        let c = raw.as_bytes()[end - 1] as char;
+        if c == ')' {
+            let opens = raw[..end].chars().filter(|&cc| cc == '(').count();
+            let closes = raw[..end].chars().filter(|&cc| cc == ')').count();
+            if closes > opens {
+                end -= 1;
+                continue;
+            }
+        }
+        if matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'') {
+            end -= 1;
+            continue;
+        }
+        break;
+    }
+    (&raw[..end], &raw[end..])
+}
+
 /// Truncate a source body to [`MAX_SOURCE_BODY_BYTES`] if necessary,
 /// returning a markdown-safe fenced version safe to embed in a supporting
 /// file (NFR-006).
+#[must_use]
 pub fn fence_source_body(body: &str) -> String {
     let trimmed = body.trim();
     let bytes = trimmed.as_bytes();
@@ -666,6 +811,7 @@ pub fn fence_source_body(body: &str) -> String {
 /// When the captured `body` is empty (e.g. older research items loaded from
 /// disk that predate the body field, or a fetch that returned no text) we
 /// emit a clearly-marked placeholder so the file is still self-describing.
+#[must_use]
 pub fn render_supporting_file(source: &Source) -> Option<String> {
     match source {
         Source::Web {
@@ -686,9 +832,7 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
              ```text\n{body}\n```\n",
             url = url,
             title = title,
-            published = published_at
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| "—".to_string()),
+            published = published_at.map_or_else(|| "—".to_string(), |dt| dt.to_rfc3339()),
             captured = captured_at.to_rfc3339(),
             relevance = if relevance.is_empty() {
                 "—"
@@ -846,6 +990,7 @@ fn normalize_finding_labels(finding: &str) -> String {
 /// The output is a markdown document listing every source with its type,
 /// title, path/URL, captured timestamp, and (when available) the first 240
 /// characters of its body.
+#[must_use]
 pub fn render_bibliography(sources: &[Source]) -> String {
     if sources.is_empty() {
         return "# Sources Bibliography\n\n_(no sources captured)_\n".to_string();
@@ -948,28 +1093,23 @@ mod tests {
         let body = &assembled.body;
         assert!(
             !body.contains("Paragraph 1"),
-            "paragraph prefixes should be stripped: {}",
-            body
+            "paragraph prefixes should be stripped: {body}"
         );
         assert!(
             body.contains("**Observation:**\nobservation text."),
-            "observation label should be on its own line: {}",
-            body
+            "observation label should be on its own line: {body}"
         );
         assert!(
             body.contains("**Analysis:**\nanalysis text."),
-            "analysis label should be on its own line: {}",
-            body
+            "analysis label should be on its own line: {body}"
         );
         assert!(
             body.contains("**Cross-reference / Dependencies:**\ndeps."),
-            "cross-reference label should be on its own line: {}",
-            body
+            "cross-reference label should be on its own line: {body}"
         );
         assert!(
             body.contains("**Caveat:**\ncaveat text."),
-            "extra caveat label should be preserved and separated: {}",
-            body
+            "extra caveat label should be preserved and separated: {body}"
         );
     }
 
@@ -990,25 +1130,21 @@ mod tests {
         // After "### Finding N — headline\n\n" the required labels should be separated by blank lines.
         assert!(
             finding.contains("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
-            "labels should be separated by blank lines: {}",
-            finding
+            "labels should be separated by blank lines: {finding}"
         );
         assert!(
             finding.contains("**Implication:**\nimpl\n\n**Caveat:**\ncaveat"),
-            "caveat should be separated from implication: {}",
-            finding
+            "caveat should be separated from implication: {finding}"
         );
         assert!(
             finding.contains("**Cross-reference / Dependencies:**\nnone\n\n**Implication:**\nimpl"),
-            "cross-reference label should be on its own line: {}",
-            finding
+            "cross-reference label should be on its own line: {finding}"
         );
         assert!(
             finding
                 .trim_start()
                 .starts_with("**Observation:**\nobs\n\n**Analysis:**\nanalysis"),
-            "label and its body should be on separate lines: {}",
-            finding
+            "label and its body should be on separate lines: {finding}"
         );
     }
 
@@ -1269,13 +1405,11 @@ mod tests {
         let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
         assert!(
             finding.contains("**Sources:**"),
-            "finding should contain Sources paragraph: {}",
-            finding
+            "finding should contain Sources paragraph: {finding}"
         );
         assert!(
-            finding.contains("- [1] Example Article — https://example.com"),
-            "Sources bullet should map citation to source title/URL: {}",
-            finding
+            finding.contains("- [1] Example Article — [https://example.com](https://example.com)"),
+            "Sources bullet should map citation to source title/URL: {finding}"
         );
     }
 
@@ -1311,8 +1445,7 @@ mod tests {
         let second = sources_block.find("- [2] B").unwrap();
         assert!(
             first < second,
-            "sources should be sorted by index: {}",
-            finding
+            "sources should be sorted by index: {finding}"
         );
     }
 
@@ -1367,14 +1500,12 @@ mod tests {
             finding.contains(
                 "**Source date range:** 2023-01-10..2024-06-01 (2 of 3 cited web sources dated)"
             ),
-            "finding should carry a source date range line: {}",
-            finding
+            "finding should carry a source date range line: {finding}"
         );
         // The bullet for the dated source should include its publication date.
         assert!(
             finding.contains("(published 2023-01-10)"),
-            "dated source bullet should include its publication date: {}",
-            finding
+            "dated source bullet should include its publication date: {finding}"
         );
     }
 
@@ -1403,8 +1534,7 @@ mod tests {
             finding.contains(
                 "**Source date range:** — (cited web sources did not expose a publication date)"
             ),
-            "finding should note that cited web sources had no date: {}",
-            finding
+            "finding should note that cited web sources had no date: {finding}"
         );
     }
 
@@ -1446,8 +1576,7 @@ mod tests {
         let count = finding.matches("**Sources:**").count();
         assert_eq!(
             count, 1,
-            "should not add a duplicate Sources paragraph: {}",
-            finding
+            "should not add a duplicate Sources paragraph: {finding}"
         );
     }
 
@@ -1455,16 +1584,81 @@ mod tests {
     fn assemble_document_puts_cross_reference_label_on_own_line() {
         let mut doc = sample_doc(sample_item());
         doc.findings = vec![
-            "**Headline:** Observation summary
+              "**Headline:** Observation summary
 
 **Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
-        ];
+          ];
         let assembled = assemble_document(&doc);
         let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
         assert!(
             finding.contains("**Cross-reference / Dependencies:**\nnone"),
-            "cross-reference label should stand on its own line: {}",
-            finding
+            "cross-reference label should stand on its own line: {finding}"
+        );
+    }
+
+    #[test]
+    fn linkify_urls_rewrites_bare_http_urls() {
+        let input = "Visit https://example.com for details.";
+        assert_eq!(
+            linkify_urls(input),
+            "Visit [https://example.com](https://example.com) for details."
+        );
+    }
+
+    #[test]
+    fn linkify_urls_leaves_existing_markdown_links_unchanged() {
+        let input = "See [example](https://example.com).";
+        assert_eq!(linkify_urls(input), input);
+    }
+
+    #[test]
+    fn linkify_urls_leaves_autolink_style_unchanged() {
+        let input = "See <https://example.com>.";
+        assert_eq!(linkify_urls(input), input);
+    }
+
+    #[test]
+    fn linkify_urls_protects_inline_code() {
+        let input = "Use `curl https://example.com` to test.";
+        assert_eq!(linkify_urls(input), input);
+    }
+
+    #[test]
+    fn linkify_urls_protects_fenced_code_blocks() {
+        let input = "```\ncurl https://example.com\n```\nThen visit https://site.org.";
+        assert_eq!(
+            linkify_urls(input),
+            "```\ncurl https://example.com\n```\nThen visit [https://site.org](https://site.org)."
+        );
+    }
+
+    #[test]
+    fn linkify_urls_keeps_trailing_punctuation_outside_link() {
+        let input = "Read https://example.com.";
+        assert_eq!(
+            linkify_urls(input),
+            "Read [https://example.com](https://example.com)."
+        );
+    }
+
+    #[test]
+    fn linkify_urls_keeps_unbalanced_closing_paren_outside_link() {
+        let input = "(see https://example.com))";
+        assert_eq!(
+            linkify_urls(input),
+            "(see [https://example.com](https://example.com)))"
+        );
+    }
+
+    #[test]
+    fn linkify_urls_leaves_supporting_file_url_lines_raw() {
+        // This mirrors the supporting-file table rows produced by
+        // render_supporting_file; linkification is applied only to the
+        // assembled RESEARCH.md body.
+        let input = "URL: https://example.com";
+        assert_eq!(
+            linkify_urls(input),
+            "URL: [https://example.com](https://example.com)"
         );
     }
 }

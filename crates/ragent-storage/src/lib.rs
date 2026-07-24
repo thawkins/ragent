@@ -1,4 +1,4 @@
-//! SQLite persistence layer for ragent
+//! `SQLite` persistence layer for ragent
 //!
 //! This crate provides:
 //! - Session storage (conversations, messages, history)

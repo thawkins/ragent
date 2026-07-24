@@ -180,7 +180,7 @@ fn data_dir() -> PathBuf {
 /// Print the ragent ASCII art startup banner to stdout.
 fn print_banner() {
     for line in ragent_tui::logo::LOGO {
-        println!("{}", line);
+        println!("{line}");
     }
     println!(
         "  v{}  —  Rust AI coding agent\n",

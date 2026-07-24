@@ -1,4 +1,4 @@
-//! Integration tests validating the FR-019 (AgentPerf T-015) rule:
+//! Integration tests validating the FR-019 (`AgentPerf` T-015) rule:
 //! `MutexGuard` MUST NOT cross an `.await` point on the agent hot path.
 //!
 //! The test exercises the per-session `SessionState` cache: we acquire

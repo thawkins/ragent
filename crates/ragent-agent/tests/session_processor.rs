@@ -399,6 +399,6 @@ fn test_token_overflow_is_not_permanent_error() {
 
 // Silence unused-import warnings for items only used under feature gates.
 #[allow(dead_code)]
-fn _unused_value_marker() -> Value {
+const fn _unused_value_marker() -> Value {
     Value::Null
 }

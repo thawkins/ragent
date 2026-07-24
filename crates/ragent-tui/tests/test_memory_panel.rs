@@ -93,7 +93,7 @@ fn make_app() -> App {
 // Mouse-event constructors
 // ────────────────────���────────────────────────────────────────────────────────
 
-fn mouse_down(col: u16, row: u16) -> MouseEvent {
+const fn mouse_down(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: col,
@@ -102,7 +102,7 @@ fn mouse_down(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_drag(col: u16, row: u16) -> MouseEvent {
+const fn mouse_drag(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Drag(MouseButton::Left),
         column: col,
@@ -111,7 +111,7 @@ fn mouse_drag(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_up(col: u16, row: u16) -> MouseEvent {
+const fn mouse_up(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Up(MouseButton::Left),
         column: col,
@@ -120,7 +120,7 @@ fn mouse_up(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn right_click(col: u16, row: u16) -> MouseEvent {
+const fn right_click(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Right),
         column: col,
@@ -129,7 +129,7 @@ fn right_click(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
+const fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::ScrollUp,
         column: col,
@@ -138,7 +138,7 @@ fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
+const fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::ScrollDown,
         column: col,

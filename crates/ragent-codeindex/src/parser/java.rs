@@ -16,7 +16,8 @@ pub struct JavaParser {
 
 impl JavaParser {
     /// Create a new Java parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 }
@@ -64,7 +65,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -387,7 +388,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
         .strip_prefix("import ")
         .unwrap_or(&text)
         .strip_prefix("static ")
-        .unwrap_or(&text.strip_prefix("import ").unwrap_or(&text))
+        .unwrap_or(text.strip_prefix("import ").unwrap_or(&text))
         .trim_end_matches(';')
         .trim()
         .to_string();
@@ -395,7 +396,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
     let (source_module, imported_name) = if let Some(idx) = path.rfind('.') {
         (path[..idx].to_string(), path[idx + 1..].to_string())
     } else {
-        (String::new(), path.clone())
+        (String::new(), path)
     };
 
     let is_static = text.contains("static ");

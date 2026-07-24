@@ -72,7 +72,7 @@ impl Tool for GitCommitTool {
             args.push("--no-verify".to_string());
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -87,7 +87,7 @@ impl Tool for GitCommitTool {
             l.split(')')
                 .next()
                 .and_then(|s| s.split_whitespace().nth(1))
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
         });
 
         let content = if stdout.trim().is_empty() {

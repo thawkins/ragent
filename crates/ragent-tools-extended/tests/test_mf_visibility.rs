@@ -420,7 +420,7 @@ fn test_all_six_mf_tools_registered_in_registry() {
     let registry = create_extended_registry();
     let definitions = registry.definitions();
     let registered_names: std::collections::HashSet<String> =
-        definitions.iter().map(|d| d.name.to_string()).collect();
+        definitions.iter().map(|d| d.name.clone()).collect();
 
     for &name in MF_TOOL_NAMES {
         assert!(
@@ -442,7 +442,7 @@ fn test_hidden_mf_tools_are_subset_of_registered_tools() {
     let registered_names: std::collections::HashSet<String> = registry
         .definitions()
         .iter()
-        .map(|d| d.name.to_string())
+        .map(|d| d.name.clone())
         .collect();
 
     let mut config = Config::default();

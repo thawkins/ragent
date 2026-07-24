@@ -92,8 +92,7 @@ impl Tool for GitTagTool {
             }
             other => {
                 return Err(anyhow::anyhow!(
-                    "Unknown action: {}. Use 'list', 'show', 'create', or 'delete'.",
-                    other
+                    "Unknown action: {other}. Use 'list', 'show', 'create', or 'delete'."
                 ));
             }
         };

@@ -17,6 +17,7 @@
 /// // Works with multi-byte characters:
 /// assert_eq!(truncate_chars("café résumé", 5), "café …");
 /// ```
+#[must_use]
 pub fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
@@ -42,6 +43,7 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> String {
 /// // "é" is 2 bytes; byte index 3 lands on a boundary:
 /// assert_eq!(truncate_bytes("café", 3), "caf…");
 /// ```
+#[must_use]
 pub fn truncate_bytes(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();

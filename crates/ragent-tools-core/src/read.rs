@@ -315,8 +315,7 @@ fn record_read_timestamp(path: &Path, ctx: &ToolContext) {
     {
         let millis = mtime
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         if let Ok(mut map) = ctx.read_timestamps.write() {
             map.insert(path.to_path_buf(), millis);
         }

@@ -35,7 +35,7 @@ pub struct MockLlmScript {
 impl MockLlmScript {
     /// Build a new script from the supplied event sequence.
     #[must_use]
-    pub fn new(events: Vec<StreamEvent>) -> Self {
+    pub const fn new(events: Vec<StreamEvent>) -> Self {
         Self { events }
     }
 
@@ -103,7 +103,7 @@ pub struct MockLlmClient {
 impl MockLlmClient {
     /// Build a new mock client backed by the supplied script.
     #[must_use]
-    pub fn new(script: MockLlmScript) -> Self {
+    pub const fn new(script: MockLlmScript) -> Self {
         Self { script }
     }
 

@@ -21,7 +21,8 @@ pub struct GradleParser {
 
 impl GradleParser {
     /// Create a new Gradle (Groovy DSL) parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -74,7 +75,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -116,7 +117,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
 
 /// Extract a Groovy class declaration.
 ///
-/// Fields: `name` (identifier), `body` (class_body), `superclass`, `interfaces`.
+/// Fields: `name` (identifier), `body` (`class_body`), `superclass`, `interfaces`.
 fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
@@ -254,7 +255,7 @@ fn extract_method(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[St
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind: SymbolKind::Method,
         visibility: extract_visibility(ctx, node),
@@ -327,7 +328,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind: SymbolKind::Function,
         visibility: extract_visibility(ctx, node),
@@ -447,7 +448,7 @@ fn extract_juxt_call(ctx: &mut Ctx, node: Node) {
     }
 
     ctx.references.push(SymbolRef {
-        symbol_name: name.clone(),
+        symbol_name: name,
         file_id: 0,
         file_path: String::new(),
         line: node.start_position().row as u32 + 1,

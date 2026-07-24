@@ -247,7 +247,7 @@ fn test_history_round_trip() {
     let file = dir.path().join("history.txt");
 
     let mut app = support::make_app();
-    app.set_history_file(file.clone());
+    app.set_history_file(file);
     app.input_history = vec![
         "first command".into(),
         "/opt cot".into(),
@@ -373,7 +373,7 @@ fn test_history_round_trip_unicode() {
     let file = dir.path().join("history.txt");
 
     let mut app = support::make_app();
-    app.set_history_file(file.clone());
+    app.set_history_file(file);
     app.input_history = vec![
         "こんにちは世界".into(),
         "émojis 🚀🦀".into(),

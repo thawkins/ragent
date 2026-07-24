@@ -35,6 +35,7 @@ pub enum OutputFormat {
 
 impl OutputFormat {
     /// Parse a format from its CLI name. Returns `None` for unknown values.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "report" | "default" => Some(Self::Report),
@@ -49,7 +50,8 @@ impl OutputFormat {
     }
 
     /// CLI-compatible name for this format.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Report => "report",
             Self::ExecutiveSummary => "executive-summary",
@@ -82,6 +84,7 @@ pub enum Depth {
 
 impl Depth {
     /// Parse a depth from its CLI name. Returns `None` for unknown values.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "shallow" => Some(Self::Shallow),
@@ -92,7 +95,8 @@ impl Depth {
     }
 
     /// CLI-compatible name for this depth.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Shallow => "shallow",
             Self::Standard => "standard",
@@ -102,6 +106,7 @@ impl Depth {
 
     /// Convert this depth + optional `--iterations` override into an engine
     /// configuration.
+    #[must_use]
     pub fn engine_config(
         self,
         iterations_override: Option<u32>,

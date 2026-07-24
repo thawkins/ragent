@@ -1,8 +1,8 @@
 //! ragent-prompt_opt — LLM-powered prompt optimization helpers.
 //!
 //! Provides a [`Completer`] trait, an [`OptMethod`] enum covering 12 prompt
-//! optimization frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, O1-STYLE, Meta
-//! Prompting, VARI, Q*, OpenAI, Claude, Microsoft), and an async [`optimize`]
+//! optimization frameworks (CO-STAR, CRISPE, `CoT`, DRAW, RISE, O1-STYLE, Meta
+//! Prompting, VARI, Q*, `OpenAI`, Claude, Microsoft), and an async [`optimize`]
 //! function that sends each method's meta-prompt to an LLM and returns the
 //! generated structured prompt.
 //!
@@ -41,7 +41,7 @@ pub enum OptMethod {
     Variational,
     /// Q*: XML-structured Q*/A* intelligent prompt optimization.
     QStar,
-    /// OpenAI adapter: detailed GPT-style system prompt.
+    /// `OpenAI` adapter: detailed GPT-style system prompt.
     OpenAI,
     /// Claude adapter: Anthropic-style XML instruction generator.
     Claude,
@@ -76,7 +76,8 @@ impl std::str::FromStr for OptMethod {
 
 impl OptMethod {
     /// Canonical short name for this method (used in status messages, logs).
-    pub fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::CoStar => "co_star",
             Self::Crispe => "crispe",
@@ -94,7 +95,8 @@ impl OptMethod {
     }
 
     /// Human-readable description for the help table.
-    pub fn description(self) -> &'static str {
+    #[must_use]
+    pub const fn description(self) -> &'static str {
         match self {
             Self::CoStar => "Context, Objective, Identity, Tone, Audience, Result",
             Self::Crispe => "Capacity/Role, Request, Intent, Steps, Persona, Examples",
@@ -112,7 +114,8 @@ impl OptMethod {
     }
 
     /// All methods in display order.
-    pub fn all() -> &'static [OptMethod] {
+    #[must_use]
+    pub const fn all() -> &'static [Self] {
         &[
             Self::CoStar,
             Self::Crispe,
@@ -130,6 +133,7 @@ impl OptMethod {
     }
 
     /// Returns a markdown help table listing all methods and their descriptions.
+    #[must_use]
     pub fn help_table() -> String {
         let mut out = String::from("| Method | Description |\n|--------|-------------|\n");
         for m in Self::all() {
@@ -141,7 +145,8 @@ impl OptMethod {
 
 /// The meta-prompt (system message) that instructs an LLM to optimize a task
 /// using the given framework. The user message will be the raw task/prompt.
-pub fn system_prompt(method: OptMethod) -> &'static str {
+#[must_use]
+pub const fn system_prompt(method: OptMethod) -> &'static str {
     match method {
         OptMethod::CoStar => CO_STAR_SYSTEM,
         OptMethod::Crispe => CRISPE_SYSTEM,
@@ -197,7 +202,7 @@ End the prompt with: "Please think step by step and complete the task."
 
 Output only the code block containing the structured prompt — no explanation."#;
 
-const CRISPE_SYSTEM: &str = r#"You are an expert Prompt Engineer who specialises in the CRISPE framework. Transform the user's task into a complete CRISPE-structured prompt and output it inside a code block.
+const CRISPE_SYSTEM: &str = r"You are an expert Prompt Engineer who specialises in the CRISPE framework. Transform the user's task into a complete CRISPE-structured prompt and output it inside a code block.
 
 The CRISPE structure is:
 
@@ -243,9 +248,9 @@ The CRISPE structure is:
 ## Initialization:
 As a <Role>, you must follow the Constraints. Greet the user, introduce yourself, then begin the Workflow for this task: <restate the user's task>.
 
-Output only the code block — no explanation."#;
+Output only the code block — no explanation.";
 
-const COT_SYSTEM: &str = r#"You are a prompt engineering expert specialising in Chain-of-Thought (CoT) reasoning prompts. Write a detailed Chain-of-Thought prompt that will guide a model to solve the user's task through explicit step-by-step reasoning.
+const COT_SYSTEM: &str = r"You are a prompt engineering expert specialising in Chain-of-Thought (CoT) reasoning prompts. Write a detailed Chain-of-Thought prompt that will guide a model to solve the user's task through explicit step-by-step reasoning.
 
 Your CoT prompt must include:
 1. A clear task description with context
@@ -257,7 +262,7 @@ Your CoT prompt must include:
 
 Use dynamic step counts — simple tasks need fewer steps, complex ones more.
 
-Output the complete CoT prompt inside a code block. No explanation."#;
+Output the complete CoT prompt inside a code block. No explanation.";
 
 const DRAW_SYSTEM: &str = r#"You are a professional AI image prompt optimizer. Transform the user's image description into a high-quality English image generation prompt optimized for models like Stable Diffusion, DALL-E, or Midjourney.
 
@@ -281,7 +286,7 @@ Example output format:
 wide shot, golden hour light, young woman reading under an oak tree, lush meadow background, impressionist oil painting style, serene and peaceful
 ```"#;
 
-const RISE_SYSTEM: &str = r#"You are an AI assistant implementing the RISE (Recursive Introspection for Self-improvement and Evaluation) algorithm. When given a task, you will autonomously iterate 3 times to progressively improve your response quality.
+const RISE_SYSTEM: &str = r"You are an AI assistant implementing the RISE (Recursive Introspection for Self-improvement and Evaluation) algorithm. When given a task, you will autonomously iterate 3 times to progressively improve your response quality.
 
 Apply these principles:
 
@@ -302,9 +307,9 @@ Format each iteration clearly:
 [response]
 **Self-analysis:** [what to improve]
 
-Now write a complete RISE-structured prompt for the following task:"#;
+Now write a complete RISE-structured prompt for the following task:";
 
-const O1_SYSTEM: &str = r#"Generate a structured reasoning prompt using the O1-STYLE thinking scaffold for the given task. The prompt must instruct the model to use these XML tags:
+const O1_SYSTEM: &str = r"Generate a structured reasoning prompt using the O1-STYLE thinking scaffold for the given task. The prompt must instruct the model to use these XML tags:
 
 - <thinking>: Enclose all reasoning and exploration before the answer
 - <step>: Each discrete reasoning step (start with a budget of 20 steps)
@@ -322,9 +327,9 @@ Additional instructions to include:
 - Use <thinking> as a scratchpad — write out all calculations explicitly
 - Conclude with a final <reflection> on solution quality and a <reward> score
 
-Output the complete O1-STYLE prompt inside a code block. No explanation."#;
+Output the complete O1-STYLE prompt inside a code block. No explanation.";
 
-const META_SYSTEM: &str = r#"You are an AI specialising in Meta Prompting. Your goal is to transform the user's prompt into a more concise, precise, and effective version while fully preserving its core objective.
+const META_SYSTEM: &str = r"You are an AI specialising in Meta Prompting. Your goal is to transform the user's prompt into a more concise, precise, and effective version while fully preserving its core objective.
 
 Apply these Meta Prompting principles:
 (a) Maintain the primary purpose and all constraints of the original prompt exactly.
@@ -335,7 +340,7 @@ Apply these Meta Prompting principles:
 (f) Optimise for token efficiency without sacrificing completeness.
 (g) If the original has examples, preserve the best one and remove the rest.
 
-Output the optimized meta-prompt directly — no preamble, no explanation. Write in the same language as the original prompt."#;
+Output the optimized meta-prompt directly — no preamble, no explanation. Write in the same language as the original prompt.";
 
 const VARI_SYSTEM: &str = r#"You are an expert in variational planning for content generation. Analyse the user's task and produce a complete variational planning prompt by filling in the following template. Do not modify the template structure — only fill in the bracketed sections with task-specific content. Output the completed prompt inside a code block.
 
@@ -457,7 +462,7 @@ Provide: overall strategy, step-by-step plan, expected outcomes, and adjustment 
 </q-star-prompt>
 </example>"#;
 
-const OPENAI_SYSTEM: &str = r#"Given a task description or existing prompt, produce a detailed system prompt to guide a language model in completing the task effectively.
+const OPENAI_SYSTEM: &str = r"Given a task description or existing prompt, produce a detailed system prompt to guide a language model in completing the task effectively.
 
 Guidelines:
 - Understand the Task: Grasp the main objective, goals, requirements, constraints, and expected output.
@@ -488,9 +493,9 @@ The final prompt must follow this structure exactly. Do not include any addition
 [1-3 examples with placeholders if needed. Mark input/output clearly.]
 
 # Notes [optional]
-[Edge cases, important considerations]"#;
+[Edge cases, important considerations]";
 
-const CLAUDE_SYSTEM: &str = r#"You are writing instructions for an eager, helpful, but inexperienced AI assistant who needs careful, explicit guidance to perform tasks correctly. The user will describe a task. You will write a complete, clear prompt that instructs the assistant how to accomplish it accurately and consistently.
+const CLAUDE_SYSTEM: &str = r"You are writing instructions for an eager, helpful, but inexperienced AI assistant who needs careful, explicit guidance to perform tasks correctly. The user will describe a task. You will write a complete, clear prompt that instructs the assistant how to accomplish it accurately and consistently.
 
 Follow these patterns from Anthropic's prompt engineering best practices:
 
@@ -510,9 +515,9 @@ Structure your output as:
 [the complete prompt for the assistant]
 </Instructions>
 
-Write the full prompt. Do not explain your choices."#;
+Write the full prompt. Do not explain your choices.";
 
-const MICROSOFT_SYSTEM: &str = r#"You are a prompt optimization expert for Microsoft Azure AI services. Transform the user's task into an optimized prompt following Microsoft's Azure AI best practices.
+const MICROSOFT_SYSTEM: &str = r"You are a prompt optimization expert for Microsoft Azure AI services. Transform the user's task into an optimized prompt following Microsoft's Azure AI best practices.
 
 Your optimized prompt must include these sections:
 
@@ -540,4 +545,4 @@ Specify the exact output structure (prefer structured/JSON responses for downstr
 **Error Handling:**
 Instruct how to handle missing data, ambiguous inputs, or out-of-scope requests.
 
-Output only the completed optimized prompt — no meta-commentary."#;
+Output only the completed optimized prompt — no meta-commentary.";

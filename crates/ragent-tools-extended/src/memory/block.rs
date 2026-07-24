@@ -26,7 +26,8 @@ pub enum BlockScope {
 
 impl BlockScope {
     /// Returns the string representation used in tool parameters.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Global => "global",
             Self::Project => "project",
@@ -37,6 +38,7 @@ impl BlockScope {
     ///
     /// Accepts "global" or "user" for [`BlockScope::Global`] and
     /// "project" for [`BlockScope::Project`].
+    #[must_use]
     pub fn from_param(s: &str) -> Option<Self> {
         match s {
             "global" | "user" => Some(Self::Global),
@@ -160,6 +162,7 @@ impl MemoryBlock {
     ///
     /// Content here.
     /// ```
+    #[must_use]
     pub fn to_markdown(&self) -> String {
         let frontmatter = serde_yaml::to_string(&FrontmatterData {
             label: self.label.clone(),
@@ -188,10 +191,11 @@ impl MemoryBlock {
     /// If the frontmatter is missing or malformed, returns a block with
     /// default metadata and the full text as content (backward compatible
     /// with existing plain MEMORY.md files).
+    #[must_use]
     pub fn from_markdown(text: &str, default_scope: BlockScope) -> Self {
         if let Some((fm, body)) = split_frontmatter(text) {
-            match serde_yaml::from_str::<FrontmatterData>(&fm) {
-                Ok(data) => Self {
+            if let Ok(data) = serde_yaml::from_str::<FrontmatterData>(&fm) {
+                Self {
                     label: data.label,
                     description: data.description.unwrap_or_default(),
                     scope: data.scope,
@@ -200,12 +204,11 @@ impl MemoryBlock {
                     created_at: parse_datetime(&data.created_at),
                     updated_at: parse_datetime(&data.updated_at),
                     content: body.trim_start().to_string(),
-                },
-                Err(_) => {
-                    // Frontmatter present but unparseable — treat as legacy
-                    let label = "MEMORY".to_string();
-                    Self::new(label, default_scope).with_content(text.to_string())
                 }
+            } else {
+                // Frontmatter present but unparseable — treat as legacy
+                let label = "MEMORY".to_string();
+                Self::new(label, default_scope).with_content(text.to_string())
             }
         } else {
             // No frontmatter — plain legacy MEMORY.md
@@ -230,19 +233,20 @@ impl MemoryBlock {
 
     /// Set the size limit in bytes.
     #[must_use]
-    pub fn with_limit(mut self, limit: usize) -> Self {
+    pub const fn with_limit(mut self, limit: usize) -> Self {
         self.limit = limit;
         self
     }
 
     /// Set the read-only flag.
     #[must_use]
-    pub fn with_read_only(mut self, read_only: bool) -> Self {
+    pub const fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self
     }
 
     /// Return the filename for this block (label + `.md` extension).
+    #[must_use]
     pub fn filename(&self) -> String {
         format!("{}.md", self.label)
     }
@@ -306,9 +310,7 @@ fn split_frontmatter(text: &str) -> Option<(String, String)> {
 
 /// Parse an ISO 8601 / RFC 3339 datetime string, falling back to now.
 fn parse_datetime(s: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(s)
-        .map(|dt| dt.with_timezone(&Utc))
-        .unwrap_or_else(|_| Utc::now())
+    DateTime::parse_from_rfc3339(s).map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc))
 }
 
 #[cfg(test)]

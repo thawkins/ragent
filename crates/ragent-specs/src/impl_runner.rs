@@ -31,6 +31,7 @@ pub struct ImplOptions {
 
 impl ImplOptions {
     /// Create default options.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -42,7 +43,8 @@ impl ImplOptions {
     }
 
     /// Enable `--dry-run` mode.
-    pub fn with_dry_run(mut self) -> Self {
+    #[must_use]
+    pub const fn with_dry_run(mut self) -> Self {
         self.dry_run = true;
         self
     }
@@ -139,16 +141,19 @@ impl SpecImplRunner {
     }
 
     /// Get the spec name.
+    #[must_use]
     pub fn spec_name(&self) -> &str {
         &self.spec_name
     }
 
     /// Get the parsed tasks.
+    #[must_use]
     pub fn tasks(&self) -> &[PlanTask] {
         &self.tasks
     }
 
     /// Get the execution order.
+    #[must_use]
     pub fn execution_order(&self) -> &[usize] {
         &self.execution_order
     }
@@ -156,13 +161,15 @@ impl SpecImplRunner {
     /// Number of tasks that will be executed in this run
     /// (i.e. the length of [`execution_order`](Self::execution_order),
     /// after resume filtering).
-    pub fn total_to_execute(&self) -> usize {
+    #[must_use]
+    pub const fn total_to_execute(&self) -> usize {
         self.execution_order.len()
     }
 
     /// Get the task ID at the given 1-based rank in the execution order.
     ///
     /// Returns `None` if `rank` is out of range (rank < 1 or rank > total).
+    #[must_use]
     pub fn task_id_at(&self, rank: usize) -> Option<&str> {
         self.execution_order
             .get(rank.checked_sub(1)?)
@@ -179,6 +186,7 @@ impl SpecImplRunner {
     /// This is the per-task prompt used by the TUI's sequential task-driving
     /// loop: after each agent turn ends, the TUI checks the task status and,
     /// if completed, dispatches the next task's prompt.
+    #[must_use]
     pub fn task_prompt(&self, rank: usize) -> Option<String> {
         let total = self.execution_order.len();
         let idx = *self.execution_order.get(rank.checked_sub(1)?)?;
@@ -196,6 +204,7 @@ impl SpecImplRunner {
     ///
     /// Public so tests can exercise it without constructing a full
     /// `SpecImplRunner` (which requires on-disk spec files).
+    #[must_use]
     pub fn build_single_task_prompt(
         task: &PlanTask,
         spec_name: &str,
@@ -364,7 +373,7 @@ impl SpecImplRunner {
             total,
             skipped
         ));
-        lines.push(format!("**Effort estimate:** {}", effort_summary));
+        lines.push(format!("**Effort estimate:** {effort_summary}"));
         lines.push(String::new());
 
         lines.push("### Execution Order\n".to_string());
@@ -442,13 +451,13 @@ impl SpecImplRunner {
         }
         let mut parts = Vec::new();
         if s > 0 {
-            parts.push(format!("{}×S", s));
+            parts.push(format!("{s}×S"));
         }
         if m > 0 {
-            parts.push(format!("{}×M", m));
+            parts.push(format!("{m}×M"));
         }
         if l > 0 {
-            parts.push(format!("{}×L", l));
+            parts.push(format!("{l}×L"));
         }
         if parts.is_empty() {
             "none".to_string()
@@ -497,6 +506,7 @@ fn is_valid_transition(from: SpecStatus, to: SpecStatus) -> bool {
 }
 
 /// Build a progress update message for a completed task (FR-015).
+#[must_use]
 pub fn build_progress_update(
     spec_name: &str,
     task_id: &str,
@@ -505,45 +515,44 @@ pub fn build_progress_update(
     next_task_id: Option<&str>,
 ) -> String {
     let next = match next_task_id {
-        Some(id) => format!(" — Next: {}", id),
+        Some(id) => format!(" — Next: {id}"),
         None => String::new(),
     };
-    format!(
-        "✅ {} ({}/{}){} — spec {}",
-        task_id, completed, total, next, spec_name
-    )
+    format!("✅ {task_id} ({completed}/{total}){next} — spec {spec_name}")
 }
 
 /// Build a completion summary (FR-016).
+#[must_use]
 pub fn build_completion_summary(spec_name: &str, total: usize) -> String {
     format!(
-        "🎉 All {} tasks completed for spec **{}**. \
-         Spec status has been set to `implemented`.",
-        total, spec_name
+        "🎉 All {total} tasks completed for spec **{spec_name}**. \
+         Spec status has been set to `implemented`."
     )
 }
 
 /// Build a cancellation summary (FR-017).
+#[must_use]
 pub fn build_cancellation_summary(spec_name: &str, completed: usize, total: usize) -> String {
     format!(
-        "⚠️ Implementation cancelled for spec **{}**. \
-         Completed {}/{} tasks. Spec status remains `in_progress`. \
-         Run `/spec impl {}` again to resume.",
-        spec_name, completed, total, spec_name
+        "⚠️ Implementation cancelled for spec **{spec_name}**. \
+         Completed {completed}/{total} tasks. Spec status remains `in_progress`. \
+         Run `/spec impl {spec_name}` again to resume."
     )
 }
 
 /// Build a blocked task summary (FR-011).
+#[must_use]
 pub fn build_blocked_summary(task_id: &str, dependent_ids: &[String]) -> String {
     let deps = if dependent_ids.is_empty() {
         String::new()
     } else {
         format!(" (also blocked: {})", dependent_ids.join(", "))
     };
-    format!("🚫 Task {} blocked{}", task_id, deps)
+    format!("🚫 Task {task_id} blocked{deps}")
 }
 
 /// Find all tasks that transitively depend on a blocked task.
+#[must_use]
 pub fn find_dependents(tasks: &[PlanTask], blocked_id: &str) -> Vec<String> {
     let _id_to_idx: HashMap<&str, usize> = tasks
         .iter()
@@ -602,8 +611,7 @@ pub fn parse_impl_args(args: &str) -> Result<(String, ImplOptions), SpecError> {
             }
             other => {
                 return Err(SpecError::PlanParse(format!(
-                    "Unknown option: {}. Valid options: --task <ID>, --dry-run",
-                    other
+                    "Unknown option: {other}. Valid options: --task <ID>, --dry-run"
                 )));
             }
         }

@@ -74,7 +74,7 @@ impl Tool for GitLogTool {
         }
 
         args.push("-n".to_string());
-        args.push(format!("{}", limit));
+        args.push(format!("{limit}"));
 
         if let Some(author) = author {
             args.push("--author".to_string());
@@ -88,7 +88,7 @@ impl Tool for GitLogTool {
 
         args.push(branch.to_string());
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 

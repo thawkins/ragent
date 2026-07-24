@@ -1,4 +1,4 @@
-//! Tests for todo_read / todo_write full lifecycle.
+//! Tests for `todo_read` / `todo_write` full lifecycle.
 
 use std::sync::Arc;
 

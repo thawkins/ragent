@@ -1,5 +1,25 @@
 # Changelog
 
+## Version: 0.1.0-beta.9
+
+### Added — LangSearch backend for `mf_search`
+
+- New optional `langsearch_api_key` top-level config field in `ragent.json`.
+  When set, the key is merged across global/project/env config layers and
+  serialised back only when explicitly present (defaults omit the key).
+- New `LangSearchEngine` in `crates/ragent-tools-extended/src/masterfetch/search/langsearch.rs`
+  implementing the `SearchEngine` trait. It calls `https://api.langsearch.com/v1/web-search`
+  with `Authorization: Bearer {key}`, maps `SearchOptions` to LangSearch JSON
+  fields (`query`, `count` clamped 1–10, `freshness`, `summary: true`), parses
+  `data.webPages.value`, and reports non-2xx responses as `engine_blocked`.
+- `mf_search` now includes the LangSearch backend automatically when a key is
+  configured; existing keyless DuckDuckGo and Brave backends continue to work
+  when no key is present.
+- API key is masked in diagnostics and never logged or surfaced in error
+  messages.
+- Tests: request/response mapping and key masking unit tests, config
+  merge/load/serialise tests, and an `#[ignore]`-gated live API test.
+
 ## Version: 0.1.0-beta.8
 
 ### Changed — Version bump

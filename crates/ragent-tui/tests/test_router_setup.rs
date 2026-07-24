@@ -485,7 +485,10 @@ fn test_router_setup_save_persists_cluster_and_enables_router() {
         .get("provider")
         .and_then(|p| p.get("router"))
         .expect("provider.router present");
-    assert_eq!(router.get("enabled").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        router.get("enabled").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     let simple = router
         .get("tiers")
         .and_then(|t| t.get("SIMPLE"))
@@ -513,8 +516,7 @@ fn test_router_setup_rejects_empty_cluster_on_save() {
                     .as_ref()
                     .expect("error set")
                     .contains("At least one tier"),
-                "expected empty-cluster error: {:?}",
-                error
+                "expected empty-cluster error: {error:?}"
             );
         }
         _ => panic!("expected SetupRouter with error"),
@@ -629,8 +631,7 @@ fn test_router_setup_rejects_recursive_router_assignment() {
                     .as_ref()
                     .expect("error set")
                     .contains("cannot route to itself"),
-                "expected recursive routing error: {:?}",
-                error
+                "expected recursive routing error: {error:?}"
             );
         }
         _ => panic!("expected SetupRouter with error"),
@@ -703,7 +704,7 @@ fn test_router_setup_reorder_models_within_bucket() {
 fn test_slash_provider_show_includes_router_when_configured() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
-    app.config_paths = vec![config_path.clone()];
+    app.config_paths = vec![config_path];
 
     // Save a minimal cluster.
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -724,7 +725,7 @@ fn test_slash_provider_show_includes_router_when_configured() {
 fn test_provider_show_renders_router_cluster() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
-    app.config_paths = vec![config_path.clone()];
+    app.config_paths = vec![config_path];
 
     // Save a cluster.
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -768,7 +769,7 @@ fn test_provider_show_renders_router_cluster() {
 fn test_router_setup_restores_router_state_at_startup() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
-    app.config_paths = vec![config_path.clone()];
+    app.config_paths = vec![config_path];
 
     // Assign a model and save the cluster.
     app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -802,7 +803,7 @@ fn test_router_setup_restores_router_state_at_startup() {
         .get_as_any("router")
         .and_then(|p| {
             p.downcast_ref::<ragent_llm::providers::router::RouterProvider>()
-                .map(|rp| rp.config())
+                .map(ragent_agent::provider::router::RouterProvider::config)
         })
         .expect("router provider in registry");
     assert!(registry_config.enabled, "registry router should be enabled");
@@ -900,8 +901,7 @@ fn test_router_model_picker_enter_preserves_providers() {
                 draft_config
                     .tiers
                     .get("SIMPLE")
-                    .map(|t| !t.models.is_empty())
-                    .unwrap_or(false),
+                    .is_some_and(|t| !t.models.is_empty()),
                 "selected model must be added to the SIMPLE bucket"
             );
         }
@@ -1014,15 +1014,15 @@ fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
             Some(ProviderSetupStep::SelectProvider { .. })
         ),
         "picker should stay open when no concrete providers are configured, got {:?}",
-        app.provider_setup
-            .as_ref()
-            .map(|s| match s {
+        app.provider_setup.as_ref().map_or_else(
+            || "None".to_string(),
+            |s| match s {
                 ProviderSetupStep::SelectProvider { .. } => "SelectProvider".to_string(),
                 ProviderSetupStep::SetupRouter { .. } => "SetupRouter".to_string(),
                 ProviderSetupStep::EnterKey { .. } => "EnterKey".to_string(),
                 _ => "other".to_string(),
-            })
-            .unwrap_or_else(|| "None".to_string())
+            }
+        )
     );
     assert!(
         app.status.contains("No concrete providers"),
@@ -1042,7 +1042,7 @@ fn render_router_setup_to_string(app: &mut App, width: u16, height: u16) -> Stri
         .draw(|frame| ragent_tui::layout::render(frame, app))
         .expect("draw");
     let cells = terminal.backend().buffer().content.clone();
-    cells.iter().map(|c| c.symbol()).collect()
+    cells.iter().map(ratatui::buffer::Cell::symbol).collect()
 }
 
 #[test]
@@ -1142,7 +1142,7 @@ fn test_router_model_picker_renders_property_columns() {
 fn test_router_setup_reopen_seeds_draft_from_persisted_config() {
     let mut app = router_setup_with_providers(mem_storage());
     let config_path = temp_config_path();
-    app.config_paths = vec![config_path.clone()];
+    app.config_paths = vec![config_path];
 
     // Assign a model to the SIMPLE bucket (anthropic is pre-selected in the
     // palette) and save the cluster.
@@ -1210,7 +1210,7 @@ fn test_router_setup_reopen_without_saved_config_uses_empty_draft() {
             );
             for tier in [Tier::Simple, Tier::Medium, Tier::Complex, Tier::Reasoning] {
                 let cfg = draft_config.tiers.get(&tier.to_string());
-                let empty = cfg.map(|t| t.models.is_empty()).unwrap_or(true);
+                let empty = cfg.map_or(true, |t| t.models.is_empty());
                 assert!(empty, "{tier} bucket should be empty on first-time setup");
             }
         }

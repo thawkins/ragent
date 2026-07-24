@@ -101,7 +101,7 @@ fn test_parse_empty_html() {
 
 #[test]
 fn test_parse_html_with_no_results() {
-    let html = r#"<html><body><p>No results found.</p></body></html>"#;
+    let html = r"<html><body><p>No results found.</p></body></html>";
     let results = parse_results_html(html, "brave");
     assert!(results.is_empty());
 }

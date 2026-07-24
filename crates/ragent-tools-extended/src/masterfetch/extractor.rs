@@ -221,7 +221,7 @@ pub enum ExtractError {
 /// * `content_type` — the HTTP `Content-Type` header value. If it does not
 ///   contain `text/html` or `application/xhtml`, the body is returned as-is
 ///   (raw) regardless of the `format` parameter.
-/// * `opts` — extraction options (format, css_selector, max_content_chars).
+/// * `opts` — extraction options (format, `css_selector`, `max_content_chars`).
 ///
 /// # Returns
 ///
@@ -819,7 +819,7 @@ fn parse_attrs(s: &str) -> Vec<HtmlAttr> {
             }
             chars.next();
         }
-        let name_end = chars.peek().map(|&(j, _)| j).unwrap_or(s.len());
+        let name_end = chars.peek().map_or(s.len(), |&(j, _)| j);
         let name = &s[name_start..name_end];
         if name.is_empty() {
             break;
@@ -842,33 +842,30 @@ fn parse_attrs(s: &str) -> Vec<HtmlAttr> {
                     break;
                 }
             }
-            match chars.peek().map(|&(_, ch)| ch) {
-                Some('"') | Some('\'') => {
-                    let quote = chars.next().unwrap().1;
-                    let val_start = chars.peek().map(|&(j, _)| j).unwrap_or(s.len());
-                    while let Some(&(_, ch)) = chars.peek() {
-                        if ch == quote {
-                            break;
-                        }
-                        chars.next();
+            if let Some('"' | '\'') = chars.peek().map(|&(_, ch)| ch) {
+                let quote = chars.next().unwrap().1;
+                let val_start = chars.peek().map_or(s.len(), |&(j, _)| j);
+                while let Some(&(_, ch)) = chars.peek() {
+                    if ch == quote {
+                        break;
                     }
-                    let val_end = chars.peek().map(|&(j, _)| j).unwrap_or(s.len());
-                    if chars.peek().is_some() {
-                        chars.next(); // consume closing quote
-                    }
-                    s[val_start..val_end].to_string()
+                    chars.next();
                 }
-                _ => {
-                    let val_start = chars.peek().map(|&(j, _)| j).unwrap_or(s.len());
-                    while let Some(&(_, ch)) = chars.peek() {
-                        if ch.is_whitespace() || ch == '/' {
-                            break;
-                        }
-                        chars.next();
-                    }
-                    let val_end = chars.peek().map(|&(j, _)| j).unwrap_or(s.len());
-                    s[val_start..val_end].to_string()
+                let val_end = chars.peek().map_or(s.len(), |&(j, _)| j);
+                if chars.peek().is_some() {
+                    chars.next(); // consume closing quote
                 }
+                s[val_start..val_end].to_string()
+            } else {
+                let val_start = chars.peek().map_or(s.len(), |&(j, _)| j);
+                while let Some(&(_, ch)) = chars.peek() {
+                    if ch.is_whitespace() || ch == '/' {
+                        break;
+                    }
+                    chars.next();
+                }
+                let val_end = chars.peek().map_or(s.len(), |&(j, _)| j);
+                s[val_start..val_end].to_string()
             }
         } else {
             String::new()

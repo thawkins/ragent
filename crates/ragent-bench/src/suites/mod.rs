@@ -106,8 +106,7 @@ pub fn adapter_for_suite(suite_id: &str) -> Result<&'static dyn BenchSuiteAdapte
         "repobench" => Ok(&repobench::ADAPTER),
         "crosscodeeval" => Ok(&crosscodeeval::ADAPTER),
         other => Err(anyhow!(
-            "benchmark suite '{}' does not have a native benchmark adapter yet",
-            other
+            "benchmark suite '{other}' does not have a native benchmark adapter yet"
         )),
     }
 }

@@ -752,12 +752,12 @@ impl App {
                     // time, so we only surface it here when env-var creds exist.
                     let has_access = std::env::var("AWS_ACCESS_KEY_ID")
                         .ok()
-                        .filter(|k| !k.is_empty())
-                        .is_some();
+                        .as_ref()
+                        .is_some_and(|k| !k.is_empty());
                     let has_secret = std::env::var("AWS_SECRET_ACCESS_KEY")
                         .ok()
-                        .filter(|k| !k.is_empty())
-                        .is_some();
+                        .as_ref()
+                        .is_some_and(|k| !k.is_empty());
                     if has_access && has_secret {
                         Some(ProviderSource::EnvVar)
                     } else {

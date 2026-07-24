@@ -41,7 +41,7 @@ fn test_bedrock_default_models_empty() {
     );
 }
 
-/// Verifies all discovered/default models have the correct provider_id.
+/// Verifies all discovered/default models have the correct `provider_id`.
 #[test]
 fn test_bedrock_models_have_correct_provider_id() {
     let registry = create_default_registry();

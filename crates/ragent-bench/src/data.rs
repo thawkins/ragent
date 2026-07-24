@@ -205,7 +205,7 @@ where
                 let mut outcomes = Vec::new();
                 for suite_language in suite.languages.iter().copied() {
                     on_progress(BenchInitProgressEvent::Starting {
-                        suite_id: suite_id.to_string(),
+                        suite_id: suite_id.clone(),
                         language: suite_language.to_string(),
                         mode,
                         verify_only,
@@ -392,11 +392,7 @@ pub fn verify_suite_with_language(
     let data_root = bench_data_root_for_language(project_root, suite_id, language);
     if !data_root.is_dir() {
         bail!(
-            "Benchmark data for '{}' (language '{}') is not initialized. Run `/bench init {} --language {}` first.",
-            suite_id,
-            language,
-            suite_id,
-            language
+            "Benchmark data for '{suite_id}' (language '{language}') is not initialized. Run `/bench init {suite_id} --language {language}` first."
         );
     }
     let manifest = load_manifest(&data_root)?;
@@ -430,16 +426,10 @@ pub fn verify_suite_with_language(
         );
     }
     if manifest.sources.is_empty() {
-        bail!(
-            "Benchmark manifest for '{}' does not record any sources.",
-            suite_id
-        );
+        bail!("Benchmark manifest for '{suite_id}' does not record any sources.");
     }
     if manifest.files.is_empty() {
-        bail!(
-            "Benchmark manifest for '{}' does not record any tracked files.",
-            suite_id
-        );
+        bail!("Benchmark manifest for '{suite_id}' does not record any tracked files.");
     }
     for file in &manifest.files {
         verify_manifest_file(&data_root, file)?;
@@ -925,10 +915,7 @@ fn require_fixture_language<'a>(
 ) -> Result<&'a str> {
     if requested_language != expected_language {
         bail!(
-            "benchmark suite '{}' does not provide init fixtures for language '{}'; use '{}'",
-            suite_id,
-            requested_language,
-            expected_language
+            "benchmark suite '{suite_id}' does not provide init fixtures for language '{requested_language}'; use '{expected_language}'"
         );
     }
     Ok(requested_language)
@@ -1388,8 +1375,7 @@ fn init_multipl_e(language: &str) -> Result<Vec<BenchCaseFixture>> {
             "rust",
         )),
         other => bail!(
-            "benchmark suite 'multipl-e' does not provide init fixtures for language '{}'; supported languages: python, rust",
-            other
+            "benchmark suite 'multipl-e' does not provide init fixtures for language '{other}'; supported languages: python, rust"
         ),
     }
 }

@@ -303,10 +303,9 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                     .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
                 depth: depth.as_deref().and_then(Depth::parse),
                 iterations,
-                output_format: format
-                    .as_deref()
-                    .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
-                    .unwrap_or(OutputFormat::Report),
+                output_format: format.as_deref().map_or(OutputFormat::Report, |s| {
+                    OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
+                }),
                 ..SessionConfig::default()
             };
 

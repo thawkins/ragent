@@ -22,7 +22,8 @@ pub struct MavenParser {
 
 impl MavenParser {
     /// Create a new Maven POM parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -73,7 +74,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -267,7 +268,7 @@ fn extract_parent_import(ctx: &mut Ctx, node: Node) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// Get the tag name from an element node by looking at its STag or EmptyElemTag child.
+/// Get the tag name from an element node by looking at its `STag` or `EmptyElemTag` child.
 fn get_tag_name(ctx: &Ctx, node: Node) -> String {
     let cursor = &mut node.walk();
     for child in node.children(cursor) {
@@ -335,14 +336,12 @@ fn build_element_name(ctx: &Ctx, node: Node, tag: &str) -> String {
             // Try to use groupId:artifactId from the project element.
             let gid = find_child_element_text(ctx, node, "groupId");
             let aid = find_child_element_text(ctx, node, "artifactId");
-            if !aid.is_empty() {
-                if !gid.is_empty() {
-                    format!("project:{gid}:{aid}")
-                } else {
-                    format!("project:{aid}")
-                }
-            } else {
+            if aid.is_empty() {
                 "project".to_string()
+            } else if gid.is_empty() {
+                format!("project:{aid}")
+            } else {
+                format!("project:{gid}:{aid}")
             }
         }
         "dependency" => {
@@ -406,7 +405,7 @@ fn build_element_sig(ctx: &Ctx, node: Node, tag: &str) -> String {
                     }
                     format!("{}…", &text[..end])
                 } else {
-                    text.clone()
+                    text
                 };
                 format!("<{tag}>{truncated}</{tag}>")
             }
@@ -414,7 +413,7 @@ fn build_element_sig(ctx: &Ctx, node: Node, tag: &str) -> String {
     }
 }
 
-/// Map a Maven tag name to a SymbolKind.
+/// Map a Maven tag name to a `SymbolKind`.
 fn map_tag_to_kind(tag: &str) -> SymbolKind {
     match tag {
         "project" => SymbolKind::Module,

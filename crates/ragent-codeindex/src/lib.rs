@@ -30,7 +30,7 @@
 //!
 //! - [`types`] — Core data types: `SymbolKind`, `FileEntry`, `Symbol`, etc.
 //! - [`scanner`] — File discovery, hashing, and language detection
-//! - [`store`] — SQLite index storage with incremental update support
+//! - [`store`] — `SQLite` index storage with incremental update support
 //! - [`parser`] — Tree-sitter parsing and symbol extraction
 //! - [`search`] — Full-text search index backed by tantivy
 //! - [`watcher`] — Filesystem event watcher
@@ -77,7 +77,7 @@ use types::{
 
 /// The main entry point for the code index system.
 ///
-/// Owns the SQLite store, tantivy FTS index, tree cache, and parser registry.
+/// Owns the `SQLite` store, tantivy FTS index, tree cache, and parser registry.
 /// Thread-safe via internal `Mutex` guards.
 pub struct CodeIndex {
     store: Mutex<IndexStore>,
@@ -212,7 +212,7 @@ impl CodeIndex {
 
     /// Non-blocking variant of [`search()`].
     ///
-    /// Returns `None` if either the FTS or the SQLite store lock is currently
+    /// Returns `None` if either the FTS or the `SQLite` store lock is currently
     /// held by a background re-index. Callers should retry briefly or fall
     /// back to a simpler search tool rather than blocking the agent loop.
     pub fn try_search(&self, query: &SearchQuery) -> Result<Option<Vec<SearchResult>>> {
@@ -256,7 +256,7 @@ impl CodeIndex {
         Ok(Some(results))
     }
 
-    /// Query symbols from the structured SQLite index.
+    /// Query symbols from the structured `SQLite` index.
     pub fn symbols(&self, filter: &SymbolFilter) -> Result<Vec<Symbol>> {
         let store = self.store.lock().unwrap();
         store.query_symbols(filter)
@@ -264,7 +264,7 @@ impl CodeIndex {
 
     /// Non-blocking variant of [`symbols()`].
     ///
-    /// Returns `None` if the SQLite store lock is currently held (e.g. by a
+    /// Returns `None` if the `SQLite` store lock is currently held (e.g. by a
     /// background reindex). Callers should retry briefly or fall back to
     /// `grep` rather than blocking the agent loop.
     pub fn try_symbols(&self, filter: &SymbolFilter) -> Result<Option<Vec<Symbol>>> {
@@ -287,7 +287,7 @@ impl CodeIndex {
 
     /// Non-blocking variant of [`references()`].
     ///
-    /// Returns `None` if the SQLite store lock is currently held.
+    /// Returns `None` if the `SQLite` store lock is currently held.
     pub fn try_references(
         &self,
         symbol_name: &str,
@@ -333,7 +333,7 @@ impl CodeIndex {
 
     /// Non-blocking variant of [`dependencies()`].
     ///
-    /// Returns `None` if the SQLite store lock is currently held.
+    /// Returns `None` if the `SQLite` store lock is currently held.
     pub fn try_dependencies(
         &self,
         path: &str,
@@ -420,11 +420,11 @@ impl CodeIndex {
         )
     }
 
-    /// Ensure FTS index is in sync with the SQLite store.
+    /// Ensure FTS index is in sync with the `SQLite` store.
     ///
     /// Detects when the FTS index is empty or significantly diverged from
-    /// SQLite (e.g., after schema recreation, corruption, or accumulated
-    /// duplicates from multiple reindexes) and rebuilds it from SQLite data.
+    /// `SQLite` (e.g., after schema recreation, corruption, or accumulated
+    /// duplicates from multiple reindexes) and rebuilds it from `SQLite` data.
     pub fn ensure_fts_sync(&self) -> Result<()> {
         let store = self.store.lock().unwrap();
         let sqlite_symbols = store.symbol_count()?;
@@ -503,35 +503,35 @@ impl CodeIndex {
         let file_id = store.upsert_file(&entry)?;
 
         // Parse if we have a parser for this language.
-        if let Some(ref lang) = language {
-            if let Some(parsed) = self.parsers.parse(lang, &content) {
-                match parsed {
-                    Ok(parsed) => {
-                        let sym_count = store.upsert_symbols(file_id, &parsed.symbols)?;
-                        store.upsert_imports(file_id, &parsed.imports)?;
-                        store.upsert_refs(file_id, &parsed.references)?;
-                        debug!("indexed {rel_path}: {sym_count} symbols");
+        if let Some(ref lang) = language
+            && let Some(parsed) = self.parsers.parse(lang, &content)
+        {
+            match parsed {
+                Ok(parsed) => {
+                    let sym_count = store.upsert_symbols(file_id, &parsed.symbols)?;
+                    store.upsert_imports(file_id, &parsed.imports)?;
+                    store.upsert_refs(file_id, &parsed.references)?;
+                    debug!("indexed {rel_path}: {sym_count} symbols");
 
-                        // Update FTS.
-                        let fts = self.fts.lock().unwrap();
-                        fts.remove_file(&rel_path)?;
-                        let fts_syms: Vec<FtsSymbol<'_>> = parsed
-                            .symbols
-                            .iter()
-                            .map(|s| symbol_to_fts(s, &rel_path))
-                            .collect();
-                        fts.add_symbols(&fts_syms)?;
-                        drop(fts);
+                    // Update FTS.
+                    let fts = self.fts.lock().unwrap();
+                    fts.remove_file(&rel_path)?;
+                    let fts_syms: Vec<FtsSymbol<'_>> = parsed
+                        .symbols
+                        .iter()
+                        .map(|s| symbol_to_fts(s, &rel_path))
+                        .collect();
+                    fts.add_symbols(&fts_syms)?;
+                    drop(fts);
 
-                        // Update tree cache with the new parse tree.
-                        if let Some(tree) = parsed.tree {
-                            let mut tc = self.tree_cache.lock().unwrap();
-                            tc.put(path.to_path_buf(), tree);
-                        }
+                    // Update tree cache with the new parse tree.
+                    if let Some(tree) = parsed.tree {
+                        let mut tc = self.tree_cache.lock().unwrap();
+                        tc.put(path.to_path_buf(), tree);
                     }
-                    Err(e) => {
-                        warn!("parse error for {rel_path}: {e}");
-                    }
+                }
+                Err(e) => {
+                    warn!("parse error for {rel_path}: {e}");
                 }
             }
         }
@@ -633,15 +633,15 @@ impl CodeIndex {
 
                 let rel_path = sf.path.to_string_lossy().to_string();
 
-                if let Some(ref lang) = sf.language {
-                    if let Some(parsed) = self.parsers.parse(lang, &content) {
-                        match parsed {
-                            Ok(parsed) => {
-                                parsed_results.push((rel_path, parsed));
-                            }
-                            Err(e) => {
-                                warn!("parse error for {rel_path}: {e}");
-                            }
+                if let Some(ref lang) = sf.language
+                    && let Some(parsed) = self.parsers.parse(lang, &content)
+                {
+                    match parsed {
+                        Ok(parsed) => {
+                            parsed_results.push((rel_path, parsed));
+                        }
+                        Err(e) => {
+                            warn!("parse error for {rel_path}: {e}");
                         }
                     }
                 }
@@ -692,7 +692,11 @@ impl CodeIndex {
         // Remove deleted files from FTS in a single batch.
         if !diff.to_remove.is_empty() {
             let fts = self.fts.lock().unwrap();
-            let remove_paths: Vec<&str> = diff.to_remove.iter().map(|s| s.as_str()).collect();
+            let remove_paths: Vec<&str> = diff
+                .to_remove
+                .iter()
+                .map(std::string::String::as_str)
+                .collect();
             fts.batch_update(&remove_paths, &[])?;
         }
 
@@ -711,9 +715,9 @@ impl CodeIndex {
         Ok(result)
     }
 
-    /// Rebuild the FTS index from SQLite symbol data.
+    /// Rebuild the FTS index from `SQLite` symbol data.
     ///
-    /// Clears all FTS documents and re-populates from the SQLite symbol store.
+    /// Clears all FTS documents and re-populates from the `SQLite` symbol store.
     /// Use this to recover from FTS/SQLite mismatches.
     pub fn rebuild_fts(&self) -> Result<()> {
         let fts = self.fts.lock().unwrap();
@@ -786,11 +790,13 @@ impl WatchSession {
     }
 
     /// Get current worker statistics.
+    #[must_use]
     pub fn stats(&self) -> worker::WorkerStats {
         self.worker_handle.stats()
     }
 
     /// Whether the session has been stopped.
+    #[must_use]
     pub fn is_stopped(&self) -> bool {
         self.worker_handle.is_stopped()
     }
@@ -861,8 +867,8 @@ fn symbol_to_fts<'a>(sym: &'a Symbol, file_path: &'a str) -> FtsSymbol<'a> {
     }
 }
 
-/// Get a static str for a SymbolKind (avoids allocation in FtsSymbol).
-fn leak_kind_str(kind: types::SymbolKind) -> &'static str {
+/// Get a static str for a `SymbolKind` (avoids allocation in `FtsSymbol`).
+const fn leak_kind_str(kind: types::SymbolKind) -> &'static str {
     match kind {
         types::SymbolKind::Function => "function",
         types::SymbolKind::Method => "method",

@@ -32,10 +32,10 @@ fn run_shell(cmd: &str, cwd: &Path) {
             .current_dir(cwd)
             .output()
     }
-    .unwrap_or_else(|e| panic!("failed to run '{}': {}", cmd, e));
+    .unwrap_or_else(|e| panic!("failed to run '{cmd}': {e}"));
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        panic!("command '{}' failed: {}", cmd, stderr);
+        panic!("command '{cmd}' failed: {stderr}");
     }
 }
 
@@ -64,7 +64,7 @@ async fn test_git_status_clean() {
         .unwrap();
 
     assert!(
-        out.content.contains("clean") || out.content.contains("#"),
+        out.content.contains("clean") || out.content.contains('#'),
         "Expected clean working tree or porcelain output, got: {}",
         out.content
     );
@@ -86,8 +86,7 @@ async fn test_git_status_modified() {
     let modified: Vec<String> = serde_json::from_value(meta["modified"].clone()).unwrap();
     assert!(
         modified.iter().any(|f| f.contains("README.md")),
-        "Expected README.md in modified, got: {:?}",
-        modified
+        "Expected README.md in modified, got: {modified:?}"
     );
 }
 
@@ -107,8 +106,7 @@ async fn test_git_status_untracked() {
     let untracked: Vec<String> = serde_json::from_value(meta["untracked"].clone()).unwrap();
     assert!(
         untracked.iter().any(|f| f.contains("new_file.txt")),
-        "Expected new_file.txt in untracked, got: {:?}",
-        untracked
+        "Expected new_file.txt in untracked, got: {untracked:?}"
     );
 }
 
@@ -129,8 +127,7 @@ async fn test_git_status_staged() {
     let staged: Vec<String> = serde_json::from_value(meta["staged"].clone()).unwrap();
     assert!(
         staged.iter().any(|f| f.contains("staged.txt")),
-        "Expected staged.txt in staged, got: {:?}",
-        staged
+        "Expected staged.txt in staged, got: {staged:?}"
     );
 }
 
@@ -176,7 +173,7 @@ async fn test_git_log_basic() {
     );
     let meta = out.metadata.expect("metadata should be present");
     let count = meta["count"].as_u64().unwrap_or(0);
-    assert!(count >= 1, "Expected at least 1 commit, got {}", count);
+    assert!(count >= 1, "Expected at least 1 commit, got {count}");
 }
 
 #[tokio::test]
@@ -214,7 +211,7 @@ async fn test_git_diff_working() {
         .unwrap();
 
     assert!(
-        out.content.contains("+") || out.content.contains("-"),
+        out.content.contains('+') || out.content.contains('-'),
         "Expected diff output with changes, got: {}",
         out.content
     );
@@ -235,7 +232,7 @@ async fn test_git_diff_staged() {
 
     assert!(
         out.content.contains("staged.txt")
-            || out.content.contains("+")
+            || out.content.contains('+')
             || out.content.contains("No differences"),
         "Expected staged diff, got: {}",
         out.content
@@ -255,7 +252,7 @@ async fn test_git_diff_stat() {
         .unwrap();
 
     assert!(
-        out.content.contains("README.md") || out.content.contains("|"),
+        out.content.contains("README.md") || out.content.contains('|'),
         "Expected stat output, got: {}",
         out.content
     );
@@ -300,18 +297,16 @@ async fn test_git_branch_list() {
         serde_json::from_value(meta["branches"].clone()).unwrap();
     let names: Vec<String> = branches
         .iter()
-        .filter_map(|b| b["name"].as_str().map(|s| s.to_string()))
+        .filter_map(|b| b["name"].as_str().map(std::string::ToString::to_string))
         .collect();
 
     assert!(
         names.iter().any(|n| n == "main" || n == "master"),
-        "Expected main/master branch, got: {:?}",
-        names
+        "Expected main/master branch, got: {names:?}"
     );
     assert!(
         names.contains(&"feature-branch".to_string()),
-        "Expected feature-branch, got: {:?}",
-        names
+        "Expected feature-branch, got: {names:?}"
     );
 
     let current = meta["current_branch"].as_str();
@@ -363,8 +358,7 @@ async fn test_git_show_head() {
     let meta = out.metadata.expect("metadata should be present");
     assert!(
         !meta["author"].is_null(),
-        "Expected author metadata, got: {:?}",
-        meta
+        "Expected author metadata, got: {meta:?}"
     );
 }
 
@@ -514,7 +508,7 @@ async fn test_git_tag_create_and_list() {
 
     let meta = out.metadata.expect("metadata should be present");
     let tags: Vec<serde_json::Value> = serde_json::from_value(meta["tags"].clone()).unwrap();
-    assert_eq!(tags.len(), 1, "Expected 1 tag, got: {:?}", tags);
+    assert_eq!(tags.len(), 1, "Expected 1 tag, got: {tags:?}");
     assert_eq!(tags[0]["name"].as_str(), Some("v1.0.0"));
 }
 
@@ -593,8 +587,7 @@ async fn test_git_add_paths() {
     let staged: Vec<String> = serde_json::from_value(meta["staged"].clone()).unwrap();
     assert!(
         staged.iter().any(|f| f.contains("new.txt")),
-        "Expected new.txt in staged, got: {:?}",
-        staged
+        "Expected new.txt in staged, got: {staged:?}"
     );
 }
 
@@ -862,8 +855,7 @@ async fn test_git_stash_list() {
     let stashes: Vec<serde_json::Value> = serde_json::from_value(meta["stashes"].clone()).unwrap();
     assert!(
         !stashes.is_empty(),
-        "Expected at least one stash, got: {:?}",
-        stashes
+        "Expected at least one stash, got: {stashes:?}"
     );
 }
 
@@ -1321,8 +1313,7 @@ async fn test_git_merge_squash() {
         staged
             .iter()
             .any(|f| f.contains("a.txt") || f.contains("b.txt")),
-        "Expected staged files after squash merge, got: {:?}",
-        staged
+        "Expected staged files after squash merge, got: {staged:?}"
     );
 }
 

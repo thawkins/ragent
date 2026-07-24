@@ -1,8 +1,8 @@
 //! Criterion benchmarks for history save/load cycle.
 //!
 //! Covers COMPLIANCE.md Section 5.A:
-//! - save_history with varying history sizes
-//! - load_history reading back saved histories
+//! - `save_history` with varying history sizes
+//! - `load_history` reading back saved histories
 
 #![allow(missing_docs)]
 
@@ -19,7 +19,7 @@ fn bench_save_history(c: &mut Criterion) {
             let dir = tempfile::tempdir().expect("tmpdir");
             let hist_path = dir.path().join("bench_history.txt");
             let mut app = support::make_app();
-            app.set_history_file(hist_path.clone());
+            app.set_history_file(hist_path);
             // Populate history
             for i in 0..n {
                 app.input_history.push(format!(
@@ -43,7 +43,7 @@ fn bench_load_history(c: &mut Criterion) {
             let hist_path = dir.path().join("bench_history.txt");
             // Pre-populate and save
             let mut app = support::make_app();
-            app.set_history_file(hist_path.clone());
+            app.set_history_file(hist_path);
             for i in 0..n {
                 app.input_history.push(format!(
                     "benchmark entry {i} with some typical length content 🦀"

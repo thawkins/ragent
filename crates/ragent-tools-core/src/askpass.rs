@@ -48,11 +48,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// Maximum time the watcher waits for a single password response before
 /// giving up (matched by the helper's own poll loop so both sides fail at
 /// roughly the same time).
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.
-pub(crate) struct AskPassBroker {
+pub struct AskPassBroker {
     /// Absolute path to the generated askpass helper script.
     helper_path: PathBuf,
     /// Per-invocation directory the helper writes request files into and the
@@ -249,7 +249,7 @@ async fn publish_question_and_wait(
 
     loop {
         tokio::select! {
-            _ = &mut deadline => {
+            () = &mut deadline => {
                 tracing::warn!("askpass: timed out waiting for password response");
                 write_cancel(&response_path);
                 return;
@@ -306,8 +306,7 @@ fn unique_stamp() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let micros = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_micros())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_micros());
     let rand = {
         static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)

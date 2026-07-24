@@ -1,4 +1,4 @@
-//! HumanEval benchmark adapter.
+//! `HumanEval` benchmark adapter.
 
 use std::process::Command;
 
@@ -182,7 +182,7 @@ fn evaluate_humaneval_hidden_tests(
     let mut passed_count = 0usize;
     let mut first_sample_passed = false;
     let mut first_error = None;
-    let mut selected_response = fallback.selected_response.clone();
+    let mut selected_response = fallback.selected_response;
 
     for (idx, sample) in generation.samples.iter().enumerate() {
         match run_humaneval_hidden_tests(case, &sample.text, test_code, entry_point) {
@@ -240,7 +240,7 @@ fn evaluate_humaneval_native_tests(
     let mut passed_count = 0usize;
     let mut first_sample_passed = false;
     let mut first_error = None;
-    let mut selected_response = fallback.selected_response.clone();
+    let mut selected_response = fallback.selected_response;
 
     for (idx, sample) in generation.samples.iter().enumerate() {
         match run_humaneval_native_tests(case, &sample.text, test_code, entry_point) {
@@ -467,7 +467,7 @@ fn humaneval_candidate_variants(
             starter,
             indent_completion_body(&completion)
         ));
-        variants.push(format!("{}{}", starter, completion));
+        variants.push(format!("{starter}{completion}"));
     } else {
         variants.push(close_open_braces(&format!(
             "{}{}",

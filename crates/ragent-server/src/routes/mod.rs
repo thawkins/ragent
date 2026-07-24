@@ -251,8 +251,7 @@ async fn create_session(
     };
     let is_dir = tokio::fs::metadata(&canonical)
         .await
-        .map(|m| m.is_dir())
-        .unwrap_or(false);
+        .is_ok_and(|m| m.is_dir());
     if !is_dir {
         return (
             StatusCode::BAD_REQUEST,

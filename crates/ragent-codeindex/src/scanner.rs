@@ -62,7 +62,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
         };
 
         // Skip directories themselves — we only want files.
-        if entry.file_type().map_or(true, |ft| !ft.is_file()) {
+        if entry.file_type().is_none_or(|ft| !ft.is_file()) {
             continue;
         }
 
@@ -73,7 +73,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<Vec<ScannedFil
             ancestor
                 .file_name()
                 .and_then(|n| n.to_str())
-                .map_or(false, |name| {
+                .is_some_and(|name| {
                     EXCLUDED_DIRS.contains(&name)
                         || config.extra_exclude_dirs.contains(&name.to_string())
                 })
@@ -158,6 +158,7 @@ fn process_file(path: &Path, root: &Path, config: &ScanConfig) -> Option<Scanned
 }
 
 /// Compute the blake3 hash of file content, returned as a hex string.
+#[must_use]
 pub fn hash_content(content: &[u8]) -> String {
     blake3::hash(content).to_hex().to_string()
 }
@@ -171,6 +172,7 @@ pub fn hash_file(path: &Path) -> Result<String> {
 /// Detect the programming language of a file based on its extension.
 ///
 /// Returns `None` for unrecognised extensions.
+#[must_use]
 pub fn detect_language(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_lowercase();
     let lang = match ext.as_str() {

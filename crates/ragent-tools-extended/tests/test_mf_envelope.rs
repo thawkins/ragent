@@ -3,17 +3,17 @@
 //! NFR-003).
 //!
 //! Covers every [`PageType`] variant:
-//! - article, docs, list, forum, qa, js_shell, auth_wall, paywall, redirect,
+//! - article, docs, list, forum, qa, `js_shell`, `auth_wall`, paywall, redirect,
 //!   json, image, unknown
 //!
 //! Covers [`SourceType`] classification:
-//! - gov, edu, github, vendor_docs, docs_site, qa, forum, blog, news,
+//! - gov, edu, github, `vendor_docs`, `docs_site`, qa, forum, blog, news,
 //!   ecommerce, unknown
-//! - `is_official` flag (true only for gov, edu, github, vendor_docs)
+//! - `is_official` flag (true only for gov, edu, github, `vendor_docs`)
 //!
 //! Covers [`compute_freshness`]:
 //! - modified preferred over published
-//! - future date → content_age_days = -1
+//! - future date → `content_age_days` = -1
 //! - stale threshold (age > 365)
 //! - no dates → -1
 //! - empty date strings → -1
@@ -38,7 +38,7 @@ use ragent_tools_extended::masterfetch::{PageMetadata, PageType, SourceType};
 
 #[test]
 fn test_detect_article_tag() {
-    let html = r#"<html><body><article><p>Hello world this is a long article with enough text to pass thresholds.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Hello world this is a long article with enough text to pass thresholds.</p></article></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/post", 200),
         PageType::Article
@@ -47,7 +47,7 @@ fn test_detect_article_tag() {
 
 #[test]
 fn test_detect_article_fallback_paragraphs() {
-    let html = r#"<html><body><p>Para one with enough text.</p><p>Para two with text.</p><p>Para three with text here.</p></body></html>"#;
+    let html = r"<html><body><p>Para one with enough text.</p><p>Para two with text.</p><p>Para three with text here.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/post", 250),
         PageType::Article
@@ -57,7 +57,7 @@ fn test_detect_article_fallback_paragraphs() {
 #[test]
 fn test_detect_article_short_text_not_article() {
     // <article> tag but text is too short → not article.
-    let html = r#"<html><body><article><p>Short.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Short.</p></article></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com/post", 10),
         PageType::Article
@@ -67,7 +67,7 @@ fn test_detect_article_short_text_not_article() {
 #[test]
 fn test_detect_article_two_paragraphs_not_enough() {
     // Only 2 <p> tags → needs >= 3 for fallback article detection.
-    let html = r#"<html><body><p>Para one with text.</p><p>Para two with text.</p></body></html>"#;
+    let html = r"<html><body><p>Para one with text.</p><p>Para two with text.</p></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com/post", 250),
         PageType::Article
@@ -80,7 +80,7 @@ fn test_detect_article_two_paragraphs_not_enough() {
 
 #[test]
 fn test_detect_docs_code_blocks() {
-    let html = r#"<html><body><pre><code>fn main() {}</code></pre><pre><code>let x = 1;</code></pre><pre><code>println!();</code></pre></body></html>"#;
+    let html = r"<html><body><pre><code>fn main() {}</code></pre><pre><code>let x = 1;</code></pre><pre><code>println!();</code></pre></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/guide", 100),
         PageType::Docs
@@ -89,7 +89,7 @@ fn test_detect_docs_code_blocks() {
 
 #[test]
 fn test_detect_docs_domain() {
-    let html = r#"<html><body><p>Documentation page.</p></body></html>"#;
+    let html = r"<html><body><p>Documentation page.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://docs.python.org/tutorial", 100),
         PageType::Docs
@@ -99,7 +99,7 @@ fn test_detect_docs_domain() {
 #[test]
 fn test_detect_docs_two_code_blocks_not_enough() {
     // Needs >= 3 total <pre> + <code> matches. One block = 1 <pre> + 1 <code> = 2.
-    let html = r#"<html><body><pre><code>fn main() {}</code></pre></body></html>"#;
+    let html = r"<html><body><pre><code>fn main() {}</code></pre></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com/guide", 100),
         PageType::Docs
@@ -108,7 +108,7 @@ fn test_detect_docs_two_code_blocks_not_enough() {
 
 #[test]
 fn test_detect_docs_developer_domain() {
-    let html = r#"<html><body><p>API reference.</p></body></html>"#;
+    let html = r"<html><body><p>API reference.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://developer.mozilla.org/en-US/docs/Web", 100),
         PageType::Docs
@@ -117,7 +117,7 @@ fn test_detect_docs_developer_domain() {
 
 #[test]
 fn test_detect_docs_docs_prefix_domain() {
-    let html = r#"<html><body><p>Custom docs.</p></body></html>"#;
+    let html = r"<html><body><p>Custom docs.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://docs.mycompany.com/guide", 100),
         PageType::Docs
@@ -126,7 +126,7 @@ fn test_detect_docs_docs_prefix_domain() {
 
 #[test]
 fn test_detect_docs_rust_lang_domain() {
-    let html = r#"<html><body><p>Rust docs.</p></body></html>"#;
+    let html = r"<html><body><p>Rust docs.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://doc.rust-lang.org/std", 100),
         PageType::Docs
@@ -195,7 +195,7 @@ fn test_detect_list_page_few_links_not_list() {
 
 #[test]
 fn test_detect_forum_domain() {
-    let html = r#"<html><body><p>Discussion thread.</p></body></html>"#;
+    let html = r"<html><body><p>Discussion thread.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://www.reddit.com/r/rust", 100),
         PageType::Forum
@@ -240,7 +240,7 @@ fn test_detect_forum_structural_signal_data_post_id() {
 
 #[test]
 fn test_detect_forum_rust_lang_domain() {
-    let html = r#"<html><body><p>Rust forum discussion.</p></body></html>"#;
+    let html = r"<html><body><p>Rust forum discussion.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://users.rust-lang.org/t/123", 100),
         PageType::Forum
@@ -253,7 +253,7 @@ fn test_detect_forum_rust_lang_domain() {
 
 #[test]
 fn test_detect_qa_domain() {
-    let html = r#"<html><body><p>Question and answers.</p></body></html>"#;
+    let html = r"<html><body><p>Question and answers.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://stackoverflow.com/q/123", 100),
         PageType::Qa
@@ -293,7 +293,7 @@ fn test_detect_qa_structural_signal_accepted_answer() {
 
 #[test]
 fn test_detect_qa_quora_domain() {
-    let html = r#"<html><body><p>Quora question.</p></body></html>"#;
+    let html = r"<html><body><p>Quora question.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://www.quora.com/What-is-Rust", 100),
         PageType::Qa
@@ -380,7 +380,7 @@ fn test_detect_auth_wall() {
 
 #[test]
 fn test_detect_auth_wall_not_triggered_with_article_content() {
-    let html = r#"<html><body><article><p>Sign in to comment. This is a long article with enough text to not be classified as an auth wall.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Sign in to comment. This is a long article with enough text to not be classified as an auth wall.</p></article></body></html>";
     // With substantial text, auth wall signals are not triggered.
     assert_ne!(
         detect_page_type(html, "https://example.com/post", 250),
@@ -390,7 +390,7 @@ fn test_detect_auth_wall_not_triggered_with_article_content() {
 
 #[test]
 fn test_detect_auth_wall_log_in_signal() {
-    let html = r#"<html><body><form><h1>Please log in</h1></form></body></html>"#;
+    let html = r"<html><body><form><h1>Please log in</h1></form></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/login", 50),
         PageType::AuthWall
@@ -399,7 +399,7 @@ fn test_detect_auth_wall_log_in_signal() {
 
 #[test]
 fn test_detect_auth_wall_authentication_required_signal() {
-    let html = r#"<html><body><h1>Authentication required</h1></body></html>"#;
+    let html = r"<html><body><h1>Authentication required</h1></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/secure", 50),
         PageType::AuthWall
@@ -408,7 +408,7 @@ fn test_detect_auth_wall_authentication_required_signal() {
 
 #[test]
 fn test_detect_auth_wall_must_be_logged_in_signal() {
-    let html = r#"<html><body><h1>You must be logged in to view this page</h1></body></html>"#;
+    let html = r"<html><body><h1>You must be logged in to view this page</h1></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/secure", 50),
         PageType::AuthWall
@@ -422,7 +422,7 @@ fn test_detect_auth_wall_must_be_logged_in_signal() {
 #[test]
 fn test_detect_paywall() {
     let html =
-        r#"<html><body><h1>Subscribe to continue reading</h1><p>Preview text...</p></body></html>"#;
+        r"<html><body><h1>Subscribe to continue reading</h1><p>Preview text...</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://nytimes.com/article", 100),
         PageType::Paywall
@@ -431,7 +431,7 @@ fn test_detect_paywall() {
 
 #[test]
 fn test_detect_paywall_subscribe_to_read() {
-    let html = r#"<html><body><h1>Subscribe to read this article</h1></body></html>"#;
+    let html = r"<html><body><h1>Subscribe to read this article</h1></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/article", 50),
         PageType::Paywall
@@ -440,7 +440,7 @@ fn test_detect_paywall_subscribe_to_read() {
 
 #[test]
 fn test_detect_paywall_premium_content() {
-    let html = r#"<html><body><h1>Premium content</h1><p>Unlock full article...</p></body></html>"#;
+    let html = r"<html><body><h1>Premium content</h1><p>Unlock full article...</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/premium", 50),
         PageType::Paywall
@@ -449,7 +449,7 @@ fn test_detect_paywall_premium_content() {
 
 #[test]
 fn test_detect_paywall_subscription_required() {
-    let html = r#"<html><body><h1>Subscription required</h1></body></html>"#;
+    let html = r"<html><body><h1>Subscription required</h1></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/article", 50),
         PageType::Paywall
@@ -509,7 +509,7 @@ fn test_detect_redirect_4_seconds_not_redirect() {
 
 #[test]
 fn test_detect_redirect_single_quotes() {
-    let html = r#"<html><head><meta http-equiv='refresh' content='0;url=https://other.com'></head><body>Redirecting...</body></html>"#;
+    let html = r"<html><head><meta http-equiv='refresh' content='0;url=https://other.com'></head><body>Redirecting...</body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/old", 50),
         PageType::Redirect
@@ -550,7 +550,7 @@ fn test_detect_json_with_whitespace_prefix() {
 #[test]
 fn test_detect_json_not_triggered_by_html_starting_with_brace() {
     // HTML that starts with { but contains </html> should not be JSON.
-    let html = r#"{something}<html><body><p>Not JSON.</p></body></html>"#;
+    let html = r"{something}<html><body><p>Not JSON.</p></body></html>";
     assert_ne!(
         detect_page_type(html, "https://example.com", 50),
         PageType::Json
@@ -585,7 +585,7 @@ fn test_detect_image_multiple_images_not_image_page() {
 
 #[test]
 fn test_detect_unknown_fallback() {
-    let html = r#"<html><body><p>Short.</p></body></html>"#;
+    let html = r"<html><body><p>Short.</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com", 10),
         PageType::Unknown
@@ -628,7 +628,7 @@ fn test_redirect_detected_before_auth_wall() {
 fn test_auth_wall_detected_before_paywall() {
     // Auth wall should be detected before paywall signals.
     let html =
-        r#"<html><body><h1>Please sign in</h1><p>Subscribe to continue reading</p></body></html>"#;
+        r"<html><body><h1>Please sign in</h1><p>Subscribe to continue reading</p></body></html>";
     assert_eq!(
         detect_page_type(html, "https://example.com/locked", 50),
         PageType::AuthWall
@@ -1368,7 +1368,7 @@ fn test_freshness_whitespace_only_date() {
 
 #[test]
 fn test_build_envelope_article() {
-    let html = r#"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/post", &metadata, true, 200);
     assert_eq!(envelope.page_type, PageType::Article);
@@ -1378,7 +1378,8 @@ fn test_build_envelope_article() {
 
 #[test]
 fn test_build_envelope_gov_source() {
-    let html = r#"<html><body><article><p>Government article with enough text.</p></article></body></html>"#;
+    let html =
+        r"<html><body><article><p>Government article with enough text.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://www.gov.uk/policy", &metadata, true, 200);
     assert_eq!(envelope.source_type, SourceType::Gov);
@@ -1387,8 +1388,7 @@ fn test_build_envelope_gov_source() {
 
 #[test]
 fn test_build_envelope_with_freshness() {
-    let html =
-        r#"<html><body><article><p>Old article with enough text.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Old article with enough text.</p></article></body></html>";
     let metadata = PageMetadata {
         published_time: Some("2010-01-01T00:00:00Z".to_string()),
         ..Default::default()
@@ -1400,7 +1400,7 @@ fn test_build_envelope_with_freshness() {
 
 #[test]
 fn test_build_envelope_summary_empty_by_default() {
-    let html = r#"<html><body><article><p>Text.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Text.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com", &metadata, true, 200);
     assert!(envelope.summary.is_empty());
@@ -1425,7 +1425,7 @@ fn test_build_envelope_js_shell_next_action() {
 
 #[test]
 fn test_build_envelope_auth_wall_next_action() {
-    let html = r#"<html><body><form><h1>Please sign in</h1></form></body></html>"#;
+    let html = r"<html><body><form><h1>Please sign in</h1></form></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/login", &metadata, false, 50);
     assert_eq!(envelope.page_type, PageType::AuthWall);
@@ -1434,7 +1434,7 @@ fn test_build_envelope_auth_wall_next_action() {
 
 #[test]
 fn test_build_envelope_paywall_next_action() {
-    let html = r#"<html><body><h1>Subscribe to continue reading</h1></body></html>"#;
+    let html = r"<html><body><h1>Subscribe to continue reading</h1></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/article", &metadata, false, 50);
     assert_eq!(envelope.page_type, PageType::Paywall);
@@ -1478,7 +1478,7 @@ fn test_build_envelope_redirect_next_action_content_not_ok() {
 
 #[test]
 fn test_build_envelope_article_no_next_action_when_content_ok() {
-    let html = r#"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/post", &metadata, true, 200);
     assert_eq!(envelope.page_type, PageType::Article);
@@ -1488,7 +1488,7 @@ fn test_build_envelope_article_no_next_action_when_content_ok() {
 
 #[test]
 fn test_build_envelope_article_next_action_when_content_not_ok() {
-    let html = r#"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Article text that is long enough to pass the threshold.</p></article></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com/post", &metadata, false, 200);
     assert_eq!(envelope.page_type, PageType::Article);
@@ -1506,7 +1506,7 @@ fn test_build_envelope_article_next_action_when_content_not_ok() {
 
 #[test]
 fn test_build_envelope_gov_article_with_freshness() {
-    let html = r#"<html><body><article><p>Government article with enough text to pass the threshold here.</p></article></body></html>"#;
+    let html = r"<html><body><article><p>Government article with enough text to pass the threshold here.</p></article></body></html>";
     let recent = Utc::now() - chrono::Duration::days(30);
     let metadata = PageMetadata {
         published_time: Some(recent.to_rfc3339()),
@@ -1522,7 +1522,7 @@ fn test_build_envelope_gov_article_with_freshness() {
 
 #[test]
 fn test_build_envelope_docs_with_stale_content() {
-    let html = r#"<html><body><pre><code>fn main() {}</code></pre><pre><code>let x = 1;</code></pre><pre><code>println!();</code></pre></body></html>"#;
+    let html = r"<html><body><pre><code>fn main() {}</code></pre><pre><code>let x = 1;</code></pre><pre><code>println!();</code></pre></body></html>";
     let metadata = PageMetadata {
         published_time: Some("2010-01-01T00:00:00Z".to_string()),
         ..Default::default()
@@ -1578,7 +1578,7 @@ fn test_build_envelope_image_source() {
 
 #[test]
 fn test_build_envelope_unknown_page_type() {
-    let html = r#"<html><body><p>Short.</p></body></html>"#;
+    let html = r"<html><body><p>Short.</p></body></html>";
     let metadata = PageMetadata::default();
     let envelope = build_envelope(html, "https://example.com", &metadata, true, 10);
     assert_eq!(envelope.page_type, PageType::Unknown);

@@ -3,7 +3,7 @@
 //! These tests mutate process-global state (env vars, current dir) and must
 //! run serially to avoid cross-test contamination.
 
-/// Sets XDG_CONFIG_HOME to a temp directory and returns the old value (if any).
+/// Sets `XDG_CONFIG_HOME` to a temp directory and returns the old value (if any).
 fn with_temp_config_home(temp: &tempfile::TempDir) -> Option<String> {
     let original = std::env::var("XDG_CONFIG_HOME").ok();
     let fake = temp.path().join("fake_config");

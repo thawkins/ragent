@@ -108,9 +108,7 @@ async fn test_manager_real_project_read_and_validate_transitions() {
     for status in next {
         assert!(
             is_valid_transition(current, status),
-            "Transition from {:?} to {:?} should be valid",
-            current,
-            status
+            "Transition from {current:?} to {status:?} should be valid"
         );
     }
 }

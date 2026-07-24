@@ -198,18 +198,7 @@ fn defines_type(file_path: &Path, type_name: &str, kind: &str) -> bool {
             let next = rest.chars().next();
             // The token must be followed by `{`, `(`, `;`, whitespace, or EOL
             // so we don't match `pub struct FooBar` when searching for `Foo`.
-            if next.is_none()
-                || matches!(
-                    next,
-                    Some('{')
-                        | Some('(')
-                        | Some(';')
-                        | Some(' ')
-                        | Some('\t')
-                        | Some('<')
-                        | Some('=')
-                )
-            {
+            if next.is_none() || matches!(next, Some('{' | '(' | ';' | ' ' | '\t' | '<' | '=')) {
                 return true;
             }
         }
@@ -234,10 +223,10 @@ fn each_consolidated_type_has_exactly_one_definition() {
             if !defines_type(file, type_name, kind) {
                 continue;
             }
-            let rel = file
-                .strip_prefix(&workspace_root)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| file.display().to_string());
+            let rel = file.strip_prefix(&workspace_root).map_or_else(
+                |_| file.display().to_string(),
+                |p| p.to_string_lossy().to_string(),
+            );
 
             if rel == canonical_display {
                 // The one allowed definition site.
@@ -320,10 +309,10 @@ fn no_path_attributes_to_ragent_team_in_agent() {
         for (lineno, line) in contents.lines().enumerate() {
             let trimmed = line.trim();
             if trimmed.starts_with("#[path") && trimmed.contains("ragent-team") {
-                let rel = file
-                    .strip_prefix(&workspace_root)
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| file.display().to_string());
+                let rel = file.strip_prefix(&workspace_root).map_or_else(
+                    |_| file.display().to_string(),
+                    |p| p.to_string_lossy().to_string(),
+                );
                 failures.push(format!(
                     "{rel}:{} : found `#[path]` attribute referencing ragent-team: {trimmed}",
                     lineno + 1
@@ -358,10 +347,10 @@ fn no_ragent_core_alias_in_source_files() {
         };
         for (lineno, line) in contents.lines().enumerate() {
             if line.contains("ragent_core") {
-                let rel = file
-                    .strip_prefix(&workspace_root)
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|_| file.display().to_string());
+                let rel = file.strip_prefix(&workspace_root).map_or_else(
+                    |_| file.display().to_string(),
+                    |p| p.to_string_lossy().to_string(),
+                );
                 failures.push(format!(
                     "{rel}:{} : found `ragent_core` reference: {}",
                     lineno + 1,

@@ -1,6 +1,6 @@
 //! Tests for TUI tool output display formatting
 //!
-//! This test suite verifies that the message_widget module correctly
+//! This test suite verifies that the `message_widget` module correctly
 //! formats tool input/output summaries according to the standardized patterns.
 
 use ragent_tui::widgets::message_widget::*;
@@ -188,11 +188,10 @@ fn test_result_summary_bash_success() {
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     // Bash shows lines and exit code, not duration directly
-    assert!(summary.contains('5'), "Should show line count: {}", summary);
+    assert!(summary.contains('5'), "Should show line count: {summary}");
     assert!(
         summary.contains("exit 0"),
-        "Should show exit code: {}",
-        summary
+        "Should show exit code: {summary}"
     );
 }
 
@@ -221,16 +220,11 @@ fn test_result_summary_write_tool() {
     let result = tool_result_summary("write", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(
-        summary.contains("10"),
-        "Should show line count: {}",
-        summary
-    );
+    assert!(summary.contains("10"), "Should show line count: {summary}");
     // Summary includes lines written, not bytes
     assert!(
         summary.contains("written"),
-        "Should show written: {}",
-        summary
+        "Should show written: {summary}"
     );
 }
 
@@ -287,8 +281,8 @@ fn test_result_summary_multiedit_tool() {
     let result = tool_result_summary("multiedit", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(summary.contains('5'), "Should show edit count: {}", summary);
-    assert!(summary.contains('3'), "Should show file count: {}", summary);
+    assert!(summary.contains('5'), "Should show edit count: {summary}");
+    assert!(summary.contains('3'), "Should show file count: {summary}");
 }
 
 #[test]
@@ -504,13 +498,11 @@ fn test_result_summary_task_complete_with_summary() {
     let summary = result.unwrap();
     assert!(
         summary.contains("✅"),
-        "Should have checkmark emoji: {}",
-        summary
+        "Should have checkmark emoji: {summary}"
     );
     assert!(
         summary.contains("Fixed formatting bug in parser"),
-        "Should contain summary text: {}",
-        summary
+        "Should contain summary text: {summary}"
     );
 }
 
@@ -523,7 +515,6 @@ fn test_result_summary_task_complete_empty_summary() {
     let summary = result.unwrap();
     assert_eq!(
         summary, "Task complete",
-        "Should show default message: {}",
-        summary
+        "Should show default message: {summary}"
     );
 }

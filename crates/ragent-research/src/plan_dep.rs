@@ -39,6 +39,7 @@ pub struct ResearchDependency {
 
 impl ResearchDependency {
     /// Borrow the validated research name as a string slice.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         self.name.as_str()
     }
@@ -174,6 +175,7 @@ pub fn parse_research_dependencies(
 ///
 /// Returns the names in document order, deduplicated. Invalid entries
 /// are ignored so the surface stays best-effort.
+#[must_use]
 pub fn parse_spec_frontmatter_research(frontmatter: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -229,7 +231,9 @@ mod tests {
         let plan = "research: alpha\n\nresearch: beta\n\nresearch: gamma\n";
         let deps = parse_research_dependencies(plan).unwrap();
         assert_eq!(
-            deps.iter().map(|d| d.as_str()).collect::<Vec<_>>(),
+            deps.iter()
+                .map(super::ResearchDependency::as_str)
+                .collect::<Vec<_>>(),
             vec!["alpha", "beta", "gamma"]
         );
     }
@@ -254,7 +258,7 @@ mod tests {
     fn deduplicates_repeated_declarations() {
         let plan = "research: alpha\nresearch: beta\nresearch: alpha\n";
         let deps = parse_research_dependencies(plan).unwrap();
-        let names: Vec<&str> = deps.iter().map(|d| d.as_str()).collect();
+        let names: Vec<&str> = deps.iter().map(super::ResearchDependency::as_str).collect();
         assert_eq!(names, vec!["alpha", "beta"]);
     }
 

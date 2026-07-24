@@ -488,7 +488,7 @@ impl MockFetcher {
                     content: content.to_string(),
                     ..Default::default()
                 },
-                discovered_links: links.iter().map(|l| l.to_string()).collect(),
+                discovered_links: links.iter().map(std::string::ToString::to_string).collect(),
             },
         );
         self

@@ -9,7 +9,7 @@
 //!
 //! 1. **JSON-LD** `"datePublished"` / `"dateCreated"` in a
 //!    `<script type="application/ld+json">` block.
-//! 2. **OpenGraph / article meta tags** — `article:published_time`,
+//! 2. **`OpenGraph` / article meta tags** — `article:published_time`,
 //!    `og:article:published_time`, `og:published_time`, and the generic
 //!    `pubdate` / `date` / `publishdate` / `dc.date` names.
 //! 3. **`<time datetime="...">`** elements.
@@ -29,6 +29,7 @@ use ragent_types::html::strip_tags;
 /// Returns `None` when no parseable date can be found. The returned
 /// timestamp is always in UTC; dates without a time component are mapped
 /// to midnight UTC of that day.
+#[must_use]
 pub fn extract_published_at(html: &str) -> Option<DateTime<Utc>> {
     // 1. JSON-LD blocks.
     if let Some(dt) = extract_from_json_ld(html) {
@@ -266,10 +267,10 @@ mod tests {
     }
     impl DtArith for DateTime<Utc> {
         fn plus_hours(self, h: u32) -> DateTime<Utc> {
-            self + chrono::Duration::hours(h as i64)
+            self + chrono::Duration::hours(i64::from(h))
         }
         fn plus_mins(self, m: u32) -> DateTime<Utc> {
-            self + chrono::Duration::minutes(m as i64)
+            self + chrono::Duration::minutes(i64::from(m))
         }
     }
 

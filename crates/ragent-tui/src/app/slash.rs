@@ -662,14 +662,13 @@ impl App {
                     endpoint_field: crate::input_field::InputField::with_text(&otel.endpoint),
                     protocol: otel.protocol,
                     interval_field: crate::input_field::InputField::with_text(
-                        &otel.export_interval_seconds.to_string(),
+                        otel.export_interval_seconds.to_string(),
                     ),
                     timeout_field: crate::input_field::InputField::with_text(
-                        &otel.export_timeout_seconds.to_string(),
+                        otel.export_timeout_seconds.to_string(),
                     ),
                     port_field: crate::input_field::InputField::with_text(
-                        &otel
-                            .internal_port
+                        otel.internal_port
                             .map(|p| p.to_string())
                             .unwrap_or_default(),
                     ),

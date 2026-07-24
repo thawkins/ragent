@@ -26,7 +26,7 @@ struct FakeProvider {
 }
 
 impl FakeProvider {
-    fn with_models(
+    const fn with_models(
         id: &'static str,
         name: &'static str,
         seen_model: std::sync::Arc<std::sync::Mutex<Option<String>>>,
@@ -639,11 +639,11 @@ struct DynamicFakeProvider {
 
 #[async_trait::async_trait]
 impl Provider for DynamicFakeProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "dynamic_fake"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Dynamic Fake"
     }
 

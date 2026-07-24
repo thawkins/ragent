@@ -5,7 +5,7 @@
 //! compression, and request byte estimation.
 //!
 //! To run:
-//!     cargo bench -p ragent-agent --bench agent_loop
+//!     cargo bench -p ragent-agent --bench `agent_loop`
 
 use std::sync::Arc;
 
@@ -52,13 +52,13 @@ fn bench_estimate_request_bytes(c: &mut Criterion) {
     let large = build_request(100, 111);
 
     c.bench_function("estimate_bytes_small", |b| {
-        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&small)))
+        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&small)));
     });
     c.bench_function("estimate_bytes_medium", |b| {
-        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&medium)))
+        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&medium)));
     });
     c.bench_function("estimate_bytes_large", |b| {
-        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&large)))
+        b.iter(|| ragent_agent::session::processor::estimate_request_bytes(black_box(&large)));
     });
 }
 
@@ -69,27 +69,21 @@ fn bench_chat_request_payload_bytes(c: &mut Criterion) {
 
     c.bench_function("serde_bytes_small", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&small))
-                .map(|v| v.len() as u64)
-                .unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&small)).map_or(0, |v| v.len() as u64);
             black_box(bytes);
-        })
+        });
     });
     c.bench_function("serde_bytes_medium", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&medium))
-                .map(|v| v.len() as u64)
-                .unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&medium)).map_or(0, |v| v.len() as u64);
             black_box(bytes);
-        })
+        });
     });
     c.bench_function("serde_bytes_large", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&large))
-                .map(|v| v.len() as u64)
-                .unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&large)).map_or(0, |v| v.len() as u64);
             black_box(bytes);
-        })
+        });
     });
 }
 
@@ -104,13 +98,13 @@ fn bench_compiled_dir_lists(c: &mut Criterion) {
         b.iter(|| {
             let g: Arc<GlobSet> = get_compiled_allowlist();
             black_box(g.is_match("src/main.rs"));
-        })
+        });
     });
     c.bench_function("compiled_denylist", |b| {
         b.iter(|| {
             let g: Arc<GlobSet> = get_compiled_denylist();
             black_box(g.is_match("/etc/passwd"));
-        })
+        });
     });
 }
 
@@ -126,13 +120,13 @@ fn bench_tool_result_truncation(c: &mut Criterion) {
         b.iter(|| {
             let r = tool_result_content_for_llm("read", black_box(&small), None);
             black_box(r);
-        })
+        });
     });
     c.bench_function("tool_result_large", |b| {
         b.iter(|| {
             let r = tool_result_content_for_llm("read", black_box(&large), None);
             black_box(r);
-        })
+        });
     });
 }
 

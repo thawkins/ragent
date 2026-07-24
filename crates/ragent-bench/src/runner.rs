@@ -315,8 +315,7 @@ pub fn run_target_with_progress(
         {
             let resumed_sample_count = resumed_summaries
                 .first()
-                .map(|summary| summary.sample_count)
-                .unwrap_or(0);
+                .map_or(0, |summary| summary.sample_count);
             message.push_str(&format!(
                 "- `{}` [`{}`] -> `{}` (resumed existing workbook; {} sample(s) recorded)\n",
                 suite.id,
@@ -486,10 +485,10 @@ pub fn run_target_with_progress(
             &case_results,
             &artifacts,
         )?;
-        let primary_metric = summary_rows
-            .first()
-            .map(|summary| format!("{}={:.3}", summary.metric_name, summary.metric_value))
-            .unwrap_or_else(|| "no metrics".to_string());
+        let primary_metric = summary_rows.first().map_or_else(
+            || "no metrics".to_string(),
+            |summary| format!("{}={:.3}", summary.metric_name, summary.metric_value),
+        );
 
         message.push_str(&format!(
             "- `{}` [`{}`] -> `{}` ({} case(s), {} sample(s) generated; {})\n",

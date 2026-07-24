@@ -228,8 +228,8 @@ pub fn pass_at_1(evaluations: &[BenchCaseEvaluation]) -> f64 {
 /// This helper reduces boilerplate by handling the common pattern of:
 /// 1. Computing selected response via exact match or edit similarity
 /// 2. Counting exact matches and first sample match
-/// 3. Handling no_exec mode with a skipped result
-/// 4. Building the final BenchCaseEvaluation
+/// 3. Handling `no_exec` mode with a skipped result
+/// 4. Building the final `BenchCaseEvaluation`
 ///
 /// For suites that need custom logic, use the individual metric functions instead.
 #[must_use]
@@ -273,7 +273,7 @@ pub fn evaluate_exact_match_case(
     }
 }
 
-/// Generate skipped metrics for multiple metric names when no_exec is set.
+/// Generate skipped metrics for multiple metric names when `no_exec` is set.
 #[must_use]
 pub fn skipped_metrics_for_suite(
     metric_names: &[&str],
@@ -333,11 +333,11 @@ fn overlap_precision(actual: &[String], expected: &[String]) -> f64 {
     }
     let mut matched = 0usize;
     for token in actual {
-        if let Some(count) = expected_counts.get_mut(token) {
-            if *count > 0 {
-                *count -= 1;
-                matched += 1;
-            }
+        if let Some(count) = expected_counts.get_mut(token)
+            && *count > 0
+        {
+            *count -= 1;
+            matched += 1;
         }
     }
     matched as f64 / actual.len() as f64

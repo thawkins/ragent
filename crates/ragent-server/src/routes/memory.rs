@@ -136,7 +136,7 @@ fn default_source() -> String {
     "api".to_string()
 }
 
-fn default_confidence() -> f64 {
+const fn default_confidence() -> f64 {
     0.7
 }
 
@@ -157,7 +157,7 @@ pub struct SearchMemoryQuery {
     pub limit: usize,
 }
 
-fn default_limit() -> usize {
+const fn default_limit() -> usize {
     20
 }
 
@@ -170,7 +170,7 @@ fn parse_scope(s: &str) -> Result<BlockScope, (StatusCode, Json<serde_json::Valu
         "project" => Ok(BlockScope::Project),
         _ => Err(error_response(
             StatusCode::BAD_REQUEST,
-            format!("Invalid scope '{}'. Use 'global' or 'project'.", s),
+            format!("Invalid scope '{s}'. Use 'global' or 'project'."),
         )),
     }
 }
@@ -261,10 +261,7 @@ pub async fn get_block(
 
     match result {
         Some((scope, block)) => serialize_response(block_to_response(&scope, &block), "get_block"),
-        None => error_response(
-            StatusCode::NOT_FOUND,
-            format!("Block '{}' not found", label),
-        ),
+        None => error_response(StatusCode::NOT_FOUND, format!("Block '{label}' not found")),
     }
 }
 
@@ -278,10 +275,7 @@ pub async fn put_block(
     if ragent_agent::memory::MemoryBlock::validate_label(&label).is_err() {
         return error_response(
             StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid label '{}'. Use lowercase alphanumeric with hyphens.",
-                label
-            ),
+            format!("Invalid label '{label}'. Use lowercase alphanumeric with hyphens."),
         );
     }
 
@@ -303,11 +297,11 @@ pub async fn put_block(
     if block.read_only {
         return error_response(
             StatusCode::FORBIDDEN,
-            format!("Block '{}' is read-only", label),
+            format!("Block '{label}' is read-only"),
         );
     }
 
-    block.scope = scope.clone();
+    block.scope = scope;
     block.content = body.content;
     if !body.description.is_empty() {
         block.description = body.description;
@@ -331,7 +325,7 @@ pub async fn put_block(
         }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to save block: {}", e),
+            format!("Failed to save block: {e}"),
         ),
     }
 }
@@ -360,10 +354,7 @@ pub async fn delete_block(
     {
         BlockScope::Global
     } else {
-        return error_response(
-            StatusCode::NOT_FOUND,
-            format!("Block '{}' not found", label),
-        );
+        return error_response(StatusCode::NOT_FOUND, format!("Block '{label}' not found"));
     };
 
     match storage.delete(&label, &scope, &wd) {
@@ -376,7 +367,7 @@ pub async fn delete_block(
         }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to delete block: {}", e),
+            format!("Failed to delete block: {e}"),
         ),
     }
 }
@@ -415,7 +406,7 @@ pub async fn search_memories(
 
             state.event_bus.publish(Event::MemorySearched {
                 session_id: "api".to_string(),
-                query: query.q.clone(),
+                query: query.q,
                 result_count: responses.len(),
                 mode: "fts".to_string(),
             });
@@ -424,7 +415,7 @@ pub async fn search_memories(
         }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Search failed: {}", e),
+            format!("Search failed: {e}"),
         ),
     }
 }
@@ -494,7 +485,7 @@ pub async fn store_memory(
         }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to store memory: {}", e),
+            format!("Failed to store memory: {e}"),
         ),
     }
 }
@@ -517,13 +508,13 @@ pub async fn forget_memory(
             Ok(false) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
             Err(e) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Delete failed: {}", e),
+                format!("Delete failed: {e}"),
             ),
         },
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Lookup failed: {}", e),
+            format!("Lookup failed: {e}"),
         ),
     }
 }

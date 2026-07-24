@@ -170,7 +170,7 @@ impl Tool for MultiEditTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let dry_run = input
             .get("dry_run")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         let edits_arr = input["edits"]
@@ -401,7 +401,7 @@ impl Tool for MultiEditTool {
 /// falls back to the controlled batch normalization (CRLF → LF, trailing
 /// whitespace stripped per line). On failure returns a [`FindDiag`] so the
 /// caller can produce an actionable error message.
-pub(crate) fn resolve_batch_edit(
+pub fn resolve_batch_edit(
     content: &str,
     old_str: &str,
     new_str: &str,
@@ -412,7 +412,7 @@ pub(crate) fn resolve_batch_edit(
             return Err(FindDiag::multiple("exact", n, None));
         }
         Err(FindError::NotFound) => {}
-    };
+    }
 
     match find_batch_normalized_replacement_range(content, old_str, new_str) {
         Ok(range) => Ok(range),
@@ -447,8 +447,7 @@ fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
         .map(|mtime| {
             mtime
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_millis() as u64)
         });
 
     let Some(current_millis) = current_millis else {
@@ -483,8 +482,7 @@ fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     {
         let millis = mtime
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         if let Ok(mut map) = ctx.read_timestamps.write() {
             map.insert(path.to_path_buf(), millis);
         }

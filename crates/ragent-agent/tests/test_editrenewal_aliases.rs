@@ -8,7 +8,7 @@
 //! - The `multi_edit` tool description references the canonical parameter
 //!   names.
 //! - The `edit` tool description instructs the model to include context and
-//!   states that old_string must be unique.
+//!   states that `old_string` must be unique.
 
 use ragent_agent::tool::create_default_registry;
 use ragent_llm::llm::ToolDefinition;

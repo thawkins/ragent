@@ -1,4 +1,4 @@
-//! CrossCodeEval benchmark adapter.
+//! `CrossCodeEval` benchmark adapter.
 
 use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;

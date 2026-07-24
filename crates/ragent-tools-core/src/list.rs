@@ -140,7 +140,7 @@ fn list_recursive(
             let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
             list_recursive(&path, &new_prefix, depth + 1, max_depth, lines)?;
         } else {
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let size = entry.metadata().map_or(0, |m| m.len());
             lines.push(format!(
                 "{}{}{}  ({})",
                 prefix,

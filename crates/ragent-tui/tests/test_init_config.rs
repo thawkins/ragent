@@ -42,7 +42,9 @@ fn restore_xdg_config_home(original: Option<String>) {
 /// config directory.
 #[test]
 fn test_slash_init_config_creates_default_global_config() {
-    let _lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -86,7 +88,9 @@ fn test_slash_init_config_creates_default_global_config() {
 /// `/init config` should not overwrite an existing global config.
 #[test]
 fn test_slash_init_config_skips_when_config_exists() {
-    let _lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());
@@ -123,7 +127,9 @@ fn test_slash_init_config_skips_when_config_exists() {
 /// produce a clean status rather than panicking.
 #[test]
 fn test_slash_init_config_produces_status_message() {
-    let _lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _lock = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
     let mut app = support::make_app();
     app.session_id = Some("test-session".to_string());

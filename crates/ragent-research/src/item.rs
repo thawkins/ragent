@@ -133,12 +133,14 @@ impl ResearchItem {
     }
 
     /// Number of sources currently captured.
-    pub fn source_count(&self) -> usize {
+    #[must_use]
+    pub const fn source_count(&self) -> usize {
         self.sources.len()
     }
 
     /// `true` if the item has at least one captured source.
-    pub fn has_sources(&self) -> bool {
+    #[must_use]
+    pub const fn has_sources(&self) -> bool {
         !self.sources.is_empty()
     }
 
@@ -172,6 +174,7 @@ impl ResearchItem {
     /// Strings are wrapped in double quotes and internal double quotes are
     /// escaped so titles and topics containing colons or quotes still parse.
     /// The output still round-trips through [`ResearchItem::from_frontmatter`].
+    #[must_use]
     pub fn render_frontmatter(&self) -> String {
         let mut out = String::from("---\n");
         out.push_str(&format!("name: {}\n", self.name.as_str()));
@@ -448,6 +451,11 @@ fn sources_count(sources: &[Source]) -> String {
 /// the title stays scannable while still summarising the topic content.
 pub const DERIVED_TITLE_MAX_CHARS: usize = 100;
 
+/// Maximum length of the final `title` field written to `RESEARCH.md`
+/// frontmatter. The title is derived from the summary so the displayed
+/// headline reflects the actual synthesis rather than the original prompt.
+pub const RESEARCH_TITLE_MAX_CHARS: usize = 80;
+
 /// Derive a human-readable research item title from the user-supplied topic.
 ///
 /// When `topic` is non-empty, the full topic is used (trimmed) so the title
@@ -464,7 +472,7 @@ pub const DERIVED_TITLE_MAX_CHARS: usize = 100;
 pub fn derive_title(topic: &str, from_url: Option<&str>) -> String {
     let trimmed = topic.trim();
     if !trimmed.is_empty() {
-        return cap_title(trimmed);
+        return cap_title(trimmed, DERIVED_TITLE_MAX_CHARS);
     }
     if let Some(url) = from_url.map(str::trim).filter(|s| !s.is_empty()) {
         return url.to_string();
@@ -472,28 +480,36 @@ pub fn derive_title(topic: &str, from_url: Option<&str>) -> String {
     "Research".to_string()
 }
 
-/// Cap `title` to [`DERIVED_TITLE_MAX_CHARS`] characters on a word boundary,
-/// appending an ellipsis when truncation occurs. A single over-long word is
-/// hard-truncated rather than overflowing.
-fn cap_title(title: &str) -> String {
-    if title.chars().count() <= DERIVED_TITLE_MAX_CHARS {
+/// Reduce `text` to a title suitable for the `RESEARCH.md` frontmatter.
+///
+/// The returned string is capped at [`RESEARCH_TITLE_MAX_CHARS`] characters
+/// and broken on a word boundary, with a trailing ellipsis when truncation
+/// occurs. A single over-long word is hard-truncated rather than overflowing.
+#[must_use]
+pub fn truncate_title(text: &str) -> String {
+    cap_title(text.trim(), RESEARCH_TITLE_MAX_CHARS)
+}
+
+/// Cap `title` to `limit` characters on a word boundary, appending an
+/// ellipsis when truncation occurs. A single over-long word is hard-truncated
+/// rather than overflowing.
+fn cap_title(title: &str, limit: usize) -> String {
+    if title.chars().count() <= limit {
         return title.to_string();
     }
     // Walk char indices up to the limit, then roll back to the last whitespace
     // so we don't split a word in half.
     let limit_byte = title
         .char_indices()
-        .take(DERIVED_TITLE_MAX_CHARS)
+        .take(limit)
         .last()
-        .map(|(i, c)| i + c.len_utf8())
-        .unwrap_or(title.len());
+        .map_or(title.len(), |(i, c)| i + c.len_utf8());
     let head = &title[..limit_byte];
     let cut = head
         .char_indices()
         .rev()
         .find(|(_, c)| c.is_whitespace())
-        .map(|(i, _)| i)
-        .unwrap_or(limit_byte);
+        .map_or(limit_byte, |(i, _)| i);
     let mut out = title[..cut].trim_end().to_string();
     out.push('…');
     out
@@ -731,7 +747,7 @@ mod tests {
         assert!(title.ends_with('…'));
         // Must not split a word in half.
         assert!(!title.trim_end_matches('…').ends_with("wo"));
-        assert!(!title.trim_end_matches('…').ends_with("r"));
+        assert!(!title.trim_end_matches('…').ends_with('r'));
     }
 
     #[test]

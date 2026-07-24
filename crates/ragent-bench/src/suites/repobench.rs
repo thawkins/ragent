@@ -1,4 +1,4 @@
-//! RepoBench benchmark adapter.
+//! `RepoBench` benchmark adapter.
 
 use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;

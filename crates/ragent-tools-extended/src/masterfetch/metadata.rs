@@ -5,7 +5,7 @@
 //! This module extracts structured metadata from HTML pages using three
 //! sources, in priority order:
 //!
-//! 1. **OpenGraph meta tags** — `<meta property="og:title" content="...">`,
+//! 1. **`OpenGraph` meta tags** — `<meta property="og:title" content="...">`,
 //!    `og:description`, `og:site_name`, `og:type`, `og:image`,
 //!    `article:published_time`, `article:modified_time`, `article:author`.
 //! 2. **JSON-LD blocks** — `<script type="application/ld+json">` containing
@@ -15,7 +15,7 @@
 //! 3. **Standard HTML fallbacks** — `<title>` tag, `<meta name="description">`,
 //!    `<link rel="canonical">`, `<html lang="...">`.
 //!
-//! OpenGraph values take priority over JSON-LD, which takes priority over
+//! `OpenGraph` values take priority over JSON-LD, which takes priority over
 //! standard HTML. This matches Hound's `metadata.py` merge strategy.
 //!
 //! All functions are pure — no network I/O — enabling unit tests without live
@@ -37,7 +37,7 @@ use super::PageMetadata;
 ///
 /// The extraction sources, in priority order, are:
 ///
-/// 1. OpenGraph meta tags (`og:*`, `article:*`)
+/// 1. `OpenGraph` meta tags (`og:*`, `article:*`)
 /// 2. JSON-LD `<script type="application/ld+json">` blocks
 /// 3. Standard HTML fallbacks (`<title>`, `<meta name="description">`,
 ///    `<link rel="canonical">`, `<html lang="...">`)
@@ -125,7 +125,7 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
 /// Meta tags with no content attribute are skipped. Attribute names are
 /// matched case-insensitively (`PROPERTY` and `property` both work).
 fn collect_meta_tags(html: &str) -> Vec<(String, String)> {
-    let re = Regex::new(r#"(?i)<meta\s+([^>]*)/?>"#).expect("meta tag regex is valid");
+    let re = Regex::new(r"(?i)<meta\s+([^>]*)/?>").expect("meta tag regex is valid");
 
     let key_re = Regex::new(r#"(?i)(?:property|name)\s*=\s*["']?([^"'\s>]+)["']?"#)
         .expect("meta key regex is valid");
@@ -133,14 +133,14 @@ fn collect_meta_tags(html: &str) -> Vec<(String, String)> {
     let content_re =
         Regex::new(r#"(?i)\bcontent\s*=\s*"([^"]*)""#).expect("meta content regex is valid");
 
-    let content_single_re = Regex::new(r#"(?i)\bcontent\s*=\s*'([^']*)'"#)
+    let content_single_re = Regex::new(r"(?i)\bcontent\s*=\s*'([^']*)'")
         .expect("meta content single-quote regex is valid");
 
     let mut metas = Vec::new();
     for cap in re.captures_iter(html) {
-        let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let attrs = cap.get(1).map_or("", |m| m.as_str());
         if let Some(key_cap) = key_re.captures(attrs) {
-            let key = key_cap.get(1).map(|m| m.as_str()).unwrap_or("");
+            let key = key_cap.get(1).map_or("", |m| m.as_str());
             if key.is_empty() {
                 continue;
             }
@@ -149,8 +149,7 @@ fn collect_meta_tags(html: &str) -> Vec<(String, String)> {
                 .captures(attrs)
                 .or_else(|| content_single_re.captures(attrs))
                 .and_then(|c| c.get(1))
-                .map(|m| m.as_str())
-                .unwrap_or("");
+                .map_or("", |m| m.as_str());
             if !content.trim().is_empty() {
                 metas.push((key.to_ascii_lowercase(), content.trim().to_string()));
             }
@@ -173,7 +172,7 @@ fn meta_value(metas: &[(String, String)], key: &str) -> Option<String> {
 
 /// Extract the text content of the first `<title>` tag.
 fn extract_title_tag(html: &str) -> Option<String> {
-    let re = Regex::new(r#"(?si)<title[^>]*>(.*?)</title>"#).expect("title regex is valid");
+    let re = Regex::new(r"(?si)<title[^>]*>(.*?)</title>").expect("title regex is valid");
     let cap = re.captures(html)?;
     let title = cap.get(1)?.as_str().trim().to_string();
     if title.is_empty() { None } else { Some(title) }
@@ -185,14 +184,14 @@ fn extract_title_tag(html: &str) -> Option<String> {
 
 /// Extract the `href` attribute from `<link rel="canonical" href="...">`.
 fn extract_canonical(html: &str) -> Option<String> {
-    let link_re = Regex::new(r#"(?i)<link\s+([^>]*)>"#).expect("link regex is valid");
+    let link_re = Regex::new(r"(?i)<link\s+([^>]*)>").expect("link regex is valid");
     let rel_re = Regex::new(r#"(?i)\brel\s*=\s*["']?canonical["']?"#).expect("rel regex is valid");
     let href_re = Regex::new(r#"(?i)\bhref\s*=\s*"([^"]*)""#).expect("href regex is valid");
     let href_single_re =
-        Regex::new(r#"(?i)\bhref\s*=\s*'([^']*)'"#).expect("href single-quote regex is valid");
+        Regex::new(r"(?i)\bhref\s*=\s*'([^']*)'").expect("href single-quote regex is valid");
 
     for cap in link_re.captures_iter(html) {
-        let attrs = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+        let attrs = cap.get(1).map_or("", |m| m.as_str());
         if rel_re.is_match(attrs) {
             let href = href_re
                 .captures(attrs)
@@ -213,7 +212,7 @@ fn extract_canonical(html: &str) -> Option<String> {
 
 /// Extract the `lang` attribute from the opening `<html>` tag.
 fn extract_html_lang(html: &str) -> Option<String> {
-    let re = Regex::new(r#"(?i)<html\s+([^>]*)>"#).expect("html tag regex is valid");
+    let re = Regex::new(r"(?i)<html\s+([^>]*)>").expect("html tag regex is valid");
     let lang_re = Regex::new(r#"(?i)\blang\s*=\s*["']([^"']+)["']"#).expect("lang regex is valid");
 
     let cap = re.captures(html)?;
@@ -253,7 +252,7 @@ fn extract_jsonld(html: &str) -> JsonLdFields {
     let mut fields = JsonLdFields::default();
 
     for cap in re.captures_iter(html) {
-        let raw = cap.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        let raw = cap.get(1).map_or("", |m| m.as_str()).trim();
         if raw.is_empty() {
             continue;
         }

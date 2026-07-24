@@ -1,4 +1,4 @@
-//! MasterFetch — integrated web-access tools for ragent.
+//! `MasterFetch` — integrated web-access tools for ragent.
 //!
 //! This module re-implements Hound's six web-access tools
 //! ([`mf_fetch`][super], `mf_crawl`, `mf_search`, `mf_screenshot`,
@@ -181,7 +181,7 @@ impl std::fmt::Display for SourceType {
 // Page metadata (FR-006)
 // ---------------------------------------------------------------------------
 
-/// Structured metadata extracted from a page's OpenGraph tags, JSON-LD
+/// Structured metadata extracted from a page's `OpenGraph` tags, JSON-LD
 /// blocks, canonical link, and `<title>` tag.
 ///
 /// All fields are optional strings because any given page may be missing
@@ -190,13 +190,13 @@ impl std::fmt::Display for SourceType {
 /// values identically.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PageMetadata {
-    /// Page title (from OpenGraph `og:title` or `<title>`).
+    /// Page title (from `OpenGraph` `og:title` or `<title>`).
     pub title: Option<String>,
     /// Page description (from `og:description` or `<meta name="description">`).
     pub description: Option<String>,
     /// Site name (from `og:site_name`).
     pub site_name: Option<String>,
-    /// OpenGraph object type (from `og:type`).
+    /// `OpenGraph` object type (from `og:type`).
     #[serde(rename = "type")]
     pub og_type: Option<String>,
     /// Preview image URL (from `og:image`).

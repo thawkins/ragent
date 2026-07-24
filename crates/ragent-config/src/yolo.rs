@@ -20,7 +20,7 @@ static YOLO_LOCK: Mutex<()> = Mutex::new(());
 pub fn is_enabled() -> bool {
     let _guard = YOLO_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     YOLO_MODE.load(Ordering::Relaxed)
 }
 
@@ -28,7 +28,7 @@ pub fn is_enabled() -> bool {
 pub fn set_enabled(enabled: bool) {
     let _guard = YOLO_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     YOLO_MODE.store(enabled, Ordering::Relaxed);
 }
 
@@ -36,7 +36,7 @@ pub fn set_enabled(enabled: bool) {
 pub fn toggle() -> bool {
     let _guard = YOLO_LOCK
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let was = YOLO_MODE.fetch_xor(true, Ordering::Relaxed);
     !was
 }

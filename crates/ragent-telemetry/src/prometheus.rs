@@ -286,7 +286,7 @@ where
     for (i, bound) in dp.bounds.iter().enumerate() {
         let count: u64 = dp.bucket_counts[..=i].iter().sum();
         // Append le="bound" to the base labels.
-        let le_label = format!("le=\"{}\"", bound);
+        let le_label = format!("le=\"{bound}\"");
         let labels = append_le_label(&base_labels, &le_label);
         out.push_str(&format!("{name}_bucket{labels} {count}\n"));
     }
@@ -386,9 +386,10 @@ pub async fn serve(
                 Err(_) => continue,
             };
             let req = String::from_utf8_lossy(&buf[..n]);
-            let is_metrics = req.lines().next().map_or(false, |line| {
-                line.starts_with("GET /metrics") || line.starts_with("GET / ")
-            });
+            let is_metrics = req
+                .lines()
+                .next()
+                .is_some_and(|line| line.starts_with("GET /metrics") || line.starts_with("GET / "));
 
             let body = if is_metrics {
                 render_prometheus_text(&reader)

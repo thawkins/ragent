@@ -19,7 +19,8 @@ pub struct GradleKtsParser {
 
 impl GradleKtsParser {
     /// Create a new Gradle Kotlin DSL parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -70,7 +71,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -107,8 +108,8 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
 
 /// Extract a Kotlin class declaration.
 ///
-/// Field: `name` (identifier). Children: modifiers, class_body,
-/// type_parameters, delegation_specifiers, primary_constructor.
+/// Field: `name` (identifier). Children: modifiers, `class_body`,
+/// `type_parameters`, `delegation_specifiers`, `primary_constructor`.
 fn extract_class(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
@@ -199,7 +200,7 @@ fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind: SymbolKind::Class,
         visibility: Visibility::Public,
@@ -224,8 +225,8 @@ fn extract_companion(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &
 
 /// Extract a Kotlin function declaration.
 ///
-/// Field: `name` (identifier). Children: function_value_parameters, type,
-/// function_body, modifiers, type_parameters.
+/// Field: `name` (identifier). Children: `function_value_parameters`, type,
+/// `function_body`, modifiers, `type_parameters`.
 fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
@@ -251,7 +252,7 @@ fn extract_function(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind: SymbolKind::Function,
         visibility: vis,
@@ -286,7 +287,7 @@ fn extract_property(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[
     }
 }
 
-/// Extract a single variable_declaration within a property_declaration.
+/// Extract a single `variable_declaration` within a `property_declaration`.
 fn extract_single_property(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     // variable_declaration children: identifier, type, expression
     let name = first_child_by_kind(ctx, node, "identifier").unwrap_or_default();
@@ -308,7 +309,7 @@ fn extract_single_property(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, sc
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind,
         visibility: Visibility::Public,
@@ -340,7 +341,7 @@ fn extract_type_alias(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
     ctx.symbols.push(Symbol {
         id,
         file_id: 0,
-        name: name.clone(),
+        name,
         qualified_name: Some(qname),
         kind: SymbolKind::TypeAlias,
         visibility: Visibility::Public,
@@ -388,7 +389,7 @@ fn extract_import(ctx: &mut Ctx, node: Node) {
 /// Extract a call expression as a reference.
 ///
 /// In Gradle Kotlin DSL, blocks like `plugins { }`, `dependencies { }`,
-/// `tasks { }` appear as call_expression nodes.
+/// `tasks { }` appear as `call_expression` nodes.
 fn extract_call(ctx: &mut Ctx, node: Node) {
     // The first identifier-like child is the callee name.
     let cursor = &mut node.walk();

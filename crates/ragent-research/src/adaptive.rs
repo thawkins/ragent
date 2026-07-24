@@ -22,12 +22,14 @@ pub enum StopDecision {
 
 impl StopDecision {
     /// `true` when the loop should terminate.
-    pub fn should_stop(self) -> bool {
+    #[must_use]
+    pub const fn should_stop(self) -> bool {
         !matches!(self, Self::Continue)
     }
 
     /// Short snake-case label for event rendering.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Continue => "continue",
             Self::MaxIterations => "max_iterations",
@@ -53,7 +55,8 @@ pub struct AdaptiveStopper {
 
 impl AdaptiveStopper {
     /// Build a stopper for the given budget. `min_iterations` defaults to 2.
-    pub fn new(max_iterations: u32) -> Self {
+    #[must_use]
+    pub const fn new(max_iterations: u32) -> Self {
         Self {
             max_iterations,
             min_iterations: 2,
@@ -63,13 +66,15 @@ impl AdaptiveStopper {
     }
 
     /// Require at least this many iterations before a no-improvement stop.
-    pub fn with_min_iterations(mut self, n: u32) -> Self {
+    #[must_use]
+    pub const fn with_min_iterations(mut self, n: u32) -> Self {
         self.min_iterations = n;
         self
     }
 
     /// Ignore no-improvement stops (used for `--depth deep` / explicit deeper run).
-    pub fn with_force_deeper(mut self, force: bool) -> Self {
+    #[must_use]
+    pub const fn with_force_deeper(mut self, force: bool) -> Self {
         self.force_deeper = force;
         self
     }
@@ -113,6 +118,7 @@ impl AdaptiveStopper {
     }
 
     /// Access the recorded score history.
+    #[must_use]
     pub fn history(&self) -> &[u32] {
         &self.history
     }

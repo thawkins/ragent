@@ -2,7 +2,7 @@
 //!
 //! Covers:
 //! - M6-T1: watchdog marks a teammate Failed after the timeout.
-//! - M6-T2: adopt_orphaned_tasks reassigns InProgress tasks for old lead to Pending.
+//! - M6-T2: `adopt_orphaned_tasks` reassigns `InProgress` tasks for old lead to Pending.
 //! - M6-T3: idempotent completion (same agent no-op, different agent rejected).
 //! - M6-T5: mailbox corruption recovery moves the file aside.
 
@@ -209,7 +209,7 @@ async fn test_mailbox_corruption_recovery_read_all() {
     let parent = mailbox_path.parent().unwrap();
     let corrupt_files: Vec<_> = std::fs::read_dir(parent)
         .expect("read dir")
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_name().to_string_lossy().contains("corrupt"))
         .collect();
     assert!(

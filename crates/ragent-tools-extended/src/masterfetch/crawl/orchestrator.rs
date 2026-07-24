@@ -255,7 +255,7 @@ pub struct CrawlResult {
 /// data plus any discovered links for BFS continuation.
 #[derive(Debug, Clone)]
 pub struct FetchedPage {
-    /// The classified crawl page (content, page_type, content_ok, etc.).
+    /// The classified crawl page (content, `page_type`, `content_ok`, etc.).
     pub page: CrawlPage,
     /// Links discovered on this page (absolute, normalised URLs).
     pub discovered_links: Vec<String>,
@@ -396,7 +396,7 @@ pub fn score_url(url: &str, focus: Option<&str>, depth: usize) -> f64 {
 
     // Depth: shallow URLs get a small boost.
     // depth 0 → +1.0, depth 1 → +0.5, depth 2 → +0.25, etc.
-    let depth_boost = 1.0 / (1u32 << depth.min(10) as u32) as f64;
+    let depth_boost = 1.0 / f64::from(1u32 << depth.min(10) as u32);
     score += depth_boost;
 
     score
@@ -421,10 +421,10 @@ pub fn score_url(url: &str, focus: Option<&str>, depth: usize) -> f64 {
 pub fn is_same_domain(url: &str, reference_url: &str) -> bool {
     let url_host = Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()));
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
     let ref_host = Url::parse(reference_url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()));
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
 
     match (url_host, ref_host) {
         (Some(a), Some(b)) => a == b,
@@ -483,7 +483,7 @@ pub fn normalize_and_dedup(urls: &[String]) -> Vec<String> {
 pub fn extract_domain(url: &str) -> Option<String> {
     Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +557,7 @@ struct EnqueueContext<'a> {
 
 impl<'a> EnqueueContext<'a> {
     /// Create a new context from the current crawl variables.
-    fn new(
+    const fn new(
         start_url: &'a str,
         start_domain: &'a Option<String>,
         focus: Option<&'a str>,
@@ -579,7 +579,7 @@ impl<'a> EnqueueContext<'a> {
 impl CrawlOrchestrator {
     /// Create a new orchestrator with the given configuration.
     #[must_use]
-    pub fn new(config: CrawlConfig) -> Self {
+    pub const fn new(config: CrawlConfig) -> Self {
         Self { config }
     }
 

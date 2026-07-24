@@ -122,8 +122,8 @@ impl FtsIndex {
             let snippet = sym.body_snippet.unwrap_or("");
             let truncated = &snippet[..snippet.len().min(BODY_SNIPPET_LEN)];
             doc.add_text(self.fields.body_snippet, truncated);
-            doc.add_i64(self.fields.start_line, sym.start_line as i64);
-            doc.add_i64(self.fields.end_line, sym.end_line as i64);
+            doc.add_i64(self.fields.start_line, i64::from(sym.start_line));
+            doc.add_i64(self.fields.end_line, i64::from(sym.end_line));
             writer.add_document(doc)?;
         }
         writer.commit()?;
@@ -163,8 +163,8 @@ impl FtsIndex {
             let snippet = sym.body_snippet.unwrap_or("");
             let truncated = &snippet[..snippet.len().min(BODY_SNIPPET_LEN)];
             doc.add_text(self.fields.body_snippet, truncated);
-            doc.add_i64(self.fields.start_line, sym.start_line as i64);
-            doc.add_i64(self.fields.end_line, sym.end_line as i64);
+            doc.add_i64(self.fields.start_line, i64::from(sym.start_line));
+            doc.add_i64(self.fields.end_line, i64::from(sym.end_line));
             writer.add_document(doc)?;
         }
 
@@ -182,8 +182,8 @@ impl FtsIndex {
 
     /// Search the FTS index with the given query string.
     ///
-    /// Fields are boosted: name 10×, qualified_name 5×, signature 3×,
-    /// doc_comment 2×, body_snippet 1×.
+    /// Fields are boosted: name 10×, `qualified_name` 5×, signature 3×,
+    /// `doc_comment` 2×, `body_snippet` 1×.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         self.reader.reload()?;
         let searcher = self.reader.searcher();
@@ -306,7 +306,7 @@ impl FtsIndex {
         builder.add_text_field("name", text_opts.clone());
         builder.add_text_field("qualified_name", text_opts.clone());
         builder.add_text_field("signature", text_opts.clone());
-        builder.add_text_field("doc_comment", text_opts.clone());
+        builder.add_text_field("doc_comment", text_opts);
 
         // body_snippet: tokenized but NOT stored (too large)
         let body_opts = TextOptions::default().set_indexing_options(
@@ -339,40 +339,35 @@ impl FtsIndex {
     fn open_or_create(path: &Path, schema: &Schema) -> Result<Index> {
         let dir = tantivy::directory::MmapDirectory::open(path)
             .with_context(|| format!("cannot open tantivy dir: {}", path.display()))?;
-        match Index::open(dir) {
-            Ok(idx) => {
-                // Validate that the on-disk schema matches our expected schema.
-                // If field count differs, the index was created by a different code version;
-                // delete and recreate to avoid silent field-ID mismatches.
-                let disk_schema = idx.schema();
-                let expected_field_count = schema.fields().count();
-                let actual_field_count = disk_schema.fields().count();
-                if actual_field_count != expected_field_count {
-                    tracing::warn!(
-                        "FTS schema mismatch: expected {} fields, found {}; recreating index",
-                        expected_field_count,
-                        actual_field_count,
-                    );
-                    drop(idx);
-                    // Clear the directory and recreate.
-                    for entry in std::fs::read_dir(path)?.flatten() {
-                        let _ = std::fs::remove_file(entry.path());
-                    }
-                    let dir2 =
-                        tantivy::directory::MmapDirectory::open(path).with_context(|| {
-                            format!("cannot reopen tantivy dir: {}", path.display())
-                        })?;
-                    return Index::create(dir2, schema.clone(), Default::default())
-                        .context("cannot create tantivy index");
+        if let Ok(idx) = Index::open(dir) {
+            // Validate that the on-disk schema matches our expected schema.
+            // If field count differs, the index was created by a different code version;
+            // delete and recreate to avoid silent field-ID mismatches.
+            let disk_schema = idx.schema();
+            let expected_field_count = schema.fields().count();
+            let actual_field_count = disk_schema.fields().count();
+            if actual_field_count != expected_field_count {
+                tracing::warn!(
+                    "FTS schema mismatch: expected {} fields, found {}; recreating index",
+                    expected_field_count,
+                    actual_field_count,
+                );
+                drop(idx);
+                // Clear the directory and recreate.
+                for entry in std::fs::read_dir(path)?.flatten() {
+                    let _ = std::fs::remove_file(entry.path());
                 }
-                Ok(idx)
-            }
-            Err(_) => {
                 let dir2 = tantivy::directory::MmapDirectory::open(path)
                     .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
-                Index::create(dir2, schema.clone(), Default::default())
-                    .context("cannot create tantivy index")
+                return Index::create(dir2, schema.clone(), Default::default())
+                    .context("cannot create tantivy index");
             }
+            Ok(idx)
+        } else {
+            let dir2 = tantivy::directory::MmapDirectory::open(path)
+                .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
+            Index::create(dir2, schema.clone(), Default::default())
+                .context("cannot create tantivy index")
         }
     }
 
@@ -706,7 +701,7 @@ mod tests {
 mod integration_tests {
     use super::*;
 
-    /// Mimic how full_reindex adds symbols: remove_file + add_symbols per file
+    /// Mimic how `full_reindex` adds symbols: `remove_file` + `add_symbols` per file
     #[test]
     fn test_incremental_add_many_files() {
         let dir = tempfile::tempdir().unwrap();

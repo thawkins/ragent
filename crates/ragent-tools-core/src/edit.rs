@@ -174,7 +174,7 @@ impl Tool for EditTool {
 
         let dry_run = input
             .get("dry_run")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         let path = resolve_path(&ctx.working_dir, path_str);
@@ -373,8 +373,7 @@ fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
         .map(|mtime| {
             mtime
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
+                .map_or(0, |d| d.as_millis() as u64)
         });
 
     let Some(current_millis) = current_millis else {
@@ -411,8 +410,7 @@ fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     {
         let millis = mtime
             .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_millis() as u64);
         if let Ok(mut map) = ctx.read_timestamps.write() {
             map.insert(path.to_path_buf(), millis);
         }
@@ -423,7 +421,8 @@ fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
 /// edited byte range `[change_start, change_end)` with at least
 /// [`SNIPPET_CONTEXT_LINES`] lines of context before and after, clamped to the
 /// file boundaries (FR-008).
-pub(crate) fn build_snippet(content: &str, change_start: usize, change_end: usize) -> String {
+#[must_use]
+pub fn build_snippet(content: &str, change_start: usize, change_end: usize) -> String {
     // Determine the 1-based line numbers of the edited region.
     let change_start_line = byte_offset_to_line(content, change_start);
     let change_end_line =
@@ -448,7 +447,7 @@ pub(crate) fn build_snippet(content: &str, change_start: usize, change_end: usiz
         } else {
             " "
         };
-        out.push_str(&format!("{:>4}{} {}\n", line_no, marker, line));
+        out.push_str(&format!("{line_no:>4}{marker} {line}\n"));
     }
     if out.is_empty() {
         // Edge case: empty file or empty new_string with no trailing newline.
@@ -458,7 +457,8 @@ pub(crate) fn build_snippet(content: &str, change_start: usize, change_end: usiz
 }
 
 /// Convert a byte offset into `content` to a 1-based line number.
-pub(crate) fn byte_offset_to_line(content: &str, offset: usize) -> usize {
+#[must_use]
+pub fn byte_offset_to_line(content: &str, offset: usize) -> usize {
     let mut line = 1;
     for (i, ch) in content.char_indices() {
         if i >= offset {

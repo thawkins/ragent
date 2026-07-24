@@ -19,6 +19,7 @@ pub struct TreeCache {
 
 impl TreeCache {
     /// Create a new tree cache with the given capacity.
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let cap = NonZeroUsize::new(capacity.max(1)).unwrap();
         Self {
@@ -27,6 +28,7 @@ impl TreeCache {
     }
 
     /// Create a tree cache with the default capacity (1000).
+    #[must_use]
     pub fn with_default_capacity() -> Self {
         Self::new(DEFAULT_CAPACITY)
     }
@@ -47,11 +49,13 @@ impl TreeCache {
     }
 
     /// Number of cached trees.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.cache.len()
     }
 
     /// Whether the cache is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.cache.is_empty()
     }
@@ -62,6 +66,7 @@ impl TreeCache {
     }
 
     /// Maximum capacity.
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.cache.cap().get()
     }

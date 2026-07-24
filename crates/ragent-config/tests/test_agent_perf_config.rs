@@ -1,5 +1,5 @@
 //! Integration tests for the `agent_perf` config block
-//! (AgentPerf T-019 / FR-027).
+//! (`AgentPerf` T-019 / FR-027).
 
 use ragent_config::{AgentPerfConfig, Config};
 

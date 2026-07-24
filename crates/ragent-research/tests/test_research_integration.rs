@@ -204,7 +204,7 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
             Ok(self
                 .files
                 .keys()
-                .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false))
+                .filter(|p| p.extension().is_some_and(|e| e == ext))
                 .cloned()
                 .collect())
         }

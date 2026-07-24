@@ -1361,6 +1361,9 @@ can see why the LLM path failed.
 Every `RESEARCH.md` contains:
 
 - YAML frontmatter with `name`, `title`, `status`, `created`, `modified`, `sources`
+  (the `title` is a reduced-length version of the `## Summary` content, capped at
+  80 characters, so the headline reflects the synthesis rather than the original
+  prompt)
 - `# Title:` heading
 - `## Topic`
 - `## Summary`

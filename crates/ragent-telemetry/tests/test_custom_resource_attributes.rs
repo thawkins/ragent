@@ -384,7 +384,7 @@ fn test_subsystem_config_preserves_resource_attributes() {
     let sub = build_subsystem(config);
     assert_eq!(sub.state(), TelemetryState::Enabled);
 
-    let stored = sub.config().resource_attributes.clone();
+    let stored = sub.config().resource_attributes;
     assert_eq!(
         stored.get("deployment.environment"),
         Some(&"production".to_string()),
@@ -532,7 +532,7 @@ fn test_config_merge_unions_resource_attributes() {
     );
 }
 
-/// A disabled overlay still contributes resource_attributes to a disabled
+/// A disabled overlay still contributes `resource_attributes` to a disabled
 /// base (FR-026).
 #[test]
 fn test_config_merge_disabled_overlay_contributes_resource_attributes() {

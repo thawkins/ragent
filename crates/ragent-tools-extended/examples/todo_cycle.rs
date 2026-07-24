@@ -1,8 +1,8 @@
-//! Standalone demonstration of TodoReadTool / TodoWriteTool.
-//! Shows the exact markdown output the MessageWidget would receive.
+//! Standalone demonstration of `TodoReadTool` / `TodoWriteTool`.
+//! Shows the exact markdown output the `MessageWidget` would receive.
 //!
 //! Run with:
-//!   cargo run --example todo_cycle
+//!   cargo run --example `todo_cycle`
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -155,7 +155,7 @@ fn make_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
 
 fn print_tool_call(name: &str, params: &serde_json::Value) {
     println!("┌──────────────────────────────────────────────────────────────┐");
-    println!("│  TOOL CALL: {:48} │", name);
+    println!("│  TOOL CALL: {name:48} │");
     println!("│  PARAMS:  {:50} │", params.to_string());
     println!("└──────────────────────────────────────────────────────────────┘");
 }

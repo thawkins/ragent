@@ -1,5 +1,5 @@
 //! Tests for parser/rust.rs (M8/T8.4).
-//! Compiled as a submodule via #[path], super::* resolves to the source module.
+//! Compiled as a submodule via #[path], `super::`* resolves to the source module.
 
 use super::*;
 

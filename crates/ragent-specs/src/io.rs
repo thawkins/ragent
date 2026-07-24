@@ -257,7 +257,7 @@ impl SpecIo {
             // Parse table rows: | ID | Title | Req | Effort | Priority | Status | Dependencies |
             let cells: Vec<&str> = trimmed
                 .split('|')
-                .map(|c| c.trim())
+                .map(str::trim)
                 .filter(|c| !c.is_empty())
                 .collect();
             // Skip header rows (contain "ID" as a cell value, not as a substring in a title)

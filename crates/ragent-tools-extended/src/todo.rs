@@ -179,7 +179,7 @@ impl Tool for TodoWriteTool {
                 (
                     format!("Added todo '{id}' with status '{status}'"),
                     "add",
-                    Some(id.to_string()),
+                    Some(id),
                     None::<String>,
                     None::<String>,
                 )
@@ -232,7 +232,7 @@ impl Tool for TodoWriteTool {
 
                 // Only include status metadata when a status change actually occurred
                 let (old_status_str, new_status_str) = if status.is_some() {
-                    (old_status.clone(), status.map(String::from))
+                    (old_status, status.map(String::from))
                 } else {
                     (None, None)
                 };
@@ -295,8 +295,7 @@ impl Tool for TodoWriteTool {
                 let existing_title = existing
                     .iter()
                     .find(|t| t.id == id)
-                    .map(|t| t.title.as_str())
-                    .unwrap_or("");
+                    .map_or("", |t| t.title.as_str());
 
                 let removed = storage
                     .delete_todo(id, &ctx.session_id)

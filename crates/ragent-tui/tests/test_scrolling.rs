@@ -1,4 +1,4 @@
-//! Tests for test_scrolling.rs
+//! Tests for `test_scrolling.rs`
 
 //! Tests for scroll and mouse support.
 //!
@@ -71,7 +71,7 @@ fn make_app() -> App {
     )
 }
 
-fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
+const fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::ScrollUp,
         column: col,
@@ -80,7 +80,7 @@ fn mouse_scroll_up(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
+const fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::ScrollDown,
         column: col,
@@ -266,7 +266,7 @@ fn test_mouse_click_no_effect() {
 
 use ragent_tui::app::ScrollbarDragPane;
 
-fn mouse_down(col: u16, row: u16) -> MouseEvent {
+const fn mouse_down(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: col,
@@ -275,7 +275,7 @@ fn mouse_down(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_drag(col: u16, row: u16) -> MouseEvent {
+const fn mouse_drag(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Drag(MouseButton::Left),
         column: col,
@@ -284,7 +284,7 @@ fn mouse_drag(col: u16, row: u16) -> MouseEvent {
     }
 }
 
-fn mouse_up(col: u16, row: u16) -> MouseEvent {
+const fn mouse_up(col: u16, row: u16) -> MouseEvent {
     MouseEvent {
         kind: MouseEventKind::Up(MouseButton::Left),
         column: col,

@@ -141,11 +141,9 @@ async fn create_research(
             .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
         depth: req.depth.as_deref().and_then(Depth::parse),
         iterations: req.iterations,
-        output_format: req
-            .format
-            .as_deref()
-            .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
-            .unwrap_or(OutputFormat::Report),
+        output_format: req.format.as_deref().map_or(OutputFormat::Report, |s| {
+            OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
+        }),
         ..SessionConfig::default()
     };
     let title = req

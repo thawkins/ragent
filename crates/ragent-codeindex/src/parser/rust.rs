@@ -16,7 +16,8 @@ pub struct RustParser {
 
 impl RustParser {
     /// Create a new Rust parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -66,7 +67,7 @@ struct ExtractionContext<'a> {
 }
 
 impl ExtractionContext<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_temp_id;
         self.next_temp_id += 1;
         id
@@ -179,7 +180,7 @@ fn extract_node(
     }
 }
 
-/// Extract a function/method call reference from a call_expression node.
+/// Extract a function/method call reference from a `call_expression` node.
 fn extract_call_reference(ctx: &mut ExtractionContext, node: Node) {
     // call_expression has a "function" field that is the callee.
     if let Some(func_node) = node.child_by_field_name("function") {
@@ -217,7 +218,7 @@ fn extract_call_reference(ctx: &mut ExtractionContext, node: Node) {
     }
 }
 
-/// Extract a field access reference from a field_expression node.
+/// Extract a field access reference from a `field_expression` node.
 fn extract_field_reference(ctx: &mut ExtractionContext, node: Node) {
     if let Some(field_node) = node.child_by_field_name("field") {
         // Skip if the parent is a call_expression (already captured as a call reference).
@@ -824,7 +825,7 @@ fn extract_doc_comment(ctx: &ExtractionContext, node: Node) -> Option<String> {
     }
 }
 
-/// Extract the function signature from a function_item node.
+/// Extract the function signature from a `function_item` node.
 fn extract_function_signature(ctx: &ExtractionContext, node: Node) -> String {
     // Build signature from: visibility + fn + name + parameters + return_type
     let vis = extract_visibility(ctx, node);

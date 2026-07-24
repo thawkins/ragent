@@ -216,13 +216,13 @@ const PROFILES: &[BenchProfileDef] = &[
 
 /// Return all registered suites.
 #[must_use]
-pub fn all_suites() -> &'static [BenchSuiteDef] {
+pub const fn all_suites() -> &'static [BenchSuiteDef] {
     SUITES
 }
 
 /// Return all registered profiles.
 #[must_use]
-pub fn all_profiles() -> &'static [BenchProfileDef] {
+pub const fn all_profiles() -> &'static [BenchProfileDef] {
     PROFILES
 }
 
@@ -299,7 +299,7 @@ pub fn expand_target(target: &BenchTarget) -> Result<Vec<&'static BenchSuiteDef>
                 .iter()
                 .map(|suite_id| {
                     find_suite(suite_id).ok_or_else(|| {
-                        anyhow!("profile '{}' references unknown suite '{}'", id, suite_id)
+                        anyhow!("profile '{id}' references unknown suite '{suite_id}'")
                     })
                 })
                 .collect()

@@ -86,7 +86,7 @@ pub enum LogLevel {
     dir
 }
 
-/// Build a CodeIndex pointing at the given temp directory.
+/// Build a `CodeIndex` pointing at the given temp directory.
 fn open_index(dir: &TempDir) -> CodeIndex {
     let config = CodeIndexConfig {
         enabled: true,

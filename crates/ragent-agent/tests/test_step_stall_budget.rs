@@ -1,5 +1,5 @@
 //! Integration tests for the per-step wall-clock budget and per-stream
-//! stall timeout (AgentPerf T-014 / FR-017 / FR-018 / FR-020).
+//! stall timeout (`AgentPerf` T-014 / FR-017 / FR-018 / FR-020).
 //!
 //! We do not drive the full `process_user_message` here (that would
 //! require a live LLM provider), but we DO assert that:

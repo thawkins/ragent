@@ -32,6 +32,9 @@ ragent-specs = { path = "../ragent-specs" }
 tokio = { version = "1", features = ["full"] }
 async-trait = { workspace = true }
 
+[build-dependencies]
+chrono = { workspace = true }
+
 [[bench]]
 name = "gathering_bench"
 harness = false

@@ -28,7 +28,8 @@ pub struct TypeScriptParser {
 
 impl TypeScriptParser {
     /// Create a new TypeScript/JavaScript parser for the given variant.
-    pub fn new(variant: TsVariant) -> Self {
+    #[must_use]
+    pub const fn new(variant: TsVariant) -> Self {
         Self { variant }
     }
 
@@ -97,7 +98,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -409,14 +410,11 @@ fn extract_variable_decl(
 
             // Check if the value is an arrow function or function expression
             let value = child.child_by_field_name("value");
-            let is_fn = value
-                .as_ref()
-                .map(|v| {
-                    v.kind() == "arrow_function"
-                        || v.kind() == "function"
-                        || v.kind() == "function_expression"
-                })
-                .unwrap_or(false);
+            let is_fn = value.as_ref().is_some_and(|v| {
+                v.kind() == "arrow_function"
+                    || v.kind() == "function"
+                    || v.kind() == "function_expression"
+            });
 
             let visibility = if exported {
                 Visibility::Public
@@ -451,7 +449,7 @@ fn extract_variable_decl(
                 && name
                     .chars()
                     .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
-                && name.chars().any(|c| c.is_alphabetic())
+                && name.chars().any(char::is_alphabetic)
             {
                 // Module-level ALL_CAPS constant
                 let qname = build_qname(scope, &name);
@@ -606,9 +604,8 @@ fn extract_jsdoc(ctx: &Ctx, node: Node) -> Option<String> {
         } else if s.kind() == "decorator" {
             sib = s.prev_sibling();
             continue;
-        } else {
-            break;
         }
+        break;
     }
     None
 }

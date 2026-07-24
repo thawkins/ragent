@@ -118,7 +118,7 @@ fn test_poll_pending_opt_poisoned_mutex_with_result() {
     assert!(
         app.opt_result
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_none()
     );
 }

@@ -241,7 +241,7 @@ fn adapt_output(
             let links = classify_links(html, url, metadata);
             let link_count = links.citations.len() + links.navigation.len();
             let content = format_link_list(&links, url, opts.max_links, metadata);
-            let summary = format!("List/index page — {} links found", link_count);
+            let summary = format!("List/index page — {link_count} links found");
             (content, true, summary, link_count)
         }
         PageType::JsShell => {
@@ -316,7 +316,7 @@ fn format_link_list(
 ) -> String {
     if max_links == 0 {
         let count = links.citations.len() + links.navigation.len();
-        return format!("({} links found — listing suppressed)\n", count);
+        return format!("({count} links found — listing suppressed)\n");
     }
 
     let base_url = Url::parse(page_url).ok();
@@ -392,11 +392,11 @@ fn resolve_url(href: &str, base: Option<&Url>) -> String {
 fn format_js_shell_report(extracted_text: &str) -> String {
     let mut out = String::new();
     out.push_str("[JS-rendered page — no static content extracted]\n\n");
-    if !extracted_text.trim().is_empty() {
+    if extracted_text.trim().is_empty() {
+        out.push_str("(no text content found)");
+    } else {
         out.push_str("Extracted text (minimal):\n");
         out.push_str(extracted_text);
-    } else {
-        out.push_str("(no text content found)");
     }
     out.push('\n');
     out
@@ -406,11 +406,11 @@ fn format_js_shell_report(extracted_text: &str) -> String {
 fn format_auth_wall_report(extracted_text: &str) -> String {
     let mut out = String::new();
     out.push_str("[Authentication required — page content is behind a login wall]\n\n");
-    if !extracted_text.trim().is_empty() {
+    if extracted_text.trim().is_empty() {
+        out.push_str("(no visible content)");
+    } else {
         out.push_str("Visible text (may be incomplete):\n");
         out.push_str(extracted_text);
-    } else {
-        out.push_str("(no visible content)");
     }
     out.push('\n');
     out
@@ -420,11 +420,11 @@ fn format_auth_wall_report(extracted_text: &str) -> String {
 fn format_paywall_report(extracted_text: &str) -> String {
     let mut out = String::new();
     out.push_str("[Paywall — content requires a subscription]\n\n");
-    if !extracted_text.trim().is_empty() {
+    if extracted_text.trim().is_empty() {
+        out.push_str("(no preview available)");
+    } else {
         out.push_str("Preview text:\n");
         out.push_str(extracted_text);
-    } else {
-        out.push_str("(no preview available)");
     }
     out.push('\n');
     out

@@ -71,7 +71,7 @@ pub fn truncate_content(content: impl AsRef<str>, max_lines: usize) -> String {
         let marker = if lines_omitted == 1 {
             "... (1 line omitted) ...".to_string()
         } else {
-            format!("... ({} lines omitted) ...", lines_omitted)
+            format!("... ({lines_omitted} lines omitted) ...")
         };
 
         result.push('\n');
@@ -145,7 +145,7 @@ pub fn truncate_content_head_tail(
     let marker = if lines_omitted == 1 {
         "... (1 line omitted) ...".to_string()
     } else {
-        format!("... ({} lines omitted) ...", lines_omitted)
+        format!("... ({lines_omitted} lines omitted) ...")
     };
     result.push_str(&marker);
     result.push('\n');
@@ -157,7 +157,7 @@ pub fn truncate_content_head_tail(
 
 /// Get line count statistics for content.
 ///
-/// Returns a tuple of (displayed_lines, total_lines, was_truncated).
+/// Returns a tuple of (`displayed_lines`, `total_lines`, `was_truncated`).
 ///
 /// # Arguments
 ///

@@ -72,7 +72,7 @@ impl ShutdownGuard {
     /// The subsystem is moved into the guard. Use [`Self::subsystem`] to
     /// get a reference for recording metrics while the guard is alive.
     #[must_use]
-    pub fn new(subsystem: TelemetrySubsystem) -> Self {
+    pub const fn new(subsystem: TelemetrySubsystem) -> Self {
         Self { subsystem }
     }
 
@@ -81,13 +81,13 @@ impl ShutdownGuard {
     /// Use this to obtain instruments and record metrics while the guard is
     /// alive.
     #[must_use]
-    pub fn subsystem(&self) -> &TelemetrySubsystem {
+    pub const fn subsystem(&self) -> &TelemetrySubsystem {
         &self.subsystem
     }
 
     /// Returns a mutable reference to the wrapped [`TelemetrySubsystem`].
     #[must_use]
-    pub fn subsystem_mut(&mut self) -> &mut TelemetrySubsystem {
+    pub const fn subsystem_mut(&mut self) -> &mut TelemetrySubsystem {
         &mut self.subsystem
     }
 
@@ -114,11 +114,8 @@ impl ShutdownGuard {
     #[must_use]
     pub fn into_inner(self) -> TelemetrySubsystem {
         // Manually destructure to avoid running Drop on self.
-        let subsystem = std::mem::replace(
-            &mut std::mem::ManuallyDrop::new(self).subsystem,
-            TelemetrySubsystem::disabled(),
-        );
-        subsystem
+
+        std::mem::take(&mut std::mem::ManuallyDrop::new(self).subsystem)
     }
 }
 

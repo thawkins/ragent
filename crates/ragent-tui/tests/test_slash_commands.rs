@@ -1,4 +1,4 @@
-//! Tests for test_slash_commands.rs
+//! Tests for `test_slash_commands.rs`
 
 //! Tests for TUI slash command parsing and dispatch (TASK-006).
 //!
@@ -1418,8 +1418,7 @@ fn test_slash_browse_refresh_updates_cache_metadata() {
         app.project_files_cache_count,
         app.project_files_cache
             .as_ref()
-            .map(|v| v.len())
-            .unwrap_or(0)
+            .map_or(0, std::vec::Vec::len)
     );
 }
 
@@ -1440,8 +1439,7 @@ fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
         app.project_files_cache_count,
         app.project_files_cache
             .as_ref()
-            .map(|v| v.len())
-            .unwrap_or(0)
+            .map_or(0, std::vec::Vec::len)
     );
 }
 
@@ -2260,7 +2258,7 @@ fn test_slash_webapi_help_shows_endpoints() {
 
     assert!(!app.messages.is_empty(), "help should produce a message");
     let last = app.messages.last().unwrap();
-    let text = format!("{:?}", last);
+    let text = format!("{last:?}");
     assert!(
         text.contains("health") || text.contains("sessions"),
         "help output should list API endpoints"
@@ -2275,7 +2273,7 @@ fn test_slash_webapi_disable_when_not_running() {
     app.execute_slash_command("/webapi disable");
 
     let last = app.messages.last().unwrap();
-    let text = format!("{:?}", last);
+    let text = format!("{last:?}");
     assert!(
         text.contains("not running") || text.contains("Disabled"),
         "should report server not running"
@@ -2317,22 +2315,13 @@ fn test_slash_spec_no_args_shows_help() {
 
     assert!(!app.messages.is_empty(), "spec should create a message");
     let text = app.messages.last().unwrap().text_content();
-    assert!(
-        text.contains("spec help"),
-        "should show spec help: {}",
-        text
-    );
+    assert!(text.contains("spec help"), "should show spec help: {text}");
     assert!(
         text.contains("spec create"),
-        "should mention spec create: {}",
-        text
+        "should mention spec create: {text}"
     );
-    assert!(
-        text.contains("specs/"),
-        "should mention specs/ dir: {}",
-        text
-    );
-    assert!(text.contains("PLAN.md"), "should mention PLAN.md: {}", text);
+    assert!(text.contains("specs/"), "should mention specs/ dir: {text}");
+    assert!(text.contains("PLAN.md"), "should mention PLAN.md: {text}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -2346,8 +2335,7 @@ async fn test_slash_spec_task_lists_tasks() {
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Tasks for") || text.contains("No tasks found") || text.contains("Error:"),
-        "should list tasks or show empty/error: {}",
-        text
+        "should list tasks or show empty/error: {text}"
     );
 }
 
@@ -2362,8 +2350,7 @@ async fn test_slash_spec_validate_all() {
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Validation") || text.contains("No specs found") || text.contains("Error:"),
-        "should show validation results: {}",
-        text
+        "should show validation results: {text}"
     );
 }
 
@@ -2631,7 +2618,7 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
         .draw(|frame| layout::render(frame, &mut app))
         .expect("draw");
     let cells = terminal.backend().buffer().content.clone();
-    let text: String = cells.iter().map(|c| c.symbol()).collect();
+    let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
         text.contains("YOLO:✓"),
         "status bar should show enabled YOLO indicator: {text}"
@@ -2649,7 +2636,7 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
         .draw(|frame| layout::render(frame, &mut app))
         .expect("draw");
     let cells = terminal.backend().buffer().content.clone();
-    let text: String = cells.iter().map(|c| c.symbol()).collect();
+    let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
     assert!(
         text.contains("YOLO:✗"),
         "status bar should show disabled YOLO indicator: {text}"

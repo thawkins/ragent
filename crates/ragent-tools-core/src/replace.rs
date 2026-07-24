@@ -99,7 +99,8 @@ pub struct FindDiag {
 
 impl FindDiag {
     /// Build a `NotFound` diagnostic.
-    pub fn not_found(pass: &'static str, closest_line: Option<usize>) -> Self {
+    #[must_use]
+    pub const fn not_found(pass: &'static str, closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::NotFound,
             pass,
@@ -108,7 +109,8 @@ impl FindDiag {
     }
 
     /// Build a `MultipleMatches` diagnostic.
-    pub fn multiple(pass: &'static str, count: usize, closest_line: Option<usize>) -> Self {
+    #[must_use]
+    pub const fn multiple(pass: &'static str, count: usize, closest_line: Option<usize>) -> Self {
         Self {
             kind: FindDiagKind::MultipleMatches(count),
             pass,
@@ -118,10 +120,10 @@ impl FindDiag {
 }
 
 impl From<FindDiag> for FindError {
-    fn from(d: FindDiag) -> FindError {
+    fn from(d: FindDiag) -> Self {
         match d.kind {
-            FindDiagKind::NotFound => FindError::NotFound,
-            FindDiagKind::MultipleMatches(n) => FindError::MultipleMatches(n),
+            FindDiagKind::NotFound => Self::NotFound,
+            FindDiagKind::MultipleMatches(n) => Self::MultipleMatches(n),
         }
     }
 }
@@ -132,6 +134,7 @@ impl From<FindDiag> for FindError {
 /// or matched multiple times, and — when available — reports the last
 /// tolerance pass attempted and the closest near-match line. This gives LLM
 /// callers concrete hints about how to fix their `old_string`.
+#[must_use]
 pub fn format_match_failure(diag: &FindDiag, path: &std::path::Path) -> String {
     let closest_hint = diag
         .closest_line
@@ -471,7 +474,8 @@ pub fn find_replacement_range_diag(
 }
 
 /// Remove all `\r` characters (handles both `\r\n` and lone `\r`).
-pub(crate) fn strip_cr(s: &str) -> String {
+#[must_use]
+pub fn strip_cr(s: &str) -> String {
     s.chars().filter(|&c| c != '\r').collect()
 }
 
@@ -526,7 +530,7 @@ fn closest_collapsed_line(content: &str, needle: &str) -> Option<usize> {
 }
 
 /// Strip trailing whitespace from every line and re-join with `\n`.
-pub(crate) fn strip_trailing_ws(s: &str) -> String {
+pub fn strip_trailing_ws(s: &str) -> String {
     s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
 }
 
@@ -550,6 +554,7 @@ fn norm_to_orig_byte(original: &str, norm_offset: usize) -> usize {
 /// Return the byte offset of the start of line `line_idx` (0-based) in `s`.
 /// Lines are counted by `\n` occurrences (covers `\r\n` and bare `\n`).
 /// Returns `s.len()` when `line_idx` is beyond the last line.
+#[must_use]
 pub fn byte_offset_of_line(s: &str, line_idx: usize) -> usize {
     if line_idx == 0 {
         return 0;
@@ -576,7 +581,7 @@ fn leading_ws(line: &str) -> &str {
 /// `lines`. Blank lines are ignored (they contribute no indentation). Returns
 /// the longest prefix of spaces/tabs shared by all non-blank lines; if there
 /// are no non-blank lines, returns an empty slice.
-pub(crate) fn common_leading_ws<'a>(lines: &[&'a str]) -> &'a str {
+pub fn common_leading_ws<'a>(lines: &[&'a str]) -> &'a str {
     let mut common: Option<&'a str> = None;
     for line in lines {
         if line.trim().is_empty() {

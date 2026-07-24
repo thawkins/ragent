@@ -1,4 +1,4 @@
-//! MasterFetch tool structs implementing the [`Tool`](crate::Tool) trait.
+//! `MasterFetch` tool structs implementing the [`Tool`](crate::Tool) trait.
 //!
 //! This module aggregates the six `mf_*` tool structs:
 //!

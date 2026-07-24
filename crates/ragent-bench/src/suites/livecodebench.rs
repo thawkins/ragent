@@ -1,4 +1,4 @@
-//! LiveCodeBench benchmark adapter.
+//! `LiveCodeBench` benchmark adapter.
 
 use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;

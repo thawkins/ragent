@@ -248,11 +248,10 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
     );
     // A source was captured, so the References Index should list it.
     assert!(
-        body.contains("https://example.com/async"),
+        body.contains("[https://example.com/async](https://example.com/async)"),
         "RESEARCH.md References Index should list the captured web source"
     );
 }
-
 #[tokio::test]
 async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
     let tmp = TempDir::new().unwrap();
@@ -300,7 +299,7 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
     );
     assert!(body.contains("## Findings"));
     assert!(
-        body.contains("### Finding 1 — The source describes async/await idioms"),
+        body.contains("### Finding 1 — The source describes async/await idioms 1"),
         "RESEARCH.md findings must have a headline heading, got:\n{body}"
     );
     assert!(body.contains("**Observation:**"));
@@ -308,7 +307,6 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
     assert!(body.contains("**Cross-reference / Dependencies:**"));
     assert!(body.contains("**Implication:**"));
 }
-
 #[tokio::test]
 async fn executive_summary_format_writes_shorter_summary_instruction() {
     let tmp = TempDir::new().unwrap();
@@ -392,9 +390,8 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
     );
     assert!(body.contains("**Observation:**"));
     assert!(body.contains("**Implication:**"));
-    assert!(body.contains("https://example.com/async"));
+    assert!(body.contains("[https://example.com/async](https://example.com/async)"));
 }
-
 #[tokio::test]
 async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
     let tmp = TempDir::new().unwrap();
@@ -441,11 +438,11 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "frontmatter should record requested IMRaD format, got:\n{body}"
     );
 
-    // FR-004: exact H2 section order.
+    // FR-004: exact H2 section order (findings are rendered as bold H2 sub-headings).
     let h2: Vec<&str> = body
         .lines()
-        .filter(|line| line.starts_with("## "))
-        .map(|line| line.trim())
+        .filter(|line| line.starts_with("## ") && !line.starts_with("## **Finding"))
+        .map(str::trim)
         .collect();
     assert_eq!(
         h2,
@@ -526,11 +523,9 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "Results Findings must contain the LLM finding verbatim, got:\n{results_section}"
     );
     assert!(
-        results_section.contains("### Finding 1 — The source describes async/await idioms"),
+        results_section.contains("### Finding 1 — The source describes async/await idioms 1"),
         "Results Findings must have a derived headline heading, got:\n{results_section}"
-    );
-
-    // FR-009: Discussion contains cross-references and open questions.
+    ); // FR-009: Discussion contains cross-references and open questions.
     let discussion_idx = body
         .find("## Discussion")
         .expect("Discussion section exists");
@@ -553,7 +548,7 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "IMRaD output must contain References Index, got:\n{body}"
     );
     assert!(
-        body.contains("https://example.com/async"),
+        body.contains("[https://example.com/async](https://example.com/async)"),
         "References Index must list the captured web source, got:\n{body}"
     );
 }

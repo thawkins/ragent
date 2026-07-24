@@ -317,7 +317,7 @@ fn classify_and_add_with_context(
 fn extract_host(url: &str) -> String {
     url::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
         .unwrap_or_default()
 }
 

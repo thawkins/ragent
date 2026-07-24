@@ -29,14 +29,12 @@ fn estimate_line_count(content: &Value) -> usize {
                 let list_items = elem
                     .get("items")
                     .and_then(|i| i.as_array())
-                    .map(|items| items.len())
-                    .unwrap_or(0);
+                    .map_or(0, std::vec::Vec::len);
                 // Add lines for rows if present (xlsx)
                 let rows = elem
                     .get("rows")
                     .and_then(|r| r.as_array())
-                    .map(|r| r.len())
-                    .unwrap_or(0);
+                    .map_or(0, std::vec::Vec::len);
                 base + list_items + rows
             })
             .sum()
@@ -52,8 +50,7 @@ fn estimate_line_count(content: &Value) -> usize {
                 let list_items = elem
                     .get("items")
                     .and_then(|i| i.as_array())
-                    .map(|items| items.len())
-                    .unwrap_or(0);
+                    .map_or(0, std::vec::Vec::len);
                 base + list_items
             })
             .sum()
@@ -62,7 +59,7 @@ fn estimate_line_count(content: &Value) -> usize {
         sheets
             .iter()
             .filter_map(|sheet| sheet.get("rows").and_then(|r| r.as_array()))
-            .map(|rows| rows.len())
+            .map(std::vec::Vec::len)
             .sum()
     } else if let Some(slides) = content["slides"].as_array() {
         // PowerPoint format: count slides
@@ -170,10 +167,7 @@ impl Tool for OfficeWriteTool {
         .await
         .context("Failed to write document: the background task exited unexpectedly")??;
 
-        let file_size = tokio::fs::metadata(&path)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = tokio::fs::metadata(&path).await.map_or(0, |m| m.len());
 
         // Calculate line count from content for consistency with other write tools
         let line_count = estimate_line_count(&content);
@@ -621,10 +615,10 @@ fn write_pptx(path: &Path, content: &Value) -> Result<()> {
         let title = slide_def["title"].as_str().unwrap_or("");
         // Accept "body" or "content" as the slide body text.
         // If the value is an array of strings, join them with newlines.
-        let body_val = if !slide_def["body"].is_null() {
-            &slide_def["body"]
-        } else {
+        let body_val = if slide_def["body"].is_null() {
             &slide_def["content"]
+        } else {
+            &slide_def["body"]
         };
         let body_owned: String;
         let body: &str = if let Some(s) = body_val.as_str() {

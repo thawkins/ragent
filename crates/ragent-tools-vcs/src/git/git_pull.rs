@@ -61,7 +61,7 @@ impl Tool for GitPullTool {
             args.push(b.to_string());
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {

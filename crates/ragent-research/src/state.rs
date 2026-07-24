@@ -49,6 +49,7 @@ impl ResearchState {
 
     /// Return `true` when every sub-question has been answered and there are
     /// no unresolved evidence gaps.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         !self.plan.sub_questions.is_empty()
             && self
@@ -60,6 +61,7 @@ impl ResearchState {
     }
 
     /// Return the sub-questions that still need work.
+    #[must_use]
     pub fn pending_sub_questions(&self) -> Vec<&SubQuestion> {
         self.plan
             .sub_questions
@@ -69,18 +71,19 @@ impl ResearchState {
     }
 
     /// Return the unresolved evidence gaps.
+    #[must_use]
     pub fn active_gaps(&self) -> Vec<&EvidenceGap> {
         self.gaps.iter().filter(|g| !g.resolved).collect()
     }
 
     /// Increment the iteration counter and return the new value.
-    pub fn increment_iteration(&mut self) -> u32 {
+    pub const fn increment_iteration(&mut self) -> u32 {
         self.iteration_count += 1;
         self.iteration_count
     }
 
     /// Record the latest evaluation score.
-    pub fn set_evaluation_score(&mut self, score: u32) {
+    pub const fn set_evaluation_score(&mut self, score: u32) {
         self.evaluation_score = Some(score);
     }
 
@@ -182,6 +185,7 @@ impl ResearchState {
     }
 
     /// A snapshot of counts useful for progress rendering.
+    #[must_use]
     pub fn counts(&self) -> StateCounts {
         StateCounts {
             sub_questions_total: self.plan.sub_questions.len(),
@@ -256,6 +260,7 @@ impl ResearchPlan {
     }
 
     /// Return sub-questions grouped by status for progress rendering.
+    #[must_use]
     pub fn status_counts(&self) -> HashMap<String, usize> {
         let mut counts = HashMap::new();
         for sq in &self.sub_questions {
@@ -301,12 +306,14 @@ impl SubQuestionStatus {
     ///
     /// [`Pending`]: Self::Pending
     /// [`Blocked`]: Self::Blocked
-    pub fn is_pending(self) -> bool {
+    #[must_use]
+    pub const fn is_pending(self) -> bool {
         matches!(self, Self::Pending | Self::Blocked)
     }
 
     /// Snake-case label used in YAML/JSON rendering.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::InProgress => "in_progress",

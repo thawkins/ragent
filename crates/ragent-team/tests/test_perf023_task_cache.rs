@@ -1,4 +1,4 @@
-//! PERF-023: in-memory TaskList cache with write-through persistence.
+//! PERF-023: in-memory `TaskList` cache with write-through persistence.
 //!
 //! Verifies that:
 //! - `TeamManager::task_list()` returns the on-disk list and populates the
@@ -35,7 +35,7 @@ struct TaskCacheFixture {
 }
 
 impl TaskCacheFixture {
-    fn new(team_dir: std::path::PathBuf) -> Self {
+    const fn new(team_dir: std::path::PathBuf) -> Self {
         Self {
             team_dir,
             list: RwLock::new(None),
@@ -112,7 +112,7 @@ fn test_task_list_caches_after_first_load() {
     drop(task_store);
     drop(store);
 
-    let fixture = TaskCacheFixture::new(team_dir.clone());
+    let fixture = TaskCacheFixture::new(team_dir);
 
     let first = fixture.task_list().expect("first load");
     assert_eq!(first.tasks.len(), 1);
@@ -214,7 +214,7 @@ fn test_invalidate_forces_reload() {
     drop(task_store);
     drop(store);
 
-    let fixture = TaskCacheFixture::new(team_dir.clone());
+    let fixture = TaskCacheFixture::new(team_dir);
     let _ = fixture.task_list().expect("first");
 
     // After invalidate, mtime is None so the next call reloads even if the
@@ -232,7 +232,7 @@ fn test_task_list_handles_missing_file() {
     TeamStore::create("empty-team", "lead-sess", &dir, true).expect("create");
     let team_dir = team_dir_for(&dir, "empty-team");
 
-    let fixture = TaskCacheFixture::new(team_dir.clone());
+    let fixture = TaskCacheFixture::new(team_dir);
     let list = fixture.task_list().expect("empty list");
     assert!(list.tasks.is_empty());
 }

@@ -148,7 +148,7 @@ fn recompile_denylist() -> Result<()> {
     Ok(())
 }
 
-/// Compile a list of glob patterns into a GlobSet.
+/// Compile a list of glob patterns into a `GlobSet`.
 fn compile_patterns(patterns: &[String]) -> GlobSet {
     let mut builder = GlobSetBuilder::new();
     for pattern in patterns {
@@ -228,8 +228,7 @@ pub fn get_denylist() -> Vec<String> {
 pub fn get_compiled_allowlist() -> Arc<GlobSet> {
     compiled_allowlist()
         .read()
-        .map(|g| Arc::new(g.clone()))
-        .unwrap_or_else(|_| Arc::new(GlobSet::empty()))
+        .map_or_else(|_| Arc::new(GlobSet::empty()), |g| Arc::new(g.clone()))
 }
 
 /// Returns the compiled denylist for efficient matching.
@@ -240,8 +239,7 @@ pub fn get_compiled_allowlist() -> Arc<GlobSet> {
 pub fn get_compiled_denylist() -> Arc<GlobSet> {
     compiled_denylist()
         .read()
-        .map(|g| Arc::new(g.clone()))
-        .unwrap_or_else(|_| Arc::new(GlobSet::empty()))
+        .map_or_else(|_| Arc::new(GlobSet::empty()), |g| Arc::new(g.clone()))
 }
 
 /// Invalidate both compiled caches so the next call re-reads the in-memory

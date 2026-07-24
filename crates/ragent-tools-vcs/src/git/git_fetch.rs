@@ -71,7 +71,7 @@ impl Tool for GitFetchTool {
             }
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -85,9 +85,9 @@ impl Tool for GitFetchTool {
             if all {
                 "Fetched all remotes.".to_string()
             } else if prune {
-                format!("Fetched {} with prune.", remote)
+                format!("Fetched {remote} with prune.")
             } else {
-                format!("Fetched from {}.", remote)
+                format!("Fetched from {remote}.")
             }
         } else {
             stdout

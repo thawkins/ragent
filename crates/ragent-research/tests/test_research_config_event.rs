@@ -1,4 +1,4 @@
-//! Tests for the ConfigSnapshot session event emitted at the start of a
+//! Tests for the `ConfigSnapshot` session event emitted at the start of a
 //! `/research create` run.
 
 use ragent_research::{

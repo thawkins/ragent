@@ -1,10 +1,10 @@
-//! CMake language parser using tree-sitter.
+//! `CMake` language parser using tree-sitter.
 //!
 //! Extracts function definitions, macro definitions, block definitions,
-//! foreach/while loops, if-conditions, and normal commands from CMake
+//! foreach/while loops, if-conditions, and normal commands from `CMake`
 //! listfiles (`.cmake` and `CMakeLists.txt`).
 //!
-//! CMake's language is command-based. The tree-sitter grammar represents
+//! `CMake`'s language is command-based. The tree-sitter grammar represents
 //! top-level constructs as `function_def`, `macro_def`, `block_def`,
 //! `foreach_loop`, `while_loop`, `if_condition`, and `normal_command`.
 //! Each `*_command` child contains an `identifier` (the command name) and
@@ -16,14 +16,15 @@ use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::Node;
 
-/// Tree-sitter parser for the CMake build language.
+/// Tree-sitter parser for the `CMake` build language.
 pub struct CmakeParser {
     _private: (),
 }
 
 impl CmakeParser {
-    /// Create a new CMake parser.
-    pub fn new() -> Self {
+    /// Create a new `CMake` parser.
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -74,7 +75,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -87,7 +88,7 @@ impl Ctx<'_> {
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
-/// Walk a tree-sitter node, extracting CMake symbols.
+/// Walk a tree-sitter node, extracting `CMake` symbols.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     match node.kind() {
         "function_def" => extract_function_def(ctx, node, parent_id),
@@ -108,7 +109,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── Function definition (`function(name …) … endfunction()`) ────────────────
 
-/// Extract a CMake `function()` definition.
+/// Extract a `CMake` `function()` definition.
 ///
 /// A `function_def` contains a `function_command` child whose first
 /// argument is the function name, and a `body` child with nested statements.
@@ -157,7 +158,7 @@ fn extract_function_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── Macro definition (`macro(name …) … endmacro()`) ─────────────────────────
 
-/// Extract a CMake `macro()` definition.
+/// Extract a `CMake` `macro()` definition.
 fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     let cmd = find_child(node, "macro_command");
     let name = cmd
@@ -202,7 +203,7 @@ fn extract_macro_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── Block definition (`block() … endblock()`) ───────────────────────────────
 
-/// Extract a CMake `block()` scope definition (CMake 3.25+).
+/// Extract a `CMake` `block()` scope definition (`CMake` 3.25+).
 fn extract_block_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     let cmd = find_child(node, "block_command");
     let args = cmd
@@ -239,7 +240,7 @@ fn extract_block_def(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── Foreach loop ───────────────────────────────────────────────────────────
 
-/// Extract a CMake `foreach()` loop.
+/// Extract a `CMake` `foreach()` loop.
 fn extract_foreach_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     let cmd = find_child(node, "foreach_command");
     let args = cmd
@@ -276,7 +277,7 @@ fn extract_foreach_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── While loop ─────────────────────────────────────────────────────────────
 
-/// Extract a CMake `while()` loop.
+/// Extract a `CMake` `while()` loop.
 fn extract_while_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     let cmd = find_child(node, "while_command");
     let args = cmd
@@ -313,7 +314,7 @@ fn extract_while_loop(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── If condition ───────────────────────────────────────────────────────────
 
-/// Extract a CMake `if()` conditional.
+/// Extract a `CMake` `if()` conditional.
 fn extract_if_condition(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
     let cmd = find_child(node, "if_command");
     let args = cmd
@@ -350,7 +351,7 @@ fn extract_if_condition(ctx: &mut Ctx, node: Node, parent_id: Option<i64>) {
 
 // ── Normal command ─────────────────────────────────────────────────────────
 
-/// Extract a CMake normal command as a call reference.
+/// Extract a `CMake` normal command as a call reference.
 ///
 /// Commands like `add_library`, `target_link_libraries`, `find_package`,
 /// `include()`, `add_subdirectory()` are recorded as references. The
@@ -397,7 +398,7 @@ fn find_child<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     node.children(cursor).find(|&child| child.kind() == kind)
 }
 
-/// Get the text of the first argument in a command's argument_list.
+/// Get the text of the first argument in a command's `argument_list`.
 fn first_argument_text(ctx: &Ctx, cmd_node: Node<'_>) -> Option<String> {
     let args = find_child(cmd_node, "argument_list")?;
     let cursor = &mut args.walk();
@@ -410,7 +411,7 @@ fn first_argument_text(ctx: &Ctx, cmd_node: Node<'_>) -> Option<String> {
     None
 }
 
-/// Get the full text of a command's argument_list (without parentheses).
+/// Get the full text of a command's `argument_list` (without parentheses).
 fn argument_list_text(ctx: &Ctx, cmd_node: Node) -> Option<String> {
     let args = find_child(cmd_node, "argument_list")?;
     Some(ctx.text(args).to_string())

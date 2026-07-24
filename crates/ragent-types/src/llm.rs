@@ -134,7 +134,7 @@ pub struct ChatRequest {
     pub stream_timeout_secs: Option<u64>,
     /// Thinking/reasoning configuration for this request.
     /// Provider adapters use this to set provider-specific parameters
-    /// (e.g. Anthropic `thinking.*`, OpenAI `reasoning_effort`).
+    /// (e.g. Anthropic `thinking.*`, `OpenAI` `reasoning_effort`).
     /// Falls back to legacy `options["thinking"]` if not set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking: Option<crate::ThinkingConfig>,

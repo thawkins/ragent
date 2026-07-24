@@ -3,7 +3,7 @@
 //! Since the workspace forbids `unsafe_code` and Rust 2024 requires `unsafe`
 //! for `set_var`/`remove_var`, we cannot manipulate environment variables in
 //! tests.  We test the aspects of `detect_provider` that are controllable via
-//! the database: preferred_provider, disabled flags, and database-stored keys.
+//! the database: `preferred_provider`, disabled flags, and database-stored keys.
 //! We also verify the function returns *something* (or None) without panicking
 //! under the ambient environment.
 

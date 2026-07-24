@@ -47,7 +47,8 @@ pub struct FileBlockStorage;
 
 impl FileBlockStorage {
     /// Create a new file-based block storage instance.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 
@@ -181,6 +182,7 @@ pub fn load_all_blocks(
 /// have YAML frontmatter are loaded as blocks with label "MEMORY" and the
 /// given default scope.
 #[allow(clippy::ptr_arg)]
+#[must_use]
 pub fn load_legacy_memory(scope: &BlockScope, working_dir: &PathBuf) -> Option<MemoryBlock> {
     let dir = resolve_block_dir(scope, working_dir).ok()?;
     let path = dir.join("MEMORY.md");

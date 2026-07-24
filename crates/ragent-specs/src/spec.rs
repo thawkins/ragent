@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub struct SpecId(String);
 
 impl SpecId {
-    /// Create a new SpecId from a string.
+    /// Create a new `SpecId` from a string.
     ///
     /// Returns `None` if the string is empty or contains invalid characters.
     pub fn new(id: impl Into<String>) -> Option<Self> {
@@ -29,11 +29,13 @@ impl SpecId {
     }
 
     /// Get the raw string representation.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Get the directory name for this spec.
+    #[must_use]
     pub fn dir_name(&self) -> &str {
         &self.0
     }
@@ -79,7 +81,7 @@ pub enum SpecStatus {
 
 impl SpecStatus {
     /// All possible status values.
-    pub const ALL: &[SpecStatus] = &[
+    pub const ALL: &[Self] = &[
         Self::Draft,
         Self::InReview,
         Self::Approved,
@@ -90,7 +92,8 @@ impl SpecStatus {
     ];
 
     /// Human-readable name.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::InReview => "in_review",
@@ -103,6 +106,7 @@ impl SpecStatus {
     }
 
     /// Parse a status from its string representation.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "draft" => Some(Self::Draft),
@@ -145,7 +149,8 @@ pub enum EarsTemplate {
 
 impl EarsTemplate {
     /// Human-readable name.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Ubiquitous => "ubiquitous",
             Self::EventDriven => "event_driven",
@@ -188,7 +193,8 @@ pub enum TaskStatus {
 
 impl TaskStatus {
     /// Human-readable name.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::InProgress => "in_progress",
@@ -198,6 +204,7 @@ impl TaskStatus {
     }
 
     /// Parse a status from its string representation.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),
@@ -249,7 +256,7 @@ pub struct Spec {
     pub requirements: Vec<Requirement>,
     /// Parsed plan tasks.
     pub tasks: Vec<Task>,
-    /// Audit trail entries: (timestamp, old_status, new_status, actor).
+    /// Audit trail entries: (timestamp, `old_status`, `new_status`, actor).
     pub audit_trail: Vec<(u64, String, String, String)>,
     /// Optional reviewer assignments.
     pub reviewers: Vec<String>,
@@ -296,21 +303,25 @@ impl Spec {
     }
 
     /// Get the path to the spec directory.
+    #[must_use]
     pub fn dir_path(&self, specs_root: &Path) -> PathBuf {
         specs_root.join(self.id.dir_name())
     }
 
     /// Get the path to SPEC.md.
+    #[must_use]
     pub fn spec_md_path(&self, specs_root: &Path) -> PathBuf {
         self.dir_path(specs_root).join("SPEC.md")
     }
 
     /// Get the path to PLAN.md.
+    #[must_use]
     pub fn plan_md_path(&self, specs_root: &Path) -> PathBuf {
         self.dir_path(specs_root).join("PLAN.md")
     }
 
     /// Compute implementation coverage as a percentage.
+    #[must_use]
     pub fn coverage_pct(&self) -> f64 {
         if self.requirements.is_empty() {
             return 0.0;
@@ -365,6 +376,7 @@ impl Plan {
     }
 
     /// Get the path to PLAN.md.
+    #[must_use]
     pub fn path(&self, specs_root: &Path) -> PathBuf {
         specs_root.join(self.spec_id.dir_name()).join("PLAN.md")
     }
@@ -416,7 +428,7 @@ mod tests {
     #[test]
     fn test_spec_new() {
         let id = SpecId::new("test").unwrap();
-        let spec = Spec::new(id.clone(), "Test Spec");
+        let spec = Spec::new(id, "Test Spec");
         assert_eq!(spec.id.as_str(), "test");
         assert_eq!(spec.status, SpecStatus::Draft);
         assert_eq!(spec.title, "Test Spec");

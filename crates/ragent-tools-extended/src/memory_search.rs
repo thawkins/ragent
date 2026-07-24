@@ -103,7 +103,7 @@ impl Tool for MemorySearchTool {
         }
 
         // Emit event.
-        let _ = ctx.event_bus.publish(Event::MemorySearched {
+        let () = ctx.event_bus.publish(Event::MemorySearched {
             session_id: ctx.session_id.clone(),
             query: query.to_string(),
             result_count: total_results,

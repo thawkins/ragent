@@ -1,4 +1,4 @@
-//! SQLite WAL-mode content cache for the masterfetch toolset.
+//! `SQLite` WAL-mode content cache for the masterfetch toolset.
 //!
 //! Implements FR-018 and NFR-002.
 //!
@@ -200,7 +200,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite database cannot be opened or the schema
+    /// Returns an error if the `SQLite` database cannot be opened or the schema
     /// cannot be initialised.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
@@ -212,7 +212,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite database cannot be opened or the schema
+    /// Returns an error if the `SQLite` database cannot be opened or the schema
     /// cannot be initialised.
     pub fn open_with_config(
         path: impl AsRef<std::path::Path>,
@@ -288,7 +288,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite query fails.
+    /// Returns an error if the `SQLite` query fails.
     pub fn get_cached(&self, key: &CacheKey) -> Result<Option<CachedEntry>> {
         let conn = self.conn.lock().expect("cache mutex poisoned");
         let now = unix_now();
@@ -363,7 +363,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite write fails.
+    /// Returns an error if the `SQLite` write fails.
     pub fn set_cached(
         &self,
         key: &CacheKey,
@@ -395,7 +395,7 @@ impl ContentCache {
                 key.css_selector_component(),
                 key.pages_component(),
                 content,
-                content_ok as i64,
+                i64::from(content_ok),
                 i64::from(status_code),
                 content_type,
                 now as i64,
@@ -417,7 +417,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite delete fails.
+    /// Returns an error if the `SQLite` delete fails.
     pub fn clear_expired(&self) -> Result<usize> {
         let conn = self.conn.lock().expect("cache mutex poisoned");
         let now = unix_now();
@@ -434,7 +434,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite delete fails.
+    /// Returns an error if the `SQLite` delete fails.
     pub fn clear_all(&self) -> Result<usize> {
         let conn = self.conn.lock().expect("cache mutex poisoned");
         let purged = conn.execute("DELETE FROM fetch_cache", [])?;
@@ -446,7 +446,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite query fails.
+    /// Returns an error if the `SQLite` query fails.
     pub fn entry_count(&self) -> Result<usize> {
         let conn = self.conn.lock().expect("cache mutex poisoned");
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM fetch_cache", [], |r| r.get(0))?;
@@ -457,7 +457,7 @@ impl ContentCache {
     ///
     /// # Errors
     ///
-    /// Returns an error if the SQLite query fails.
+    /// Returns an error if the `SQLite` query fails.
     pub fn total_bytes(&self) -> Result<usize> {
         let conn = self.conn.lock().expect("cache mutex poisoned");
         let total: i64 = conn.query_row(
@@ -468,7 +468,7 @@ impl ContentCache {
         Ok(total as usize)
     }
 
-    /// Return the current SQLite journal mode (e.g. `"wal"` or `"memory"`).
+    /// Return the current `SQLite` journal mode (e.g. `"wal"` or `"memory"`).
     ///
     /// Useful for diagnostics and for tests that need to verify WAL mode is
     /// active on a file-based cache.

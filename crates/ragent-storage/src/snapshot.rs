@@ -82,7 +82,7 @@ impl IncrementalSnapshot {
                 // Binary file or empty diff — carry base forward unchanged
                 continue;
             }
-            let base_bytes = files.get(path).map(|b| b.as_slice()).unwrap_or(b"");
+            let base_bytes = files.get(path).map(std::vec::Vec::as_slice).unwrap_or(b"");
             let base_str = String::from_utf8_lossy(base_bytes);
             let patched = apply_unified_diff(&base_str, diff_text)?;
             files.insert(path.clone(), patched.into_bytes());

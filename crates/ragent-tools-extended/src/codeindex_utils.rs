@@ -29,7 +29,7 @@ use crate::ToolOutput;
 ///
 /// A [`ToolOutput`] with the disabled message and structured metadata.
 #[must_use]
-pub(crate) fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str]) -> ToolOutput {
+pub fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str]) -> ToolOutput {
     let content = if fallback_hint.is_empty() {
         "Code index is not available. It may be disabled or not yet initialised.".to_string()
     } else {
@@ -83,14 +83,12 @@ where
 {
     let deadline = Instant::now() + timeout;
     loop {
-        match op()? {
-            Some(value) => return Ok(Some(value)),
-            None => {
-                if Instant::now() >= deadline {
-                    return Ok(None);
-                }
-                tokio::time::sleep(interval).await;
-            }
+        if let Some(value) = op()? {
+            return Ok(Some(value));
         }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        tokio::time::sleep(interval).await;
     }
 }

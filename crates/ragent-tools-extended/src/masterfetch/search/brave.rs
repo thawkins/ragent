@@ -104,14 +104,14 @@ impl BraveEngine {
     /// Create a new `BraveEngine` that uses the shared masterfetch HTTP
     /// client.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { client: None }
     }
 
     /// Create a new `BraveEngine` with a custom HTTP client (for testing
     /// or custom timeout/redirect configuration).
     #[must_use]
-    pub fn with_client(client: reqwest::Client) -> Self {
+    pub const fn with_client(client: reqwest::Client) -> Self {
         Self {
             client: Some(client),
         }
@@ -329,7 +329,7 @@ pub fn build_search_params(query: &str, opts: &SearchOptions) -> Vec<(String, St
 /// Map a [`Freshness`] value to Brave's `tf` parameter.
 ///
 /// Returns `None` for [`Freshness::Any`] (no time filter).
-fn freshness_to_tf(freshness: Freshness) -> Option<&'static str> {
+const fn freshness_to_tf(freshness: Freshness) -> Option<&'static str> {
     match freshness {
         Freshness::Day => Some("pd"),
         Freshness::Week => Some("pw"),
@@ -465,41 +465,43 @@ pub fn parse_results_html(html: &str, source: &str) -> Vec<RawResult> {
     let header_matches: Vec<(String, String)> = header_re
         .captures_iter(html)
         .map(|cap| {
-            let href = cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-            let inner = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+            let href = cap.get(1).map_or("", |m| m.as_str()).to_string();
+            let inner = cap.get(2).map_or("", |m| m.as_str());
             // Extract title from inner content: try snippet-title span, else strip tags.
             let title = snippet_title_re
                 .captures(inner)
                 .and_then(|c| c.get(1))
-                .map(|m| strip_html_tags(m.as_str()).trim().to_string())
-                .unwrap_or_else(|| strip_html_tags(inner).trim().to_string());
+                .map_or_else(
+                    || strip_html_tags(inner).trim().to_string(),
+                    |m| strip_html_tags(m.as_str()).trim().to_string(),
+                );
             (href, title)
         })
         .filter(|(href, title)| !href.is_empty() && !title.is_empty())
         .collect();
 
-    if !header_matches.is_empty() {
-        titles_with_urls = header_matches;
-    } else {
+    if header_matches.is_empty() {
         // Try Pattern 2: title-class links.
         let title_link_matches: Vec<(String, String)> = title_link_re
             .captures_iter(html)
             .map(|cap| {
-                let href = cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-                let title_html = cap.get(2).map(|m| m.as_str()).unwrap_or("");
+                let href = cap.get(1).map_or("", |m| m.as_str()).to_string();
+                let title_html = cap.get(2).map_or("", |m| m.as_str());
                 let title = strip_html_tags(title_html).trim().to_string();
                 (href, title)
             })
             .filter(|(href, title)| !href.is_empty() && !title.is_empty())
             .collect();
 
-        if !title_link_matches.is_empty() {
-            titles_with_urls = title_link_matches;
-        } else {
+        if title_link_matches.is_empty() {
             // Pattern 3: snippet-title spans (title only, no URL).
             // We can't get URLs this way, so we skip this fallback.
             // Brave results without URLs are not useful.
+        } else {
+            titles_with_urls = title_link_matches;
         }
+    } else {
+        titles_with_urls = header_matches;
     }
 
     // Collect all snippet texts.
@@ -555,7 +557,7 @@ fn unwrap_brave_url(href: &str) -> String {
 /// Replaces `<...>` sequences with nothing, and decodes common HTML entities
 /// (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&#39;`).
 fn strip_html_tags(s: &str) -> String {
-    let tag_re = Regex::new(r#"<[^>]*>"#).unwrap_or_else(|e| panic!("invalid tag regex: {e}"));
+    let tag_re = Regex::new(r"<[^>]*>").unwrap_or_else(|e| panic!("invalid tag regex: {e}"));
     let stripped = tag_re.replace_all(s, "");
 
     stripped

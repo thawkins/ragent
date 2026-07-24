@@ -44,7 +44,7 @@ fn configured_app() -> App {
 fn all_message_text(app: &App) -> String {
     app.messages
         .iter()
-        .map(|message| message.text_content())
+        .map(ragent_agent::message::Message::text_content)
         .collect::<Vec<_>>()
         .join("\n")
 }

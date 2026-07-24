@@ -15,7 +15,8 @@ pub struct PythonParser {
 
 impl PythonParser {
     /// Create a new Python parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -63,7 +64,7 @@ struct ExtractCtx<'a> {
 }
 
 impl ExtractCtx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -271,43 +272,43 @@ fn try_extract_assignment(
 ) {
     let cursor = &mut node.walk();
     for child in node.children(cursor) {
-        if child.kind() == "assignment" {
-            if let Some(left) = child.child_by_field_name("left") {
-                let name = ctx.node_text(left).trim().to_string();
-                // Only treat ALL_CAPS names as constants.
-                if !name.is_empty()
-                    && name
-                        .chars()
-                        .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
-                    && name.chars().any(|c| c.is_alphabetic())
-                {
-                    let type_ann = child
-                        .child_by_field_name("type")
-                        .map(|n| ctx.node_text(n).to_string());
-                    let sig = match &type_ann {
-                        Some(t) => format!("{name}: {t}"),
-                        None => name.clone(),
-                    };
-                    let qualified_name = build_qualified(scope, &name);
+        if child.kind() == "assignment"
+            && let Some(left) = child.child_by_field_name("left")
+        {
+            let name = ctx.node_text(left).trim().to_string();
+            // Only treat ALL_CAPS names as constants.
+            if !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                && name.chars().any(char::is_alphabetic)
+            {
+                let type_ann = child
+                    .child_by_field_name("type")
+                    .map(|n| ctx.node_text(n).to_string());
+                let sig = match &type_ann {
+                    Some(t) => format!("{name}: {t}"),
+                    None => name.clone(),
+                };
+                let qualified_name = build_qualified(scope, &name);
 
-                    let id = ctx.alloc_id();
-                    ctx.symbols.push(Symbol {
-                        id,
-                        file_id: 0,
-                        name,
-                        qualified_name: Some(qualified_name),
-                        kind: SymbolKind::Constant,
-                        visibility: Visibility::Public,
-                        start_line: child.start_position().row as u32 + 1,
-                        end_line: child.end_position().row as u32 + 1,
-                        start_col: child.start_position().column as u32,
-                        end_col: child.end_position().column as u32,
-                        parent_id,
-                        signature: Some(sig),
-                        doc_comment: None,
-                        body_hash: None,
-                    });
-                }
+                let id = ctx.alloc_id();
+                ctx.symbols.push(Symbol {
+                    id,
+                    file_id: 0,
+                    name,
+                    qualified_name: Some(qualified_name),
+                    kind: SymbolKind::Constant,
+                    visibility: Visibility::Public,
+                    start_line: child.start_position().row as u32 + 1,
+                    end_line: child.end_position().row as u32 + 1,
+                    start_col: child.start_position().column as u32,
+                    end_col: child.end_position().column as u32,
+                    parent_id,
+                    signature: Some(sig),
+                    doc_comment: None,
+                    body_hash: None,
+                });
             }
         }
     }

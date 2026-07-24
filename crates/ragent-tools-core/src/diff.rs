@@ -85,8 +85,8 @@ impl Tool for DiffFilesTool {
 
         for group in diff.grouped_ops(context_lines) {
             // Compute hunk header
-            let old_start = group.first().map(|o| o.old_range().start).unwrap_or(0);
-            let new_start = group.first().map(|o| o.new_range().start).unwrap_or(0);
+            let old_start = group.first().map_or(0, |o| o.old_range().start);
+            let new_start = group.first().map_or(0, |o| o.new_range().start);
             let old_len: usize = group.iter().map(|o| o.old_range().len()).sum();
             let new_len: usize = group.iter().map(|o| o.new_range().len()).sum();
             output.push_str(&format!(

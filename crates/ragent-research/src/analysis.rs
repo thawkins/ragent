@@ -191,6 +191,7 @@ impl LlmAnalysisEngine {
     }
 
     /// Provide an API key for the provider.
+    #[must_use]
     pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
         self.api_key = api_key;
         self
@@ -198,6 +199,7 @@ impl LlmAnalysisEngine {
 
     /// Override the API base URL. If unset, the engine resolves it from storage
     /// / config / env at analysis time.
+    #[must_use]
     pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
         self.base_url = base_url;
         self
@@ -206,13 +208,15 @@ impl LlmAnalysisEngine {
     /// Override the `system` message persona (FR-009 / T-008). When set, the
     /// supplied string replaces the default "careful research analyst" system
     /// prompt verbatim. Pass `None` (or never call this) to keep the default.
+    #[must_use]
     pub fn with_persona(mut self, persona: Option<String>) -> Self {
         self.persona = persona;
         self
     }
 
     /// Set the output format requested via `--format`.
-    pub fn with_output_format(mut self, fmt: Option<OutputFormat>) -> Self {
+    #[must_use]
+    pub const fn with_output_format(mut self, fmt: Option<OutputFormat>) -> Self {
         self.output_format = fmt;
         self
     }
@@ -382,7 +386,7 @@ impl<'a> SynthesisPromptBuilder<'a> {
     }
 
     /// Attach the captured source corpus. Required before [`build`].
-    pub fn sources(mut self, sources: &'a [SourceBody]) -> Self {
+    pub const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
         self.sources = sources;
         self
     }
@@ -395,14 +399,14 @@ impl<'a> SynthesisPromptBuilder<'a> {
     }
 
     /// Set the output artifact for this prompt (FR-012).
-    pub fn output_format(mut self, fmt: OutputFormat) -> Self {
+    pub const fn output_format(mut self, fmt: OutputFormat) -> Self {
         self.config.output_format = Some(fmt);
         self
     }
 
     /// Borrow the active config immutably.
     #[allow(dead_code)] // exercised by T-003..T-008
-    pub fn cfg(&self) -> &SynthesisPromptConfig {
+    pub const fn cfg(&self) -> &SynthesisPromptConfig {
         &self.config
     }
 
@@ -442,11 +446,11 @@ fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
 /// per-finding labeled-paragraph template. With the default config this is
 /// byte-identical to the legacy middle of `build_synthesis_prompt`.
 ///
-/// The IMRaD output format (FR-012 / specs/imradreport) is handled specially:
+/// The `IMRaD` output format (FR-012 / specs/imradreport) is handled specially:
 /// the model is still asked for the same four raw sections (Summary, Findings,
 /// In-Project Cross-References, Open Questions) so the parser remains unchanged,
 /// and an extra paragraph encourages results-oriented phrasing so the final
-/// IMRaD layout reads naturally in the `## Results` section.
+/// `IMRaD` layout reads naturally in the `## Results` section.
 fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
@@ -920,13 +924,12 @@ fn mechanical_fallback_findings(text: &str) -> Vec<String> {
                 "**Headline:** Model response could not be parsed\n\n\
                  **Observation:** (findings could not be structured — see below)\n\n\
                  The raw model response (truncated) is preserved for manual review:\n\n\
-                 ```text\n{raw}\n```\n\n\
+                 ```text\n{truncated}\n```\n\n\
                  **Analysis:** (extracted mechanically — the model output did not \
                  contain the four required labeled paragraphs)\n\n\
                  **Cross-reference / Dependencies:** No direct dependencies.\n\n\
                  **Implication:** Re-run `/research create` or refine the topic; \
                  the raw model output is preserved above for manual review.",
-                raw = truncated,
             ));
         }
     }
@@ -1076,7 +1079,7 @@ fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
 
     // Kahn's algorithm. `in_degree[i]` is the number of dependencies finding i
     // has (the count of edges leaving node i toward its prerequisites).
-    let mut in_degree: Vec<usize> = adj.iter().map(|deps| deps.len()).collect();
+    let mut in_degree: Vec<usize> = adj.iter().map(std::vec::Vec::len).collect();
 
     // Roots (no dependencies) keep their original relative order via a FIFO
     // queue. Each queue item is placed before its dependants are released.
@@ -1322,8 +1325,7 @@ mod tests {
         assert_eq!(ordered.len(), 2);
         assert!(
             ordered[0].contains("Finding 2") || ordered[1].contains("Finding 1"),
-            "cycle should be broken by keeping original order, got: {:?}",
-            ordered
+            "cycle should be broken by keeping original order, got: {ordered:?}"
         );
     }
 
@@ -1530,7 +1532,7 @@ mod tests {
              **Implication:** i."
             .to_string();
         let config = SynthesisPromptConfig {
-            few_shot_examples: vec![exemplar.clone()],
+            few_shot_examples: vec![exemplar],
             ..Default::default()
         };
         let prompt = SynthesisPromptBuilder::new("topic")

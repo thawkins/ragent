@@ -387,7 +387,7 @@ fn test_cache_get_missing_domain_returns_none() {
 fn test_cache_expired_entry_returns_none() {
     let mut cache = RobotsCache::new();
     let rules = parse_robots_txt("User-agent: *\nDisallow: /private/\n");
-    let expired = Instant::now() - ROBOTS_CACHE_TTL - Duration::from_secs(1);
+    let expired = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap() - Duration::from_secs(1);
     cache.insert_with_timestamp("example.com", rules, expired);
     assert!(cache.get("example.com").is_none());
 }
@@ -396,7 +396,8 @@ fn test_cache_expired_entry_returns_none() {
 fn test_cache_entry_just_before_ttl_is_fresh() {
     let mut cache = RobotsCache::new();
     let rules = parse_robots_txt("User-agent: *\nDisallow: /private/\n");
-    let near_expiry = Instant::now() - ROBOTS_CACHE_TTL + Duration::from_secs(1);
+    let near_expiry =
+        Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap() + Duration::from_secs(1);
     cache.insert_with_timestamp("example.com", rules, near_expiry);
     assert!(cache.get("example.com").is_some());
 }
@@ -406,7 +407,7 @@ fn test_cache_entry_at_exact_ttl_is_expired() {
     let mut cache = RobotsCache::new();
     let rules = parse_robots_txt("User-agent: *\nDisallow: /private/\n");
     // Exactly at TTL → elapsed >= TTL → expired.
-    let exact = Instant::now() - ROBOTS_CACHE_TTL;
+    let exact = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap();
     cache.insert_with_timestamp("example.com", rules, exact);
     assert!(cache.get("example.com").is_none());
 }
@@ -433,7 +434,7 @@ fn test_cache_evict_single_domain() {
 #[test]
 fn test_cache_clear_expired_removes_only_stale() {
     let mut cache = RobotsCache::new();
-    let expired = Instant::now() - ROBOTS_CACHE_TTL - Duration::from_secs(10);
+    let expired = Instant::now().checked_sub(ROBOTS_CACHE_TTL).unwrap() - Duration::from_secs(10);
     cache.insert_with_timestamp("old.com", RobotsRules::default(), expired);
     cache.insert("new.com", RobotsRules::default());
     let removed = cache.clear_expired();

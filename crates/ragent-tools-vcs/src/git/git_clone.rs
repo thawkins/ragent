@@ -76,7 +76,7 @@ impl Tool for GitCloneTool {
 
         if let Some(d) = depth {
             args.push("--depth".to_string());
-            args.push(format!("{}", d));
+            args.push(format!("{d}"));
         }
 
         args.push(url.to_string());
@@ -85,7 +85,7 @@ impl Tool for GitCloneTool {
             args.push(dir.to_string());
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -105,9 +105,9 @@ impl Tool for GitCloneTool {
         let content = if stdout.trim().is_empty() {
             let dir_msg = clone_dir
                 .as_ref()
-                .map(|d| format!(" into '{}'", d))
+                .map(|d| format!(" into '{d}'"))
                 .unwrap_or_default();
-            format!("Cloned repository{}.", dir_msg)
+            format!("Cloned repository{dir_msg}.")
         } else {
             stdout
         };

@@ -91,6 +91,7 @@ pub enum ResearchCliCommand {
 impl ResearchCliCommand {
     /// Parse `ragent research …` arguments. The first positional argument is
     /// the subcommand; remaining arguments are subcommand-specific.
+    #[must_use]
     pub fn parse(args: &str) -> Self {
         let trimmed = args.trim();
         if trimmed.is_empty() {
@@ -256,7 +257,10 @@ impl ResearchCliCommand {
     }
 
     fn parse_continue(rest: &[&str]) -> Self {
-        let name = rest.first().map(|s| s.to_string()).unwrap_or_default();
+        let name = rest
+            .first()
+            .map(std::string::ToString::to_string)
+            .unwrap_or_default();
         if name.is_empty() {
             return Self::Unknown("continue".to_string());
         }
@@ -271,7 +275,7 @@ impl ResearchCliCommand {
         let name = rest
             .iter()
             .find(|a| !a.starts_with("--"))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .unwrap_or_default();
         if name.is_empty() {
             Self::Unknown("open".to_string())
@@ -284,7 +288,7 @@ impl ResearchCliCommand {
         let name = rest
             .iter()
             .find(|a| !a.starts_with("--"))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .unwrap_or_default();
         if name.is_empty() {
             Self::Unknown("show".to_string())
@@ -298,7 +302,7 @@ impl ResearchCliCommand {
         let name = rest
             .iter()
             .find(|a| !a.starts_with("--") && !a.starts_with('-'))
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .unwrap_or_default();
         if name.is_empty() {
             Self::Unknown("delete".to_string())
@@ -308,7 +312,8 @@ impl ResearchCliCommand {
     }
 
     /// Build the static help message shown by `ragent research help`.
-    pub fn build_help_message() -> &'static str {
+    #[must_use]
+    pub const fn build_help_message() -> &'static str {
         "ragent research — manage research items under research/\n\
                \n\
                USAGE:\n\
@@ -344,7 +349,8 @@ impl ResearchCliCommand {
     }
     /// `true` if this is a usage-error variant (i.e. parse succeeded but the
     /// caller passed wrong args).
-    pub fn is_usage_error(&self) -> bool {
+    #[must_use]
+    pub const fn is_usage_error(&self) -> bool {
         matches!(self, Self::Unknown(_))
     }
 }
@@ -352,6 +358,7 @@ impl ResearchCliCommand {
 /// Render a [`SessionEvent`] as a single machine-readable JSON line on stdout
 /// (T-035). The prefix `ragent-research:` makes the line easy to grep in a
 /// mixed transcript.
+#[must_use]
 pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String {
     use crate::session::SessionEvent;
     let (kind, payload) = match event {
@@ -456,6 +463,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
 }
 
 /// Pretty-print a research item (T-034: `ragent research show`).
+#[must_use]
 pub fn render_show_output(
     name: &str,
     title: &str,
@@ -482,6 +490,7 @@ pub fn render_show_output(
 }
 
 /// Pretty-print a research list (T-034: `ragent research list`).
+#[must_use]
 pub fn render_list_output(rows: &[(String, String, String, String, String)]) -> String {
     let mut out = String::new();
     out.push_str(&format!(
@@ -514,6 +523,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// Pretty-print a search result list (T-030).
+#[must_use]
 pub fn render_search_output(hits: &[(String, String, String)]) -> String {
     let mut out = String::new();
     for (name, title, snippet) in hits {
@@ -526,6 +536,7 @@ pub fn render_search_output(hits: &[(String, String, String)]) -> String {
 }
 
 /// Convenience: map a [`ResearchNameError`] to a user-facing message.
+#[must_use]
 pub fn explain_name_error(err: &ResearchNameError) -> String {
     err.to_string()
 }
@@ -557,6 +568,7 @@ pub struct FsLocalTool;
 
 impl FsLocalTool {
     /// Build a new filesystem-backed local tool.
+    #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self)
     }
@@ -683,8 +695,7 @@ async fn walk(root: &Path, dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> any
                 .to_string_lossy()
                 .rsplit('.')
                 .next()
-                .map(|e| e == ext)
-                .unwrap_or(false);
+                .is_some_and(|e| e == ext);
             if matches_ext && let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_path_buf());
             }

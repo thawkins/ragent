@@ -2185,6 +2185,128 @@ fn input_lines_with_kb_selection(
 const INPUT_PLACEHOLDER: &str =
     "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
 
+fn render_router_save_dialog(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "Save Router Configuration",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from("This will overwrite your current Model Router cluster in ragent.json."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter save  Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    if let Some(ref draft) = app.pending_router_save {
+        let total: usize = draft.tiers.values().map(|t| t.models.len()).sum();
+        lines.insert(3, Line::from(format!("Tier entries to save: {total}")));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirm Save ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render the Telemetry side panel (toggled via `Alt+O`).
+///
+/// Displays the same live counter/gauge values as `/telemetry counters`, grouped
+/// by category in a compact, scrollable side panel. The panel reads from the
+/// shared [`TelemetryCountersContent`] builder so it stays in sync with the chat
+/// output without duplicating metric definitions.
+///
+/// # Arguments
+/// - `frame` — the ratatui frame to render into.
+/// - `app` — mutable `App` state; reads `telemetry_scroll_offset`; writes
+///   `telemetry_area`, `telemetry_max_scroll`, and `telemetry_content_lines`.
+/// - `area` — the rect allocated to the panel by the side-panel split.
+fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Telemetry ",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    app.telemetry_area = area;
+
+    let content = App::telemetry_counters_content();
+
+    let header_style = Style::default()
+        .fg(Color::LightGreen)
+        .add_modifier(Modifier::BOLD);
+    let metric_style = Style::default().fg(Color::White);
+    let value_style = Style::default().fg(Color::LightGreen);
+    let desc_style = Style::default().fg(Color::DarkGray);
+    let type_style = Style::default()
+        .fg(Color::Blue)
+        .add_modifier(Modifier::BOLD);
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    for (title, group) in [
+        ("Usage metrics", &content.usage),
+        ("Performance metrics", &content.performance),
+        ("Cost metrics", &content.cost),
+        ("Effectiveness metrics", &content.effectiveness),
+    ] {
+        lines.push(Line::from(Span::styled(title.to_string(), header_style)));
+        for (name, kind, desc, value) in group {
+            // Compact line: "name value — type — description", matching the
+            // `/telemetry counters` chat output as closely as the narrow panel
+            // allows.
+            lines.push(Line::from(vec![
+                Span::styled(format!("{name} "), metric_style),
+                Span::styled(value.to_string(), value_style),
+                Span::styled(format!(" — {kind}"), type_style),
+                Span::styled(format!(" — {desc}"), desc_style),
+            ]));
+        }
+        lines.push(Line::raw(""));
+    }
+
+    // Cache plain-text content for text selection copy, matching the other
+    // side panels' wrapping behaviour.
+    let telemetry_inner_width = inner.width as usize;
+    app.telemetry_content_lines = build_wrapped_content_lines(&lines, telemetry_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.telemetry_max_scroll = max_scroll;
+    let scroll = app.telemetry_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((scroll, 0));
+    frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows.
+    if total_lines > visible_height {
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        // Render in the full panel area so the scrollbar gutter aligns with
+        // the mouse hit-test column used by the drag handler.
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
+}
 // ---------------------------------------------------------------------------
 // Chat screen
 // ---------------------------------------------------------------------------
@@ -4949,129 +5071,5 @@ mod tests {
             rendered.iter().any(|line| line == "  💭 Second line."),
             "Expected second thought line in rendered output: {rendered:?}"
         );
-    }
-}
-
-/// Render the router save confirmation modal overlay.
-fn render_router_save_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 40, frame.area());
-    frame.render_widget(Clear, area);
-
-    let mut lines: Vec<Line<'_>> = vec![
-        Line::from(Span::styled(
-            "Save Router Configuration",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from("This will overwrite your current Model Router cluster in ragent.json."),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Enter save  Esc cancel",
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
-
-    if let Some(ref draft) = app.pending_router_save {
-        let total: usize = draft.tiers.values().map(|t| t.models.len()).sum();
-        lines.insert(3, Line::from(format!("Tier entries to save: {total}")));
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Confirm Save ")
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
-}
-
-/// Render the Telemetry side panel (toggled via `Alt+O`).
-///
-/// Displays the same live counter/gauge values as `/telemetry counters`, grouped
-/// by category in a compact, scrollable side panel. The panel reads from the
-/// shared [`TelemetryCountersContent`] builder so it stays in sync with the chat
-/// output without duplicating metric definitions.
-///
-/// # Arguments
-/// - `frame` — the ratatui frame to render into.
-/// - `app` — mutable `App` state; reads `telemetry_scroll_offset`; writes
-///   `telemetry_area`, `telemetry_max_scroll`, and `telemetry_content_lines`.
-/// - `area` — the rect allocated to the panel by the side-panel split.
-fn render_telemetry_panel(frame: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(
-            " Telemetry ",
-            Style::default()
-                .fg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD),
-        ));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    app.telemetry_area = area;
-
-    let content = App::telemetry_counters_content();
-
-    let header_style = Style::default()
-        .fg(Color::LightGreen)
-        .add_modifier(Modifier::BOLD);
-    let metric_style = Style::default().fg(Color::White);
-    let value_style = Style::default().fg(Color::LightGreen);
-    let desc_style = Style::default().fg(Color::DarkGray);
-    let type_style = Style::default()
-        .fg(Color::Blue)
-        .add_modifier(Modifier::BOLD);
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    for (title, group) in [
-        ("Usage metrics", &content.usage),
-        ("Performance metrics", &content.performance),
-        ("Cost metrics", &content.cost),
-        ("Effectiveness metrics", &content.effectiveness),
-    ] {
-        lines.push(Line::from(Span::styled(title.to_string(), header_style)));
-        for (name, kind, desc, value) in group {
-            // Compact line: "name value — type — description", matching the
-            // `/telemetry counters` chat output as closely as the narrow panel
-            // allows.
-            lines.push(Line::from(vec![
-                Span::styled(format!("{name} "), metric_style),
-                Span::styled(value.to_string(), value_style),
-                Span::styled(format!(" — {kind}"), type_style),
-                Span::styled(format!(" — {desc}"), desc_style),
-            ]));
-        }
-        lines.push(Line::raw(""));
-    }
-
-    // Cache plain-text content for text selection copy, matching the other
-    // side panels' wrapping behaviour.
-    let telemetry_inner_width = inner.width as usize;
-    app.telemetry_content_lines = build_wrapped_content_lines(&lines, telemetry_inner_width);
-
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let total_lines = paragraph.line_count(inner.width) as u16;
-    let visible_height = inner.height;
-    let max_scroll = total_lines.saturating_sub(visible_height);
-    app.telemetry_max_scroll = max_scroll;
-    let scroll = app.telemetry_scroll_offset.min(max_scroll);
-    let paragraph = paragraph.scroll((scroll, 0));
-    frame.render_widget(paragraph, inner);
-
-    // Render scrollbar when content overflows.
-    if total_lines > visible_height {
-        let mut scrollbar_state =
-            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .style(Style::default().fg(Color::DarkGray));
-        // Render in the full panel area so the scrollbar gutter aligns with
-        // the mouse hit-test column used by the drag handler.
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }

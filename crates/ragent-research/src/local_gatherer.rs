@@ -135,7 +135,10 @@ pub struct LocalGatherConfig {
 impl Default for LocalGatherConfig {
     fn default() -> Self {
         Self {
-            globs: DEFAULT_GLOBS.iter().map(|s| s.to_string()).collect(),
+            globs: DEFAULT_GLOBS
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
             max_local_sources: DEFAULT_MAX_LOCAL_SOURCES,
             terms: Vec::new(),
             skip_specs: false,
@@ -377,9 +380,9 @@ impl LocalGatherer {
         let mut sources = Vec::new();
         for (spec_id, title) in selected.into_iter().take(max_total) {
             let relevance = if title.is_empty() {
-                format!("Spec {} under specs/", spec_id)
+                format!("Spec {spec_id} under specs/")
             } else {
-                format!("Spec {}: {}", spec_id, title)
+                format!("Spec {spec_id}: {title}")
             };
             sources.push(Source::Spec {
                 spec_id,
@@ -399,6 +402,7 @@ pub const MAX_LOCAL_EXCERPT_LINES: usize = 30;
 /// Compute the zero-padded supporting-file path for the Nth local source.
 ///
 /// Index 0 → `local-01.md`, index 1 → `local-02.md`, etc.
+#[must_use]
 pub fn local_body_path(index: usize) -> PathBuf {
     PathBuf::from(format!("sources/local-{:02}.md", index + 1))
 }
@@ -413,6 +417,7 @@ pub fn local_body_path(index: usize) -> PathBuf {
 ///
 /// When the body is empty (read failed) we fall back to the matched lines
 /// only, since those are still informative.
+#[must_use]
 pub fn build_local_excerpt(body: &str, matches: &[GrepMatch], max_lines: usize) -> String {
     if matches.is_empty() {
         return String::new();
@@ -500,8 +505,7 @@ pub fn build_relevance_note(matched_terms: &[String], matches: &[GrepMatch]) -> 
     };
     let first = matches
         .first()
-        .map(|m| m.text.trim())
-        .unwrap_or("")
+        .map_or("", |m| m.text.trim())
         .chars()
         .take(120)
         .collect::<String>();
@@ -519,6 +523,7 @@ pub fn build_relevance_note(matched_terms: &[String], matches: &[GrepMatch]) -> 
 
 /// Walk the grep matches and figure out which of `terms` actually appeared.
 /// Returns a deduplicated, lowercase vec preserving first-seen order.
+#[must_use]
 pub fn collect_matched_terms(matches: &[GrepMatch], terms: &[String]) -> Vec<String> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
@@ -541,6 +546,7 @@ pub fn collect_matched_terms(matches: &[GrepMatch], terms: &[String]) -> Vec<Str
 /// `topic` is empty. Returns a deduplicated, lowercased vec of tokens
 /// of length ≥ 2 (so we don't try to grep for single letters) drawn
 /// from either source.
+#[must_use]
 pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
     // Replace ASCII punctuation (except apostrophes in contractions) with spaces
     // so tokens like "async/await," become "async" and "await".
@@ -556,7 +562,7 @@ pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
         .collect();
     let mut terms: Vec<String> = cleaned
         .split_whitespace()
-        .map(|s| s.to_lowercase())
+        .map(str::to_lowercase)
         .filter(|s| s.len() >= 2)
         .collect();
     if terms.is_empty() {
@@ -577,7 +583,7 @@ pub fn derive_terms(topic: &str, fallback: &[String]) -> Vec<String> {
             .join(" ");
         terms = cleaned_fallback
             .split_whitespace()
-            .map(|s| s.to_lowercase())
+            .map(str::to_lowercase)
             .filter(|s| s.len() >= 2)
             .collect();
     }
@@ -613,7 +619,7 @@ mod tests {
             let mut out: Vec<PathBuf> = self
                 .files
                 .keys()
-                .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false) && p.starts_with(root))
+                .filter(|p| p.extension().is_some_and(|e| e == ext) && p.starts_with(root))
                 .cloned()
                 .collect();
             out.sort();
@@ -720,7 +726,7 @@ mod tests {
     #[tokio::test]
     async fn gather_emits_local_sources_with_zero_padded_body_paths() {
         let mut fs = FakeFs::default();
-        for name in ["alpha.rs", "beta.rs", "gamma.rs"].iter() {
+        for name in &["alpha.rs", "beta.rs", "gamma.rs"] {
             let p = root().join("src").join(name);
             fs.files
                 .insert(p, format!("this is the {name} file, alpha content\n"));

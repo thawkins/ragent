@@ -4,16 +4,17 @@ use std::path::Path;
 /// Locate the project root by walking up from the current file.
 fn project_root() -> std::path::PathBuf {
     // `CARGO_MANIFEST_DIR` points to crates/ragent-codeindex.
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").map_or_else(
+        |_| {
             Path::new(file!())
                 .parent()
                 .unwrap()
                 .parent()
                 .unwrap()
                 .to_path_buf()
-        });
+        },
+        std::path::PathBuf::from,
+    );
     // Workspace root is two levels up from the crate manifest dir.
     manifest_dir
         .parent()
@@ -76,7 +77,7 @@ fn diag_raw_fts_search() {
     );
 }
 
-/// Test CodeIndex search (full pipeline)
+/// Test `CodeIndex` search (full pipeline)
 #[test]
 fn diag_codeindex_search() {
     let project_root = project_root();
@@ -93,7 +94,7 @@ fn diag_codeindex_search() {
 
     let config = ragent_codeindex::types::CodeIndexConfig {
         enabled: true,
-        project_root: project_root.to_path_buf(),
+        project_root,
         index_dir,
         scan_config: ragent_codeindex::types::ScanConfig::default(),
     };

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// These values abstract across all providers' native parameters:
 /// - Anthropic: `thinking.type` + `effort` / `budget_tokens`
-/// - OpenAI / Copilot: `reasoning_effort` (`"low"`, `"medium"`, `"high"`, `"none"`)
+/// - `OpenAI` / Copilot: `reasoning_effort` (`"low"`, `"medium"`, `"high"`, `"none"`)
 /// - Gemini: `thinkingConfig.thinkingLevel` (`"minimal"`, `"low"`, `"medium"`, `"high"`, `"auto"`)
 /// - Ollama: `think` boolean
 ///
@@ -34,8 +34,9 @@ pub enum ThinkingLevel {
 
 impl ThinkingLevel {
     /// Returns `true` if this level enables any form of thinking/reasoning.
-    pub fn is_enabled(self) -> bool {
-        !matches!(self, ThinkingLevel::Off)
+    #[must_use]
+    pub const fn is_enabled(self) -> bool {
+        !matches!(self, Self::Off)
     }
 }
 
@@ -79,7 +80,8 @@ impl Default for ThinkingConfig {
 
 impl ThinkingConfig {
     /// Create a `ThinkingConfig` with the given level and default settings.
-    pub fn new(level: ThinkingLevel) -> Self {
+    #[must_use]
+    pub const fn new(level: ThinkingLevel) -> Self {
         Self {
             enabled: level.is_enabled(),
             level,
@@ -89,7 +91,8 @@ impl ThinkingConfig {
     }
 
     /// Create an "off" config — thinking disabled.
-    pub fn off() -> Self {
+    #[must_use]
+    pub const fn off() -> Self {
         Self {
             enabled: false,
             level: ThinkingLevel::Off,
@@ -99,7 +102,8 @@ impl ThinkingConfig {
     }
 
     /// Returns `true` if thinking is effectively enabled.
-    pub fn is_effective_enabled(&self) -> bool {
+    #[must_use]
+    pub const fn is_effective_enabled(&self) -> bool {
         self.enabled && self.level.is_enabled()
     }
 }

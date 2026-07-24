@@ -121,18 +121,21 @@ pub struct SessionConfig {
 
 impl SessionConfig {
     /// Resolve the effective [`EngineConfig`] from `depth` + `iterations`.
+    #[must_use]
     pub fn engine_config(&self) -> EngineConfig {
         let depth = self.depth.unwrap_or(Depth::Standard);
         depth.engine_config(self.iterations, depth == Depth::Deep)
     }
 
     /// Maximum web sources to capture for the selected depth/iteration combo.
+    #[must_use]
     pub fn budget_web_results(&self) -> usize {
         let cfg = self.engine_config();
         (cfg.max_sources_per_question * 3).max(3)
     }
 
     /// Maximum local sources to capture for the selected depth.
+    #[must_use]
     pub fn budget_local_sources(&self) -> usize {
         match self.depth.unwrap_or(Depth::Standard) {
             Depth::Shallow => 5,
@@ -184,7 +187,8 @@ pub enum SessionPhase {
 
 impl SessionPhase {
     /// Human-readable label for log output.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Setup => "setup",
             Self::Web => "web",
@@ -270,7 +274,7 @@ pub enum SessionEvent {
         /// Sub-question texts in plan order.
         sub_questions: Vec<String>,
     },
-    /// A sub-question changed status (e.g. pending → in_progress → answered).
+    /// A sub-question changed status (e.g. pending → `in_progress` → answered).
     SubQuestionStatusChanged {
         /// Sub-question id.
         id: String,
@@ -351,7 +355,8 @@ pub enum SynthesizeOutcome {
 
 impl SynthesizeOutcome {
     /// Short label for log output.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Llm => "llm",
             Self::FallbackEmpty => "fallback-empty",
@@ -488,7 +493,7 @@ fn derive_topic_from_url_body(src_body: &str, src_title: &str, _src_url: &str) -
     let body_description = derive_topic_description(src_body, title_topic.as_deref());
     match (title_topic, body_description) {
         (Some(title), Some(desc)) => {
-            let combined = format!("{} — {}", title, desc);
+            let combined = format!("{title} — {desc}");
             Some(truncate_at_char_boundary(
                 &combined,
                 MAX_DERIVED_TOPIC_CHARS,
@@ -627,7 +632,7 @@ fn clean_topic_fragment(s: &str) -> String {
     // Drop trailing markdown reference-link indices like "[12]".
     if let Some(idx) = out.rfind('[') {
         let tail = &out[idx..];
-        if tail.ends_with(']') && tail.chars().filter(|c| c.is_ascii_digit()).count() > 0 {
+        if tail.ends_with(']') && tail.chars().filter(char::is_ascii_digit).count() > 0 {
             out.truncate(idx);
             out = out.trim_end().to_string();
         }
@@ -638,15 +643,15 @@ fn clean_topic_fragment(s: &str) -> String {
 }
 
 /// Characters used to separate article titles from site branding in HTML
-/// `<title>` tags and OpenGraph metadata.
+/// `<title>` tags and `OpenGraph` metadata.
 const TITLE_SEPARATORS: &[char] = &['|', '-', '—', '–', '/', '>', '»', '·'];
 
 /// Clean a page title so it can be used directly as the research topic.
 ///
 /// Splits the title on common separator characters, evaluates each segment
 /// independently, and returns the longest usable segment. This handles both
-/// leading site-brand tokens ("InfoQ Homepage Articles ...") and trailing
-/// site names ("... | InfoQ"). Each segment has nav words, glued tokens, and
+/// leading site-brand tokens ("`InfoQ` Homepage Articles ...") and trailing
+/// site names ("... | `InfoQ`"). Each segment has nav words, glued tokens, and
 /// short/generic noise removed. Returns `None` when no segment is meaningful.
 fn clean_site_title(title: &str) -> Option<String> {
     let mut best: Option<String> = None;
@@ -671,7 +676,7 @@ fn clean_site_title(title: &str) -> Option<String> {
 
 /// Clean a single title segment: strip leading site nav words, drop a leading
 /// site-brand token when it is followed by a nav word, split glued tokens such
-/// as "HomepageArticlesLarge", and discard empty or short results.
+/// as "`HomepageArticlesLarge`", and discard empty or short results.
 fn clean_site_title_segment(title: &str) -> Option<String> {
     let mut out = title.trim().to_string();
     if out.is_empty() {
@@ -700,7 +705,7 @@ fn clean_site_title_segment(title: &str) -> Option<String> {
         }
         break;
     }
-    let kept: Vec<&str> = words[i..].iter().map(|s| s.as_str()).collect();
+    let kept: Vec<&str> = words[i..].iter().map(std::string::String::as_str).collect();
     out = kept.join(" ");
 
     out = collapse_whitespace(&out);
@@ -736,7 +741,7 @@ const TOPIC_NAV_PREFIXES: &[&str] = &[
 ];
 
 /// Remove leading nav/site tokens from a topic candidate, one pass at a time,
-/// so strings like "InfoQ Homepage Articles Large Concept Models..." collapse
+/// so strings like "`InfoQ` Homepage Articles Large Concept Models..." collapse
 /// to "Large Concept Models...".
 fn remove_topic_nav_prefixes(s: &str) -> String {
     let mut out = s.trim().to_string();
@@ -822,7 +827,7 @@ fn is_topic_noise(cleaned: &str, original: &str) -> bool {
     false
 }
 
-/// Split glued-together words such as "HomepageArticlesLarge" or "AIReasoning"
+/// Split glued-together words such as "`HomepageArticlesLarge`" or "`AIReasoning`"
 /// into separate tokens so topic derivation and nav-prefix removal work on the
 /// individual words. Uses character-boundary heuristics instead of regex
 /// look-around, which the `regex` crate does not support.
@@ -856,7 +861,7 @@ fn should_split_topic_words(
     // "eA..." or "5A..." when the uppercase letter starts a new word.
     if (prev.is_lowercase() || prev.is_ascii_digit())
         && curr.is_uppercase()
-        && next.is_some_and(|n| n.is_lowercase())
+        && next.is_some_and(char::is_lowercase)
     {
         return true;
     }
@@ -866,8 +871,8 @@ fn should_split_topic_words(
     // letter, i.e. a real word rather than a trailing "s" or a space/punctuation.
     if prev.is_uppercase()
         && curr.is_uppercase()
-        && next.is_some_and(|n| n.is_lowercase())
-        && after_next.is_some_and(|n| n.is_lowercase())
+        && next.is_some_and(char::is_lowercase)
+        && after_next.is_some_and(char::is_lowercase)
     {
         return true;
     }
@@ -896,8 +901,7 @@ fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
         .char_indices()
         .take(max_chars)
         .last()
-        .map(|(i, _)| i)
-        .unwrap_or(s.len());
+        .map_or(s.len(), |(i, _)| i);
     s[..end].to_string()
 }
 
@@ -1003,28 +1007,24 @@ impl ResearchSession {
                         title: src_title.clone(),
                     });
                     if topic.trim().is_empty() {
-                        match derive_topic_from_url_body(&src_body, &src_title, &src_url) {
-                            Some(derived) => {
-                                topic = derived;
-                                tracing::info!(
-                                    url = %src_url,
-                                    derived_topic = %topic,
-                                    "research: --from-url derived topic from fetched page body"
-                                );
-                            }
-                            None => {
-                                let message = format!(
-                                    "fetched page body for '{}' contained no usable article text to derive a topic",
-                                    src_url
-                                );
-                                observer.on_event(SessionEvent::WebFetchFailed {
-                                    url: src_url.clone(),
-                                    error: message.clone(),
-                                });
-                                return Err(ResearchError::FromUrlNoUsableBody {
-                                    url: src_url.clone(),
-                                });
-                            }
+                        if let Some(derived) =
+                            derive_topic_from_url_body(&src_body, &src_title, &src_url)
+                        {
+                            topic = derived;
+                            tracing::info!(
+                                url = %src_url,
+                                derived_topic = %topic,
+                                "research: --from-url derived topic from fetched page body"
+                            );
+                        } else {
+                            let message = format!(
+                                "fetched page body for '{src_url}' contained no usable article text to derive a topic"
+                            );
+                            observer.on_event(SessionEvent::WebFetchFailed {
+                                url: src_url.clone(),
+                                error: message,
+                            });
+                            return Err(ResearchError::FromUrlNoUsableBody { url: src_url });
                         }
                     }
                     // Use the cleaned page title as the item title when the
@@ -1228,14 +1228,14 @@ impl ResearchSession {
                     // (NoopAnalysisEngine), the default analyze_with_outcome
                     // returns AnalysisOutcome::Llm, but we override to NoLlm
                     // so the UI is transparent about the provenance.
-                    let synth = if !has_llm_engine {
-                        SynthesizeOutcome::NoLlm
-                    } else {
+                    let synth = if has_llm_engine {
                         match outcome {
                             AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
                             AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
                             AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
                         }
+                    } else {
+                        SynthesizeOutcome::NoLlm
                     };
                     (result, synth, None)
                 }
@@ -1276,7 +1276,9 @@ impl ResearchSession {
             || !analysis.findings.is_empty()
             || !analysis.cross_references.is_empty()
             || !analysis.open_questions.is_empty();
-        let doc = ResearchDocument {
+        use crate::item::truncate_title;
+
+        let mut doc = ResearchDocument {
             item: item_with_sources,
             summary: if analysis.summary.is_empty() {
                 default_summary(&sources, &topic)
@@ -1317,6 +1319,15 @@ impl ResearchSession {
             decomposed_queries: web_queries.clone(),
             output_format: config.output_format,
         };
+        // The frontmatter `title` should be a reduced-length version of the
+        // final summary (max 80 chars) so the displayed headline reflects the
+        // synthesis rather than the original prompt.
+        let final_title = if doc.summary.trim().is_empty() {
+            item_title
+        } else {
+            truncate_title(&doc.summary)
+        };
+        doc.item.set_title(&final_title);
         let assembled = self.manager.write_document(&doc).await?;
         // ── Finalize ──────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
@@ -1608,8 +1619,7 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             };
             let previous = if idx > 0 {
                 format!(
-                    "This finding follows and reinforces the web-source thread begun in Finding {}.",
-                    idx
+                    "This finding follows and reinforces the web-source thread begun in Finding {idx}."
                 )
             } else {
                 "No direct dependencies.".to_string()
@@ -1617,10 +1627,6 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             let headline = crate::document::make_headline_from_observation(&observation);
             let finding = format!(
                 "**Headline:** {headline}\n\n**Observation:** {observation}\n\n**Analysis:** This evidence relates directly to the topic '{topic}', providing public context that can be compared against project-local material.\n\n**Cross-reference / Dependencies:** {previous}\n\n**Implication:** The source should be treated as background unless it is corroborated by an in-project reference or a later finding; if no corroboration exists, flag it as an open question.",
-                headline = headline,
-                observation = observation,
-                topic = topic,
-                previous = previous,
             );
             out.push(finding);
         }
@@ -1653,25 +1659,19 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             } else {
                 None
             };
-            let web_idx = if !web.is_empty() { Some(1usize) } else { None };
+            let web_idx = if web.is_empty() { None } else { Some(1usize) };
             let dependencies = match (sibling_idx, web_idx) {
                 (Some(s), Some(_)) => format!(
-                    "This finding is related to Finding {sibling} (the previous local match) and builds on Finding 1 (the first web source) by grounding public information in project code.",
-                    sibling = s,
+                    "This finding is related to Finding {s} (the previous local match) and builds on Finding 1 (the first web source) by grounding public information in project code.",
                 ),
                 (Some(s), None) => format!(
-                    "This finding depends on Finding {sibling}, which established the first local match in this sequence.",
-                    sibling = s,
+                    "This finding depends on Finding {s}, which established the first local match in this sequence.",
                 ),
                                   (None, Some(_)) => "This finding is the first local match; it can be cross-checked against Finding 1 (the first web source).".to_string(),                (None, None) => "No direct dependencies.".to_string(),
             };
             let headline = crate::document::make_headline_from_observation(&observation);
             let finding = format!(
                 "**Headline:** {headline}\n\n**Observation:** {observation}\n\n**Analysis:** This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance.\n\n**Cross-reference / Dependencies:** {dependencies}\n\n**Implication:** The referenced path is a concrete place to start implementation or further investigation; consider opening it as a cross-reference and verifying the excerpt against the latest source.",
-                headline = headline,
-                observation = observation,
-                topic = topic,
-                dependencies = dependencies,
             );
             out.push(finding);
         }
@@ -1694,15 +1694,13 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             } else {
                 None
             };
-            let first_web = if !web.is_empty() { Some(1usize) } else { None };
+            let first_web = if web.is_empty() { None } else { Some(1usize) };
             let dependencies = match (first_local, first_web) {
                 (Some(l), Some(_)) => format!(
                     "This finding connects the prior specification to the in-project evidence in Finding {l} and the web background in Finding 1; treat it as the bridge between design intent and current code.",
-                    l = l,
                 ),
                 (Some(l), None) => format!(
                     "This finding depends on Finding {l}, which identified the in-project material that implements (or should implement) this spec.",
-                    l = l,
                 ),
                 (None, Some(_)) => "This finding is related to Finding 1 (web background) but no local implementation has been matched yet.".to_string(),
                 (None, None) => "No direct dependencies.".to_string(),
@@ -1733,10 +1731,9 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
 fn body_excerpt(body: &str, max_chars: usize) -> String {
     // Strip the "Excerpt — N keyword match(es)" header that the local
     // gatherer prepends so we don't double-print it in the Findings section.
-    let stripped = body
-        .strip_prefix("Excerpt —")
-        .map(|rest| rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n'))
-        .unwrap_or(body);
+    let stripped = body.strip_prefix("Excerpt —").map_or(body, |rest| {
+        rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n')
+    });
     // Collapse whitespace so the excerpt fits on one logical line.
     let collapsed: String = stripped
         .chars()
@@ -1862,7 +1859,7 @@ mod tests {
             Ok(self
                 .files
                 .keys()
-                .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false))
+                .filter(|p| p.extension().is_some_and(|e| e == ext))
                 .cloned()
                 .collect())
         }
@@ -1922,7 +1919,7 @@ mod tests {
                     url: "https://example.com".into(),
                     title: "Example".into(),
                     snippet: "snippet".into(),
-                    matched_query: "".into(),
+                    matched_query: String::new(),
                 }],
             }),
             Arc::new(FakeFetch {
@@ -1964,7 +1961,17 @@ mod tests {
         let p = research_root.join("rust-async/RESEARCH.md");
         assert!(p.is_file());
         let body = tokio::fs::read_to_string(&p).await.unwrap();
-        assert!(body.contains("Rust Async"));
+        // The final title is derived from the summary, not the original
+        // prompt, so the heading no longer contains the literal title.
+        // Assert the topic and summary-derived title are present instead.
+        assert!(
+            body.contains("Rust async"),
+            "RESEARCH.md should contain the topic; got:\n{body}"
+        );
+        assert!(
+            body.contains("# Title: Gathered"),
+            "RESEARCH.md title should be derived from the summary; got:\n{body}"
+        );
         // INDEX.md should exist.
         assert!(research_root.join("INDEX.md").is_file());
         // Observer should have received at least a Phase(Setup), Phase(Web), etc.
@@ -2077,8 +2084,8 @@ mod tests {
                 Ok(vec![WebSearchHit {
                     url: "https://example.com".into(),
                     title: "Example".into(),
-                    snippet: "".into(),
-                    matched_query: "".into(),
+                    snippet: String::new(),
+                    matched_query: String::new(),
                 }])
             }
         }
@@ -2623,9 +2630,9 @@ mod tests {
         use std::path::PathBuf;
         use std::sync::Arc;
 
-        /// LocalTool that emits one `Source::Spec` via list_specs/spec_title
+        /// `LocalTool` that emits one `Source::Spec` via `list_specs/spec_title`
         /// but no regular local files. This is the only path through which
-        /// spec sources enter the session, so it exercises the disable_specs
+        /// spec sources enter the session, so it exercises the `disable_specs`
         /// gate at the gatherer boundary.
         #[derive(Default)]
         struct SpecOnlyTool;
@@ -2823,33 +2830,28 @@ mod tests {
         ];
         let out = default_findings(&s, "topic");
         // One finding per source.
-        assert_eq!(out.len(), 3, "expected 3 findings, got {:?}", out);
+        assert_eq!(out.len(), 3, "expected 3 findings, got {out:?}");
         // Each finding uses the five-paragraph structure (Headline + four required).
         for f in &out {
             assert!(
                 f.contains("**Headline:**"),
-                "missing Headline paragraph: {}",
-                f
+                "missing Headline paragraph: {f}"
             );
             assert!(
                 f.contains("**Observation:**"),
-                "missing Observation paragraph: {}",
-                f
+                "missing Observation paragraph: {f}"
             );
             assert!(
                 f.contains("**Analysis:**"),
-                "missing Analysis paragraph: {}",
-                f
+                "missing Analysis paragraph: {f}"
             );
             assert!(
                 f.contains("**Cross-reference / Dependencies:**"),
-                "missing Cross-reference paragraph: {}",
-                f
+                "missing Cross-reference paragraph: {f}"
             );
             assert!(
                 f.contains("**Implication:**"),
-                "missing Implication paragraph: {}",
-                f
+                "missing Implication paragraph: {f}"
             );
         }
         // Web finding carries the title and excerpt.
@@ -3083,8 +3085,7 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .starts_with("Large Concept Models: a Paradigm Shift in AI Reasoning — They move"),
-            "expected title + body description, got {:?}",
-            topic
+            "expected title + body description, got {topic:?}"
         );
     }
 
@@ -3098,8 +3099,7 @@ mod tests {
                 .as_deref()
                 .unwrap_or("")
                 .contains("Rust async model maps asynchronous operations"),
-            "expected body-derived topic, got {:?}",
-            topic
+            "expected body-derived topic, got {topic:?}"
         );
     }
 
@@ -3113,11 +3113,7 @@ mod tests {
             "topic too long: {}",
             topic.len()
         );
-        assert!(
-            topic.starts_with("Some Article Title —"),
-            "topic: {}",
-            topic
-        );
+        assert!(topic.starts_with("Some Article Title —"), "topic: {topic}");
     }
 
     #[test]

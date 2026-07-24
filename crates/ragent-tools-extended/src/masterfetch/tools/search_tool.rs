@@ -2,7 +2,7 @@
 //!
 //! Implements FR-008 through FR-010, FR-022, FR-023, FR-025, FR-026.
 //!
-//! Queries multiple public search-engine backends in parallel (DuckDuckGo,
+//! Queries multiple public search-engine backends in parallel (`DuckDuckGo`,
 //! Brave, and optionally more), merges and deduplicates results by normalised
 //! URL, ranks by relevance with cross-engine consensus boosting, and returns a
 //! formatted result list with structured signals.
@@ -11,7 +11,7 @@
 //!
 //! 1. Validate the query (non-empty after trim).
 //! 2. Build [`SearchOptions`] from the tool's input parameters (site,
-//!    exclude_sites, freshness, max_results, page).
+//!    `exclude_sites`, freshness, `max_results`, page).
 //! 3. Run [`SearchOrchestrator::search`] to query all backends in parallel,
 //!    merge via consensus, and cache for 5 minutes.
 //! 4. Format the ranked results as a human-readable text report.
@@ -19,17 +19,23 @@
 //!    `fetch_relevance`, `engines_consensus`, `related_queries`,
 //!    `fetch_hint`, `engine_blocked`, `cached`, `duration_ms`.
 //!
-//! # No API keys
+//! # API keys
 //!
-//! This tool is **keyless** (FR-023): it scrapes public search-engine HTML
-//! result pages. No API keys, tokens, or accounts are required.
+//! The tool is **keyless by default** (FR-023): it scrapes public search-engine
+//! HTML result pages via DuckDuckGo and Brave. No API keys are required for
+//! those backends. If a `langsearch_api_key` is configured in `ragent.json`, an
+//! optional LangSearch backend is added for higher-quality results; the key is
+//! masked in diagnostics and never logged.
 
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use std::sync::Arc;
+
 use super::super::MASTERFETCH_VERSION;
 use super::super::search::consensus::MergeOutput;
-use super::super::search::{Freshness, SearchOptions, SearchOrchestrator};
+use super::super::search::langsearch::LangSearchEngine;
+use super::super::search::{Freshness, SearchEngine, SearchOptions, SearchOrchestrator};
 
 use crate::{Tool, ToolContext, ToolOutput};
 
@@ -45,6 +51,35 @@ use crate::{Tool, ToolContext, ToolOutput};
 /// `engines_consensus`.
 pub struct MfSearchTool;
 
+impl MfSearchTool {
+    /// Build the [`SearchOrchestrator`] for this tool based on the supplied
+    /// [`ToolContext`].
+    ///
+    /// The orchestrator always includes the keyless `DuckDuckGo` and Brave
+    /// backends. If `ctx.config` contains a non-empty `langsearch_api_key`, a
+    /// [`LangSearchEngine`] is added as a third backend.
+    ///
+    /// This helper is public so integration tests can verify backend wiring
+    /// without making network requests.
+    #[must_use]
+    pub fn build_orchestrator(ctx: &ToolContext) -> SearchOrchestrator {
+        let langsearch_key = ctx
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.langsearch_api_key.as_deref());
+        let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(super::super::search::duckduckgo::DuckDuckGoEngine::new()),
+            Arc::new(super::super::search::brave::BraveEngine::new()),
+        ];
+        if let Some(key) = langsearch_key
+            && !key.is_empty()
+        {
+            engines.push(Arc::new(LangSearchEngine::new(key)));
+        }
+        SearchOrchestrator::with_engines(engines)
+    }
+}
+
 #[async_trait::async_trait]
 impl Tool for MfSearchTool {
     fn name(&self) -> &'static str {
@@ -52,11 +87,12 @@ impl Tool for MfSearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Local keyless web search. Multiple backends in parallel (DuckDuckGo, \
-         Brave, and more), merges + ranks with cross-engine consensus. No API \
-         keys required. Each result carries relevance_score, fetch_relevance \
-         (high/med/low), and engines_consensus. Supports site, exclude_sites, \
-         freshness, max_results, and page filters."
+        "Local keyless web search. Multiple backends run in parallel (DuckDuckGo, \
+             Brave, and optionally LangSearch when a `langsearch_api_key` is configured), \
+             merges + ranks with cross-engine consensus. No API keys required. Each \
+             result carries `relevance_score`, `fetch_relevance` (high/med/low), and \
+             `engines_consensus`. Supports `site`, `exclude_sites`, `freshness`, \
+             `max_results`, and `page` filters."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -103,7 +139,7 @@ impl Tool for MfSearchTool {
     /// Returns an error if the `query` parameter is missing or empty. Search
     /// backend failures (rate limits, outages) are reported in `engine_blocked`
     /// within the metadata, not as `Err`.
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"].as_str().unwrap_or("");
 
         if query.trim().is_empty() {
@@ -141,8 +177,8 @@ impl Tool for MfSearchTool {
             opts = opts.with_page(page as usize);
         }
 
-        // Run the search orchestrator (parallel backends + consensus merge + cache).
-        let orchestrator = SearchOrchestrator::new();
+        // Build the orchestrator from the tool context and run the search.
+        let orchestrator = MfSearchTool::build_orchestrator(ctx);
         let output = orchestrator.search(query, &opts).await;
 
         // Format the text report.

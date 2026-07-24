@@ -8,7 +8,7 @@ fn test_image_part_round_trip() {
     }));
     let json = serde_json::to_string(&part).expect("serialize image part");
     println!("serialized: {json}");
-    let parts = vec![part.clone()];
+    let parts = vec![part];
     let parts_json = serde_json::to_string(&parts).expect("serialize parts");
     println!("serialized parts: {parts_json}");
     let decoded: Vec<MessagePart> = serde_json::from_str(&parts_json).expect("deserialize parts");

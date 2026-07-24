@@ -87,7 +87,7 @@ struct RuntimeState {
 impl RuntimeState {
     /// Construct a disabled runtime state with the given config.
     #[cfg(feature = "telemetry")]
-    fn disabled(config: OtelConfig) -> Self {
+    const fn disabled(config: OtelConfig) -> Self {
         Self {
             state: TelemetryState::Disabled,
             config,
@@ -173,14 +173,9 @@ impl TelemetrySubsystem {
                 // tokio runtime and store the outer JoinHandle for later
                 // abort on shutdown/reconfigure.
                 let prometheus_handle = if let Some(port) = config.internal_port {
-                    if let Some(reader) = &prometheus_reader {
-                        Some(tokio::spawn(crate::prometheus::serve(
-                            reader.handle(),
-                            port,
-                        )))
-                    } else {
-                        None
-                    }
+                    prometheus_reader
+                        .as_ref()
+                        .map(|reader| tokio::spawn(crate::prometheus::serve(reader.handle(), port)))
                 } else {
                     None
                 };
@@ -241,7 +236,7 @@ impl TelemetrySubsystem {
         Self::disabled_with_config(OtelConfig::default())
     }
 
-    fn disabled_with_config(config: OtelConfig) -> Self {
+    const fn disabled_with_config(config: OtelConfig) -> Self {
         Self {
             runtime: parking_lot::Mutex::new(RuntimeState::disabled(config)),
         }
@@ -438,13 +433,13 @@ impl TelemetrySubsystem {
         #[cfg(feature = "telemetry")]
         {
             let guard = self.runtime.lock();
-            if let Some(provider) = &guard.provider {
-                if let Err(e) = provider.force_flush() {
-                    tracing::warn!("OTEL meter provider force_flush error: {e}");
-                    return Err(crate::TelemetryError::ExporterInit(format!(
-                        "flush failed: {e}"
-                    )));
-                }
+            if let Some(provider) = &guard.provider
+                && let Err(e) = provider.force_flush()
+            {
+                tracing::warn!("OTEL meter provider force_flush error: {e}");
+                return Err(crate::TelemetryError::ExporterInit(format!(
+                    "flush failed: {e}"
+                )));
             }
         }
         Ok(())
@@ -476,13 +471,13 @@ impl TelemetrySubsystem {
             if let Some(handle) = &guard.prometheus_handle {
                 handle.abort();
             }
-            if let Some(provider) = &guard.provider {
-                if let Err(e) = provider.shutdown() {
-                    tracing::warn!("OTEL meter provider shutdown error: {e}");
-                    return Err(crate::TelemetryError::ExporterInit(format!(
-                        "shutdown failed: {e}"
-                    )));
-                }
+            if let Some(provider) = &guard.provider
+                && let Err(e) = provider.shutdown()
+            {
+                tracing::warn!("OTEL meter provider shutdown error: {e}");
+                return Err(crate::TelemetryError::ExporterInit(format!(
+                    "shutdown failed: {e}"
+                )));
             }
         }
         Ok(())
@@ -635,14 +630,9 @@ fn build_enabled_provider(
     };
 
     let prometheus_handle = if let Some(port) = config.internal_port {
-        if let Some(reader) = &prometheus_reader {
-            Some(tokio::spawn(crate::prometheus::serve(
-                reader.handle(),
-                port,
-            )))
-        } else {
-            None
-        }
+        prometheus_reader
+            .as_ref()
+            .map(|reader| tokio::spawn(crate::prometheus::serve(reader.handle(), port)))
     } else {
         None
     };
@@ -760,10 +750,10 @@ fn hostname_str() -> Option<String> {
     // the `hostname` command via std::process::Command. However, to avoid
     // spawning a process at startup, we fall back to the `HOSTNAME` env var
     // (commonly set by shells) and then to reading /etc/hostname.
-    if let Ok(h) = std::env::var("HOSTNAME") {
-        if !h.is_empty() {
-            return Some(h);
-        }
+    if let Ok(h) = std::env::var("HOSTNAME")
+        && !h.is_empty()
+    {
+        return Some(h);
     }
     if let Ok(bytes) = std::fs::read("/etc/hostname") {
         let h = String::from_utf8_lossy(&bytes).trim().to_string();

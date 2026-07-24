@@ -1501,7 +1501,7 @@ impl SessionProcessor {
             "Agent loop finished - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
             total_elapsed_ms, cumulative_model_wait_ms, other_ms
         );
-        let iterations = self.event_bus.current_step(session_id) as u64;
+        let iterations = self.event_bus.current_step(session_id);
         session_recorder.record_session_end();
         session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
         self.event_bus.publish(Event::MessageEnd {

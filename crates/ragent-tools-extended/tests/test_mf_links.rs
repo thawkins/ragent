@@ -2,7 +2,7 @@
 //! (T-032, FR-007, NFR-003).
 //!
 //! Covers: citation classification, navigation classification, external
-//! classification, primary_source hint, empty page, malformed HTML.
+//! classification, `primary_source` hint, empty page, malformed HTML.
 
 use ragent_tools_extended::masterfetch::PageMetadata;
 use ragent_tools_extended::masterfetch::links::{ClassifiedLinks, LinkInfo, classify_links};
@@ -360,7 +360,7 @@ fn test_empty_html_returns_empty_lists() {
 
 #[test]
 fn test_html_with_no_links_returns_empty_lists() {
-    let html = r#"<html><body><p>No links here</p></body></html>"#;
+    let html = r"<html><body><p>No links here</p></body></html>";
     let links = classify(html, "https://example.com");
     assert!(links.citations.is_empty());
     assert!(links.navigation.is_empty());

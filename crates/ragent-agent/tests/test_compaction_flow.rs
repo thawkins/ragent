@@ -104,9 +104,9 @@ async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
 // 2. `emergency_compact` function level
 // ────────────────────────────────────────────────────────────────────────────
 
-/// A mock LlmClient that returns a fixed summary for any request.
+/// A mock `LlmClient` that returns a fixed summary for any request.
 struct SummaryClient;
-/// A mock LlmClient that captures the prompt of the first request and then
+/// A mock `LlmClient` that captures the prompt of the first request and then
 /// returns a fixed summary. Used to assert the prompt built by `compact`
 /// carries the previous-summary update instruction.
 struct CapturingClient {

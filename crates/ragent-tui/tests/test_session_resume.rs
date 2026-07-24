@@ -1,4 +1,4 @@
-//! Tests for test_session_resume.rs
+//! Tests for `test_session_resume.rs`
 
 //! Tests for CLI session resume (TASK-007).
 //!
@@ -160,8 +160,7 @@ fn test_load_session_unknown_id_returns_error() {
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains("not found"),
-        "error should mention not found: {}",
-        err
+        "error should mention not found: {err}"
     );
 }
 

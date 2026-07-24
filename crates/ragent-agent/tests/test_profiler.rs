@@ -206,6 +206,6 @@ fn test_scope_disabled_then_enabled_records() {
 // observe closure invocation order across threads; currently unused to
 // avoid dead-code warnings, so reference it once.
 #[allow(dead_code)]
-fn _unused_mutex_anchor() -> Mutex<usize> {
+const fn _unused_mutex_anchor() -> Mutex<usize> {
     Mutex::new(0)
 }

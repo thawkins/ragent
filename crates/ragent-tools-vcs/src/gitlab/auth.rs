@@ -1,6 +1,6 @@
 //! GitLab Personal Access Token and configuration persistence.
 //!
-//! Credentials are stored encrypted in the ragent SQLite database using the
+//! Credentials are stored encrypted in the ragent `SQLite` database using the
 //! same `provider_auth` / `settings` tables as LLM provider keys.
 //!
 //! Resolution priority (highest wins):

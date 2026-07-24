@@ -82,7 +82,7 @@ impl Tool for GitCheckoutTool {
             }
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -95,14 +95,14 @@ impl Tool for GitCheckoutTool {
         let content = if stdout.trim().is_empty() {
             if paths.is_some() {
                 let source = input["source"].as_str().unwrap_or("HEAD");
-                format!("Restored files from {}.", source)
+                format!("Restored files from {source}.")
             } else {
                 let branch = input["branch"].as_str().unwrap_or("?");
                 let create = input["create_branch"].as_bool().unwrap_or(false);
                 if create {
-                    format!("Switched to new branch '{}'.", branch)
+                    format!("Switched to new branch '{branch}'.")
                 } else {
-                    format!("Switched to branch '{}'.", branch)
+                    format!("Switched to branch '{branch}'.")
                 }
             }
         } else {

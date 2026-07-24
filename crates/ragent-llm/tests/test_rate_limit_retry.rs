@@ -1,6 +1,6 @@
 //! Tests for HTTP 429 (Too Many Requests) retry logic.
 
-/// Test that parse_retry_after correctly parses integer seconds.
+/// Test that `parse_retry_after` correctly parses integer seconds.
 #[test]
 fn test_parse_retry_after_seconds() {
     // We can't directly test the private function, but we can test it via
@@ -18,8 +18,7 @@ fn test_backoff_delays() {
         let delay_ms = 500 * (1_u64 << attempt.min(4));
         assert_eq!(
             delay_ms, *exp_ms,
-            "Backoff for attempt {} should be {}ms, got {}ms",
-            attempt, exp_ms, delay_ms
+            "Backoff for attempt {attempt} should be {exp_ms}ms, got {delay_ms}ms"
         );
     }
 }

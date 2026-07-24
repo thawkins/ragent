@@ -90,6 +90,7 @@ impl CodeWatcher {
     }
 
     /// The canonical root path being watched.
+    #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -138,12 +139,11 @@ fn should_ignore(root: &Path, path: &Path) -> bool {
     // Make it relative first so we check component names.
     let rel = path.strip_prefix(root).unwrap_or(path);
     for component in rel.components() {
-        if let std::path::Component::Normal(name) = component {
-            if let Some(name_str) = name.to_str() {
-                if IGNORED_DIRS.contains(&name_str) {
-                    return true;
-                }
-            }
+        if let std::path::Component::Normal(name) = component
+            && let Some(name_str) = name.to_str()
+            && IGNORED_DIRS.contains(&name_str)
+        {
+            return true;
         }
     }
 

@@ -40,7 +40,7 @@ fn build_subsystem() -> (
 
     let provider = rt.block_on(async {
         let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-            .with_interval(Duration::from_secs(3600))
+            .with_interval(Duration::from_hours(1))
             .build();
         SdkMeterProvider::builder().with_reader(reader).build()
     });

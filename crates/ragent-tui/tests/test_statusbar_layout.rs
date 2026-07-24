@@ -140,7 +140,7 @@ fn test_responsive_mode_sequential_widths_full() {
 #[test]
 fn test_responsive_mode_clone() {
     let m1 = ResponsiveMode::Full;
-    let m2 = m1.clone();
+    let m2 = m1;
     assert_eq!(m1, m2);
 }
 
@@ -154,14 +154,14 @@ fn test_statusbar_config_clone() {
 #[test]
 fn test_responsive_mode_debug() {
     let m = ResponsiveMode::Compact;
-    let debug_str = format!("{:?}", m);
+    let debug_str = format!("{m:?}");
     assert!(debug_str.contains("Compact"));
 }
 
 #[test]
 fn test_statusbar_config_debug() {
     let c = StatusBarConfig { verbose: true };
-    let debug_str = format!("{:?}", c);
+    let debug_str = format!("{c:?}");
     assert!(debug_str.contains("verbose"));
 }
 

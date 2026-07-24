@@ -544,7 +544,7 @@ pub enum Event {
     },
     /// A teammate sent a message that was delivered to the lead session.
     ///
-    /// M5-T6: `message_type` carries the snake_case `MessageType` so event
+    /// M5-T6: `message_type` carries the `snake_case` `MessageType` so event
     /// consumers can distinguish a plan approval from a broadcast without
     /// parsing the preview.
     TeammateMessage {
@@ -556,7 +556,7 @@ pub enum Event {
         from: String,
         /// Recipient's agent ID or `"lead"`.
         to: String,
-        /// Snake_case message type (e.g. `"message"`, `"plan_approved"`,
+        /// `Snake_case` message type (e.g. `"message"`, `"plan_approved"`,
         /// `"broadcast"`).
         message_type: String,
         /// First 200 chars of message content (preview).
@@ -643,7 +643,7 @@ pub enum Event {
         from: String,
         /// Recipient's agent ID.
         to: String,
-        /// Snake_case message type (M5-T6).
+        /// `Snake_case` message type (M5-T6).
         message_type: String,
         /// First 200 chars of message content (preview).
         preview: String,
@@ -915,7 +915,10 @@ impl EventBus {
     /// Called by the session processor at the start of each loop iteration.
     /// Pass `0` to clear (reset) the counter for that session.
     pub fn set_step(&self, session_id: &str, step: u64) {
-        let mut map = self.steps.write().unwrap_or_else(|e| e.into_inner());
+        let mut map = self
+            .steps
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if step == 0 {
             map.remove(session_id);
         } else {
@@ -928,7 +931,10 @@ impl EventBus {
     /// Returns `0` if no step has been set for this session.
     #[must_use]
     pub fn current_step(&self, session_id: &str) -> u64 {
-        let map = self.steps.read().unwrap_or_else(|e| e.into_inner());
+        let map = self
+            .steps
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(session_id).copied().unwrap_or(0)
     }
 

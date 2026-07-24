@@ -35,7 +35,7 @@ mod mock_session {
         let exporter_clone = exporter.clone();
         let provider = rt.block_on(async {
             let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-                .with_interval(Duration::from_secs(3600))
+                .with_interval(Duration::from_hours(1))
                 .build();
             SdkMeterProvider::builder().with_reader(reader).build()
         });
@@ -154,7 +154,7 @@ mod mock_session {
         compression.record_compression(1000, 500, 2.0);
 
         // Simulate snapshot restore.
-        let snapshot = SnapshotRecorder::new(registry.clone());
+        let snapshot = SnapshotRecorder::new(registry);
         snapshot.record_restore();
         // Simulate agent loop completion.
         session.record_agent_loop(5000.0, 3);

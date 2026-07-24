@@ -23,6 +23,7 @@ pub enum Effort {
 
 impl Effort {
     /// Parse from a single character: "S", "M", "L" (case-insensitive).
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_uppercase().as_str() {
             "S" => Some(Self::S),
@@ -33,7 +34,8 @@ impl Effort {
     }
 
     /// Human-readable label.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::S => "S",
             Self::M => "M",
@@ -65,6 +67,7 @@ pub enum Priority {
 
 impl Priority {
     /// Parse from a human-readable string (case-insensitive).
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
             "low" => Some(Self::Low),
@@ -76,7 +79,8 @@ impl Priority {
     }
 
     /// Human-readable label.
-    pub fn as_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Low => "Low",
             Self::Medium => "Medium",
@@ -98,7 +102,7 @@ impl std::fmt::Display for Priority {
 ///
 /// Unlike `spec::Task`, this uses typed `Effort` and `Priority` enums and
 /// preserves the original `requirement` string for prompt construction.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanTask {
     /// Unique identifier, e.g. "T-001".
     pub id: String,
@@ -173,7 +177,7 @@ impl PlanParser {
                 header_seen = true;
                 let cells: Vec<&str> = trimmed
                     .split('|')
-                    .map(|c| c.trim())
+                    .map(str::trim)
                     .filter(|c| !c.is_empty())
                     .collect();
                 has_status_column = cells.iter().any(|c| c.eq_ignore_ascii_case("Status"));
@@ -194,7 +198,7 @@ impl PlanParser {
             // Parse data row
             let cells: Vec<&str> = trimmed
                 .split('|')
-                .map(|c| c.trim())
+                .map(str::trim)
                 .filter(|c| !c.is_empty())
                 .collect();
 
@@ -220,28 +224,26 @@ impl PlanParser {
             let effort_str = cells.get(3).copied().unwrap_or("");
             let priority_str = cells.get(4).copied().unwrap_or("");
 
-            let effort = match Effort::parse(effort_str) {
-                Some(e) => e,
-                None => {
-                    tracing::warn!(
-                        "Task {}: unrecognized effort '{}', defaulting to M",
-                        id,
-                        effort_str
-                    );
-                    Effort::M
-                }
+            let effort = if let Some(e) = Effort::parse(effort_str) {
+                e
+            } else {
+                tracing::warn!(
+                    "Task {}: unrecognized effort '{}', defaulting to M",
+                    id,
+                    effort_str
+                );
+                Effort::M
             };
 
-            let priority = match Priority::parse(priority_str) {
-                Some(p) => p,
-                None => {
-                    tracing::warn!(
-                        "Task {}: unrecognized priority '{}', defaulting to Medium",
-                        id,
-                        priority_str
-                    );
-                    Priority::Medium
-                }
+            let priority = if let Some(p) = Priority::parse(priority_str) {
+                p
+            } else {
+                tracing::warn!(
+                    "Task {}: unrecognized priority '{}', defaulting to Medium",
+                    id,
+                    priority_str
+                );
+                Priority::Medium
             };
 
             let (status, dependencies) = if has_status_column && cells.len() >= 7 {
@@ -403,6 +405,7 @@ pub fn filter_for_task(tasks: &[PlanTask], target_id: &str) -> Result<Vec<usize>
 /// still pending or blocked are kept in their topological order; the
 /// sequential driver processes them one at a time so dependencies are satisfied
 /// naturally, and any blocked task stops the run before its dependents run.
+#[must_use]
 pub fn filter_for_resume(tasks: &[PlanTask], order: &[usize]) -> Vec<usize> {
     order
         .iter()
@@ -455,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_parse_valid_table() {
-        let md = r#"
+        let md = r"
 # Plan
 
 ## Tasks
@@ -467,7 +470,7 @@ mod tests {
 | T-003 | Add tests | FR-005 | M | High | T-002 |
 
 ## Details
-"#;
+";
         let tasks = PlanParser::parse(md).unwrap();
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[0].id, "T-001");
@@ -480,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_parse_with_status_column() {
-        let md = r#"
+        let md = r"
 ## Tasks
 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
@@ -488,7 +491,7 @@ mod tests {
 | T-001 | Define types | FR-003 | S | Critical | completed | — |
 | T-002 | Build parser | FR-004 | M | High | in_progress | T-001 |
 | T-003 | Add tests | FR-005 | M | High | pending | T-002 |
-"#;
+";
         let tasks = PlanParser::parse(md).unwrap();
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[0].status, TaskStatus::Completed);
@@ -505,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_parse_skips_malformed_rows() {
-        let md = r#"
+        let md = r"
 ## Tasks
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
@@ -513,7 +516,7 @@ mod tests {
 | T-001 | Valid task | FR-003 | S | Critical | — |
 | bad-id | Invalid | FR-004 | M | High | — |
 | T-002 | Also valid | FR-005 | M | High | T-001 |
-"#;
+";
         let tasks = PlanParser::parse(md).unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].id, "T-001");

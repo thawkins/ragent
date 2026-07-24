@@ -1,6 +1,6 @@
 //! specs/imradreport T-006 / NFR-001.
 //!
-//! Unit tests verifying that [`assemble_document`] emits the IMRaD section order
+//! Unit tests verifying that [`assemble_document`] emits the `IMRaD` section order
 //! when [`OutputFormat::Imrad`] is selected. The tests construct a
 //! [`ResearchDocument`] directly so no LLM call or gathering pass is required.
 
@@ -16,7 +16,7 @@ fn sample_item() -> ResearchItem {
 }
 
 /// Build a [`ResearchDocument`] with controlled fields.
-fn sample_doc(item: ResearchItem) -> ResearchDocument {
+const fn sample_doc(item: ResearchItem) -> ResearchDocument {
     ResearchDocument {
         item,
         summary: String::new(),
@@ -43,7 +43,7 @@ fn section_positions(body: &str) -> Vec<(&str, usize)> {
 fn h2_headings(body: &str) -> Vec<&str> {
     body.lines()
         .filter(|line| line.starts_with("## "))
-        .map(|line| line.trim())
+        .map(str::trim)
         .collect()
 }
 
@@ -133,8 +133,7 @@ fn imrad_populated_fields_render_in_sections() {
     let abstract_body = &body[abstract_idx..intro_idx];
     assert!(
         abstract_body.contains("A concise abstract/summary of the research."),
-        "Abstract must contain the summary text: {}",
-        abstract_body
+        "Abstract must contain the summary text: {abstract_body}"
     );
 
     // Introduction contains the topic.
@@ -142,13 +141,11 @@ fn imrad_populated_fields_render_in_sections() {
     let intro_body = &body[intro_idx..methods_idx];
     assert!(
         intro_body.contains("IMRaD layout verification"),
-        "Introduction must contain the topic: {}",
-        intro_body
+        "Introduction must contain the topic: {intro_body}"
     );
     assert!(
         intro_body.contains("research item investigates the topic above"),
-        "Introduction must contain the objective framing paragraph: {}",
-        intro_body
+        "Introduction must contain the objective framing paragraph: {intro_body}"
     );
 
     // Methods contains the decomposed queries and a configuration sub-section.
@@ -156,18 +153,15 @@ fn imrad_populated_fields_render_in_sections() {
     let methods_body = &body[methods_idx..results_idx];
     assert!(
         methods_body.contains("### Search Queries"),
-        "Methods must contain Search Queries sub-section: {}",
-        methods_body
+        "Methods must contain Search Queries sub-section: {methods_body}"
     );
     assert!(
         methods_body.contains("- query one"),
-        "Search Queries must list decomposed queries: {}",
-        methods_body
+        "Search Queries must list decomposed queries: {methods_body}"
     );
     assert!(
         methods_body.contains("### Research Configuration"),
-        "Methods must contain Research Configuration sub-section: {}",
-        methods_body
+        "Methods must contain Research Configuration sub-section: {methods_body}"
     );
 
     // Results contains the summary sub-section and findings sub-section.
@@ -175,23 +169,19 @@ fn imrad_populated_fields_render_in_sections() {
     let results_body = &body[results_idx..discussion_idx];
     assert!(
         results_body.contains("### Summary"),
-        "Results must contain Summary sub-section: {}",
-        results_body
+        "Results must contain Summary sub-section: {results_body}"
     );
     assert!(
         results_body.contains("### Findings"),
-        "Results must contain Findings sub-section: {}",
-        results_body
+        "Results must contain Findings sub-section: {results_body}"
     );
     assert!(
         results_body.contains("### Finding 1 — Finding one headline"),
-        "Results must render numbered findings: {}",
-        results_body
+        "Results must render numbered findings: {results_body}"
     );
     assert!(
         results_body.contains("### Findings Relationship Diagram"),
-        "Results must contain the diagram as a sub-section: {}",
-        results_body
+        "Results must contain the diagram as a sub-section: {results_body}"
     );
 
     // Discussion contains cross-references and open questions sub-sections.
@@ -199,23 +189,19 @@ fn imrad_populated_fields_render_in_sections() {
     let discussion_body = &body[discussion_idx..references_idx];
     assert!(
         discussion_body.contains("### In-Project Cross-References"),
-        "Discussion must contain In-Project Cross-References sub-section: {}",
-        discussion_body
+        "Discussion must contain In-Project Cross-References sub-section: {discussion_body}"
     );
     assert!(
         discussion_body.contains("### Open Questions"),
-        "Discussion must contain Open Questions sub-section: {}",
-        discussion_body
+        "Discussion must contain Open Questions sub-section: {discussion_body}"
     );
     assert!(
         discussion_body.contains("`src/lib.rs`"),
-        "Cross-references table must include the project path: {}",
-        discussion_body
+        "Cross-references table must include the project path: {discussion_body}"
     );
     assert!(
         discussion_body.contains("What is the migration path?"),
-        "Open Questions must include the question: {}",
-        discussion_body
+        "Open Questions must include the question: {discussion_body}"
     );
 }
 
@@ -238,12 +224,13 @@ fn imrad_references_index_unchanged() {
         "References Index must be present"
     );
     assert!(
-        assembled.body.contains("Example Article"),
-        "References Index must render the source title: {}",
+        assembled
+            .body
+            .contains("| 1 | web | [https://example.com](https://example.com) |"),
+        "References Index must linkify the source URL: {}",
         assembled.body
     );
 }
-
 #[test]
 fn imrad_format_does_not_change_document_fields() {
     let mut doc = sample_doc(sample_item());

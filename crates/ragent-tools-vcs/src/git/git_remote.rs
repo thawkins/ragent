@@ -87,8 +87,7 @@ impl Tool for GitRemoteTool {
             }
             other => {
                 return Err(anyhow::anyhow!(
-                    "Unknown action: {}. Use 'list', 'add', 'remove', or 'set-url'.",
-                    other
+                    "Unknown action: {other}. Use 'list', 'add', 'remove', or 'set-url'."
                 ));
             }
         };

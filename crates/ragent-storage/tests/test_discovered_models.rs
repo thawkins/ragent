@@ -23,7 +23,7 @@ fn test_discovered_models_round_trip() {
 fn test_delete_discovered_models_removes_entry() {
     let storage = Storage::open_in_memory().expect("in-memory storage");
     storage
-        .set_discovered_models("copilot", r#"[]"#)
+        .set_discovered_models("copilot", r"[]")
         .expect("store models");
     storage
         .delete_discovered_models("copilot")

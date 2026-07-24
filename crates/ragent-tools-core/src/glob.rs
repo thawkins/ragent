@@ -130,7 +130,7 @@ fn collect_matches(
 ) -> Result<()> {
     // Gather all entries in this directory
     let entries: Vec<_> = match std::fs::read_dir(dir) {
-        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+        Ok(rd) => rd.filter_map(std::result::Result::ok).collect(),
         Err(_) => return Ok(()),
     };
 

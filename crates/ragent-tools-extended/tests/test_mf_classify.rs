@@ -11,7 +11,7 @@
 //! - Redirect detection → content from redirect target.
 //! - Unknown fallback → extractor output.
 //! - Summary computation (metadata description, first sentence).
-//! - Link-list formatting (absolute URL resolution, dedup, max_links cap).
+//! - Link-list formatting (absolute URL resolution, dedup, `max_links` cap).
 //! - Non-HTML content (raw passthrough, no classification).
 //! - `count_unique_links` helper.
 
@@ -70,21 +70,19 @@ fn js_shell_html() -> String {
 
 /// Generate auth-wall HTML.
 fn auth_wall_html() -> String {
-    format!(
-        r#"<html><head><title>Login</title></head>
+    r#"<html><head><title>Login</title></head>
 <body><div class="login-form"><h1>Sign In</h1>
 <p>Please log in to continue.</p>
 <form><input type="password"></form></div></body></html>"#
-    )
+        .to_string()
 }
 
 /// Generate paywall HTML.
 fn paywall_html() -> String {
-    format!(
-        r#"<html><head><title>Article</title></head>
+    r#"<html><head><title>Article</title></head>
 <body><article><p>This is a preview of the article.</p></article>
 <div class="paywall">Subscribe to continue reading.</div></body></html>"#
-    )
+        .to_string()
 }
 
 /// Generate redirect HTML (meta refresh, 0-second delay).
@@ -158,12 +156,12 @@ fn test_article_content_has_text() {
 fn test_docs_detected_on_docs_domain() {
     // docs.rs is in VENDOR_DOCS_DOMAINS.
     let html = format!(
-        r#"<html><head><title>API Docs</title></head>
+        r"<html><head><title>API Docs</title></head>
 <body><main><p>{LONG_BODY}</p>
 <pre><code>fn foo() -> i32 {{ 42 }}</code></pre>
 <pre><code>fn bar() -> i32 {{ 99 }}</code></pre>
 <pre><code>fn baz() -> i32 {{ 0 }}</code></pre>
-</main></body></html>"#
+</main></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -284,8 +282,8 @@ fn test_list_dedup_by_resolved_url() {
     // Add a duplicate of page/1 with different text.
     links.push_str("<li><a href=\"/page/1\">First again</a></li>\n");
     let html = format!(
-        r#"<html><head><title>Dup</title></head>
-<body><ul>{links}</ul></body></html>"#
+        r"<html><head><title>Dup</title></head>
+<body><ul>{links}</ul></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -461,7 +459,7 @@ fn test_redirect_summary_mentions_redirect() {
 
 #[test]
 fn test_unknown_page_with_minimal_html() {
-    let html = r#"<html><body><p>Hi</p></body></html>"#;
+    let html = r"<html><body><p>Hi</p></body></html>";
     let result = classify_and_extract(
         html,
         "https://example.com",
@@ -474,7 +472,7 @@ fn test_unknown_page_with_minimal_html() {
 
 #[test]
 fn test_unknown_page_returns_extracted_text() {
-    let html = r#"<html><body><p>Hello world.</p></body></html>"#;
+    let html = r"<html><body><p>Hello world.</p></body></html>";
     let result = classify_and_extract(
         html,
         "https://example.com",
@@ -521,8 +519,8 @@ fn test_non_html_content_type_raw() {
 fn test_summary_from_first_sentence_when_no_metadata() {
     // HTML without og:description or meta description.
     let html = format!(
-        r#"<html><head><title>Test</title></head>
-<body><article><p>{LONG_BODY}</p></article></body></html>"#
+        r"<html><head><title>Test</title></head>
+<body><article><p>{LONG_BODY}</p></article></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -555,7 +553,7 @@ fn test_summary_truncated_when_too_long() {
 
 #[test]
 fn test_summary_empty_when_no_text_and_no_metadata() {
-    let html = r#"<html><head></head><body></body></html>"#;
+    let html = r"<html><head></head><body></body></html>";
     let result = classify_and_extract(
         html,
         "https://example.com",
@@ -625,8 +623,8 @@ fn test_absolute_urls_kept_as_is() {
         ));
     }
     let html = format!(
-        r#"<html><head><title>Links</title></head>
-<body><ul>{links}</ul></body></html>"#
+        r"<html><head><title>Links</title></head>
+<body><ul>{links}</ul></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -645,8 +643,8 @@ fn test_relative_urls_resolved() {
         links.push_str(&format!("<li><a href=\"../page{i}\">Page {i}</a></li>\n"));
     }
     let html = format!(
-        r#"<html><head><title>Links</title></head>
-<body><ul>{links}</ul></body></html>"#
+        r"<html><head><title>Links</title></head>
+<body><ul>{links}</ul></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -666,8 +664,8 @@ fn test_empty_link_text_uses_url_as_label() {
         links.push_str(&format!("<li><a href=\"/page{i}\"></a></li>\n"));
     }
     let html = format!(
-        r#"<html><head><title>Links</title></head>
-<body><ul>{links}</ul></body></html>"#
+        r"<html><head><title>Links</title></head>
+<body><ul>{links}</ul></body></html>"
     );
     let result = classify_and_extract(
         &html,
@@ -699,7 +697,7 @@ fn test_count_unique_links_basic() {
 
 #[test]
 fn test_count_unique_links_empty_page() {
-    let html = r#"<html><body></body></html>"#;
+    let html = r"<html><body></body></html>";
     let metadata = ragent_tools_extended::masterfetch::PageMetadata::default();
     let count = count_unique_links(html, "https://example.com", &metadata);
     assert_eq!(count, 0);
@@ -780,7 +778,7 @@ fn test_empty_html() {
 
 #[test]
 fn test_malformed_html_does_not_panic() {
-    let html = r#"<html><head><title>Broken<body><p>unclosed"#;
+    let html = r"<html><head><title>Broken<body><p>unclosed";
     let result = classify_and_extract(
         html,
         "https://example.com",
@@ -795,8 +793,8 @@ fn test_malformed_html_does_not_panic() {
 fn test_very_large_html_does_not_panic() {
     let body = format!("<p>{}</p>", "A".repeat(100_000));
     let html = format!(
-        r#"<html><head><title>Big</title></head>
-<body><article>{body}</article></body></html>"#
+        r"<html><head><title>Big</title></head>
+<body><article>{body}</article></body></html>"
     );
     let result = classify_and_extract(
         &html,

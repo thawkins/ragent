@@ -1,7 +1,7 @@
 //! Integration test M2.5: scan → parse → store end-to-end pipeline.
 //!
 //! Creates temp directories with Rust source files, scans them, parses
-//! with tree-sitter, stores symbols/imports in SQLite, and queries back.
+//! with tree-sitter, stores symbols/imports in `SQLite`, and queries back.
 #![allow(missing_docs)]
 
 use ragent_codeindex::parser::ParserRegistry;
@@ -103,7 +103,7 @@ pub mod inner {
 }
 
 /// Run the full pipeline: scan → parse → store for all files in a project.
-/// Returns the store and a list of (path, file_id) pairs.
+/// Returns the store and a list of (path, `file_id`) pairs.
 fn index_project(dir: &TempDir) -> (IndexStore, Vec<(String, i64)>) {
     let config = ScanConfig::default();
     let scanned = scan_directory(dir.path(), &config).unwrap();

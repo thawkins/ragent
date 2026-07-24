@@ -5,7 +5,7 @@
 //! - M4-T2: `team_assign_task` notifies the assigned teammate via mailbox.
 //! - M4-T3: `team_broadcast` reports per-recipient success/failure.
 //! - M4-T4: `team_message` rejects `Stopped` / `Failed` / unknown recipients.
-//! - M4-T5: `team_read_messages` emits snake_case `type` and includes `to`/`read`.
+//! - M4-T5: `team_read_messages` emits `snake_case` `type` and includes `to`/`read`.
 
 use std::sync::Arc;
 

@@ -76,20 +76,17 @@ impl Tool for GetEnvTool {
         let mut meta = serde_json::Map::new();
 
         for name in &names {
-            match std::env::var(name) {
-                Ok(val) => {
-                    let display = if is_sensitive(name) {
-                        "***REDACTED***".to_string()
-                    } else {
-                        val.clone()
-                    };
-                    lines.push(format!("{name}={display}"));
-                    meta.insert(name.clone(), json!(display));
-                }
-                Err(_) => {
-                    lines.push(format!("{name}=(not set)"));
-                    meta.insert(name.clone(), Value::Null);
-                }
+            if let Ok(val) = std::env::var(name) {
+                let display = if is_sensitive(name) {
+                    "***REDACTED***".to_string()
+                } else {
+                    val.clone()
+                };
+                lines.push(format!("{name}={display}"));
+                meta.insert(name.clone(), json!(display));
+            } else {
+                lines.push(format!("{name}=(not set)"));
+                meta.insert(name.clone(), Value::Null);
             }
         }
 

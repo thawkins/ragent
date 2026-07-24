@@ -6,7 +6,7 @@
 //! search pipeline:
 //!
 //! - [`SearchEngine`] — an `async` trait implemented by each search backend
-//!   adapter (DuckDuckGo, Brave, …). Backends are keyless: they scrape public
+//!   adapter (`DuckDuckGo`, Brave, …). Backends are keyless: they scrape public
 //!   search-engine HTML result pages and parse the results. No API keys,
 //!   tokens, or accounts are required (FR-023).
 //! - [`RawResult`] — a single search result as returned by one engine, before
@@ -77,7 +77,7 @@ pub const DEFAULT_PAGE: usize = 0;
 /// Time filter for search results.
 ///
 /// Maps to the `freshness` parameter of `mf_search`. Engines translate this
-/// into their own time-filter syntax (e.g. DuckDuckGo's `df` parameter).
+/// into their own time-filter syntax (e.g. `DuckDuckGo`'s `df` parameter).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Freshness {
     /// Results from the last 24 hours.
@@ -106,7 +106,7 @@ impl Freshness {
     /// assert_eq!(Freshness::Any.as_str(), "any");
     /// ```
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::Day => "day",
             Self::Week => "week",
@@ -187,14 +187,14 @@ impl SearchOptions {
 
     /// Builder: set the `freshness` filter.
     #[must_use]
-    pub fn with_freshness(mut self, freshness: Freshness) -> Self {
+    pub const fn with_freshness(mut self, freshness: Freshness) -> Self {
         self.freshness = freshness;
         self
     }
 
     /// Builder: set the result `page`.
     #[must_use]
-    pub fn with_page(mut self, page: usize) -> Self {
+    pub const fn with_page(mut self, page: usize) -> Self {
         self.page = page;
         self
     }
@@ -352,14 +352,14 @@ impl EngineReport {
 
     /// Returns `true` if this report has results (i.e. `results` is non-empty).
     #[must_use]
-    pub fn has_results(&self) -> bool {
+    pub const fn has_results(&self) -> bool {
         !self.results.is_empty()
     }
 
     /// Returns `true` if this report represents a successful, non-blocked
     /// search (even if zero results were returned).
     #[must_use]
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         self.error.is_empty() && !self.engine_blocked
     }
 }
@@ -415,7 +415,7 @@ pub enum SearchEngineError {
 /// pages and parse the results. No API keys, tokens, or accounts are required
 /// (FR-023).
 ///
-/// Each adapter (DuckDuckGo, Brave, …) implements this trait and is queried
+/// Each adapter (`DuckDuckGo`, Brave, …) implements this trait and is queried
 /// in parallel by the `mf_search` consensus merger. The merger collects
 /// [`EngineReport`]s from all backends, merges and deduplicates results by
 /// normalised URL, and ranks them with cross-engine consensus boosting.
@@ -1121,7 +1121,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SearchEngine for BlockedEngine {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "blocked-engine"
         }
 

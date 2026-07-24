@@ -49,7 +49,7 @@ impl LocalTool for FakeLocal {
         Ok(self
             .files
             .keys()
-            .filter(|p| p.extension().map(|e| e == ext).unwrap_or(false))
+            .filter(|p| p.extension().is_some_and(|e| e == ext))
             .cloned()
             .collect())
     }
@@ -136,10 +136,7 @@ fn bench_gathering(c: &mut Criterion) {
     // Add a NOTES.md file inside research_root so the local gatherer sees the project layout.
     let anchor = research_root.join("NOTES.md");
     std::fs::write(&anchor, "Rust async notes about the project").unwrap();
-    files.insert(
-        anchor.clone(),
-        "Rust async notes about the project".to_string(),
-    );
+    files.insert(anchor, "Rust async notes about the project".to_string());
 
     let web = WebGatherer::new(
         Arc::new(FakeSearch {

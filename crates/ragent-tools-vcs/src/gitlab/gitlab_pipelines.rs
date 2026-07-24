@@ -184,8 +184,7 @@ impl Tool for GitlabGetPipelineTool {
         let finished = pipeline["finished_at"].as_str().unwrap_or("not finished");
         let duration = pipeline["duration"]
             .as_f64()
-            .map(|d| format!("{d:.1}s"))
-            .unwrap_or_else(|| "N/A".to_string());
+            .map_or_else(|| "N/A".to_string(), |d| format!("{d:.1}s"));
         let web_url = pipeline["web_url"].as_str().unwrap_or("?");
         let user = pipeline["user"]["username"].as_str().unwrap_or("?");
 
@@ -282,8 +281,7 @@ impl Tool for GitlabListJobsTool {
             let status = job["status"].as_str().unwrap_or("?");
             let duration = job["duration"]
                 .as_f64()
-                .map(|d| format!("{d:.1}s"))
-                .unwrap_or_else(|| "-".to_string());
+                .map_or_else(|| "-".to_string(), |d| format!("{d:.1}s"));
             let runner = job["runner"]["description"].as_str().unwrap_or("no runner");
             lines.push(format!(
                 "  {} [{stage}] {name} (id:{id}) — {status}, {duration}, runner:{runner}",
@@ -348,8 +346,7 @@ impl Tool for GitlabGetJobTool {
         let finished = job["finished_at"].as_str().unwrap_or("not finished");
         let duration = job["duration"]
             .as_f64()
-            .map(|d| format!("{d:.1}s"))
-            .unwrap_or_else(|| "N/A".to_string());
+            .map_or_else(|| "N/A".to_string(), |d| format!("{d:.1}s"));
         let web_url = job["web_url"].as_str().unwrap_or("?");
         let runner_desc = job["runner"]["description"].as_str().unwrap_or("none");
         let pipeline_id = job["pipeline"]["id"].as_u64().unwrap_or(0);

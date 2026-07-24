@@ -49,7 +49,8 @@ pub struct KeywordVerifier;
 
 impl KeywordVerifier {
     /// Create a new keyword verifier.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 
@@ -72,7 +73,7 @@ impl KeywordVerifier {
             .to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
             .filter(|w| w.len() >= 4)
-            .map(|w| w.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
         words.sort_unstable();
         words.dedup();
@@ -180,7 +181,7 @@ mod tests {
 
     fn analysis_with_finding(finding: &str) -> AnalysisResult {
         AnalysisResult {
-            summary: "".to_string(),
+            summary: String::new(),
             findings: vec![finding.to_string()],
             cross_references: vec![],
             open_questions: vec![],

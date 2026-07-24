@@ -43,7 +43,7 @@ pub enum ResearchStatus {
 
 impl ResearchStatus {
     /// All possible status values in canonical order.
-    pub const ALL: &[ResearchStatus] = &[
+    pub const ALL: &[Self] = &[
         Self::Draft,
         Self::InProgress,
         Self::Complete,
@@ -51,18 +51,21 @@ impl ResearchStatus {
     ];
 
     /// `true` if the status represents a terminal state.
-    pub fn is_terminal(self) -> bool {
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
         matches!(self, Self::Archived)
     }
 
     /// `true` if the status represents work that is finished but not archived.
-    pub fn is_finished(self) -> bool {
+    #[must_use]
+    pub const fn is_finished(self) -> bool {
         matches!(self, Self::Complete)
     }
 
     /// Lowercase kebab-style identifier used in YAML frontmatter and the
     /// research index.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::InProgress => "in-progress",
@@ -73,6 +76,7 @@ impl ResearchStatus {
 
     /// Parse a status from its kebab-case string representation. Returns
     /// `None` if the input does not match any known status.
+    #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "draft" => Some(Self::Draft),

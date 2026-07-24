@@ -1,5 +1,5 @@
 //! Integration tests verifying that per-step regexes are pre-compiled
-//! (AgentPerf T-011 / FR-016).
+//! (`AgentPerf` T-011 / FR-016).
 //!
 //! We don't try to assert *that* the regex is only compiled once
 //! across the whole process (that's enforced by the use of

@@ -94,7 +94,7 @@ impl Tool for MemoryWriteTool {
         let label = input["label"].as_str();
         let mode = input["mode"].as_str().unwrap_or("append");
         let block_description = input["description"].as_str().unwrap_or("");
-        let limit = input["limit"].as_u64().map(|l| l as usize).unwrap_or(0);
+        let limit = input["limit"].as_u64().map_or(0, |l| l as usize);
 
         let scope = BlockScope::from_param(scope_str).unwrap_or(BlockScope::Project);
         let storage = FileBlockStorage::new();
@@ -109,10 +109,7 @@ impl Tool for MemoryWriteTool {
             if let Some(ref block) = existing
                 && block.read_only
             {
-                anyhow::bail!(
-                    "Memory block '{}' is read-only and cannot be modified",
-                    label_str
-                );
+                anyhow::bail!("Memory block '{label_str}' is read-only and cannot be modified");
             }
 
             let block = if mode == "overwrite" {
@@ -135,10 +132,7 @@ impl Tool for MemoryWriteTool {
                     block.limit = limit;
                 }
                 if block.read_only {
-                    anyhow::bail!(
-                        "Memory block '{}' is read-only and cannot be modified",
-                        label_str
-                    );
+                    anyhow::bail!("Memory block '{label_str}' is read-only and cannot be modified");
                 }
                 // Append content with a timestamp separator.
                 let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
@@ -424,15 +418,10 @@ impl Tool for MemoryReplaceTool {
 
         let mut block = storage
             .load(label, &scope, &ctx.working_dir)?
-            .ok_or_else(|| {
-                anyhow::anyhow!("Memory block '{}' not found (scope: {})", label, scope)
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Memory block '{label}' not found (scope: {scope})"))?;
 
         if block.read_only {
-            anyhow::bail!(
-                "Memory block '{}' is read-only and cannot be modified",
-                label
-            );
+            anyhow::bail!("Memory block '{label}' is read-only and cannot be modified");
         }
 
         // Find and replace using the shared whitespace-tolerant matcher
@@ -446,15 +435,12 @@ impl Tool for MemoryReplaceTool {
             new_str,
         ) {
             Ok(range) => range,
-            Err(ragent_tools_core::replace::FindError::NotFound) => anyhow::bail!(
-                "old_str not found in memory block '{}'. No changes made.",
-                label
-            ),
+            Err(ragent_tools_core::replace::FindError::NotFound) => {
+                anyhow::bail!("old_str not found in memory block '{label}'. No changes made.")
+            }
             Err(ragent_tools_core::replace::FindError::MultipleMatches(n)) => {
                 anyhow::bail!(
-                    "old_str found {} times in memory block '{}'. Provide more context to make the match unique.",
-                    n,
-                    label
+                    "old_str found {n} times in memory block '{label}'. Provide more context to make the match unique."
                 )
             }
         };

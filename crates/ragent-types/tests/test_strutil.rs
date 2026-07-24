@@ -53,7 +53,7 @@ fn test_truncate_bytes_em_dash_at_400_boundary() {
     // fixed 400-byte index that fell inside a 3-byte em dash (bytes 398..401).
     // `truncate_bytes` must step back to the previous character boundary.
     let prefix = "a".repeat(398);
-    let input = format!("{}\u{2014}more text after", prefix);
+    let input = format!("{prefix}\u{2014}more text after");
     let result = truncate_bytes(&input, 400);
-    assert_eq!(result, format!("{}…", prefix));
+    assert_eq!(result, format!("{prefix}…"));
 }

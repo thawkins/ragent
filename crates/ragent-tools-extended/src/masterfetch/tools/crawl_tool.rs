@@ -156,7 +156,9 @@ impl Tool for MfCrawlTool {
         let max_depth = input["max_depth"].as_u64().unwrap_or(2) as usize;
         let max_total_chars = input["max_total_chars"].as_u64().unwrap_or(200_000) as usize;
         let deadline_ms = input["deadline_ms"].as_u64().unwrap_or(120_000);
-        let focus = input["focus"].as_str().map(|s| s.to_string());
+        let focus = input["focus"]
+            .as_str()
+            .map(std::string::ToString::to_string);
         let discover_only = input["discover_only"].as_bool().unwrap_or(false);
         let respect_robots = input["respect_robots"].as_bool().unwrap_or(false);
 
@@ -226,7 +228,7 @@ struct HttpCrawlFetcher {
 }
 
 impl HttpCrawlFetcher {
-    fn new(respect_robots: bool) -> Self {
+    const fn new(respect_robots: bool) -> Self {
         Self { respect_robots }
     }
 }
@@ -394,7 +396,7 @@ fn format_crawl_report(start_url: &str, result: &super::super::crawl::CrawlResul
 }
 
 /// Convert a [`TruncatedBy`] to a human-readable string.
-fn truncated_by_str(reason: TruncatedBy) -> &'static str {
+const fn truncated_by_str(reason: TruncatedBy) -> &'static str {
     match reason {
         TruncatedBy::MaxPages => "max_pages cap reached",
         TruncatedBy::MaxTotalChars => "max_total_chars budget reached",

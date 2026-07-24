@@ -1268,7 +1268,7 @@ fn test_workbook_schema_headers_are_stable() {
         .expect("write workbook");
 
     let mut workbook = calamine::open_workbook_auto(&workbook_path).expect("open workbook");
-    let sheet_names = workbook.sheet_names().to_vec();
+    let sheet_names = workbook.sheet_names().clone();
     assert_eq!(
         sheet_names,
         vec![

@@ -90,7 +90,7 @@ async fn test_spec_read_happy_path() {
 
     let tool = SpecReadTool;
     let result = tool.execute(json!({"spec_id": "testspec"}), &ctx).await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
     let output = result.unwrap();
     assert!(output.content.contains("Test Spec"));
     assert!(output.content.contains("FR-001"));
@@ -141,7 +141,7 @@ async fn test_spec_task_update_happy_path() {
             &ctx,
         )
         .await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
 
     // Verify task was updated
     let mgr2 = SpecManager::new(specs_root);
@@ -169,7 +169,7 @@ async fn test_spec_search_happy_path() {
 
     let tool = SpecSearchTool;
     let result = tool.execute(json!({"query": "authenticate"}), &ctx).await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
     let output = result.unwrap();
     assert!(output.content.contains("testspec"));
     assert!(output.content.contains("authenticate"));
@@ -232,7 +232,7 @@ async fn test_spec_coverage_happy_path() {
 
     let tool = SpecCoverageTool;
     let result = tool.execute(json!({"spec_id": "testspec"}), &ctx).await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
     let output = result.unwrap();
     assert!(output.content.contains("Coverage Report"));
     assert!(output.content.contains("FR-001"));
@@ -287,7 +287,7 @@ async fn test_spec_task_update_status_transitions() {
             &ctx,
         )
         .await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
 
     // Verify task is now in_progress
     let spec = mgr.read_spec(&id).await.unwrap();
@@ -301,7 +301,7 @@ async fn test_spec_task_update_status_transitions() {
             &ctx,
         )
         .await;
-    assert!(result.is_ok(), "{:?}", result);
+    assert!(result.is_ok(), "{result:?}");
 
     // Verify task is now completed
     let spec = mgr.read_spec(&id).await.unwrap();

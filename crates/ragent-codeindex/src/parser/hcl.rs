@@ -4,7 +4,7 @@
 //! outputs, provider blocks, and terraform settings blocks from HCL-based
 //! Terraform configuration files (`.tf` / `.tfvars`).
 //!
-//! Terraform files use HCL (HashiCorp Configuration Language). The tree-sitter
+//! Terraform files use HCL (`HashiCorp` Configuration Language). The tree-sitter
 //! HCL grammar produces a `body` → `block` / `attribute` tree. Each `block`
 //! has the form:
 //!
@@ -29,7 +29,8 @@ pub struct HclParser {
 
 impl HclParser {
     /// Create a new HCL parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -80,7 +81,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -162,12 +163,12 @@ fn extract_block(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
     let mut seen_type = false;
     for child in &children {
         if child.kind() == "identifier" {
-            if !seen_type {
-                // This is the block type — skip.
-                seen_type = true;
-            } else {
+            if seen_type {
                 // Additional identifier labels (rare but valid in HCL).
                 labels.push(ctx.text(*child).to_string());
+            } else {
+                // This is the block type — skip.
+                seen_type = true;
             }
         } else if child.kind() == "string_lit" {
             // Strip surrounding quotes from string_lit labels.
@@ -189,7 +190,7 @@ fn extract_block(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[Str
 
     // Build a signature: block_type "label1" "label2"
     let sig = if labels.is_empty() {
-        format!("{block_type}")
+        block_type.clone()
     } else {
         let label_str: Vec<String> = labels.iter().map(|l| format!("\"{l}\"")).collect();
         format!("{} {}", block_type, label_str.join(" "))

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 // ── Transition graph ──────────────────────────────────────────────────────
 
 /// Returns the list of statuses that `from` is allowed to transition to.
-fn allowed_transitions(from: SpecStatus) -> &'static [SpecStatus] {
+const fn allowed_transitions(from: SpecStatus) -> &'static [SpecStatus] {
     match from {
         SpecStatus::Draft => &[SpecStatus::InReview],
         SpecStatus::InReview => &[SpecStatus::Draft, SpecStatus::Approved],
@@ -23,6 +23,7 @@ fn allowed_transitions(from: SpecStatus) -> &'static [SpecStatus] {
 }
 
 /// Returns `true` if `from` → `to` is a valid transition.
+#[must_use]
 pub fn is_valid_transition(from: SpecStatus, to: SpecStatus) -> bool {
     if from == to {
         return false;
@@ -31,6 +32,7 @@ pub fn is_valid_transition(from: SpecStatus, to: SpecStatus) -> bool {
 }
 
 /// Returns the list of allowed next statuses for a given status.
+#[must_use]
 pub fn next_statuses(from: SpecStatus) -> Vec<SpecStatus> {
     allowed_transitions(from).to_vec()
 }
@@ -52,6 +54,7 @@ impl SpecManager {
     }
 
     /// Get the root directory.
+    #[must_use]
     pub fn root(&self) -> &Path {
         &self.specs_root
     }
@@ -176,14 +179,16 @@ impl SpecManager {
                 table_end = Some(i);
                 break;
             }
-            if in_task_section && table_start.is_none() && trimmed.starts_with("|") {
+            if in_task_section && table_start.is_none() && trimmed.starts_with('|') {
                 table_start = Some(i);
             }
         }
         let table_start = table_start.unwrap_or(lines.len());
         let table_end = table_end.unwrap_or(lines.len());
-        let mut new_lines: Vec<String> =
-            lines[..table_start].iter().map(|l| l.to_string()).collect();
+        let mut new_lines: Vec<String> = lines[..table_start]
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         new_lines.push(
             "| ID | Title | Requirement | Effort | Priority | Status | Dependencies |".to_string(),
         );
@@ -212,7 +217,11 @@ impl SpecManager {
                 deps
             ));
         }
-        new_lines.extend(lines[table_end..].iter().map(|l| l.to_string()));
+        new_lines.extend(
+            lines[table_end..]
+                .iter()
+                .map(std::string::ToString::to_string),
+        );
         Ok(new_lines.join("\n"))
     }
 
@@ -330,8 +339,8 @@ impl SpecManager {
 
                 let score = if title_match { 3 } else { 0 }
                     + if spec_match { 2 } else { 0 }
-                    + if plan_match { 1 } else { 0 }
-                    + if review_match { 1 } else { 0 };
+                    + i32::from(plan_match)
+                    + i32::from(review_match);
 
                 results.push(SpecSearchResult {
                     spec,
@@ -375,14 +384,13 @@ fn update_frontmatter(
         fm_lines.push("audit:".to_string());
         for (ts, old, new, actor) in audit_trail {
             fm_lines.push(format!(
-                "  - {{ time: {}, from: \"{}\", to: \"{}\", actor: \"{}\" }}",
-                ts, old, new, actor
+                "  - {{ time: {ts}, from: \"{old}\", to: \"{new}\", actor: \"{actor}\" }}"
             ));
         }
     }
 
     if !reviewers.is_empty() {
-        let names: Vec<String> = reviewers.iter().map(|r| format!("\"{}\"", r)).collect();
+        let names: Vec<String> = reviewers.iter().map(|r| format!("\"{r}\"")).collect();
         fm_lines.push(format!("reviewers: [{}]", names.join(", ")));
     }
 
@@ -433,12 +441,14 @@ pub struct SpecFilter {
 
 impl SpecFilter {
     /// Create a filter with default settings (no filters, sort by modified desc).
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Only return specs with this status.
-    pub fn with_status(mut self, status: SpecStatus) -> Self {
+    #[must_use]
+    pub const fn with_status(mut self, status: SpecStatus) -> Self {
         self.status = Some(status);
         self
     }
@@ -450,19 +460,22 @@ impl SpecFilter {
     }
 
     /// Only return specs modified at or after this timestamp.
-    pub fn with_modified_since(mut self, since: u64) -> Self {
+    #[must_use]
+    pub const fn with_modified_since(mut self, since: u64) -> Self {
         self.modified_since = Some(since);
         self
     }
 
     /// Include archived specs.
-    pub fn with_archived(mut self) -> Self {
+    #[must_use]
+    pub const fn with_archived(mut self) -> Self {
         self.include_archived = true;
         self
     }
 
     /// Set sort order.
-    pub fn with_sort(mut self, sort: SortBy) -> Self {
+    #[must_use]
+    pub const fn with_sort(mut self, sort: SortBy) -> Self {
         self.sort_by = sort;
         self
     }

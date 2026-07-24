@@ -3,7 +3,7 @@
 //! `Storage::get_session` and `Storage::list_sessions` previously ran a
 //! `pragma_table_info` query on every call to detect the `format_version`
 //! column. PERF-004 caches that result in an `AtomicBool` populated during
-//! `migrate()`, so subsequent calls skip the SQLite round-trip.
+//! `migrate()`, so subsequent calls skip the `SQLite` round-trip.
 //!
 //! The `has_format_version` field is now private (it lives on
 //! `ragent_storage::Storage`, which is re-exported by `ragent_agent::storage`).

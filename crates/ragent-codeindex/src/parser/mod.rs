@@ -37,7 +37,8 @@ pub struct ParsedFile {
 
 impl ParsedFile {
     /// Create an empty parsed file.
-    pub fn empty() -> Self {
+    #[must_use]
+    pub const fn empty() -> Self {
         Self {
             symbols: Vec::new(),
             imports: Vec::new(),
@@ -66,6 +67,7 @@ pub struct ParserRegistry {
 
 impl ParserRegistry {
     /// Create a new registry with all built-in language parsers.
+    #[must_use]
     pub fn new() -> Self {
         let mut parsers: HashMap<String, Arc<dyn LanguageParser>> = HashMap::new();
 
@@ -131,18 +133,24 @@ impl ParserRegistry {
     }
 
     /// Look up a parser by language id.
+    #[must_use]
     pub fn get(&self, language: &str) -> Option<Arc<dyn LanguageParser>> {
         self.parsers.get(language).cloned()
     }
 
     /// List all supported language ids.
+    #[must_use]
     pub fn supported_languages(&self) -> Vec<&str> {
-        self.parsers.keys().map(|s| s.as_str()).collect()
+        self.parsers
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Parse a file given its source code and detected language.
     ///
     /// Returns `None` if no parser is registered for the language.
+    #[must_use]
     pub fn parse(&self, language: &str, source: &[u8]) -> Option<Result<ParsedFile>> {
         self.get(language).map(|parser| parser.parse(source))
     }

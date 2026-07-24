@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::search::duckduckgo` — DuckDuckGo keyless search
+//! Unit tests for `masterfetch::search::duckduckgo` — `DuckDuckGo` keyless search
 //! backend (T-013, FR-008, NFR-003).
 //!
 //! The HTML parsing and form-parameter construction are pure functions and are
@@ -69,7 +69,7 @@ fn test_parse_empty_html() {
 
 #[test]
 fn test_parse_html_with_no_results() {
-    let html = r#"<html><body><p>No results found.</p></body></html>"#;
+    let html = r"<html><body><p>No results found.</p></body></html>";
     let results = parse_results_html(html, "duckduckgo");
     assert!(results.is_empty());
 }

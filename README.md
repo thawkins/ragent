@@ -9,6 +9,8 @@ single statically-linked binary with zero runtime dependencies.
 
 It is implemented in Rust as a learning exercise for the author.
 
+Read TUI-QUICKSTART for instructions on how to use the tool.
+
 ## Features
 
 - **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
@@ -234,20 +236,20 @@ one of 12 structured frameworks — no LLM call needed, instant results.
 /opt draw    A futuristic city at sunset
 ```
 
-| Method | Description |
-|---|---|
-| `co_star` | Context, Objective, Scope, Task, Action, Result |
-| `crispe` | Context, Role, Intent, Steps, Persona, Examples |
-| `cot` | Chain-of-Thought step-by-step reasoning |
-| `draw` | Image prompt: subject, style, details, negatives |
-| `rise` | Role, Intent, Scope, Examples |
-| `o1_style` | Stylized creative tokens and constraints |
-| `meta` | Meta Prompting — generate the internal prompt |
+| Method          | Description                                             |
+| --------------- | ------------------------------------------------------- |
+| `co_star`     | Context, Objective, Scope, Task, Action, Result         |
+| `crispe`      | Context, Role, Intent, Steps, Persona, Examples         |
+| `cot`         | Chain-of-Thought step-by-step reasoning                 |
+| `draw`        | Image prompt: subject, style, details, negatives        |
+| `rise`        | Role, Intent, Scope, Examples                           |
+| `o1_style`    | Stylized creative tokens and constraints                |
+| `meta`        | Meta Prompting — generate the internal prompt          |
 | `variational` | VARI — multiple prompt candidates + selection criteria |
-| `q_star` | Q* — iterative query refinement |
-| `openai` | OpenAI/GPT system+user adapter |
-| `claude` | Anthropic Claude adapter |
-| `microsoft` | Microsoft Azure AI adapter |
+| `q_star`      | Q* — iterative query refinement                        |
+| `openai`      | OpenAI/GPT system+user adapter                          |
+| `claude`      | Anthropic Claude adapter                                |
+| `microsoft`   | Microsoft Azure AI adapter                              |
 
 HTTP endpoint (requires Bearer token):
 
@@ -284,23 +286,23 @@ Docs and examples:
 
 The project is a Cargo workspace built from 15 focused crates:
 
-| Crate | Purpose |
-|-------|---------|
-| `ragent-agent` | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
-| `ragent-bench` | Benchmark runner shared between TUI and CLI |
-| `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
-| `ragent-config` | Configuration types, defaults, and parsing |
-| `ragent-llm` | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
-| `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
-| `ragent-server` | Axum HTTP routes and SSE streaming |
-| `ragent-specs` | Spec lifecycle management: discovery, validation, status transitions, review, archival |
-| `ragent-storage` | SQLite-backed storage, snapshots, encrypted credentials |
-| `ragent-team` | Team coordination runtime and team tools |
-| `ragent-tools-core` | Core shell/file/search tools |
-| `ragent-tools-extended` | Extended document/web/memory/codeindex tools |
-| `ragent-tools-vcs` | GitHub and GitLab tool surface |
-| `ragent-tui` | Ratatui terminal interface |
-| `ragent-types` | Shared IDs, events, messages, and sanitization primitives |
+| Crate                     | Purpose                                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ragent-agent`          | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry                                                                                                                          |
+| `ragent-bench`          | Benchmark runner shared between TUI and CLI                                                                                                                                                       |
+| `ragent-codeindex`      | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher                                                                                                                   |
+| `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
+| `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
+| `ragent-prompt_opt`     | Prompt optimization templates and completer abstraction                                                                                                                                           |
+| `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
+| `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival                                                                                                            |
+| `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
+| `ragent-team`           | Team coordination runtime and team tools                                                                                                                                                          |
+| `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
+| `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
+| `ragent-tools-vcs`      | GitHub and GitLab tool surface                                                                                                                                                                    |
+| `ragent-tui`            | Ratatui terminal interface                                                                                                                                                                        |
+| `ragent-types`          | Shared IDs, events, messages, and sanitization primitives                                                                                                                                         |
 
 The binary entry point (`src/main.rs`) wires these crates together behind a clap CLI.
 
@@ -340,6 +342,7 @@ cargo bench -p ragent-codeindex
 ```
 
 Key optimisations in the current release:
+
 - **DashMap** replaces `RwLock<HashMap>` in the orchestrator, reducing lock contention
 - **LRU file-read cache** (256-entry, mtime-keyed) avoids redundant disk I/O
 - **Rayon parallel glob** walk for large directory trees
@@ -353,12 +356,13 @@ server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
-  - TODO side panel added (Alt+T) with `/todo` slash alias
-  - Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
-  - All 279 compiler warnings eliminated (build, tests, benches, examples)
-  - Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
-  - `read` tool instructions clarified (`end_line` is absolute line number)
-  - Remote push prohibitions strengthened in `AGENTS.md`
+
+- TODO side panel added (Alt+T) with `/todo` slash alias
+- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
+- All 279 compiler warnings eliminated (build, tests, benches, examples)
+- Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
+- `read` tool instructions clarified (`end_line` is absolute line number)
+- Remote push prohibitions strengthened in `AGENTS.md`
 - SPEC.md reorganized, audited, and brought up to date with actual implementation
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery

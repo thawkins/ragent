@@ -1,13 +1,13 @@
 //! Tests for validate.rs (M8/T8.4).
-//! Compiled as a submodule via #[path], super::* resolves to the source module.
+//! Compiled as a submodule via #[path], `super::`* resolves to the source module.
 
 use super::*;
 use crate::spec::{Spec, SpecId};
 
 fn valid_spec() -> Spec {
     let id = SpecId::new("testspec").unwrap();
-    let mut spec = Spec::new(id.clone(), "Test Spec");
-    spec.spec_md = r#"---
+    let mut spec = Spec::new(id, "Test Spec");
+    spec.spec_md = r"---
 status: draft
 id: testspec
 ---
@@ -53,10 +53,10 @@ In scope.
 ### Assumptions
 
 1. Users have Git.
-"#
+"
     .to_string();
 
-    spec.plan_md = r#"# Implementation Plan: Test Spec
+    spec.plan_md = r"# Implementation Plan: Test Spec
 
 ## Overview
 
@@ -72,7 +72,7 @@ A plan.
 |---|---|---|---|---|
 | T-001 | Do X | FR-001 | S | High |
 | T-002 | Do Z | FR-002 | S | High |
-"#
+"
     .to_string();
     spec
 }
@@ -131,8 +131,7 @@ fn test_validate_valid_spec() {
     let report = validate(&spec);
     assert!(
         !report.has_errors(),
-        "valid spec should have no errors: {:?}",
-        report
+        "valid spec should have no errors: {report:?}"
     );
 }
 
@@ -155,7 +154,7 @@ fn test_validate_missing_section() {
 fn test_validate_no_requirements() {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test");
-    spec.spec_md = r#"---
+    spec.spec_md = r"---
 status: draft
 ---
 
@@ -179,7 +178,7 @@ None.
 ## Constraints & Assumptions
 ### Constraints
 1. X.
-"#
+"
     .to_string();
     spec.plan_md = "# Plan\n".to_string();
     let report = validate(&spec);
@@ -195,7 +194,7 @@ None.
 fn test_validate_duplicate_req_id() {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test");
-    spec.spec_md = r#"---
+    spec.spec_md = r"---
 status: draft
 ---
 
@@ -223,7 +222,7 @@ None.
 ## Constraints & Assumptions
 ### Constraints
 1. X.
-"#
+"
     .to_string();
     spec.plan_md = "# Plan\n".to_string();
     let report = validate(&spec);
@@ -239,7 +238,7 @@ None.
 fn test_validate_numbering_gap() {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test");
-    spec.spec_md = r#"---
+    spec.spec_md = r"---
 status: draft
 ---
 
@@ -267,7 +266,7 @@ None.
 ## Constraints & Assumptions
 ### Constraints
 1. X.
-"#
+"
     .to_string();
     spec.plan_md = "# Plan\n".to_string();
     let report = validate(&spec);
@@ -278,7 +277,7 @@ None.
 fn test_validate_invalid_status() {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test");
-    spec.spec_md = r#"---
+    spec.spec_md = r"---
 status: bananas
 ---
 
@@ -303,7 +302,7 @@ None.
 ## Constraints & Assumptions
 ### Constraints
 1. X.
-"#
+"
     .to_string();
     spec.plan_md = "# Plan\n".to_string();
     let report = validate(&spec);
@@ -350,7 +349,7 @@ fn test_validate_unknown_requirement_reference() {
     let id = SpecId::new("testspec").unwrap();
     let mut spec = Spec::new(id, "Test");
     spec.spec_md = valid_spec().spec_md;
-    spec.plan_md = r#"# Plan
+    spec.plan_md = r"# Plan
 
 ## Overview
 
@@ -365,7 +364,7 @@ Plan.
 | ID | Title | Requirement | Effort | Priority |
 |---|---|---|---|---|
 | T-001 | Do X | FR-999 | S | High |
-"#
+"
     .to_string();
     let report = validate(&spec);
     assert!(
@@ -378,7 +377,7 @@ Plan.
 
 #[test]
 fn test_parse_requirements() {
-    let md = r#"## Functional Requirements
+    let md = r"## Functional Requirements
 
 ### FR-001 — First
 `The system shall do A.`
@@ -388,7 +387,7 @@ fn test_parse_requirements() {
 
 ### NFR-001 — Perf
 `The system shall respond fast.`
-"#;
+";
     let reqs = parse_requirements(md);
     assert_eq!(reqs.len(), 3);
     assert_eq!(reqs[0].id, "FR-001");

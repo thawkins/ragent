@@ -3,7 +3,7 @@
 //! Implements **FR-008**, **FR-009**, and **NFR-003** (T-015).
 //!
 //! This module merges results from multiple keyless search backends
-//! (DuckDuckGo, Brave, …), deduplicates by normalised URL, boosts results
+//! (`DuckDuckGo`, Brave, …), deduplicates by normalised URL, boosts results
 //! that appear across multiple engines (cross-engine consensus), assigns a
 //! normalised relevance score (0.0–1.0), derives a coarse `fetch_relevance`
 //! tier (`high` / `med` / `low`), mines related queries from titles and
@@ -94,10 +94,10 @@ use super::engine::{
 /// URL (consensus boost).
 const CONSENSUS_BOOST_PER_ENGINE: f64 = 0.15;
 
-/// Minimum score for the `high` fetch_relevance tier.
+/// Minimum score for the `high` `fetch_relevance` tier.
 const HIGH_TIER_THRESHOLD: f64 = 0.6;
 
-/// Minimum score for the `med` fetch_relevance tier.
+/// Minimum score for the `med` `fetch_relevance` tier.
 const MED_TIER_THRESHOLD: f64 = 0.3;
 
 /// Maximum number of related queries to extract.
@@ -227,7 +227,7 @@ pub fn merge_and_rank(reports: &[EngineReport], query: &str) -> MergeOutput {
     let engines_with_results = reports.iter().filter(|r| r.has_results()).count();
     let blocked_engines: Vec<String> = blocked_engine_names(reports)
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
 
     // Collect all results.
@@ -376,7 +376,7 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
 /// - Rank 10 → ~0.40
 /// - Rank 20 → ~0.25
 fn rank_score(rank: usize) -> f64 {
-    1.0 / (1.0 + rank as f64 * 0.15)
+    1.0 / (rank as f64).mul_add(0.15, 1.0)
 }
 
 /// Derive the `fetch_relevance` tier from a score.

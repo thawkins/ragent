@@ -1,9 +1,9 @@
-//! OpenSCAD language parser using tree-sitter.
+//! `OpenSCAD` language parser using tree-sitter.
 //!
 //! Extracts modules, functions, variable declarations, include/use statements,
-//! and parameter lists from OpenSCAD (`.scad`) source files.
+//! and parameter lists from `OpenSCAD` (`.scad`) source files.
 //!
-//! OpenSCAD is a declarative CAD scripting language. Its main code units are
+//! `OpenSCAD` is a declarative CAD scripting language. Its main code units are
 //! **modules** (imperative geometry generators) and **functions** (pure
 //! expressions that return values). Both can accept parameters. Variables are
 //! declared with `=`, and files are pulled in via `include <…>` or `use <…>`.
@@ -13,14 +13,15 @@ use crate::types::{ImportEntry, Symbol, SymbolKind, SymbolRef, Visibility};
 use anyhow::{Context, Result};
 use tree_sitter::Node;
 
-/// Tree-sitter parser for the OpenSCAD language.
+/// Tree-sitter parser for the `OpenSCAD` language.
 pub struct OpenScadParser {
     _private: (),
 }
 
 impl OpenScadParser {
-    /// Create a new OpenSCAD parser.
-    pub fn new() -> Self {
+    /// Create a new `OpenSCAD` parser.
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 
@@ -71,7 +72,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -84,7 +85,7 @@ impl Ctx<'_> {
 
 // ── Recursive walk ──────────────────────────────────────────────────────────
 
-/// Walk a tree-sitter node, extracting OpenSCAD symbols and imports.
+/// Walk a tree-sitter node, extracting `OpenSCAD` symbols and imports.
 fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     match node.kind() {
         "module_item" => extract_module_item(ctx, node, parent_id, scope),
@@ -105,7 +106,7 @@ fn walk(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
 
 // ── Module item (`module <name>(…) { … }`) ──────────────────────────────────
 
-/// Extract an OpenSCAD module definition.
+/// Extract an `OpenSCAD` module definition.
 ///
 /// Tree-sitter node fields: `name` (identifier), `parameters`, `body` (statement).
 fn extract_module_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -147,7 +148,7 @@ fn extract_module_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope:
 
 // ── Function item (`function <name>(…) = …;`) ──────────────────────────────
 
-/// Extract an OpenSCAD function definition.
+/// Extract an `OpenSCAD` function definition.
 ///
 /// Tree-sitter node fields: `name` (identifier), `parameters`.
 fn extract_function_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
@@ -182,10 +183,10 @@ fn extract_function_item(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scop
 
 // ── Variable declaration (`var_declaration` wrapping `assignment`) ──────────
 
-/// Extract an OpenSCAD top-level variable declaration.
+/// Extract an `OpenSCAD` top-level variable declaration.
 ///
 /// A `var_declaration` contains a single `assignment` child, which has fields
-/// `name` (identifier or special_variable) and `value` (expression).
+/// `name` (identifier or `special_variable`) and `value` (expression).
 fn extract_var_declaration(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     // The var_declaration node wraps an assignment — delegate to assignment
     // extraction by finding the assignment child.
@@ -200,9 +201,9 @@ fn extract_var_declaration(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, sc
 
 // ── Assignment (`name = expr;`) ────────────────────────────────────────────
 
-/// Extract an OpenSCAD assignment as a constant symbol.
+/// Extract an `OpenSCAD` assignment as a constant symbol.
 ///
-/// Tree-sitter node fields: `name` (identifier or special_variable), `value` (expression).
+/// Tree-sitter node fields: `name` (identifier or `special_variable`), `value` (expression).
 fn extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = field_child_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
@@ -239,7 +240,7 @@ fn extract_assignment(ctx: &mut Ctx, node: Node, parent_id: Option<i64>, scope: 
 
 // ── Include / use statements ───────────────────────────────────────────────
 
-/// Extract an OpenSCAD include or use statement.
+/// Extract an `OpenSCAD` include or use statement.
 ///
 /// Both `include_statement` and `use_statement` contain an `include_path` child.
 fn extract_include_use(ctx: &mut Ctx, node: Node) {

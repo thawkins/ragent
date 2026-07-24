@@ -6,7 +6,7 @@
 //! - [`engine`] — the [`SearchEngine`] trait, [`RawResult`] / [`EngineReport`]
 //!   structs, search options, and URL-normalisation helpers for dedup
 //!   (T-012, FR-008, NFR-003).
-//! - [`duckduckgo`] — DuckDuckGo keyless backend (T-013).
+//! - [`duckduckgo`] — `DuckDuckGo` keyless backend (T-013).
 //! - [`brave`] — Brave keyless backend (T-014).
 //! - [`consensus`] — merge, dedup, consensus boost, and ranking (T-015).
 //! - [`SearchOrchestrator`] — run all backends in parallel, merge, cache
@@ -41,6 +41,7 @@ pub mod brave;
 pub mod consensus;
 pub mod duckduckgo;
 pub mod engine;
+pub mod langsearch;
 
 // Re-export commonly used types at the module level.
 pub use consensus::{ConsensusResult, MergeOutput, merge_and_rank, merge_and_rank_with_cap};
@@ -59,7 +60,7 @@ use std::time::{Duration, Instant};
 // ---------------------------------------------------------------------------
 
 /// Search-result cache TTL: 5 minutes (NFR-001).
-pub const SEARCH_CACHE_TTL: Duration = Duration::from_secs(300);
+pub const SEARCH_CACHE_TTL: Duration = Duration::from_mins(5);
 
 // ---------------------------------------------------------------------------
 // SearchOutput
@@ -104,7 +105,7 @@ pub struct SearchOutput {
 ///
 /// # Examples
 ///
-/// Create an orchestrator with default backends (DuckDuckGo + Brave):
+/// Create an orchestrator with default backends (`DuckDuckGo` + Brave):
 ///
 /// ```no_run
 /// use ragent_tools_extended::masterfetch::search::{
@@ -133,7 +134,7 @@ struct CacheEntry {
 }
 
 impl SearchOrchestrator {
-    /// Create a new orchestrator with the default backends (DuckDuckGo +
+    /// Create a new orchestrator with the default backends (`DuckDuckGo` +
     /// Brave).
     #[must_use]
     pub fn new() -> Self {
@@ -194,8 +195,8 @@ impl SearchOrchestrator {
     /// # Arguments
     ///
     /// - `query` — the search query string (must not be empty).
-    /// - `opts` — search options (filters: site, exclude_sites, freshness,
-    ///   max_results, page).
+    /// - `opts` — search options (filters: site, `exclude_sites`, freshness,
+    ///   `max_results`, page).
     ///
     /// # Returns
     ///
@@ -363,7 +364,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl SearchEngine for BlockedMockEngine {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "blocked"
         }
         async fn search(&self, _query: &str, _opts: &SearchOptions) -> EngineReport {
@@ -605,6 +606,6 @@ mod tests {
 
     #[test]
     fn test_search_cache_ttl_is_5_minutes() {
-        assert_eq!(SEARCH_CACHE_TTL, Duration::from_secs(300));
+        assert_eq!(SEARCH_CACHE_TTL, Duration::from_mins(5));
     }
 }

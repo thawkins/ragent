@@ -390,10 +390,10 @@ pub fn write_benchmark_workbook(
 }
 
 fn append_sidecar_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let file_name = path
-        .file_name()
-        .map(|value| value.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "workbook.xlsx".to_string());
+    let file_name = path.file_name().map_or_else(
+        || "workbook.xlsx".to_string(),
+        |value| value.to_string_lossy().into_owned(),
+    );
     path.with_file_name(format!("{file_name}.{suffix}"))
 }
 

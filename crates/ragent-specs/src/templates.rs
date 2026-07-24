@@ -7,6 +7,7 @@ pub struct SpecTemplate;
 
 impl SpecTemplate {
     /// Generate a SPEC.md from the EARS template with the given id and title.
+    #[must_use]
     pub fn generate(id: &SpecId, title: &str) -> String {
         Self::generate_with_research(id, title, &[])
     }
@@ -15,6 +16,7 @@ impl SpecTemplate {
     /// listing the supplied research items (T-041). When `research_names` is
     /// empty, the `## Related Research` section is omitted entirely so the
     /// template matches the un-researched default.
+    #[must_use]
     pub fn generate_with_research(id: &SpecId, title: &str, research_names: &[String]) -> String {
         let related_section = if research_names.is_empty() {
             String::new()
@@ -40,7 +42,7 @@ impl SpecTemplate {
             format!("status: draft\nid: {}\nresearch: [{}]\n", id.as_str(), yaml)
         };
         format!(
-            r#"---
+            r"---
 {frontmatter}
 ---
 
@@ -136,10 +138,7 @@ impl SpecTemplate {
 ---
 
 *End of Specification*
-"#,
-            title = title,
-            related_section = related_section,
-            frontmatter = frontmatter,
+",
         )
     }
 }
@@ -149,9 +148,10 @@ pub struct PlanTemplate;
 
 impl PlanTemplate {
     /// Generate a PLAN.md from the standard implementation plan template.
+    #[must_use]
     pub fn generate(id: &SpecId, title: &str) -> String {
         format!(
-            r#"---
+            r"---
 spec_id: {id}
 ---
 
@@ -203,7 +203,7 @@ spec_id: {id}
 ---
 
 *End of Implementation Plan*
-"#,
+",
             id = id.as_str(),
             title = title
         )

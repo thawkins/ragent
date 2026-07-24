@@ -1,7 +1,7 @@
 //! Integration tests for `masterfetch::metadata` — metadata extraction
 //! (T-031, FR-006, NFR-003).
 //!
-//! Covers: OpenGraph extraction, JSON-LD parsing, canonical URL, `<title>`
+//! Covers: `OpenGraph` extraction, JSON-LD parsing, canonical URL, `<title>`
 //! fallback, missing metadata, both attribute orders, `html lang`.
 
 use ragent_tools_extended::masterfetch::metadata::extract_metadata;
@@ -120,7 +120,7 @@ fn test_meta_content_before_name() {
 
 #[test]
 fn test_title_tag_as_fallback_when_no_og_title() {
-    let html = r#"<html><head><title>Page Title</title></head><body></body></html>"#;
+    let html = r"<html><head><title>Page Title</title></head><body></body></html>";
     let md = extract_metadata(html);
     assert_eq!(md.title.as_deref(), Some("Page Title"));
 }
@@ -137,7 +137,7 @@ fn test_og_title_takes_priority_over_title_tag() {
 
 #[test]
 fn test_title_tag_trimmed() {
-    let html = r#"<html><head><title>  Spaced Title  </title></head><body></body></html>"#;
+    let html = r"<html><head><title>  Spaced Title  </title></head><body></body></html>";
     let md = extract_metadata(html);
     assert_eq!(md.title.as_deref(), Some("Spaced Title"));
 }
@@ -189,7 +189,7 @@ fn test_canonical_with_other_attributes() {
 
 #[test]
 fn test_no_canonical_returns_none() {
-    let html = r#"<html><head><title>Test</title></head><body></body></html>"#;
+    let html = r"<html><head><title>Test</title></head><body></body></html>";
     let md = extract_metadata(html);
     assert!(md.canonical.is_none());
 }
@@ -235,7 +235,7 @@ fn test_html_lang_with_other_attributes() {
 
 #[test]
 fn test_no_html_lang_returns_none() {
-    let html = r#"<html><head></head><body></body></html>"#;
+    let html = r"<html><head></head><body></body></html>";
     let md = extract_metadata(html);
     assert!(md.lang.is_none());
 }
@@ -464,7 +464,7 @@ fn test_empty_html_returns_all_none() {
 
 #[test]
 fn test_html_with_no_metadata_returns_all_none() {
-    let html = r#"<html><head></head><body><p>Hello</p></body></html>"#;
+    let html = r"<html><head></head><body><p>Hello</p></body></html>";
     let md = extract_metadata(html);
     assert!(md.title.is_none());
     assert!(md.description.is_none());
@@ -586,9 +586,9 @@ fn test_jsonld_image_object_with_at_id() {
 
 #[test]
 fn test_canonical_single_quoted_href() {
-    let html = r#"<html><head>
+    let html = r"<html><head>
 <link rel='canonical' href='https://example.com/single'>
-</head><body></body></html>"#;
+</head><body></body></html>";
     let md = extract_metadata(html);
     assert_eq!(md.canonical.as_deref(), Some("https://example.com/single"));
 }

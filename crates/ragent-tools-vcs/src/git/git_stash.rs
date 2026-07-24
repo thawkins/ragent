@@ -65,19 +65,19 @@ impl Tool for GitStashTool {
             "pop" => {
                 args.push("pop".to_string());
                 if index > 0 {
-                    args.push(format!("stash@{{{}}}", index));
+                    args.push(format!("stash@{{{index}}}"));
                 }
             }
             "apply" => {
                 args.push("apply".to_string());
                 if index > 0 {
-                    args.push(format!("stash@{{{}}}", index));
+                    args.push(format!("stash@{{{index}}}"));
                 }
             }
             "drop" => {
                 args.push("drop".to_string());
                 if index > 0 {
-                    args.push(format!("stash@{{{}}}", index));
+                    args.push(format!("stash@{{{index}}}"));
                 } else {
                     args.push("stash@{0}".to_string());
                 }
@@ -90,13 +90,12 @@ impl Tool for GitStashTool {
             }
             other => {
                 return Err(anyhow::anyhow!(
-                    "Unknown stash action: {}. Use 'push', 'pop', 'apply', 'drop', 'list', or 'clear'.",
-                    other
+                    "Unknown stash action: {other}. Use 'push', 'pop', 'apply', 'drop', 'list', or 'clear'."
                 ));
             }
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {

@@ -7,10 +7,10 @@
 //!
 //! - **Page-type detection** ([`detect_page_type`]) — classifies the HTML
 //!   structure into [`PageType`] variants (article, docs, list, forum, qa,
-//!   js_shell, auth_wall, paywall, redirect, image, json, unknown). Drives the
+//!   `js_shell`, `auth_wall`, paywall, redirect, image, json, unknown). Drives the
 //!   `next_action` suggestion (FR-029).
 //! - **Source-authority classification** ([`classify_source_type`]) — maps the
-//!   URL domain to [`SourceType`] (gov, edu, github, vendor_docs, docs_site,
+//!   URL domain to [`SourceType`] (gov, edu, github, `vendor_docs`, `docs_site`,
 //!   qa, forum, blog, news, ecommerce, unknown) and computes `is_official`
 //!   (FR-030).
 //! - **Freshness computation** ([`compute_freshness`]) — parses the page's
@@ -395,6 +395,7 @@ fn find_meta_refresh_content(html_lower: &str) -> Option<String> {
 ///
 /// Format: `N;url=...` or just `N`. Returns 999 if parsing fails (treat as
 /// non-redirect).
+#[must_use]
 pub fn parse_meta_refresh_seconds(content: &str) -> u64 {
     let semicolon_pos = content.find(';').unwrap_or(content.len());
     let num_str = &content[..semicolon_pos];
@@ -714,13 +715,14 @@ pub fn compute_freshness(metadata: &PageMetadata) -> (i64, bool) {
 
 /// Parse an ISO 8601 date string into a `DateTime<Utc>`.
 ///
-/// Handles common formats produced by OpenGraph, JSON-LD, and HTML meta tags:
+/// Handles common formats produced by `OpenGraph`, JSON-LD, and HTML meta tags:
 ///
 /// - `2024-01-15T10:30:00Z` (RFC 3339 / ISO 8601 with Z)
 /// - `2024-01-15T10:30:00+00:00` (with explicit offset)
 /// - `2024-01-15T10:30:00` (no timezone → assumed UTC)
 /// - `2024-01-15 10:30:00` (space separator)
 /// - `2024-01-15` (date only)
+#[must_use]
 pub fn parse_iso_date(s: &str) -> Option<DateTime<Utc>> {
     let s = s.trim();
     if s.is_empty() {
@@ -858,7 +860,7 @@ fn compute_next_action(page_type: PageType, content_ok: bool) -> String {
 fn extract_host(url: &str) -> Option<String> {
     url::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase))
 }
 
 // ---------------------------------------------------------------------------

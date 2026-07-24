@@ -18,7 +18,8 @@ pub struct CParser {
 
 impl CParser {
     /// Create a new C parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 }
@@ -67,7 +68,8 @@ pub struct CppParser {
 
 impl CppParser {
     /// Create a new C++ parser.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 }
@@ -119,7 +121,7 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn alloc_id(&mut self) -> i64 {
+    const fn alloc_id(&mut self) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         id
@@ -205,33 +207,33 @@ fn extract_declaration(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[
 
     // Check if this looks like a function declaration (has parentheses in declarator)
     let declarator = node.child_by_field_name("declarator");
-    if let Some(decl) = declarator {
-        if decl.kind() == "function_declarator" || decl.kind() == "init_declarator" {
-            let name = find_identifier(ctx, decl).unwrap_or_default();
-            if !name.is_empty() && text.contains('(') {
-                // Function prototype
-                let doc = extract_c_doc(ctx, node);
-                let qname = build_qname(scope, &name);
+    if let Some(decl) = declarator
+        && (decl.kind() == "function_declarator" || decl.kind() == "init_declarator")
+    {
+        let name = find_identifier(ctx, decl).unwrap_or_default();
+        if !name.is_empty() && text.contains('(') {
+            // Function prototype
+            let doc = extract_c_doc(ctx, node);
+            let qname = build_qname(scope, &name);
 
-                let id = ctx.alloc_id();
-                ctx.symbols.push(Symbol {
-                    id,
-                    file_id: 0,
-                    name,
-                    qualified_name: Some(qname),
-                    kind: SymbolKind::Function,
-                    visibility: Visibility::Public,
-                    start_line: node.start_position().row as u32 + 1,
-                    end_line: node.end_position().row as u32 + 1,
-                    start_col: node.start_position().column as u32,
-                    end_col: node.end_position().column as u32,
-                    parent_id: parent,
-                    signature: Some(text),
-                    doc_comment: doc,
-                    body_hash: None,
-                });
-                return;
-            }
+            let id = ctx.alloc_id();
+            ctx.symbols.push(Symbol {
+                id,
+                file_id: 0,
+                name,
+                qualified_name: Some(qname),
+                kind: SymbolKind::Function,
+                visibility: Visibility::Public,
+                start_line: node.start_position().row as u32 + 1,
+                end_line: node.end_position().row as u32 + 1,
+                start_col: node.start_position().column as u32,
+                end_col: node.end_position().column as u32,
+                parent_id: parent,
+                signature: Some(text),
+                doc_comment: doc,
+                body_hash: None,
+            });
+            return;
         }
     }
 

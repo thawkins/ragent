@@ -16,5 +16,5 @@ fn main() {
     let dt = chrono::DateTime::from_timestamp(now.as_secs() as i64, 0)
         .expect("invalid timestamp")
         .format("%Y-%m-%d %H:%M:%S UTC");
-    println!("cargo:rustc-env=COMPILE_TIME={}", dt);
+    println!("cargo:rustc-env=COMPILE_TIME={dt}");
 }

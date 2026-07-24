@@ -1,4 +1,4 @@
-//! Tests for todo_write status-change summaries.
+//! Tests for `todo_write` status-change summaries.
 
 use std::sync::Arc;
 

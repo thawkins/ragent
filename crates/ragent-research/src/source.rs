@@ -39,7 +39,8 @@ pub enum LocalSourceKind {
 
 impl LocalSourceKind {
     /// Type-column value used in the References Index table.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::InProject => "local",
             Self::Extra => "extra-local",
@@ -134,7 +135,8 @@ pub enum Source {
 
 impl Source {
     /// Type-column value used in the References Index table.
-    pub fn type_str(&self) -> &'static str {
+    #[must_use]
+    pub const fn type_str(&self) -> &'static str {
         match self {
             Self::Web { .. } => "web",
             Self::Local { kind, .. } => kind.as_str(),
@@ -144,6 +146,7 @@ impl Source {
     }
 
     /// Title or label for this source, used in the References Index table.
+    #[must_use]
     pub fn title(&self) -> &str {
         match self {
             Self::Web { title, .. } => title,
@@ -154,6 +157,7 @@ impl Source {
     }
 
     /// Path or URL for this source, used in the References Index table.
+    #[must_use]
     pub fn path_or_url(&self) -> &str {
         match self {
             Self::Web { url, .. } => url,
@@ -164,7 +168,8 @@ impl Source {
     }
 
     /// Timestamp at which the source was captured.
-    pub fn captured_at(&self) -> DateTime<Utc> {
+    #[must_use]
+    pub const fn captured_at(&self) -> DateTime<Utc> {
         match self {
             Self::Web { captured_at, .. }
             | Self::Local { captured_at, .. }
@@ -178,7 +183,8 @@ impl Source {
     /// Only [`Source::Web`] carries a publication date (parsed from the page's
     /// embedded metadata at fetch time). Local, spec, and other sources do not
     /// have a meaningful publication date and always return `None`.
-    pub fn published_at(&self) -> Option<DateTime<Utc>> {
+    #[must_use]
+    pub const fn published_at(&self) -> Option<DateTime<Utc>> {
         match self {
             Self::Web { published_at, .. } => *published_at,
             _ => None,
@@ -186,6 +192,7 @@ impl Source {
     }
 
     /// Optional relevance note for local, spec, and web sources.
+    #[must_use]
     pub fn relevance(&self) -> Option<&str> {
         match self {
             Self::Local { relevance, .. }
@@ -201,7 +208,8 @@ impl Source {
     ///
     /// When the source was loaded from an older `RESEARCH.md` that predates
     /// the `body` field, this returns an empty string.
-    pub fn body(&self) -> Option<&str> {
+    #[must_use]
+    pub const fn body(&self) -> Option<&str> {
         match self {
             Self::Web { body, .. } | Self::Local { body, .. } | Self::Other { body, .. } => {
                 Some(body.as_str())
@@ -212,8 +220,9 @@ impl Source {
 
     /// `true` when the source has a non-empty captured body. Used by the
     /// synthesis engine to skip empty rows when computing prompt budgets.
+    #[must_use]
     pub fn has_body(&self) -> bool {
-        self.body().map(|b| !b.is_empty()).unwrap_or(false)
+        self.body().is_some_and(|b| !b.is_empty())
     }
 }
 

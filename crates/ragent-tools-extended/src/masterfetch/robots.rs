@@ -77,7 +77,7 @@ use url::Url;
 // ---------------------------------------------------------------------------
 
 /// Per-domain cache TTL in seconds (FR-028: 3600 = 1 hour).
-pub const ROBOTS_CACHE_TTL: Duration = Duration::from_secs(3600);
+pub const ROBOTS_CACHE_TTL: Duration = Duration::from_hours(1);
 
 /// Timeout for fetching `robots.txt` (seconds).
 pub const ROBOTS_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -192,6 +192,7 @@ impl RobotsRules {
     /// assert!(!rules.is_allowed("*", "/private/secret.html"));
     /// assert!(rules.is_allowed("*", "/public/page.html"));
     /// ```
+    #[must_use]
     pub fn is_allowed(&self, user_agent: &str, path: &str) -> bool {
         // Empty rules → allow all (RFC 9309: no robots.txt = allow).
         if self.is_empty {
@@ -276,13 +277,13 @@ impl RobotsRules {
     ///
     /// Empty rules mean "allow all" per RFC 9309.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.is_empty
     }
 
     /// Returns the number of rule groups parsed from the file.
     #[must_use]
-    pub fn group_count(&self) -> usize {
+    pub const fn group_count(&self) -> usize {
         self.groups.len()
     }
 }

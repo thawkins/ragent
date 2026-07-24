@@ -109,11 +109,14 @@ fn test_permission_request_has_timeout_fields() {
         request
             .metadata
             .get("timeout_secs")
-            .and_then(|v| v.as_u64()),
+            .and_then(serde_json::Value::as_u64),
         Some(120)
     );
     assert_eq!(
-        request.metadata.get("created_at").and_then(|v| v.as_u64()),
+        request
+            .metadata
+            .get("created_at")
+            .and_then(serde_json::Value::as_u64),
         Some(now)
     );
 }
@@ -141,10 +144,7 @@ fn test_countdown_calculation_logic() {
     assert_eq!(remaining_mins, 1);
     assert_eq!(remaining_secs, 30);
 
-    let title = format!(
-        " Permission Required ({}:{:02} remaining) ",
-        remaining_mins, remaining_secs
-    );
+    let title = format!(" Permission Required ({remaining_mins}:{remaining_secs:02} remaining) ");
     assert_eq!(title, " Permission Required (1:30 remaining) ");
 }
 
@@ -169,10 +169,7 @@ fn test_countdown_expired() {
     } else {
         let remaining_mins = remaining / 60;
         let remaining_secs = remaining % 60;
-        format!(
-            " Permission Required ({}:{:02} remaining) ",
-            remaining_mins, remaining_secs
-        )
+        format!(" Permission Required ({remaining_mins}:{remaining_secs:02} remaining) ")
     };
 
     assert_eq!(title, " Permission Required (EXPIRED) ");
@@ -197,7 +194,7 @@ fn test_countdown_formats_correctly() {
         assert_eq!(mins, expected_mins);
         assert_eq!(secs, expected_secs);
 
-        let formatted = format!("{}:{:02}", mins, secs);
+        let formatted = format!("{mins}:{secs:02}");
         assert_eq!(formatted, expected_str);
     }
 }

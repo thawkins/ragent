@@ -65,7 +65,7 @@ impl Tool for GitCherryPickTool {
             }
         }
 
-        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let arg_refs: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
         let (stdout, stderr) = run_git(&arg_refs, &ctx.working_dir)?;
 
         if !stderr.is_empty() && stdout.trim().is_empty() {
@@ -78,12 +78,9 @@ impl Tool for GitCherryPickTool {
         let content = if stdout.trim().is_empty() {
             let count = commits.len();
             if no_commit {
-                format!(
-                    "Applied changes from {} commit(s) without committing.",
-                    count
-                )
+                format!("Applied changes from {count} commit(s) without committing.")
             } else {
-                format!("Cherry-picked {} commit(s).", count)
+                format!("Cherry-picked {count} commit(s).")
             }
         } else {
             stdout

@@ -68,7 +68,7 @@ fn test_truncate_content_max_lines_zero() {
 #[test]
 fn test_truncate_content_head_tail() {
     let content = (1..=20)
-        .map(|n| format!("line{}", n))
+        .map(|n| format!("line{n}"))
         .collect::<Vec<_>>()
         .join("\n");
 

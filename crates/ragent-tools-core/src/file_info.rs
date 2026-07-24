@@ -72,8 +72,7 @@ impl Tool for FileInfoTool {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs());
 
         // Format as a simple ISO-8601-like UTC timestamp
         let mtime_str = format_unix_secs(mtime_secs);
@@ -165,6 +164,6 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     (year, (month + 1) as u64, days + 1)
 }
 
-fn is_leap(year: u64) -> bool {
+const fn is_leap(year: u64) -> bool {
     (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }

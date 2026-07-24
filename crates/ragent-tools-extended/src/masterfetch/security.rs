@@ -55,6 +55,7 @@ const DNS_REBINDING_SUFFIXES: &[&str] = &[".nip.io", ".sslip.io", ".xip.io", ".n
 const CLOUD_METADATA_HOSTS: &[&str] = &["metadata.google.internal", "metadata.azure.com"];
 
 /// Cloud metadata endpoint IP literal `169.254.169.254`.
+#[allow(dead_code)]
 const CLOUD_METADATA_IP: &str = "169.254.169.254";
 
 /// Error returned when a URL fails SSRF / security validation.
@@ -63,7 +64,7 @@ pub enum SecurityError {
     /// URL is empty or not a valid string.
     #[error("URL is empty")]
     Empty,
-    /// URL exceeds the maximum allowed length ({0} > {MAX_URL_LEN}).
+    /// URL exceeds the maximum allowed length ({0} > {`MAX_URL_LEN`}).
     #[error("URL exceeds maximum length of {MAX_URL_LEN} characters ({0} chars)")]
     TooLong(usize),
     /// URL contains a backslash character (CVE-2025-0454 parser confusion).

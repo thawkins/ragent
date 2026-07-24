@@ -1,4 +1,4 @@
-//! Tests for test_force_cleanup_modal.rs
+//! Tests for `test_force_cleanup_modal.rs`
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_team::team::{MemberStatus, TeamConfig, TeamMember, TeamStore};

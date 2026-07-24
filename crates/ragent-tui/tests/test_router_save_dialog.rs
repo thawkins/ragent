@@ -89,7 +89,10 @@ fn test_router_save_confirm_persists_and_activates() {
         .get("provider")
         .and_then(|p| p.get("router"))
         .expect("provider.router present");
-    assert_eq!(router.get("enabled").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        router.get("enabled").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     let simple = router
         .get("tiers")
         .and_then(|t| t.get("SIMPLE"))

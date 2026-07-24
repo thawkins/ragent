@@ -74,22 +74,20 @@ fn test_detect_all_ears_templates_in_real_spec() {
         }
     }
 
-    println!("Template counts: {:?}", template_counts);
-    println!("Unrecognised: {:?}", unrecognised);
+    println!("Template counts: {template_counts:?}");
+    println!("Unrecognised: {unrecognised:?}");
 
     // Most real requirements should match a template
     let total_with_ears = reqs.iter().filter(|r| !r.ears_text.is_empty()).count();
     let recognised: usize = template_counts.values().sum();
     let recognition_rate = (recognised as f64) / (total_with_ears as f64) * 100.0;
 
-    println!("Recognition rate: {}%", recognition_rate);
+    println!("Recognition rate: {recognition_rate}%");
 
     // At least 70% recognition on the real spec (some edge cases are expected)
     assert!(
         recognition_rate >= 70.0,
-        "Expected >=70% EARS recognition, got {}%\nUnrecognised: {:?}",
-        recognition_rate,
-        unrecognised
+        "Expected >=70% EARS recognition, got {recognition_rate}%\nUnrecognised: {unrecognised:?}"
     );
 }
 

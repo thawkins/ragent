@@ -68,7 +68,7 @@ struct SharedStats {
 }
 
 impl SharedStats {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             files_indexed: AtomicU64::new(0),
             files_removed: AtomicU64::new(0),
@@ -196,11 +196,13 @@ impl IndexWorkerHandle {
     }
 
     /// Get current worker statistics.
+    #[must_use]
     pub fn stats(&self) -> WorkerStats {
         self.stats.snapshot()
     }
 
     /// Whether the worker has been asked to stop.
+    #[must_use]
     pub fn is_stopped(&self) -> bool {
         self.stop_flag.load(Ordering::SeqCst)
     }
@@ -297,11 +299,12 @@ fn worker_loop(
         }
 
         // Debounce: only process if enough time has elapsed since last event.
-        if let Some(last) = last_event_time {
-            if last.elapsed() >= debounce && !batch.is_empty() {
-                process_batch(&index, &mut batch, &config, &stats, &stop);
-                last_event_time = None;
-            }
+        if let Some(last) = last_event_time
+            && last.elapsed() >= debounce
+            && !batch.is_empty()
+        {
+            process_batch(&index, &mut batch, &config, &stats, &stop);
+            last_event_time = None;
         }
 
         // Sleep briefly to avoid busy-spinning.
@@ -341,7 +344,7 @@ fn process_batch(
             break;
         }
 
-        let paths: Vec<&std::path::Path> = chunk.iter().map(|p| p.as_path()).collect();
+        let paths: Vec<&std::path::Path> = chunk.iter().map(std::path::PathBuf::as_path).collect();
         match index.index_files(&paths) {
             Ok(result) => {
                 debug!(

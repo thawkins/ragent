@@ -167,7 +167,7 @@ mod disabled_zero_traffic {
 
         let provider = rt.block_on(async {
             let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-                .with_interval(Duration::from_secs(3600))
+                .with_interval(Duration::from_hours(1))
                 .build();
             SdkMeterProvider::builder().with_reader(reader).build()
         });
@@ -289,7 +289,7 @@ mod disabled_zero_traffic {
     #[test]
     fn test_noop_registry_does_not_connect_to_collector() {
         // Build a collector that would receive metrics if any were exported.
-        let (_collector_provider, collector_exporter, rt) = build_collector();
+        let (collector_provider, collector_exporter, rt) = build_collector();
 
         // Create a no-op registry and record a variety of metrics.
         let registry = InstrumentRegistry::noop();
@@ -306,7 +306,7 @@ mod disabled_zero_traffic {
 
         // Flush the collector — nothing should appear.
         rt.block_on(async {
-            _collector_provider
+            collector_provider
                 .force_flush()
                 .expect("flush should succeed");
         });

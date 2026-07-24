@@ -104,7 +104,7 @@ pub struct MockBenchModelRunner {
 impl MockBenchModelRunner {
     /// Build a mock runner using the given selection and sample outputs.
     #[must_use]
-    pub fn new(selection: ResolvedModelSelection, outputs: Vec<String>) -> Self {
+    pub const fn new(selection: ResolvedModelSelection, outputs: Vec<String>) -> Self {
         Self { selection, outputs }
     }
 }
@@ -554,8 +554,7 @@ fn is_permanent_benchmark_api_error(message: &str) -> bool {
     }
 
     extract_benchmark_error_status_code(message)
-        .map(|code| (400..500).contains(&code) && code != 408 && code != 429)
-        .unwrap_or(false)
+        .is_some_and(|code| (400..500).contains(&code) && code != 408 && code != 429)
 }
 
 fn extract_benchmark_error_status_code(message: &str) -> Option<u16> {

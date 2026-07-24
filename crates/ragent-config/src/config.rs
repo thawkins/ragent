@@ -62,6 +62,13 @@ pub struct Config {
     /// environment variable takes precedence over this config field.
     #[serde(default)]
     pub tavily_api_key: Option<String>,
+    /// LangSearch API key for the `mf_search` tool.
+    ///
+    /// Stored in `ragent.json` (global or project). When present, `mf_search`
+    /// will query the LangSearch Web Search API as an additional backend. The
+    /// key is masked in diagnostics and never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub langsearch_api_key: Option<String>,
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,
@@ -1611,6 +1618,11 @@ impl Config {
         // tavily_api_key: overlay overrides base
         if overlay.tavily_api_key.is_some() {
             base.tavily_api_key = overlay.tavily_api_key;
+        }
+
+        // langsearch_api_key: overlay overrides base
+        if overlay.langsearch_api_key.is_some() {
+            base.langsearch_api_key = overlay.langsearch_api_key;
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)

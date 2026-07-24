@@ -1,4 +1,4 @@
-//! Integration tests for the SpecImplRunner and PlanParser.
+//! Integration tests for the `SpecImplRunner` and `PlanParser`.
 //!
 //! Tests the full flow of parsing a PLAN.md, resolving execution order,
 //! and constructing implementation prompts.
@@ -12,7 +12,7 @@ use ragent_specs::spec::TaskStatus;
 
 #[test]
 fn test_full_parse_and_order() {
-    let md = r#"
+    let md = r"
 # SpecImpl — Implementation Plan
 
 ## Architecture
@@ -35,7 +35,7 @@ Some architecture text.
 ### T-001 — Define PlanTask Struct
 
 Details here.
-"#;
+";
 
     let tasks = PlanParser::parse(md).unwrap();
     assert_eq!(tasks.len(), 6);
@@ -75,7 +75,7 @@ Details here.
 
 #[test]
 fn test_resume_from_partial_completion() {
-    let md = r#"
+    let md = r"
 ## Tasks
 
 | ID | Title | Requirement | Effort | Priority | Status | Dependencies |
@@ -85,7 +85,7 @@ fn test_resume_from_partial_completion() {
 | T-003 | DAG sort | FR-005 | M | Critical | pending | T-001 |
 | T-004 | Status column | FR-019 | M | High | pending | T-002 |
 | T-005 | Runner | FR-007 | L | Critical | pending | T-002, T-003 |
-"#;
+";
 
     let tasks = PlanParser::parse(md).unwrap();
     assert_eq!(tasks.len(), 5);
@@ -108,7 +108,7 @@ fn test_resume_from_partial_completion() {
 
 #[test]
 fn test_cycle_detection_in_plan() {
-    let md = r#"
+    let md = r"
 ## Tasks
 
 | ID | Title | Requirement | Effort | Priority | Dependencies |
@@ -116,7 +116,7 @@ fn test_cycle_detection_in_plan() {
 | T-001 | First | FR-001 | S | Critical | T-003 |
 | T-002 | Second | FR-002 | M | High | T-001 |
 | T-003 | Third | FR-003 | M | High | T-002 |
-"#;
+";
 
     let tasks = PlanParser::parse(md).unwrap();
     let result = resolve_execution_order(&tasks);
@@ -236,7 +236,7 @@ fn test_find_dependents_transitive() {
 /// `SpecImplRunner::build_single_task_prompt` is the per-task prompt used by
 /// the TUI's sequential `/spec impl` driver. It must name the task, its spec,
 /// its position in the run, the requirement, and the `spec_task_update`
-/// instruction with the correct spec_id/task_id.
+/// instruction with the correct `spec_id/task_id`.
 #[test]
 fn test_build_single_task_prompt_contains_required_fields() {
     use ragent_specs::impl_runner::SpecImplRunner;

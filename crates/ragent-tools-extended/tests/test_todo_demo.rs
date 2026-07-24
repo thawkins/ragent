@@ -1,5 +1,5 @@
-//! Demonstration: exercise todo_read / todo_write through a full lifecycle.
-//! Run with: cargo test -p ragent-tools-extended --test test_todo_demo -- --nocapture
+//! Demonstration: exercise `todo_read` / `todo_write` through a full lifecycle.
+//! Run with: cargo test -p ragent-tools-extended --test `test_todo_demo` -- --nocapture
 
 use std::sync::Arc;
 

@@ -209,7 +209,7 @@ pub struct Storage {
     /// pragma query.  Populated once during [`Storage::migrate`] (or lazily
     /// on the first session read if the storage was constructed without
     /// running migrations) and reused by [`Storage::get_session`] and
-    /// [`Storage::list_sessions`] to skip one SQLite round-trip per call.
+    /// [`Storage::list_sessions`] to skip one `SQLite` round-trip per call.
     /// An `AtomicBool` is sufficient because the schema never loses the
     /// column once it has been added.
     has_format_version: std::sync::atomic::AtomicBool,
@@ -233,7 +233,7 @@ impl Storage {
     /// On the first call after construction — when the flag is still
     /// `false` — this runs the `pragma_table_info` query once and records
     /// the result so every subsequent `get_session` / `list_sessions`
-    /// call skips the SQLite round-trip.  The schema never loses the
+    /// call skips the `SQLite` round-trip.  The schema never loses the
     /// column after it has been added, so caching is safe.
     fn has_format_version_cached(&self, conn: &rusqlite::Connection) -> Result<bool> {
         if self
@@ -465,8 +465,7 @@ impl Storage {
         for (table, col) in &[("memories", "embedding"), ("sessions", "format_version")] {
             let has_col: bool = conn
                 .prepare(&format!(
-                    "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'",
-                    table, col
+                    "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{col}'"
                 ))?
                 .query_row([], |r| r.get::<_, i64>(0))
                 .unwrap_or(0)
@@ -475,7 +474,7 @@ impl Storage {
                 let sql = if *table == "sessions" && *col == "format_version" {
                     "ALTER TABLE sessions ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;"
                 } else {
-                    &format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col)
+                    &format!("ALTER TABLE {table} ADD COLUMN {col} BLOB;")
                 };
                 conn.execute_batch(sql)?;
             } else if *table == "sessions" && *col == "format_version" {
@@ -1450,7 +1449,7 @@ impl Storage {
                {tag_clause}
              ORDER BY f.rank
              LIMIT ?{}",
-            limit_param_idx + tags.map_or(0, |t| t.len()) + 1
+            limit_param_idx + tags.map_or(0, <[std::string::String]>::len) + 1
         );
 
         // Build parameter list.
@@ -1474,7 +1473,7 @@ impl Storage {
         params_vec.push(Box::new(limit as i64));
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
         let mut stmt = conn.prepare(&sql)?;
         let rows: Vec<MemoryRow> = stmt
@@ -1577,14 +1576,14 @@ impl Storage {
         if older_than_days.is_none()
             && max_confidence.is_none()
             && category.is_none()
-            && tags.is_none_or(|t| t.is_empty())
+            && tags.is_none_or(<[std::string::String]>::is_empty)
         {
             anyhow::bail!("At least one filter criterion is required to delete memories");
         }
 
         let conn = lock_conn!(self)?;
         let cutoff = older_than_days.map(|days| {
-            let dt = Utc::now() - chrono::Duration::days(days as i64);
+            let dt = Utc::now() - chrono::Duration::days(i64::from(days));
             dt.to_rfc3339()
         });
 
@@ -1627,7 +1626,7 @@ impl Storage {
         let sql = format!("SELECT id FROM memories WHERE {where_clause}");
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
         let mut stmt = conn.prepare(&sql)?;
         let ids: Vec<i64> = stmt
@@ -1661,7 +1660,7 @@ impl Storage {
         Ok(affected > 0)
     }
 
-    /// Increments the access count and updates last_accessed for a memory.
+    /// Increments the access count and updates `last_accessed` for a memory.
     ///
     /// # Errors
     ///

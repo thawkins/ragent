@@ -53,10 +53,7 @@ impl Tool for OfficeInfoTool {
         let path = resolve_path(&ctx.working_dir, path_str);
         let office_format = detect_format(&path)?;
 
-        let file_size = tokio::fs::metadata(&path)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = tokio::fs::metadata(&path).await.map_or(0, |m| m.len());
 
         let path_clone = path.clone();
         let (content, metadata) =

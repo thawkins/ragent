@@ -6,7 +6,7 @@ use ragent_tui::input;
 #[path = "support/mod.rs"]
 mod support;
 
-fn esc_key() -> KeyEvent {
+const fn esc_key() -> KeyEvent {
     KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
 }
 

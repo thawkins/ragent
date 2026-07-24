@@ -42,7 +42,7 @@ fn test_team_context_cache_hit_within_ttl() {
     // Populate the cache as the processor would after a miss.
     cache
         .write()
-        .insert(session_id.clone(), (ctx.clone(), std::time::Instant::now()));
+        .insert(session_id.clone(), (ctx, std::time::Instant::now()));
 
     // Read within the 5 s TTL — should be a hit.
     let cached = cache.read().get(&session_id).cloned();

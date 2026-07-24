@@ -38,7 +38,7 @@ pub enum OtelProtocol {
 ///   "metrics": {}
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OtelConfig {
     /// Master on/off switch (default `false`).
     #[serde(default)]
@@ -147,7 +147,7 @@ impl OtelConfig {
 
     /// Returns `true` when telemetry export is enabled.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 }
@@ -171,7 +171,7 @@ impl Default for OtelConfig {
 /// Top-level telemetry configuration wrapping the `telemetry.otel` block.
 ///
 /// Embedded into [`crate::config::Config`] as the `telemetry` field.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelemetryConfig {
     /// The `telemetry.otel` block.
     #[serde(default)]
@@ -181,7 +181,7 @@ pub struct TelemetryConfig {
 impl TelemetryConfig {
     /// Returns `true` when OTEL export is enabled.
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.otel.enabled
     }
 
@@ -203,7 +203,7 @@ impl TelemetryConfig {
     ///
     /// `true` when the legacy flag caused telemetry to be enabled (caller
     /// should log a deprecation warning); `false` otherwise.
-    pub fn apply_legacy_flag(&mut self, legacy_open_telemetry: bool) -> bool {
+    pub const fn apply_legacy_flag(&mut self, legacy_open_telemetry: bool) -> bool {
         if self.otel.enabled {
             // Already explicitly enabled — legacy flag is irrelevant.
             return false;
@@ -229,6 +229,7 @@ impl TelemetryConfig {
     /// - Otherwise, preserve the base's `enabled` but still merge
     ///   `resource_attributes` and `metrics` maps (union) so global config can
     ///   supply defaults that a project config extends.
+    #[must_use]
     pub fn merge(base: &Self, overlay: &Self) -> Self {
         if overlay.otel.enabled {
             return overlay.clone();

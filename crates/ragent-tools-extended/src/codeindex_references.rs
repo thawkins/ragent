@@ -59,10 +59,7 @@ impl Tool for CodeIndexReferencesTool {
             .as_str()
             .context("Missing required 'symbol' parameter")?;
 
-        let limit = input["limit"]
-            .as_u64()
-            .map(|n| n.min(200) as usize)
-            .unwrap_or(50);
+        let limit = input["limit"].as_u64().map_or(50, |n| n.min(200) as usize);
 
         let refs = match with_retry(|| idx.try_references(symbol, limit)).await? {
             Some(r) => r,
@@ -88,7 +85,7 @@ impl Tool for CodeIndexReferencesTool {
             };
             if current_path.as_deref() != Some(&display_path) {
                 current_path = Some(display_path.clone());
-                output.push_str(&format!("\n── {} ──\n", display_path));
+                output.push_str(&format!("\n── {display_path} ──\n"));
             }
             output.push_str(&format!(
                 "  L{}:{} — {} ({})\n",

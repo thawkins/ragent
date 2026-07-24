@@ -94,7 +94,6 @@ fn template_is_merged_not_replacing_standard_sections() {
     assert!(body.contains("**Cross-reference / Dependencies:**"));
     assert!(body.contains("**Implication:**"));
 }
-
 #[test]
 fn no_template_preserves_standard_sections_unchanged() {
     // Regression guard: the default (no template) path still produces all
@@ -114,7 +113,6 @@ fn no_template_preserves_standard_sections_unchanged() {
     assert!(body.contains("**Implication:**"));
     assert!(body.contains("## References Index"));
 }
-
 #[test]
 fn template_with_custom_placeholder_section_is_populated_in_addition_to_findings() {
     // A template that defines a custom `## Background` section must appear

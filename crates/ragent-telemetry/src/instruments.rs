@@ -313,7 +313,16 @@ impl InstrumentRegistry {
 
     /// Construct all instruments from the given [`Meter`].
     fn from_meter(meter: opentelemetry::metrics::Meter) -> Self {
-        use names::*;
+        use names::{
+            AGENT_LOOP_DURATION, AGENT_LOOP_ITERATIONS, AGENTS_ACTIVE, AGENTS_COMPLETED,
+            CONTEXT_COMPRESSION_RATIO, CONTEXT_COMPRESSIONS, COST_ESTIMATED, COST_SESSION,
+            ERRORS_TOTAL, LLM_DURATION, LLM_REQUESTS, LLM_TTFT, MESSAGES_USER, PERMISSION_APPROVED,
+            PERMISSION_DENIED, RATE_LIMIT_REQUESTS_PCT, RATE_LIMIT_TOKENS_PCT, RETRIES_LLM,
+            SESSION_DURATION, SESSIONS_ACTIVE, SESSIONS_TOTAL, SNAPSHOT_RESTORES, SUBAGENT_SPAWNS,
+            TASK_COMPLETIONS, TEAM_MEMBERS, TIMEOUTS_TOTAL, TOKENS_CACHE_READ, TOKENS_CACHE_WRITE,
+            TOKENS_INPUT, TOKENS_OUTPUT, TOOL_CALLS_PER_SESSION, TOOL_DURATION, TOOL_INVOCATIONS,
+            TOOL_PERMISSION_WAIT,
+        };
 
         // The metric toggles map defaults to empty (all metrics enabled).
         // TelemetrySubsystem::instruments() calls with_metric_toggles() to
@@ -667,7 +676,7 @@ mod tests {
         let exporter_clone = exporter.clone();
         let provider = rt.block_on(async {
             let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
-                .with_interval(Duration::from_secs(3600))
+                .with_interval(Duration::from_hours(1))
                 .build();
             SdkMeterProvider::builder().with_reader(reader).build()
         });

@@ -427,7 +427,7 @@ fn combine_outputs(results: Vec<(String, ToolOutput)>) -> ToolOutput {
                 .metadata
                 .as_ref()
                 .and_then(|m| m.get("content_ok"))
-                .and_then(|v| v.as_bool())
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         })
         .count();
@@ -488,7 +488,7 @@ fn bulk_client_error_output(urls: &[String], error: &str) -> ToolOutput {
 
 /// Open the content cache for this tool invocation.
 ///
-/// Tries to use a persistent SQLite cache under `.ragent/` in the working
+/// Tries to use a persistent `SQLite` cache under `.ragent/` in the working
 /// directory. If that fails (e.g. in tests or ephemeral contexts), falls back
 /// to an in-memory cache.
 async fn open_cache(ctx: &ToolContext) -> ContentCache {

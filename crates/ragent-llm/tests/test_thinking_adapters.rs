@@ -325,7 +325,10 @@ async fn test_ollama_cloud_sends_think_field_when_configured() {
         let captured = capture_body(client, request, rx).await;
         assert_eq!(captured.path, "/api/chat");
         assert_eq!(
-            captured.body.get("think").and_then(|v| v.as_bool()),
+            captured
+                .body
+                .get("think")
+                .and_then(serde_json::Value::as_bool),
             Some(expected_think),
             "ollama_cloud `think` field mismatch for {:?}: {:#?}",
             thinking,

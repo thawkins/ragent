@@ -86,10 +86,7 @@ impl Tool for CodeIndexSymbolsTool {
         let visibility = input["visibility"]
             .as_str()
             .and_then(|v| v.parse::<ragent_codeindex::types::Visibility>().ok());
-        let limit = input["limit"]
-            .as_u64()
-            .map(|n| n.min(200) as u32)
-            .unwrap_or(50);
+        let limit = input["limit"].as_u64().map_or(50, |n| n.min(200) as u32);
 
         let filter = ragent_codeindex::types::SymbolFilter {
             name,

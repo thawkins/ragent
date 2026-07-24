@@ -218,7 +218,7 @@ fn test_jsonl_reader_skips_blank_lines() {
     assert_eq!(all[1].content, "two");
 }
 
-/// Round-trip through drain/mark_all_read works on a JSONL file.
+/// Round-trip through `drain/mark_all_read` works on a JSONL file.
 #[test]
 fn test_mark_all_read_works_on_jsonl() {
     let (_tmp, dir) = setup_workspace();

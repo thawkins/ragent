@@ -50,10 +50,10 @@ fn build_provider(
 
 /// Best-effort hostname — mirrors the private `hostname_str` in subsystem.rs.
 fn hostname_str() -> Option<String> {
-    if let Ok(h) = std::env::var("HOSTNAME") {
-        if !h.is_empty() {
-            return Some(h);
-        }
+    if let Ok(h) = std::env::var("HOSTNAME")
+        && !h.is_empty()
+    {
+        return Some(h);
     }
     if let Ok(bytes) = std::fs::read("/etc/hostname") {
         let h = String::from_utf8_lossy(&bytes).trim().to_string();

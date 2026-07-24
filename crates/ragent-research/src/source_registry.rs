@@ -30,7 +30,8 @@ pub struct BuiltinSourceRegistry;
 
 impl BuiltinSourceRegistry {
     /// Create a new built-in source registry.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }

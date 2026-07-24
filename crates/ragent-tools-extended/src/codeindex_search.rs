@@ -83,8 +83,7 @@ impl Tool for CodeIndexSearchTool {
         let file_pattern = input["file_pattern"].as_str().map(String::from);
         let max_results = input["max_results"]
             .as_u64()
-            .map(|n| n.min(100) as usize)
-            .unwrap_or(20);
+            .map_or(20, |n| n.min(100) as usize);
 
         let search_query = ragent_codeindex::types::SearchQuery {
             query: query_str.to_string(),

@@ -1,20 +1,20 @@
 # Release
 
-## Current Version: 0.1.0-beta.8
+## Current Version: 0.1.0-beta.9
+
+### Added — LangSearch backend for `mf_search`
+
+- New optional `langsearch_api_key` top-level config field in `ragent.json`.
+- New `LangSearchEngine` calling `https://api.langsearch.com/v1/web-search`, integrated into `mf_search`.
+- Existing keyless DuckDuckGo and Brave backends continue to work when no key is configured.
+- API key is masked in diagnostics and never logged or surfaced in error messages.
+
+## Previous Version: 0.1.0-beta.8
 
 ### Changed — Version bump
 
 - Workspace version bumped from `0.1.0-beta.7` to `0.1.0-beta.8`.
 - `cargo check` passes cleanly with the new version.
-
-## Previous Version: 0.1.0-beta.7
-
-### Changed — Version bump
-
-- Workspace version bumped from `0.1.0-beta.5` to `0.1.0-beta.6`.
-- `cargo check` passes cleanly with the new version.
-
-### Previous Version: 0.1.0-beta.5
 
 ### Added — Live telemetry reconfiguration, agent metric recording, and sudo askpass broker
 

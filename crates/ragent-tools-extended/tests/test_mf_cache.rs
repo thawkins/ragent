@@ -1,4 +1,4 @@
-//! Unit tests for `masterfetch::cache` — SQLite WAL content cache
+//! Unit tests for `masterfetch::cache` — `SQLite` WAL content cache
 //! (T-035, FR-018, NFR-003).
 //!
 //! Covers:

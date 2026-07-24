@@ -148,6 +148,7 @@ impl EmbeddingProvider for NoOpEmbedding {
 /// let c = vec![0.0, 1.0, 0.0];
 /// assert!((cosine_similarity(&a, &c)).abs() < 1e-6);
 /// ```
+#[must_use]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(
         a.len(),
@@ -163,7 +164,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (norm_a * norm_b)
 }
 
-/// Serialise a `Vec<f32>` embedding into a byte blob for SQLite BLOB storage.
+/// Serialise a `Vec<f32>` embedding into a byte blob for `SQLite` BLOB storage.
 ///
 /// Each `f32` is stored in little-endian IEEE 754 format (4 bytes per value).
 ///
@@ -177,6 +178,7 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// let recovered = deserialise_embedding(&blob, 3).unwrap();
 /// assert_eq!(vec, recovered);
 /// ```
+#[must_use]
 pub fn serialise_embedding(vec: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(vec.len() * 4);
     for &val in vec {

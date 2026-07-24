@@ -92,7 +92,7 @@ fn test_atomic_update_no_tmp_file_left() {
     // No stray temp files should remain — only ragent.json and the .lock file.
     let entries: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
@@ -178,7 +178,7 @@ fn test_concurrent_writers_different_sections() {
 
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
     let b1 = barrier.clone();
-    let b2 = barrier.clone();
+    let b2 = barrier;
 
     let h1 = std::thread::spawn(move || {
         b1.wait();

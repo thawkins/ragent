@@ -15,6 +15,7 @@ use std::path::PathBuf;
 /// Returns a list of `(proposed_label, content)` pairs derived from the
 /// top-level headings in the file. The heading text is slugified to create
 /// a valid label.
+#[must_use]
 pub fn analyse_memory_md(content: &str) -> Vec<(String, String)> {
     let mut sections: Vec<(String, String)> = Vec::new();
     let mut current_label = String::new();
@@ -45,7 +46,7 @@ pub fn analyse_memory_md(content: &str) -> Vec<(String, String)> {
     if !current_label.is_empty() {
         let body = current_lines.join("\n");
         if !body.trim().is_empty() {
-            sections.push((current_label.clone(), body));
+            sections.push((current_label, body));
         }
     }
 
@@ -97,10 +98,10 @@ fn slugify_heading(heading: &str) -> String {
     if trimmed.is_empty() {
         return "section".to_string();
     }
-    if !trimmed.chars().next().unwrap().is_ascii_lowercase() {
-        format!("s-{trimmed}")
-    } else {
+    if trimmed.chars().next().unwrap().is_ascii_lowercase() {
         trimmed
+    } else {
+        format!("s-{trimmed}")
     }
 }
 
@@ -177,6 +178,7 @@ pub struct MigrationPlan {
 
 impl MigrationPlan {
     /// Returns a human-readable summary of the migration plan.
+    #[must_use]
     pub fn summary(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(

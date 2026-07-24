@@ -112,6 +112,7 @@ impl ResearchManager {
     }
 
     /// Get the root directory.
+    #[must_use]
     pub fn root(&self) -> &Path {
         &self.research_root
     }
@@ -505,6 +506,7 @@ impl ResearchManager {
 /// Suggest up to three closest names from `candidates` to `target`. Exposed
 /// as a free function so the closest-matches logic can be unit-tested
 /// without touching the filesystem (T-046).
+#[must_use]
 pub fn suggest_closest_from(candidates: &[String], target: &str) -> String {
     if candidates.is_empty() {
         return "(no research items exist yet)".to_string();
@@ -559,7 +561,7 @@ fn replace_frontmatter_status_line(content: &str, status: ResearchStatus) -> Str
         .collect();
 
     let updated_fm = updated_fm.join("\n");
-    format!("---\n{}\n---\n\n{}", updated_fm, body)
+    format!("---\n{updated_fm}\n---\n\n{body}")
 }
 
 /// Levenshtein distance implemented locally so we don't pull in extra deps
@@ -578,7 +580,7 @@ fn lev(a: &str, b: &str) -> usize {
     for i in 1..=a.len() {
         curr[0] = i;
         for j in 1..=b.len() {
-            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            let cost = usize::from(a[i - 1] != b[j - 1]);
             curr[j] = std::cmp::min(
                 std::cmp::min(curr[j - 1] + 1, prev[j] + 1),
                 prev[j - 1] + cost,
@@ -606,8 +608,8 @@ fn extract_snippet(body: &str, byte_idx: usize, q_len: usize, window_chars: usiz
         .unwrap_or(chars.len());
     let lo = start_char.saturating_sub(window_chars);
     let hi = (end_char + window_chars).min(chars.len());
-    let lo_byte = chars.get(lo).map(|(i, _)| *i).unwrap_or(0);
-    let hi_byte = chars.get(hi).map(|(i, _)| *i).unwrap_or(body.len());
+    let lo_byte = chars.get(lo).map_or(0, |(i, _)| *i);
+    let hi_byte = chars.get(hi).map_or(body.len(), |(i, _)| *i);
     let mut snippet = body[lo_byte..hi_byte].to_string();
     if lo > 0 {
         snippet = format!("…{snippet}");
@@ -622,10 +624,11 @@ fn extract_snippet(body: &str, byte_idx: usize, q_len: usize, window_chars: usiz
 /// is marked `InProgress` by bumping the state to a non-terminal status. Unlike
 /// the RESEARCH.md frontmatter helper, this operates purely on the in-memory
 /// state.
-fn mark_in_progress_for_state(_state: &mut ResearchState) {}
+const fn mark_in_progress_for_state(_state: &mut ResearchState) {}
 
 /// Compute the on-disk `RESEARCH.md` text for a research item without
 /// performing any I/O. Useful for tests and dry-run previews (T-007).
+#[must_use]
 pub fn render_document_for(
     name: &ResearchName,
     title: &str,
@@ -655,6 +658,7 @@ pub fn render_document_for(
 /// Convenience helper: returns the union of unique research names referenced
 /// by a PLAN.md plus any names present in `existing`. Useful for surfacing
 /// research links in `/spec list` (T-043).
+#[must_use]
 pub fn union_with_existing(referenced: &[String], existing: &HashSet<String>) -> Vec<String> {
     let mut set: HashSet<String> = existing.clone();
     for n in referenced {
@@ -917,7 +921,10 @@ mod tests {
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
-        assert!(doc.content.contains("| 1 | web | https://example.com"));
+        assert!(
+            doc.content
+                .contains("| 1 | web | [https://example.com](https://example.com)")
+        );
     }
 
     #[test]

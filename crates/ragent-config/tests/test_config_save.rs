@@ -15,13 +15,15 @@ fn write_global_config(dir: &Path, contents: &str) -> PathBuf {
     path
 }
 
+type BackupComponents = (u32, u32, u32, u32, u32, u32, Option<u32>);
+
 /// Parse a backup file name into its numeric `(year, month, day, hour, min, sec,
 /// counter)` components.
 ///
 /// Returns `None` when the name does not strictly match the
 /// `ragent.json.YYYY-MM-DD.HH-MM-SS` pattern or the collision-avoidance form
 /// `ragent.json.YYYY-MM-DD.HH-MM-SS-N`.
-fn parse_backup_name(name: &str) -> Option<(u32, u32, u32, u32, u32, u32, Option<u32>)> {
+fn parse_backup_name(name: &str) -> Option<BackupComponents> {
     let suffix = name.strip_prefix("ragent.json.")?;
     let parts: Vec<&str> = suffix.split('.').collect();
     if parts.len() != 2 {
@@ -73,8 +75,7 @@ fn test_backup_creates_saves_directory_and_timestamped_file() {
     let name = backup.file_name().and_then(|n| n.to_str()).unwrap_or("");
     assert!(
         name.starts_with("ragent.json."),
-        "backup name should start with 'ragent.json.': {}",
-        name
+        "backup name should start with 'ragent.json.': {name}"
     );
     // Name format: ragent.json.YYYY-MM-DD.HH-MM-SS
     let suffix = name.strip_prefix("ragent.json.").unwrap_or("");
@@ -82,8 +83,7 @@ fn test_backup_creates_saves_directory_and_timestamped_file() {
     assert_eq!(
         parts.len(),
         2,
-        "backup suffix should have date.time: {}",
-        suffix
+        "backup suffix should have date.time: {suffix}"
     );
     assert!(
         parts[0].len() == 10 && parts[0].chars().nth(4) == Some('-'),
@@ -234,7 +234,7 @@ fn test_backup_name_uses_hyphens_in_time_not_colons() {
 
     // Time part has at least two hyphens; a third hyphen is an optional
     // same-second collision counter, which is also allowed.
-    let time = suffix.split_once('.').map(|(_, t)| t).unwrap_or(suffix);
+    let time = suffix.split_once('.').map_or(suffix, |(_, t)| t);
     assert!(
         time.matches('-').count() >= 2,
         "time portion should be HH-MM-SS (optionally -N): {time}"

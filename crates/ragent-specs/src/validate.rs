@@ -136,7 +136,8 @@ impl Issue {
     }
 
     /// Set the line number.
-    pub fn with_line(mut self, line: usize) -> Self {
+    #[must_use]
+    pub const fn with_line(mut self, line: usize) -> Self {
         self.line = Some(line);
         self
     }
@@ -163,6 +164,7 @@ pub struct Report {
 
 impl Report {
     /// Create an empty report.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             issues: Vec::new(),
@@ -178,16 +180,19 @@ impl Report {
     }
 
     /// Returns `true` if the report contains any [`Severity::Error`] issues.
+    #[must_use]
     pub fn has_errors(&self) -> bool {
         self.issues.iter().any(|i| i.severity == Severity::Error)
     }
 
     /// Returns `true` if the report contains any [`Severity::Warning`] issues.
+    #[must_use]
     pub fn has_warnings(&self) -> bool {
         self.issues.iter().any(|i| i.severity == Severity::Warning)
     }
 
     /// Count issues by severity.
+    #[must_use]
     pub fn count_by_severity(&self, severity: Severity) -> usize {
         self.issues
             .iter()
@@ -217,6 +222,7 @@ impl Report {
     }
 
     /// Format the report as a human-readable multi-line string.
+    #[must_use]
     pub fn format(&self, spec_id: &str) -> String {
         let mut lines = vec![format!("Validation Report for `{}`", spec_id)];
         lines.push(format!(
@@ -232,19 +238,18 @@ impl Report {
         let warnings = self.count_by_severity(Severity::Warning);
         let infos = self.count_by_severity(Severity::Info);
         lines.push(format!(
-            "Issues: {} error(s), {} warning(s), {} info(s)",
-            errors, warnings, infos
+            "Issues: {errors} error(s), {warnings} warning(s), {infos} info(s)"
         ));
         lines.push(String::new());
 
         for issue in &self.issues {
             let loc = issue
                 .line
-                .map_or_else(|| "file".to_string(), |l| format!("line {}", l));
+                .map_or_else(|| "file".to_string(), |l| format!("line {l}"));
             let id = issue
                 .id
                 .as_ref()
-                .map_or_else(|| "".to_string(), |id| format!(" [{}]", id));
+                .map_or_else(String::new, |id| format!(" [{id}]"));
             lines.push(format!(
                 "  [{}] {} — {}{} (at {})",
                 issue.severity, issue.category, issue.message, id, loc
@@ -347,7 +352,7 @@ pub fn parse_requirements(content: &str) -> Vec<ParsedRequirement> {
             let id = format!("{}-{}", &caps[1], &caps[2]);
             let ears_text = caps[3].trim().to_string();
             let title = if ears_text.len() > 50 {
-                format!("{:.47}...", ears_text)
+                format!("{ears_text:.47}...")
             } else {
                 ears_text.clone()
             };
@@ -382,6 +387,7 @@ pub fn extract_sections(content: &str) -> Vec<(usize, String, usize)> {
 /// Validate a spec and return a [`Report`].
 ///
 /// This runs structural, EARS, and PLAN.md validation in sequence.
+#[must_use]
 pub fn validate(spec: &Spec) -> Report {
     let mut report = Report::new();
 
@@ -411,7 +417,7 @@ pub fn validate_structure(spec: &Spec, report: &mut Report) {
             report.add(Issue::new(
                 Severity::Error,
                 Category::MissingSection,
-                format!("Missing required section: {}", req),
+                format!("Missing required section: {req}"),
             ));
         }
     }
@@ -432,7 +438,7 @@ pub fn validate_structure(spec: &Spec, report: &mut Report) {
                                 Issue::new(
                                     Severity::Error,
                                     Category::InvalidStatus,
-                                    format!("Unknown status value: {}", status_str),
+                                    format!("Unknown status value: {status_str}"),
                                 )
                                 .with_line(i + j + 2),
                             );
@@ -572,7 +578,7 @@ fn check_numbering_gaps(numbers: &[u32], prefix: &str, report: &mut Report) {
                 report.add(Issue::new(
                     Severity::Warning,
                     Category::Numbering,
-                    format!("Gap in numbering: {}-{} is missing", prefix, missing),
+                    format!("Gap in numbering: {prefix}-{missing} is missing"),
                 ));
             }
         }
@@ -600,7 +606,7 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
             report.add(Issue::new(
                 Severity::Warning,
                 Category::Plan,
-                format!("PLAN.md missing section: {}", req),
+                format!("PLAN.md missing section: {req}"),
             ));
         }
     }
@@ -626,7 +632,7 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
                 report.add(Issue::new(
                     Severity::Warning,
                     Category::Plan,
-                    format!("PLAN.md references unknown requirement {}", ref_id),
+                    format!("PLAN.md references unknown requirement {ref_id}"),
                 ));
             }
         }
@@ -639,7 +645,7 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
             report.add(Issue::new(
                 Severity::Warning,
                 Category::Plan,
-                format!("Duplicate task ID: {}", task_id),
+                format!("Duplicate task ID: {task_id}"),
             ));
         }
         seen_tasks.push(task_id.clone());

@@ -68,18 +68,18 @@ impl CompactionConfig {
 
     /// Return the maximum number of tokens to request for a compaction summary.
     ///
-    /// Fixed at 4_096 to match OpenCode's `SUMMARY_OUTPUT_TOKENS` default.
+    /// Fixed at `4_096` to match `OpenCode`'s `SUMMARY_OUTPUT_TOKENS` default.
     #[must_use]
-    pub fn summary_output_tokens(&self) -> usize {
+    pub const fn summary_output_tokens(&self) -> usize {
         4_096
     }
 
     /// Return the tool-output truncation limit in characters.
     ///
     /// Long tool outputs are truncated before being serialised into the
-    /// compaction prompt. Fixed at 2_000 characters to match OpenCode.
+    /// compaction prompt. Fixed at `2_000` characters to match `OpenCode`.
     #[must_use]
-    pub fn tool_output_max_chars(&self) -> usize {
+    pub const fn tool_output_max_chars(&self) -> usize {
         2_000
     }
 }
@@ -132,7 +132,7 @@ pub struct LegacyCompressionConfig {
 /// Only applies when the new config's `auto` equals the default (`true`).
 /// This preserves explicit user overrides in the new `compaction` section.
 #[must_use]
-pub fn apply_legacy_compression_alias(
+pub const fn apply_legacy_compression_alias(
     current: CompactionConfig,
     legacy: &LegacyCompressionConfig,
 ) -> CompactionConfig {

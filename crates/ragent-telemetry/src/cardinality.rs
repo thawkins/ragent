@@ -88,12 +88,11 @@ impl CardinalityCache {
 
         // Try read lock first — common case is that the signature is already seen.
         {
-            if let Ok(seen) = self.seen.read() {
-                if let Some(set) = seen.get(metric_name) {
-                    if set.contains(&signature) {
-                        return attrs.to_vec();
-                    }
-                }
+            if let Ok(seen) = self.seen.read()
+                && let Some(set) = seen.get(metric_name)
+                && set.contains(&signature)
+            {
+                return attrs.to_vec();
             }
         }
 
@@ -127,18 +126,15 @@ impl CardinalityCache {
     /// tracked for the given metric name. Primarily useful for testing.
     #[must_use]
     pub fn distinct_count(&self, metric_name: &str) -> usize {
-        self.seen
-            .read()
-            .map(|seen| {
-                seen.get(metric_name)
-                    .map_or(0, std::collections::HashSet::len)
-            })
-            .unwrap_or(0)
+        self.seen.read().map_or(0, |seen| {
+            seen.get(metric_name)
+                .map_or(0, std::collections::HashSet::len)
+        })
     }
 
     /// Returns the configured per-metric cardinality limit.
     #[must_use]
-    pub fn limit(&self) -> usize {
+    pub const fn limit(&self) -> usize {
         self.max
     }
 }

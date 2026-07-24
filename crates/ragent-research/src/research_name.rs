@@ -112,6 +112,7 @@ pub const MAX_LEN: usize = 64;
 /// intentionally a superset of FR-002 — any character that could appear in
 /// a traversal is flagged even if it also satisfies the `[a-z0-9-]` rule,
 /// so callers can decide policy at the call site.
+#[must_use]
 pub fn is_path_traversal(name: &str) -> bool {
     detect_path_traversal(name).is_some()
 }
@@ -211,6 +212,7 @@ impl ResearchName {
     }
 
     /// Borrow the underlying string slice.
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -220,18 +222,21 @@ impl ResearchName {
     /// Equivalent to `self.as_str()` — research names are used as-is for the
     /// `research/<name>/` directory path because the FR-002 character set is
     /// already filesystem-safe on every supported platform.
+    #[must_use]
     pub fn dir_name(&self) -> &str {
         &self.0
     }
 
     /// Return the length of the research name in bytes.
-    pub fn len(&self) -> usize {
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// `true` if the research name is empty (never true for a constructed
     /// `ResearchName`, but provided for parity with `str::is_empty`).
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -303,7 +308,7 @@ mod tests {
     #[test]
     fn rejects_too_long() {
         let too_long = "a".repeat(MAX_LEN + 1);
-        let err = ResearchName::try_new(too_long.clone()).unwrap_err();
+        let err = ResearchName::try_new(too_long).unwrap_err();
         assert_eq!(
             err,
             ResearchNameError::TooLong {
@@ -462,7 +467,7 @@ mod tests {
         assert_ne!(a, c);
         use std::collections::HashSet;
         let mut set = HashSet::new();
-        set.insert(a.clone());
+        set.insert(a);
         assert!(set.contains(&b));
         assert!(!set.contains(&c));
     }

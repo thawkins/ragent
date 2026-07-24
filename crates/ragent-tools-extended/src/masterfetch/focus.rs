@@ -5,7 +5,7 @@
 //! When the agent passes a `focus` query to `mf_fetch` or `mf_crawl`, the
 //! extracted markdown is filtered to the blocks (paragraphs / headings /
 //! tables / lists) most relevant to the query, so the agent loads less context
-//! on long pages. Inspired by Crawl4AI's `BM25ContentFilter`, implemented
+//! on long pages. Inspired by `Crawl4AI`'s `BM25ContentFilter`, implemented
 //! locally with no extra dependency.
 //!
 //! # Design
@@ -166,6 +166,7 @@ impl Default for FocusParams {
 /// // Single block → no-op.
 /// assert_eq!(focus_content("only one block", "query"), "only one block");
 /// ```
+#[must_use]
 pub fn focus_content(text: &str, query: &str) -> String {
     focus_content_with_params(text, query, &FocusParams::default())
 }
@@ -215,7 +216,7 @@ pub fn focus_content_with_params(text: &str, query: &str, params: &FocusParams) 
     let n = blocks.len();
 
     // Average document (block) length in tokens.
-    let total_tokens: usize = block_tokens.iter().map(|t| t.len()).sum();
+    let total_tokens: usize = block_tokens.iter().map(std::vec::Vec::len).sum();
     let avgdl = if n > 0 && total_tokens > 0 {
         total_tokens as f64 / n as f64
     } else {
@@ -271,7 +272,7 @@ pub fn focus_content_with_params(text: &str, query: &str, params: &FocusParams) 
             .take(params.fallback_top)
             .map(|(i, _)| i)
             .collect();
-        keep.sort();
+        keep.sort_unstable();
     }
 
     // Preserve a heading immediately preceding a kept non-heading block.
@@ -324,7 +325,7 @@ fn tokenize(text: &str) -> Vec<String> {
 fn idf(term: &str, n: usize, df: &HashMap<&str, usize>) -> f64 {
     let d = *df.get(term).unwrap_or(&0) as f64;
     let nf = n as f64;
-    ((nf - d + 0.5) / (d + 0.5) + 1.0).ln()
+    ((nf - d + 0.5) / (d + 0.5)).ln_1p()
 }
 
 /// Check whether a block's first non-blank line is a markdown heading.

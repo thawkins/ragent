@@ -114,12 +114,17 @@ fn diagram_section_is_between_findings_and_cross_references() {
         "Findings Relationship Diagram must come BEFORE ## In-Project Cross-References (FR-002)"
     );
 
-    // No other `## `-level heading appears between Findings and the diagram:
-    // the diagram is the *immediate* next section.
+    // No other top-level `## ` section heading (other than the bold finding
+    // sub-headings) appears between Findings and the diagram: the diagram is
+    // the *immediate* next section.
     let between = &body[findings_idx + "## Findings\n".len()..diagram_idx];
+    let unexpected_h2: Vec<&str> = between
+        .lines()
+        .filter(|line| line.starts_with("## ") && !line.starts_with("## **Finding"))
+        .collect();
     assert!(
-        !between.contains("\n## "),
-        "no ## section heading may appear between ## Findings and ## Findings Relationship Diagram (FR-002): found: {between:?}"
+        unexpected_h2.is_empty(),
+        "no top-level section heading may appear between ## Findings and ## Findings Relationship Diagram (FR-002): found: {unexpected_h2:?}"
     );
 }
 

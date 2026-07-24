@@ -4,7 +4,7 @@
 //! Provides global [`Semaphore`](tokio::sync::Semaphore) instances that gate:
 //!
 //! 1. **Process spawning** — how many child processes may be in flight at once.
-//!    All process-spawning call sites (BashTool, dynamic context commands, MCP
+//!    All process-spawning call sites (`BashTool`, dynamic context commands, MCP
 //!    stdio servers) should acquire a permit from [`acquire_process_permit`].
 //!
 //! 2. **Tool execution** — how many tool calls may run concurrently within a

@@ -1,5 +1,5 @@
 //! Integration tests for the `Arc<str>` tool-result content path
-//! (AgentPerf T-008 / FR-013).
+//! (`AgentPerf` T-008 / FR-013).
 //!
 //! Validates that `tool_result_content_for_llm` returns an `Arc<str>` and
 //! that the `Arc<str>` round-trips through the on-wire JSON

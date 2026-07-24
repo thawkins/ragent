@@ -151,7 +151,6 @@ impl Tool for TeamSpawnTool {
                             Ok(Event::PermissionReplied {
                                 session_id: ref s,
                                 request_id: ref rid,
-                                allowed: _,
                                 ..
                             }) => {
                                 tracing::debug!(

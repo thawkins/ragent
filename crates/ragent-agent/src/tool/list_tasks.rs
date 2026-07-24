@@ -216,7 +216,7 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
     );
 
     if let Some(prompt) = Some(&task.task_prompt) {
-        let _ = write!(detail, "\n\nTask Prompt:\n{}", &prompt);
+        let _ = write!(detail, "\n\nTask Prompt:\n{prompt}");
     }
 
     if let Some(ref result) = task.result {
