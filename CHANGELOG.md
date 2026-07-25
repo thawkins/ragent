@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## Version: 0.1.0-beta.11
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.10` to `0.1.0-beta.11`.
+- Moved Tavily search backend into the `mf_search` multi-engine framework.
+
+## Version: 0.1.0-beta.9
+
+### Added — TUI `/websearch` diagnostics
+
+- New TUI slash command `/websearch show` lists every configured web-search
+  backend (DuckDuckGo, Brave, LangSearch, Tavily) with `enabled`, `in_use`, and
+  `failed` status columns.
+- `/websearch help` prints usage and subcommand help.
+- Command is registered in the TUI slash menu with autocomplete suggestions for
+  `show` and `help`.
+- `MfSearchTool::engine_status()` exposes the same status table programmatically
+  so the TUI and tests share one source of truth.
+- SPEC.md slash-command table updated with `/websearch show|help` and `/webapi`.
+
 ### Added — Tavily backend for `mf_search` and research migration
 
 - New `TavilyEngine` in `crates/ragent-tools-extended/src/masterfetch/search/tavily.rs`
@@ -46,8 +67,13 @@
 - All new fields use `serde(default)` so existing `RESEARCH.md` files and older
   metadata load without migration.
 
-## Version: 0.1.0-beta.9
+### Fixed
 
+- `/websearch test` no longer panics from nested Tokio runtime. The TUI slash
+  command now runs the async `MfSearchTool::engine_test()` inside
+  `tokio::task::block_in_place`, matching the pattern used by `/spec validate`.
+
+## Version: 0.1.0-beta.9
 ### Added — LangSearch backend for `mf_search`
 
 - New optional `langsearch_api_key` top-level config field in `ragent.json`.

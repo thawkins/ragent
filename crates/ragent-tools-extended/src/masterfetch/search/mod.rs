@@ -269,6 +269,42 @@ impl SearchOrchestrator {
         output
     }
 
+    /// Execute a search query against each registered backend and return the
+    /// raw per-engine reports.
+    ///
+    /// Unlike [`search`](Self::search), this method does **not** merge,
+    /// deduplicate, or cache results. It is intended for diagnostics such
+    /// as the TUI `/websearch test` command, which needs to know how many
+    /// results each engine returned individually.
+    ///
+    /// # Arguments
+    ///
+    /// - `query` — the search query string (must not be empty).
+    /// - `opts` — search options applied to every backend.
+    ///
+    /// # Returns
+    ///
+    /// A vector of [`EngineReport`]s, one per registered backend, in the same
+    /// order as [`engine_names`](Self::engine_names).
+    pub async fn search_per_engine(&self, query: &str, opts: &SearchOptions) -> Vec<EngineReport> {
+        if query.trim().is_empty() {
+            return Vec::new();
+        }
+
+        let futures: Vec<_> = self
+            .engines
+            .iter()
+            .map(|engine| {
+                let engine = engine.clone();
+                let query = query.to_string();
+                let opts = opts.clone();
+                async move { engine.search(&query, &opts).await }
+            })
+            .collect();
+
+        futures::future::join_all(futures).await
+    }
+
     /// Clear the search-result cache.
     pub fn clear_cache(&self) {
         let mut cache = self.cache.lock().expect("search cache mutex poisoned");

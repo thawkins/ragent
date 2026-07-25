@@ -432,6 +432,39 @@ mod app_tests {
     }
 
     #[test]
+    pub fn test_render_markdown_to_ascii_preserves_websearch_help_lines() {
+        let mut app = test_app();
+        let text = "From: /websearch\n\
+            Web search engine diagnostics.\n\n\
+            Usage:\n\n\
+            • `/websearch show`\n\
+              — list all engines with enabled / in-use / failed status\n\n\
+            • `/websearch test`\n\
+              — run a live diagnostic query on each configured engine and report counts\n\n\
+            • `/websearch help`\n\
+              — show this help";
+        let rendered = app.render_markdown_to_ascii(text);
+        // The markdown renderer collapses list items to single lines; the key
+        // requirement is that each command appears on its own rendered line.
+        assert!(
+            rendered.contains("/websearch show"),
+            "websearch show line missing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("/websearch test"),
+            "websearch test line missing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("/websearch help"),
+            "websearch help line missing; got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("/websearch show /websearch test /websearch help"),
+            "websearch help output collapsed into one line; got:\n{rendered}"
+        );
+    }
+
+    #[test]
     pub fn test_render_markdown_to_ascii_preserves_help_command_lines() {
         let mut app = test_app();
         let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";

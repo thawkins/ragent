@@ -1,26 +1,31 @@
-//! Legacy web search tool (Tavily-backed).
+//! Legacy web search tool — compatibility wrapper around `mf_search`.
 //!
 //! [`WebSearchTool`] is retained for direct agent use and backwards
-//! compatibility. New research workflows use the multi-engine `mf_search`
-//! tool; the research adapter selects `mf_search` when present and falls
-//! back to this tool otherwise.
+//! compatibility. It delegates to the multi-engine `mf_search` pipeline
+//! (via [`MfSearchTool::build_orchestrator`]) so that all configured
+//! backends — DuckDuckGo, Brave, LangSearch, and Tavily — contribute
+//! results. The tool preserves its original name (`websearch`), parameter
+//! schema (`query`, `num_results`), and human-readable output format.
 //!
-//! Currently supports the [Tavily](https://tavily.com/) search API.
+//! New research workflows use `mf_search` directly; the research adapter
+//! selects `mf_search` when present and falls back to this tool otherwise.
 
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::masterfetch::search::SearchOptions;
+use crate::masterfetch::tools::search_tool::MfSearchTool;
 
 /// Performs a web search and returns structured results.
+///
+/// Delegates to the `mf_search` multi-engine pipeline so results include
+/// DuckDuckGo, Brave, and optionally LangSearch / Tavily when their API
+/// keys are configured.
 pub struct WebSearchTool;
 
-const TAVILY_API_URL: &str = "https://api.tavily.com/search";
 const DEFAULT_NUM_RESULTS: u64 = 5;
 const MAX_NUM_RESULTS: u64 = 20;
-const REQUEST_TIMEOUT_SECS: u64 = 30;
-const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 #[async_trait::async_trait]
 impl Tool for WebSearchTool {
@@ -28,13 +33,10 @@ impl Tool for WebSearchTool {
         "websearch"
     }
 
-    /// # Errors
-    ///
-    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Search the web and return results with titles, URLs, and snippets. \
-               Requires a TAVILY_API_KEY environment variable or 'tavily_api_key' \
-               in ragent.json config to be set."
+                 Requires a TAVILY_API_KEY environment variable or 'tavily_api_key' \
+                 in ragent.json config to be set."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -53,18 +55,18 @@ impl Tool for WebSearchTool {
         })
     }
 
-    /// # Errors
-    ///
-    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &'static str {
         "web"
     }
 
+    /// Execute a web search by delegating to the `mf_search` multi-engine
+    /// pipeline.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the `query` parameter is missing or empty,
-    /// if the `TAVILY_API_KEY` environment variable is not set, or if the
-    /// search request fails.
+    /// Returns an error if the `query` parameter is missing or empty.
+    /// Backend failures (rate limits, missing keys) are reported in
+    /// `engine_blocked` within the metadata, not as `Err`.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
@@ -79,26 +81,14 @@ impl Tool for WebSearchTool {
             .unwrap_or(DEFAULT_NUM_RESULTS)
             .min(MAX_NUM_RESULTS);
 
-        // Try environment variable first, then fall back to config
-        let api_key = std::env::var("TAVILY_API_KEY")
-            .ok()
-            .or_else(|| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|cfg| cfg.tavily_api_key.clone())
-            })
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "No search API key configured. Set the TAVILY_API_KEY environment \
-                           variable or add 'tavily_api_key' to your ragent.json config file. \
-                           Get a free key at https://tavily.com"
-                )
-            })?;
+        // Build search options and run through the mf_search orchestrator.
+        let opts = SearchOptions::new(num_results as usize);
+        let orchestrator = MfSearchTool::build_orchestrator(ctx);
+        let search_output = orchestrator.search(query, &opts).await;
 
-        let results = tavily_search(&api_key, query, num_results).await?;
-        // Format results as readable text
+        // Format results as human-readable text matching the legacy shape.
         let mut output = String::new();
-        for (i, result) in results.iter().enumerate() {
+        for (i, result) in search_output.merge.results.iter().enumerate() {
             if i > 0 {
                 output.push('\n');
             }
@@ -109,12 +99,36 @@ impl Tool for WebSearchTool {
             }
         }
 
-        if results.is_empty() {
-            output.push_str("No results found.");
+        if search_output.merge.results.is_empty() {
+            if !search_output.merge.blocked_engines.is_empty() {
+                output.push_str(&format!(
+                    "No results found. Blocked engines: {}\n",
+                    search_output.merge.blocked_engines.join(", ")
+                ));
+            } else {
+                output.push_str("No results found.");
+            }
         }
 
         let line_count = output.lines().count();
-        let result_count = results.len();
+        let result_count = search_output.merge.results.len();
+
+        // Build metadata with the legacy `results` array shape so existing
+        // parsers (`hits_from_metadata`, research adapter) keep working.
+        let results_json: Vec<Value> = search_output
+            .merge
+            .results
+            .iter()
+            .map(|r| {
+                json!({
+                    "title": r.title,
+                    "url": r.url,
+                    "snippet": r.snippet,
+                    "search_tool": "websearch",
+                    "search_engine": r.source,
+                })
+            })
+            .collect();
 
         Ok(ToolOutput {
             content: output,
@@ -122,33 +136,23 @@ impl Tool for WebSearchTool {
                 "query": query,
                 "count": result_count,
                 "line_count": line_count,
+                "results": results_json,
+                "engines_used": search_output.engines_used,
+                "engine_blocked": search_output.merge.blocked_engines,
+                "cached": search_output.cached,
+                "duration_ms": search_output.duration_ms,
             })),
         })
     }
 }
 
-// ── Tavily API ───────────────────────────────────────────────────
-
-#[derive(Debug, Serialize)]
-struct TavilyRequest<'a> {
-    query: &'a str,
-    max_results: u64,
-    include_answer: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct TavilyResponse {
-    results: Vec<TavilyResult>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TavilyResult {
-    title: String,
-    url: String,
-    content: String,
-}
+// ── Shared types ──────────────────────────────────────────────────
 
 /// A single search result.
+///
+/// Deserialized from the `results` array in the JSON metadata emitted by
+/// [`WebSearchTool`]. The research adapter uses [`hits_from_metadata`] to
+/// extract these rows.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SearchResult {
     /// The title of the search result.
@@ -158,14 +162,16 @@ pub struct SearchResult {
     /// A short snippet/summary from the search result.
     pub snippet: String,
     /// Search tool that produced this result. Always `"websearch"` for the
-    /// Tavily-backed tool, present so the research layer can show provenance
-    /// without special-casing the tool.
+    /// compatibility wrapper, present so the research layer can show
+    /// provenance without special-casing the tool.
     #[serde(default)]
     pub search_tool: String,
-    /// Backend search engine that returned this result. Always `"tavily"`.
+    /// Backend search engine(s) that returned this result (comma-separated
+    /// when multiple engines agree).
     #[serde(default)]
     pub search_engine: String,
 }
+
 /// Extract structured search results from the JSON metadata emitted by
 /// [`WebSearchTool`].
 ///
@@ -178,84 +184,4 @@ pub fn hits_from_metadata(metadata: &serde_json::Value) -> Vec<SearchResult> {
         .get("results")
         .and_then(|r| serde_json::from_value::<Vec<SearchResult>>(r.clone()).ok())
         .unwrap_or_default()
-}
-
-/// Truncate a search query to Tavily's maximum accepted length (400 chars),
-/// respecting UTF-8 character boundaries.
-pub(crate) fn truncate_query(query: &str) -> String {
-    const TAVILY_MAX_QUERY_CHARS: usize = 400;
-    if query.chars().count() <= TAVILY_MAX_QUERY_CHARS {
-        query.to_string()
-    } else {
-        query.chars().take(TAVILY_MAX_QUERY_CHARS).collect()
-    }
-}
-
-async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<Vec<SearchResult>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .user_agent(USER_AGENT)
-        .build()
-        .context("Failed to build HTTP client")?;
-
-    // Tavily rejects queries longer than 400 characters; truncate first so
-    // long prompts still get a response instead of an HTTP error.
-    let safe_query = truncate_query(query);
-    let request_body = TavilyRequest {
-        query: &safe_query,
-        max_results,
-        include_answer: false,
-    };
-
-    let response = client
-        .post(TAVILY_API_URL)
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
-        .json(&request_body)
-        .send()
-        .await
-        .with_context(|| format!("Failed to call Tavily search API for: {query}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            bail!("Tavily API authentication failed (HTTP {status}). Check your TAVILY_API_KEY.");
-        }
-        bail!("Tavily API error (HTTP {status}): {body}");
-    }
-
-    let tavily_response: TavilyResponse = response
-        .json()
-        .await
-        .context("Failed to parse Tavily API response")?;
-
-    let results = tavily_response
-        .results
-        .into_iter()
-        .map(|r| {
-            // Truncate snippet to ~200 chars
-            let snippet = if r.content.len() > 200 {
-                let end = r
-                    .content
-                    .char_indices()
-                    .map(|(i, _)| i)
-                    .take_while(|&i| i <= 200)
-                    .last()
-                    .unwrap_or(0);
-                format!("{}…", &r.content[..end])
-            } else {
-                r.content
-            };
-            SearchResult {
-                title: r.title,
-                url: r.url,
-                snippet,
-                search_tool: "websearch".to_string(),
-                search_engine: "tavily".to_string(),
-            }
-        })
-        .collect();
-
-    Ok(results)
 }

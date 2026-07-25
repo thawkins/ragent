@@ -31,6 +31,7 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::super::MASTERFETCH_VERSION;
@@ -53,6 +54,41 @@ use crate::{Tool, ToolContext, ToolOutput};
 /// `engines_consensus`.
 pub struct MfSearchTool;
 
+/// Result of probing a single search backend with a fixed diagnostic query.
+///
+/// Used by the TUI `/websearch test` command to report whether each engine
+/// returned any results and how many.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineTestResult {
+    /// Human-readable engine name.
+    pub name: String,
+    /// Whether the engine returned at least one result.
+    pub returned_results: bool,
+    /// Number of raw results returned by the engine.
+    pub result_count: usize,
+    /// Error or blocked message, empty when the engine succeeded.
+    pub error: String,
+}
+
+/// Availability status of a single web-search backend.
+///
+/// Returned by [`MfSearchTool::engine_status`] for UI diagnostics (e.g. the
+/// TUI `/websearch show` command). `enabled` means the engine can be used with
+/// the current configuration; `in_use` means it is currently wired into the
+/// search orchestrator; `failed` means it is unavailable due to missing or
+/// invalid configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineStatus {
+    /// Human-readable engine name.
+    pub name: &'static str,
+    /// Whether the engine is configured and available.
+    pub enabled: bool,
+    /// Whether the engine is currently active in the orchestrator.
+    pub in_use: bool,
+    /// Whether the engine is unavailable because configuration is missing.
+    pub failed: bool,
+}
+
 impl MfSearchTool {
     /// Build the [`SearchOrchestrator`] for this tool based on the supplied
     /// [`ToolContext`].
@@ -67,18 +103,7 @@ impl MfSearchTool {
     /// without making network requests.
     #[must_use]
     pub fn build_orchestrator(ctx: &ToolContext) -> SearchOrchestrator {
-        let langsearch_key = ctx
-            .config
-            .as_ref()
-            .and_then(|cfg| cfg.langsearch_api_key.as_deref());
-        let tavily_key = std::env::var("TAVILY_API_KEY")
-            .ok()
-            .or_else(|| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|cfg| cfg.tavily_api_key.clone())
-            })
-            .filter(|k| !k.is_empty());
+        let (langsearch_key, tavily_key) = Self::resolve_search_keys(ctx);
         let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
             Arc::new(super::super::search::duckduckgo::DuckDuckGoEngine::new()),
             Arc::new(super::super::search::brave::BraveEngine::new()),
@@ -92,6 +117,101 @@ impl MfSearchTool {
             engines.push(Arc::new(TavilyEngine::new(key)));
         }
         SearchOrchestrator::with_engines(engines)
+    }
+
+    /// Resolve configured API keys for optional search backends.
+    ///
+    /// Returns `(langsearch_key, tavily_key)` where `langsearch_key` is taken
+    /// from `ctx.config.langsearch_api_key` and `tavily_key` is taken from the
+    /// `TAVILY_API_KEY` environment variable or `ctx.config.tavily_api_key`.
+    fn resolve_search_keys(ctx: &ToolContext) -> (Option<&str>, Option<String>) {
+        let langsearch_key = ctx
+            .config
+            .as_ref()
+            .and_then(|cfg| cfg.langsearch_api_key.as_deref());
+        let tavily_key = std::env::var("TAVILY_API_KEY")
+            .ok()
+            .or_else(|| {
+                ctx.config
+                    .as_ref()
+                    .and_then(|cfg| cfg.tavily_api_key.clone())
+            })
+            .filter(|k| !k.is_empty());
+        (langsearch_key, tavily_key)
+    }
+
+    /// Return availability status for all possible search backends.
+    ///
+    /// DuckDuckGo and Brave are always considered available. LangSearch and
+    /// Tavily require an API key and are marked as `failed` when the key is
+    /// missing. `in_use` reflects the engines that are actually wired into the
+    /// orchestrator built from the supplied [`ToolContext`].
+    #[must_use]
+    pub fn engine_status(ctx: &ToolContext) -> Vec<EngineStatus> {
+        let (langsearch_key, tavily_key) = Self::resolve_search_keys(ctx);
+        let orchestrator = Self::build_orchestrator(ctx);
+        let in_use: HashSet<&str> = orchestrator.engine_names().into_iter().collect();
+        vec![
+            EngineStatus {
+                name: "DuckDuckGo",
+                enabled: true,
+                in_use: in_use.contains("duckduckgo"),
+                failed: false,
+            },
+            EngineStatus {
+                name: "Brave",
+                enabled: true,
+                in_use: in_use.contains("brave"),
+                failed: false,
+            },
+            EngineStatus {
+                name: "LangSearch",
+                enabled: langsearch_key.is_some_and(|k| !k.is_empty()),
+                in_use: in_use.contains("langsearch"),
+                failed: langsearch_key.is_none_or(|k| k.is_empty()),
+            },
+            EngineStatus {
+                name: "Tavily",
+                enabled: tavily_key.is_some(),
+                in_use: in_use.contains("tavily"),
+                failed: tavily_key.is_none(),
+            },
+        ]
+    }
+
+    /// Probe every configured search backend with a fixed diagnostic query.
+    ///
+    /// Runs the query `"what is websearch"` against each engine that is
+    /// currently wired into the orchestrator and returns per-engine counts.
+    /// This is a live network test, so it may take several seconds on a slow
+    /// connection. Engines that are not configured (e.g. missing API keys) are
+    /// omitted from the test run.
+    pub async fn engine_test(ctx: &ToolContext) -> Vec<EngineTestResult> {
+        let orchestrator = Self::build_orchestrator(ctx);
+        let opts = SearchOptions::new(5);
+        let reports = orchestrator
+            .search_per_engine("what is websearch", &opts)
+            .await;
+        reports
+            .into_iter()
+            .map(|report| {
+                let name = report.engine.clone();
+                let count = report.result_count;
+                let error = if report.engine_blocked {
+                    format!("blocked: {}", report.error)
+                } else if report.error.is_empty() {
+                    String::new()
+                } else {
+                    report.error.clone()
+                };
+                EngineTestResult {
+                    name,
+                    returned_results: count > 0,
+                    result_count: count,
+                    error,
+                }
+            })
+            .collect()
     }
 }
 

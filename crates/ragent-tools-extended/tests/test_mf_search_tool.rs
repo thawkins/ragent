@@ -5,7 +5,7 @@
 //! making any network calls.
 
 use ragent_config::Config;
-use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+use ragent_tools_extended::masterfetch::tools::search_tool::{EngineStatus, MfSearchTool};
 use ragent_tools_extended::{Tool, ToolContext};
 use serde_json::json;
 
@@ -266,4 +266,102 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
     // provenance can be derived.
     assert!(!names.is_empty());
     let _ = opts;
+}
+
+#[test]
+fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
+    let status = MfSearchTool::engine_status(&ctx());
+    assert_eq!(status.len(), 4);
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    let duck = by_name["DuckDuckGo"];
+    assert!(duck.enabled && duck.in_use && !duck.failed);
+
+    let brave = by_name["Brave"];
+    assert!(brave.enabled && brave.in_use && !brave.failed);
+
+    let lang = by_name["LangSearch"];
+    assert!(!lang.enabled && !lang.in_use && lang.failed);
+
+    let tav = by_name["Tavily"];
+    assert!(!tav.enabled && !tav.in_use && tav.failed);
+}
+
+#[test]
+fn test_engine_status_with_langsearch_key_enables_langsearch() {
+    let status = MfSearchTool::engine_status(&ctx_with_langsearch_key("ls-test-key"));
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    let lang = by_name["LangSearch"];
+    assert!(lang.enabled && lang.in_use && !lang.failed);
+
+    let tav = by_name["Tavily"];
+    assert!(!tav.enabled && !tav.in_use && tav.failed);
+}
+
+#[test]
+fn test_engine_status_with_tavily_key_enables_tavily() {
+    let status = MfSearchTool::engine_status(&ctx_with_tavily_key("tvly-test-key"));
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    let tav = by_name["Tavily"];
+    assert!(tav.enabled && tav.in_use && !tav.failed);
+
+    let lang = by_name["LangSearch"];
+    assert!(!lang.enabled && !lang.in_use && lang.failed);
+}
+
+#[test]
+fn test_engine_status_with_both_keys_enables_all_optional_engines() {
+    let mut config = Config::default();
+    config.langsearch_api_key = Some("ls-test-key".to_string());
+    config.tavily_api_key = Some("tvly-test-key".to_string());
+    let ctx = ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    };
+    let status = MfSearchTool::engine_status(&ctx);
+    for e in status {
+        assert!(
+            e.enabled && e.in_use && !e.failed,
+            "{} should be fully enabled",
+            e.name
+        );
+    }
+}
+
+#[test]
+fn test_engine_status_with_empty_keys_treats_keys_as_missing() {
+    let mut config = Config::default();
+    config.langsearch_api_key = Some(String::new());
+    config.tavily_api_key = Some(String::new());
+    let ctx = ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    };
+    let status = MfSearchTool::engine_status(&ctx);
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    assert!(by_name["LangSearch"].failed);
+    assert!(!by_name["LangSearch"].enabled);
+    assert!(by_name["Tavily"].failed);
+    assert!(!by_name["Tavily"].enabled);
 }

@@ -767,6 +767,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Manage the HTTP REST API: /webapi enable | disable | help",
     },
     SlashCommandDef {
+        trigger: "websearch",
+        description: "Web search engine diagnostics: /websearch show | test | help",
+    },
+    SlashCommandDef {
         trigger: "init",
         description: "Analyse the project and write a summary, or create a default config: /init [config]",
     },

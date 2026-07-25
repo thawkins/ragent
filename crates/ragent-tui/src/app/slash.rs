@@ -88,6 +88,9 @@ impl App {
             "mouse" => {
                 vec!["on".to_string(), "off".to_string()]
             }
+            "websearch" => {
+                vec!["show".to_string(), "test".to_string(), "help".to_string()]
+            }
             "status" => {
                 vec!["clear".to_string()]
             }
@@ -5927,14 +5930,120 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
             },
 
+            "websearch" => {
+                let sub = args.split_whitespace().next().unwrap_or("");
+                match sub {
+                    "help" => {
+                        self.append_assistant_text(
+                                                    "From: /websearch\n\
+                                                    Web search engine diagnostics.\n\n\
+                                                    Usage:\n\n\
+                                                    • `/websearch show`\n\
+                                                      — list all engines with enabled / in-use / failed status\n\n\
+                                                    • `/websearch test`\n\
+                                                      — run a live diagnostic query on each configured engine and report counts\n\n\
+                                                    • `/websearch help`\n\
+                                                      — show this help",
+                                                );
+                        self.status = "websearch: help".to_string();
+                    }
+                    "test" => {
+                        self.status = "websearch: testing engines...".to_string();
+                        let config = ragent_config::Config::load().unwrap_or_default();
+                        let ctx = ragent_tools_extended::ToolContext {
+                            session_id: String::new(),
+                            working_dir: std::env::current_dir().unwrap_or_default(),
+                            event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
+                            storage: None,
+                            code_index: None,
+                            config: Some(Arc::new(config)),
+                            read_timestamps: Arc::new(std::sync::RwLock::new(
+                                std::collections::HashMap::new(),
+                            )),
+                        };
+                        use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+                        let results = tokio::task::block_in_place(|| {
+                            let rt = tokio::runtime::Handle::current();
+                            rt.block_on(MfSearchTool::engine_test(&ctx))
+                        });
+                        let mut output = String::from(
+                            "From: /websearch test\n\n\
+                                                                | Engine | Returned | Count |\n\
+                                                                |--------|:--------:|------:|\n",
+                        );
+                        let mut total = 0usize;
+                        for r in &results {
+                            let returned = if r.returned_results {
+                                "✅ yes"
+                            } else {
+                                "❌ no"
+                            };
+                            output.push_str(&format!(
+                                "| {:<10} | {} | {:>5} |\n",
+                                r.name, returned, r.result_count
+                            ));
+                            total += r.result_count;
+                        }
+                        output.push_str(&format!("\nTotal raw results: {total}"));
+                        self.append_assistant_text(&output);
+                        self.status = "websearch: engine test complete".to_string();
+                    }
+                    "show" | "" => {
+                        let config = ragent_config::Config::load().unwrap_or_default();
+                        let ctx = ragent_tools_extended::ToolContext {
+                            session_id: String::new(),
+                            working_dir: std::env::current_dir().unwrap_or_default(),
+                            event_bus: Arc::new(ragent_agent::event::EventBus::new(16)),
+                            storage: None,
+                            code_index: None,
+                            config: Some(Arc::new(config)),
+                            read_timestamps: Arc::new(std::sync::RwLock::new(
+                                std::collections::HashMap::new(),
+                            )),
+                        };
+                        use ragent_tools_extended::masterfetch::tools::search_tool::MfSearchTool;
+                        let engines = MfSearchTool::engine_status(&ctx);
+                        let mut output = String::from(
+                            "From: /websearch show\n\n\
+                                          | Engine | Enabled | In Use | Failed |\n\
+                                          |--------|:-------:|:------:|:------:|\n",
+                        );
+                        for e in engines {
+                            let enabled = if e.enabled { "✅ yes" } else { "❌ no" };
+                            let in_use = if e.in_use { "✅ yes" } else { "❌ no" };
+                            let failed = if e.failed { "⚠️ yes" } else { "✅ no" };
+                            output.push_str(&format!(
+                                "| {:<10} | {} | {} | {} |\n",
+                                e.name, enabled, in_use, failed
+                            ));
+                        }
+                        output.push_str(
+                                          "\nKeyless engines (DuckDuckGo, Brave) are always enabled. \
+                                           LangSearch requires `langsearch_api_key` in `ragent.json`. \
+                                           Tavily requires `tavily_api_key` in `ragent.json` or the \
+                                           `TAVILY_API_KEY` environment variable.",
+                                      );
+                        self.append_assistant_text(&output);
+                        self.status = "websearch: status shown".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                                          "From: /websearch\n\
+                                          ⚠ Unknown subcommand. Use `/websearch help` for available commands.",
+                                      );
+                        self.status = "websearch: unknown".to_string();
+                    }
+                }
+            }
+
             "mouse" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
                     "on" => {
                         self.mouse_enabled = true;
                         self.append_assistant_text(
-                                        "From: /mouse on\n✅ **Mouse support enabled.**\n\nYou can now use the mouse for scrolling, clicking, and selection."
-                                    );
+                                                      "From: /mouse on\n✅ **Mouse support enabled.**\n\nYou can now use the mouse for scrolling, clicking, and selection."
+                                                  );
                         self.status = "mouse: enabled".to_string();
                     }
                     "off" => {

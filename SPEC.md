@@ -1027,6 +1027,9 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/model` | Select model |
 | `/agent` | Select agent |
 | `/agents` | List loaded agents and diagnostics |
+| `/websearch show` | Show web-search engine diagnostics (enabled / in-use / failed) |
+| `/websearch help` | Show `/websearch` subcommand help |
+| `/webapi enable\|disable\|help` | Manage the HTTP REST API |
 | `/tools` | Toggle tool visibility |
 | `/codeindex on\|off` | Enable/disable code index |
 | `/codeindex lang <language>` | Filter code index by language |

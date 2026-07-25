@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.1.0-beta.11
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.10` to `0.1.0-beta.11`.
+- Moved Tavily search backend into the `mf_search` multi-engine framework.
+
 ## v0.1.0-beta.10
 
 ### Added
