@@ -100,6 +100,18 @@ pub enum Source {
         /// the source predates this field or was supplied directly via `--from-url`.
         #[serde(default)]
         search_engine: String,
+        /// HTTP `Content-Type` reported by the fetcher, when available. Stored
+        /// so that the research layer can recover PDF counts from historical
+        /// `RESEARCH.md` files.
+        #[serde(default)]
+        content_type: Option<String>,
+        /// Page-type classification reported by the fetcher.
+        #[serde(default)]
+        page_type: Option<String>,
+        /// Classified media type of the source. One of `"page"`, `"pdf"`, or
+        /// `"youtube"`. Defaults to `"page"` for sources that predate this field.
+        #[serde(default = "default_media_type")]
+        media_type: String,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -142,6 +154,12 @@ pub enum Source {
         #[serde(default)]
         body: String,
     },
+}
+
+/// Default `media_type` used when a historical `RESEARCH.md` is loaded and
+/// the field is missing.
+fn default_media_type() -> String {
+    "page".to_string()
 }
 
 impl Source {
@@ -259,6 +277,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(web.type_str(), "web");
 
@@ -310,6 +331,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -347,6 +371,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -363,6 +390,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -457,6 +487,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -471,6 +504,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -501,6 +537,9 @@ mod tests {
             relevance: "High — title matches query terms".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -520,6 +559,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         assert_eq!(s.relevance(), Some(""));
     }

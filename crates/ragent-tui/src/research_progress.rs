@@ -76,6 +76,10 @@ pub struct ResearchProgress {
     pub fetched_count: usize,
     /// Number of URLs/pages that failed to fetch in the web phase.
     pub failed_count: usize,
+    /// Number of recovered PDF documents.
+    pub pdf_count: usize,
+    /// Number of recovered YouTube transcripts / video URLs.
+    pub youtube_count: usize,
 }
 
 impl ResearchProgress {
@@ -89,6 +93,8 @@ impl ResearchProgress {
             done: false,
             fetched_count: 0,
             failed_count: 0,
+            pdf_count: 0,
+            youtube_count: 0,
         }
     }
 
@@ -133,8 +139,10 @@ impl ResearchProgress {
     }
 
     /// Mark the run complete with the final source count.
-    pub fn finish(&mut self, total_sources: usize) {
+    pub fn finish(&mut self, total_sources: usize, pdf_count: usize, youtube_count: usize) {
         self.total_sources = Some(total_sources);
+        self.pdf_count = pdf_count;
+        self.youtube_count = youtube_count;
         self.done = true;
     }
 
@@ -166,10 +174,30 @@ impl ResearchProgress {
             && let Some(total) = self.total_sources
         {
             out.push('\n');
-            out.push_str(&format!(
-                "✅ Complete — {total} source(s). Use `/research open {}` to view the result.",
+            let mut line = format!("✅ Complete — {total} source(s)");
+            let mut extras = Vec::new();
+            if self.pdf_count > 0 {
+                extras.push(format!(
+                    "{} PDF{}",
+                    self.pdf_count,
+                    if self.pdf_count == 1 { "" } else { "s" }
+                ));
+            }
+            if self.youtube_count > 0 {
+                extras.push(format!(
+                    "{} YouTube video{}",
+                    self.youtube_count,
+                    if self.youtube_count == 1 { "" } else { "s" }
+                ));
+            }
+            if !extras.is_empty() {
+                line.push_str(&format!(", including {}", extras.join(" and ")));
+            }
+            line.push_str(&format!(
+                ". Use `/research open {}` to view the result.",
                 self.name
             ));
+            out.push_str(&line);
         } else if self.fetched_count > 0 || self.failed_count > 0 {
             out.push('\n');
             out.push_str(&format!(
@@ -193,13 +221,15 @@ struct ProgressPayload {
     status: String,
     detail: String,
     total_sources: Option<usize>,
+    pdf_count: usize,
+    youtube_count: usize,
 }
 
 /// Encode a [`SessionEvent`] plus run metadata as a sentinel-prefixed
 /// `AgentNotice` message string.
 pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> String {
-    let (phase, status, detail, total_sources) = match event {
-        SessionEvent::Phase { phase } => (*phase, "started", phase_description(*phase), None),
+    let (phase, status, detail, total_sources, pdf_count, youtube_count) = match event {
+        SessionEvent::Phase { phase } => (*phase, "started", phase_description(*phase), None, 0, 0),
         SessionEvent::QueriesDecomposed { queries } => {
             let detail = if queries.is_empty() {
                 "no decomposition".to_string()
@@ -211,13 +241,15 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     queries.join("\n  - ")
                 )
             };
-            (SessionPhase::Web, "queries", detail, None)
+            (SessionPhase::Web, "queries", detail, None, 0, 0)
         }
         SessionEvent::WebSearchFailed { error } => (
             SessionPhase::Web,
             "error",
             format!("web search failed: {}", sanitize_for_display(error)),
             None,
+            0,
+            0,
         ),
         SessionEvent::WebFetchFailed { url, error } => (
             SessionPhase::Web,
@@ -228,6 +260,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 sanitize_for_display(error)
             ),
             None,
+            0,
+            0,
         ),
         SessionEvent::WebCaptured {
             url,
@@ -251,6 +285,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     sanitize_for_display(title)
                 ),
                 None,
+                0,
+                0,
             )
         }
         SessionEvent::FromUrlBodyPreview { url, body_preview } => (
@@ -262,18 +298,24 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 sanitize_for_display(body_preview)
             ),
             None,
+            0,
+            0,
         ),
         SessionEvent::LocalCaptured { path, score } => (
             SessionPhase::Local,
             "captured",
             format!("captured {} (score {})", sanitize_for_display(path), score),
             None,
+            0,
+            0,
         ),
         SessionEvent::SpecCaptured { spec_id } => (
             SessionPhase::Specs,
             "captured",
             format!("referenced spec {}", sanitize_for_display(spec_id)),
             None,
+            0,
+            0,
         ),
         SessionEvent::SynthesizeResult { outcome, detail } => {
             let detail = match (outcome, detail) {
@@ -291,13 +333,19 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     "no LLM engine configured — using mechanical fallback".to_string()
                 }
             };
-            (SessionPhase::Synthesize, "done", detail, None)
+            (SessionPhase::Synthesize, "done", detail, None, 0, 0)
         }
-        SessionEvent::Done { total_sources } => (
+        SessionEvent::Done {
+            total_sources,
+            pdf_count,
+            youtube_count,
+        } => (
             SessionPhase::Finalize,
             "done",
             "marked complete".to_string(),
             Some(*total_sources),
+            *pdf_count,
+            *youtube_count,
         ),
         SessionEvent::ConfigSnapshot {
             output_format,
@@ -320,9 +368,18 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 "config",
                 format!("options in use: {}", parts.join(", ")),
                 None,
+                0,
+                0,
             )
         }
-        _ => (SessionPhase::Setup, "event", format!("{event:?}"), None),
+        _ => (
+            SessionPhase::Setup,
+            "event",
+            format!("{event:?}"),
+            None,
+            0,
+            0,
+        ),
     };
     let payload = ProgressPayload {
         name: name.to_string(),
@@ -331,6 +388,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
         status: status.to_string(),
         detail,
         total_sources,
+        pdf_count,
+        youtube_count,
     };
     let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
     format!("{PROGRESS_SENTINEL}{json}")
@@ -364,6 +423,10 @@ pub struct DecodedProgress {
     pub detail: String,
     /// Total source count, present only on the final `Done` event.
     pub total_sources: Option<usize>,
+    /// Number of recovered PDF documents.
+    pub pdf_count: usize,
+    /// Number of recovered YouTube transcripts / video URLs.
+    pub youtube_count: usize,
 }
 
 /// Try to decode an [`Event::AgentNotice`] message as a research progress
@@ -386,6 +449,8 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
         status,
         detail: payload.detail,
         total_sources: payload.total_sources,
+        pdf_count: payload.pdf_count,
+        youtube_count: payload.youtube_count,
     })
 }
 
@@ -484,11 +549,21 @@ mod tests {
 
     #[test]
     fn test_encode_decode_roundtrip_done() {
-        let encoded = encode_progress_event("foo", "bar", &SessionEvent::Done { total_sources: 7 });
+        let encoded = encode_progress_event(
+            "foo",
+            "bar",
+            &SessionEvent::Done {
+                total_sources: 7,
+                pdf_count: 2,
+                youtube_count: 1,
+            },
+        );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert_eq!(decoded.phase, SessionPhase::Finalize);
         assert_eq!(decoded.status, StepStatus::Done);
         assert_eq!(decoded.total_sources, Some(7));
+        assert_eq!(decoded.pdf_count, 2);
+        assert_eq!(decoded.youtube_count, 1);
     }
 
     #[test]
@@ -588,7 +663,7 @@ mod tests {
         );
         p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
         p.apply(SessionPhase::Web, StepStatus::Done, "3 source(s) captured");
-        p.finish(3);
+        p.finish(3, 0, 0);
         let rendered = p.render();
         assert!(rendered.contains("🔬 Research Progress"));
         assert!(rendered.contains("✓ setup"));
@@ -679,7 +754,7 @@ fn test_complete_message_replaces_totals_line() {
         StepStatus::Error,
         "fetch failed for https://b.com: 403",
     );
-    p.finish(1);
+    p.finish(1, 0, 0);
 
     let rendered = p.render();
     assert!(

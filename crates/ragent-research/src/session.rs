@@ -334,6 +334,10 @@ pub enum SessionEvent {
     Done {
         /// Total number of sources captured.
         total_sources: usize,
+        /// Number of recovered PDF documents.
+        pdf_count: usize,
+        /// Number of recovered YouTube transcripts / video URLs.
+        youtube_count: usize,
     },
     /// Resolved run options, emitted once at the start of a session so that
     /// every observer (CLI JSON, TUI progress log, HTTP response) can confirm
@@ -1352,11 +1356,25 @@ impl ResearchSession {
         self.manager.complete_gathering(name_str).await?;
 
         let total_sources = sources.len();
-        observer.on_event(SessionEvent::Done { total_sources });
+        let pdf_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
+            .count();
+        let youtube_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
+            .count();
+        observer.on_event(SessionEvent::Done {
+            total_sources,
+            pdf_count,
+            youtube_count,
+        });
 
         info!(
             name = %name,
             total = total_sources,
+            pdf_count,
+            youtube_count,
             "research: session complete"
         );
 
@@ -1365,6 +1383,8 @@ impl ResearchSession {
             sources,
             document: assembled,
             web_queries,
+            pdf_count,
+            youtube_count,
         })
     }
 }
@@ -1473,6 +1493,10 @@ pub struct RunOutcome {
     /// Sub-queries used by the web-gathering phase. Empty when web gathering
     /// was disabled or no decomposer was configured.
     pub web_queries: Vec<String>,
+    /// Number of recovered PDF documents.
+    pub pdf_count: usize,
+    /// Number of recovered YouTube transcripts / video URLs.
+    pub youtube_count: usize,
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────
@@ -1948,6 +1972,8 @@ mod tests {
                         url: "https://example.com".into(),
                         title: "Example".into(),
                         body: "body".into(),
+                        content_type: None,
+                        page_type: None,
                     },
                 )]),
             }),
@@ -2028,6 +2054,8 @@ mod tests {
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2118,6 +2146,8 @@ mod tests {
                     url: url.to_string(),
                     title: "Example".into(),
                     body: "body".into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2204,6 +2234,8 @@ mod tests {
                            Tokio is the most popular runtime and provides a \
                            multi-threaded scheduler for async tasks."
                         .into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2315,6 +2347,8 @@ mod tests {
                            Read more Subscribe Newsletter\n\n\
                            © 2024 Example Corp. All rights reserved."
                         .into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2396,6 +2430,8 @@ mod tests {
                     url: url.to_string(),
                     title: "Meaningful Page Title".into(),
                     body: "Home About Contact\n\nLogin Sign up\n\n© 2024 Example Corp.".into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2449,6 +2485,8 @@ mod tests {
                     url: url.to_string(),
                     title: "Fetched Page Title".into(),
                     body: "body text".into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -2731,6 +2769,9 @@ mod tests {
                 body: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
             Source::Local {
                 path: "x.md".into(),
@@ -2762,6 +2803,9 @@ mod tests {
                 body: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
             Source::Web {
                 published_at: None,
@@ -2773,6 +2817,9 @@ mod tests {
                 body: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -2820,6 +2867,9 @@ mod tests {
             body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);
@@ -2843,6 +2893,9 @@ mod tests {
                 body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -2908,6 +2961,9 @@ mod tests {
             body: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);

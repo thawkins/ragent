@@ -218,6 +218,9 @@ fn imrad_references_index_unchanged() {
         body: "body".into(),
         search_tool: String::new(),
         search_engine: String::new(),
+        content_type: None,
+        page_type: None,
+        media_type: "page".into(),
     });
 
     let assembled = assemble_document(&doc);

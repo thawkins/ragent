@@ -75,6 +75,9 @@ async fn write_document_persists_supports_files_and_index() {
         relevance: "User-supplied seed URL".into(),
         search_tool: String::new(),
         search_engine: String::new(),
+        content_type: None,
+        page_type: None,
+        media_type: "page".into(),
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -343,6 +346,8 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 url: url.to_string(),
                 title: "Example Page".into(),
                 body: "Real page body — talks about Rust lifetimes.".into(),
+                content_type: None,
+                page_type: None,
             })
         }
     }

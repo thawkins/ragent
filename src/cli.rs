@@ -332,11 +332,27 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 .await
             {
                 Ok(outcome) => {
-                    println!(
-                        "ragent-research: created research/{} ({} sources)",
+                    let mut summary = format!(
+                        "ragent-research: created research/{} ({} sources",
                         outcome.research_name,
                         outcome.sources.len()
                     );
+                    if outcome.pdf_count > 0 {
+                        summary.push_str(&format!(
+                            ", {} PDF{}",
+                            outcome.pdf_count,
+                            if outcome.pdf_count == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if outcome.youtube_count > 0 {
+                        summary.push_str(&format!(
+                            ", {} YouTube video{}",
+                            outcome.youtube_count,
+                            if outcome.youtube_count == 1 { "" } else { "s" }
+                        ));
+                    }
+                    summary.push(')');
+                    println!("{summary}");
                 }
                 Err(e) => {
                     eprintln!("ragent-research: {e}");

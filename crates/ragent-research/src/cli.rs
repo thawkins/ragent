@@ -444,9 +444,17 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "detail": detail,
             }),
         ),
-        SessionEvent::Done { total_sources } => (
+        SessionEvent::Done {
+            total_sources,
+            pdf_count,
+            youtube_count,
+        } => (
             "done",
-            serde_json::json!({ "total_sources": total_sources }),
+            serde_json::json!({
+                "total_sources": total_sources,
+                "pdf_count": pdf_count,
+                "youtube_count": youtube_count,
+            }),
         ),
         SessionEvent::ConfigSnapshot {
             output_format,

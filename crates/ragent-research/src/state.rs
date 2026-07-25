@@ -366,6 +366,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         }
     }
 

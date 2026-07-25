@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Added — `/research create` richer fetch metadata and PDF/YouTube counters
+
+- Research web gathering now prefers the `mf_fetch` tool over legacy `webfetch`.
+  `mf_fetch` returns a structured envelope with `content_type`, `page_type`, and
+  `metadata.title`, giving the research layer reliable media classification and
+  better page titles.
+- Added `WebFetchedPage.content_type` and `WebFetchedPage.page_type` to carry
+  the richer `mf_fetch` metadata through the gatherer.
+- Added `Source::Web` fields `content_type`, `page_type`, and `media_type`
+  (`"page" | "pdf" | "youtube"`) with serde defaults so older `RESEARCH.md`
+  files remain backward compatible.
+- New `WebSourceKind` enum and `classify_web_source()` helper classify sources
+  from `Content-Type: application/pdf`, `.pdf` URLs, and YouTube hosts.
+- `GatherResult`, `SessionEvent::Done`, `RunOutcome`, and the TUI
+  `ResearchProgress` tracker now carry `pdf_count` and `youtube_count`.
+- CLI `ragent research create` prints recovered PDF and YouTube counts in the
+  completion summary (e.g. "created research/foo (5 sources, 2 PDFs, 1 YouTube
+  video)").
+- TUI `/research create` progress summary now shows PDF and YouTube counts both in
+  the live tracker render and in the status-bar completion message.
+- Research event JSON output (`render_session_event_json`) includes
+  `pdf_count` and `youtube_count` in the `done` payload.
+- Added `url` crate dependency to `ragent-research` for host-based YouTube
+  classification.
+
 ## Version: 0.1.0-beta.11
 
 ### Changed — Version bump

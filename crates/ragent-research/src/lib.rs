@@ -114,5 +114,5 @@ pub use web_date::extract_published_at;
 pub use web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, GatherEvent, GatherResult, HeuristicQueryDecomposer,
     LlmQueryDecomposer, QueryDecomposer, WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer,
-    WebSearchHit, WebSearchTool,
+    WebSearchHit, WebSearchTool, WebSourceKind, classify_web_source,
 };

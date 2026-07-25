@@ -711,13 +711,28 @@ impl App {
                     };
                     progress.apply(decoded.phase, decoded.status, decoded.detail);
                     if let Some(total) = decoded.total_sources {
-                        progress.finish(total);
+                        progress.finish(total, decoded.pdf_count, decoded.youtube_count);
                         // The final progress event marks the run complete.
                         // Drop the `⏳` in-progress status for a terminal
                         // message and arm the auto-expiry timer so it
                         // transitions to "ready" after the grace period.
-                        self.status =
+                        let mut status =
                             format!("research: {} complete — {total} sources", decoded.name);
+                        if decoded.pdf_count > 0 {
+                            status.push_str(&format!(
+                                ", {} PDF{}",
+                                decoded.pdf_count,
+                                if decoded.pdf_count == 1 { "" } else { "s" }
+                            ));
+                        }
+                        if decoded.youtube_count > 0 {
+                            status.push_str(&format!(
+                                ", {} YouTube video{}",
+                                decoded.youtube_count,
+                                if decoded.youtube_count == 1 { "" } else { "s" }
+                            ));
+                        }
+                        self.status = status;
                         self.arm_status_expiry();
                     }
                     let name_for_refresh = decoded.name.clone();

@@ -1282,6 +1282,9 @@ mod tests {
             body: "page body content".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
@@ -1301,6 +1304,9 @@ mod tests {
             body: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("no body captured"));
@@ -1355,6 +1361,9 @@ mod tests {
             body: "page body content".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         let out = render_bibliography(&[source]);
         assert!(out.contains("Example"));
@@ -1395,6 +1404,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1434,6 +1446,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1445,6 +1460,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
@@ -1478,6 +1496,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         item.add_source(Source::Web {
             published_at: Some(
@@ -1493,6 +1514,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1504,6 +1528,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1540,6 +1567,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1581,6 +1611,9 @@ mod tests {
             body: "body".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.

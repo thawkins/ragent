@@ -195,7 +195,9 @@ fn build_web_gatherer(
     let search = registry
         .get("mf_search")
         .or_else(|| registry.get("websearch"))?;
-    let fetch = registry.get("webfetch")?;
+    let fetch = registry
+        .get("mf_fetch")
+        .or_else(|| registry.get("webfetch"))?;
     let search_tool_name = search.name().to_string();
     let ctx = build_tool_context(
         session_id,
@@ -373,34 +375,56 @@ const DATE_EXTRACTION_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkin
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
     async fn fetch(&self, url: &str) -> Result<WebFetchedPage> {
-        // Fetch the rendered text body via the existing webfetch tool so
-        // the research system gets the same content it always has, and so
-        // tool permission rules still apply.
-        let input = json!({
-            "url": url,
-            "format": "text",
-        });
+        // Prefer `mf_fetch` for richer metadata (content_type, page_type, title).
+        // Fall back to the legacy `webfetch` tool when `mf_fetch` is not
+        // registered.
+        let is_mf_fetch = self.tool.name() == "mf_fetch";
+        let input = if is_mf_fetch {
+            json!({
+                "url": url,
+                "format": "markdown",
+            })
+        } else {
+            json!({
+                "url": url,
+                "format": "text",
+            })
+        };
         let output = self.tool.execute(input, &self.ctx).await?;
 
-        // The webfetch tool now uses readability-rs to extract the article
-        // title and main content from HTML. Prefer the metadata title over
-        // the legacy first-line-of-body heuristic.
-        let title = output
-            .metadata
-            .as_ref()
-            .and_then(|m| m.get("title"))
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .map(ToString::to_string)
-            .unwrap_or_else(|| {
-                output
-                    .content
-                    .lines()
-                    .find(|l| !l.trim().is_empty())
-                    .unwrap_or(url)
-                    .to_string()
-            });
+        // `mf_fetch` returns a structured envelope. If the envelope is present,
+        // use its metadata and content; otherwise treat the legacy `webfetch`
+        // output as the page body directly.
+        let (body, title, content_type, page_type) = if is_mf_fetch {
+            parse_mf_fetch_output(url, &output.content, output.metadata.as_ref())
+        } else {
+            let title = output
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("title"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| {
+                    output
+                        .content
+                        .lines()
+                        .find(|l| !l.trim().is_empty())
+                        .unwrap_or(url)
+                        .to_string()
+                });
+            (
+                output.content,
+                title,
+                None,
+                output.metadata.as_ref().and_then(|m| {
+                    m.get("page_type")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                }),
+            )
+        };
 
         // Opportunistically fetch the raw HTML head to extract a publication
         // date from the page's embedded metadata. This is a best-effort step:
@@ -412,10 +436,91 @@ impl WebFetchTool for AgentWebFetchTool {
         Ok(WebFetchedPage {
             url: url.to_string(),
             title,
-            body: output.content,
+            body,
             published_at,
+            content_type,
+            page_type,
         })
     }
+}
+
+/// Parse the `mf_fetch` tool's output envelope.
+///
+/// `mf_fetch` returns a JSON object with `content`, `content_type`,
+/// `page_type`, `content_ok`, and nested `metadata.title` /
+/// `metadata.published_time`. The body is returned as Markdown/text. The legacy
+/// `webfetch` tool returns plain text without this envelope.
+fn parse_mf_fetch_output(
+    url: &str,
+    content: &str,
+    metadata: Option<&serde_json::Value>,
+) -> (String, String, Option<String>, Option<String>) {
+    // If the content looks like the mf_fetch envelope, parse it.
+    if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(content) {
+        if let Some(body) = envelope
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+        {
+            let title = envelope
+                .get("metadata")
+                .and_then(|m| m.get("title"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    body.lines()
+                        .find(|l| !l.trim().is_empty())
+                        .map(|l| l.to_string())
+                })
+                .unwrap_or_else(|| url.to_string());
+            let content_type = envelope
+                .get("content_type")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| {
+                    metadata
+                        .and_then(|m| m.get("content_type"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                });
+            let page_type = envelope
+                .get("page_type")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| {
+                    metadata
+                        .and_then(|m| m.get("page_type"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                });
+            return (body, title, content_type, page_type);
+        }
+    }
+    // Not an envelope: treat the whole content as the body.
+    let title = metadata
+        .and_then(|m| m.get("title"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            content
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or(url)
+                .to_string()
+        });
+    let content_type = metadata
+        .and_then(|m| m.get("content_type"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let page_type = metadata
+        .and_then(|m| m.get("page_type"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    (content.to_string(), title, content_type, page_type)
 }
 
 /// Fetch the raw HTML for `url` and attempt to extract a publication date.

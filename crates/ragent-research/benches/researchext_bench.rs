@@ -37,6 +37,8 @@ impl WebFetchTool for FixedFetch {
             url: url.to_string(),
             title: "Fake source".into(),
             body: "This is the body of the fake source used for benchmarking.".into(),
+            content_type: None,
+            page_type: None,
         })
     }
 }

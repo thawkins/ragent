@@ -506,6 +506,9 @@ mod tests {
                 body: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
             Source::Web {
                 url: "https://undated.example".into(),
@@ -518,6 +521,9 @@ mod tests {
                 body: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
             },
         ];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());

@@ -459,6 +459,10 @@ pub struct GatherResult {
     /// Captured web sources, already deduplicated by URL and limited to the
     /// caller's `max_results` budget.
     pub sources: Vec<Source>,
+    /// Count of captured PDF documents.
+    pub pdf_count: usize,
+    /// Count of captured YouTube video URLs.
+    pub youtube_count: usize,
 }
 
 impl GatherResult {
@@ -468,6 +472,8 @@ impl GatherResult {
         Self {
             queries: Vec::new(),
             sources: Vec::new(),
+            pdf_count: 0,
+            youtube_count: 0,
         }
     }
 }
@@ -508,6 +514,58 @@ pub struct WebFetchedPage {
     /// fetcher was able to determine one. `None` when the page did not expose
     /// a parseable publication date.
     pub published_at: Option<DateTime<Utc>>,
+    /// HTTP `Content-Type` reported by the fetcher, when available. Used by
+    /// the research layer to classify PDFs and other media types.
+    pub content_type: Option<String>,
+    /// Page-type classification reported by the fetcher (e.g. `article`,
+    /// `docs`). Currently informational; `content_type` drives media
+    /// classification.
+    pub page_type: Option<String>,
+}
+
+/// Classified kind of a captured web source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebSourceKind {
+    /// A normal web page (article, blog post, documentation, etc.).
+    Page,
+    /// A PDF document detected by `Content-Type` or URL extension.
+    Pdf,
+    /// A YouTube video URL (transcript extraction is future work; for now
+    /// this counts video URLs returned by search).
+    YouTube,
+}
+
+/// Classify a web URL by its `Content-Type` and host.
+///
+/// PDFs are recognised by an `application/pdf` content type or by a `.pdf`
+/// path extension. YouTube URLs are recognised by host (`youtube.com` or
+/// `youtu.be`). Everything else is treated as a generic page.
+#[must_use]
+pub fn classify_web_source(url: &str, content_type: Option<&str>) -> WebSourceKind {
+    if content_type.is_some_and(|ct| ct.to_ascii_lowercase().contains("application/pdf"))
+        || url.to_ascii_lowercase().ends_with(".pdf")
+    {
+        return WebSourceKind::Pdf;
+    }
+    if let Ok(parsed) = url::Url::parse(url) {
+        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+        if host.contains("youtube.com") || host.contains("youtu.be") {
+            return WebSourceKind::YouTube;
+        }
+    }
+    WebSourceKind::Page
+}
+
+impl WebSourceKind {
+    /// Human-readable classifier used when serialising web sources.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Pdf => "pdf",
+            Self::YouTube => "youtube",
+        }
+    }
 }
 
 /// Trait abstracting the existing `websearch` tool.
@@ -676,6 +734,9 @@ impl WebGatherer {
             relevance: "User-supplied seed URL".into(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         };
         Ok((source, page))
     }
@@ -812,6 +873,8 @@ impl WebGatherer {
             return Ok(GatherResult {
                 queries,
                 sources: Vec::new(),
+                pdf_count: 0,
+                youtube_count: 0,
             });
         }
 
@@ -869,7 +932,7 @@ impl WebGatherer {
                     collected.push((
                         index,
                         Some(Source::Web {
-                            url: page.url,
+                            url: page.url.clone(),
                             title,
                             captured_at: Utc::now(),
                             published_at: page.published_at,
@@ -878,6 +941,14 @@ impl WebGatherer {
                             relevance,
                             search_tool: hit.search_tool,
                             search_engine: hit.search_engine,
+                            content_type: page.content_type.clone(),
+                            page_type: page.page_type.clone(),
+                            media_type: classify_web_source(
+                                &page.url,
+                                page.content_type.as_deref(),
+                            )
+                            .as_str()
+                            .to_string(),
                         }),
                     ));
                 }
@@ -896,13 +967,36 @@ impl WebGatherer {
         // Restore search-ranking order so `web-NN.md` numbers track hit
         // position rather than fetch-completion timing.
         collected.sort_by_key(|(index, _)| *index);
-        let sources: Vec<Source> = collected.into_iter().filter_map(|(_, src)| src).collect();
-
+        let mut pdf_count = 0usize;
+        let mut youtube_count = 0usize;
+        let sources: Vec<Source> = collected
+            .into_iter()
+            .filter_map(|(_, src)| {
+                if let Some(Source::Web {
+                    url, content_type, ..
+                }) = src.as_ref()
+                {
+                    match classify_web_source(url, content_type.as_deref()) {
+                        WebSourceKind::Pdf => pdf_count += 1,
+                        WebSourceKind::YouTube => youtube_count += 1,
+                        WebSourceKind::Page => {}
+                    }
+                }
+                src
+            })
+            .collect();
         tracing::info!(
             count = sources.len(),
+            pdf_count,
+            youtube_count,
             "research: web-gathering phase complete"
         );
-        Ok(GatherResult { queries, sources })
+        Ok(GatherResult {
+            queries,
+            sources,
+            pdf_count,
+            youtube_count,
+        })
     }
 }
 
@@ -1076,6 +1170,8 @@ mod tests {
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -1086,6 +1182,7 @@ mod tests {
             "search failure must not surface as an error"
         );
     }
+
     #[tokio::test]
     async fn gather_creates_web_source_per_hit_with_sequential_body_paths() {
         let hits = vec![
@@ -1122,6 +1219,8 @@ mod tests {
                 url: "https://a.example".into(),
                 title: "A — resolved".into(),
                 body: "body a".into(),
+                content_type: None,
+                page_type: None,
             },
         );
         pages.insert(
@@ -1131,6 +1230,8 @@ mod tests {
                 url: "https://b.example".into(),
                 title: "B — resolved".into(),
                 body: "body b".into(),
+                content_type: None,
+                page_type: None,
             },
         );
         pages.insert(
@@ -1140,6 +1241,8 @@ mod tests {
                 url: "https://c.example".into(),
                 title: String::new(), // empty title should fall back to search hit title
                 body: "body c".into(),
+                content_type: None,
+                page_type: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -1198,6 +1301,9 @@ mod tests {
                 url: "https://ok".into(),
                 title: "OK".into(),
                 body: "b".into(),
+
+                content_type: None,
+                page_type: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -1248,6 +1354,9 @@ mod tests {
                     url: u.into(),
                     title: u.into(),
                     body: "b".into(),
+
+                    content_type: None,
+                    page_type: None,
                 },
             );
         }
@@ -1302,6 +1411,9 @@ mod tests {
                     url: "u".into(),
                     title: "t".into(),
                     body: "b".into(),
+
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -1385,6 +1497,9 @@ mod tests {
                 url: "https://ok".into(),
                 title: "OK".into(),
                 body: "b".into(),
+
+                content_type: None,
+                page_type: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -1438,6 +1553,8 @@ mod tests {
                     url: url.to_string(),
                     title: format!("title-{url}"),
                     body: format!("body-{url}"),
+                    content_type: None,
+                    page_type: None,
                 })
             }
         }
@@ -1690,6 +1807,8 @@ mod tests {
                 url: _url.to_string(),
                 title: format!("title-{_url}"),
                 body: format!("body-{_url}"),
+                content_type: None,
+                page_type: None,
             })
         }
     }

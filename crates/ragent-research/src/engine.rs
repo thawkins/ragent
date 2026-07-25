@@ -501,6 +501,8 @@ mod tests {
                 url: url.to_string(),
                 title: "fake".to_string(),
                 body: "body text".to_string(),
+                content_type: None,
+                page_type: None,
             })
         }
     }

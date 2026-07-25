@@ -920,6 +920,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -961,6 +964,9 @@ mod tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         let doc = ResearchDocument {
             item,
@@ -1006,6 +1012,9 @@ mod frontmatter_tests {
             relevance: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
         });
         item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
         let doc = ResearchDocument {
