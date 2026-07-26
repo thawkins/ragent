@@ -316,65 +316,91 @@ pub fn extract(
 
 /// Run the readability → html2text → raw text chain and return the best
 /// result.
+///
+/// The chain is wrapped in a top-level [`std::panic::catch_unwind`] so that a
+/// panic in any stage (readability parsing, html2text rendering, or the
+/// extractor's own logic) degrades to the raw-text fallback instead of
+/// aborting the calling task or process. `html2text` in particular has a
+/// history of panicking on real-world HTML (e.g. mdBook-generated pages),
+/// so this outer guard is defence in depth on top of the per-stage isolation.
 fn extract_markdown(
     html: &str,
     url: &str,
     max_chars: usize,
 ) -> Result<ExtractResult, ExtractError> {
-    // Strip noise tags (script, style, nav, etc.) before extraction so their
-    // text content never leaks into the output.
-    let cleaned = strip_noise_tags(html);
+    // Outer catch_unwind: if *anything* in the chain panics, fall back to
+    // stripping tags. This protects callers that run the extractor inside an
+    // async web-gatherer task from an isolated renderer bug crashing the
+    // whole research pipeline.
+    let result = std::panic::catch_unwind(|| {
+        // Strip noise tags (script, style, nav, etc.) before extraction so
+        // their text content never leaks into the output.
+        let cleaned = strip_noise_tags(html);
 
-    // Stage 1: readability-rs (primary).
-    if let Some((text, title)) = extract_readability(&cleaned, url) {
-        if text.chars().count() >= MIN_READABILITY_CHARS {
+        // Stage 1: readability-rs (primary).
+        if let Some((text, title)) = extract_readability(&cleaned, url) {
+            if text.chars().count() >= MIN_READABILITY_CHARS {
+                tracing::debug!(
+                    chars = text.chars().count(),
+                    "extractor: readability succeeded"
+                );
+                let (content, is_truncated) = truncate(&text, max_chars);
+                return Ok(ExtractResult {
+                    content,
+                    title: Some(title),
+                    method: ExtractMethod::Readability,
+                    is_truncated,
+                    total_chars: text.chars().count(),
+                });
+            }
             tracing::debug!(
                 chars = text.chars().count(),
-                "extractor: readability succeeded"
+                min = MIN_READABILITY_CHARS,
+                "extractor: readability text too short, falling back to html2text"
             );
+        } else {
+            tracing::debug!("extractor: readability failed, falling back to html2text");
+        }
+
+        // Stage 2: html2text (fallback).
+        if let Some(text) = extract_html2text(&cleaned)
+            && !text.trim().is_empty()
+        {
             let (content, is_truncated) = truncate(&text, max_chars);
             return Ok(ExtractResult {
                 content,
-                title: Some(title),
-                method: ExtractMethod::Readability,
+                title: None,
+                method: ExtractMethod::Html2Text,
                 is_truncated,
                 total_chars: text.chars().count(),
             });
         }
-        tracing::debug!(
-            chars = text.chars().count(),
-            min = MIN_READABILITY_CHARS,
-            "extractor: readability text too short, falling back to html2text"
-        );
-    } else {
-        tracing::debug!("extractor: readability failed, falling back to html2text");
-    }
 
-    // Stage 2: html2text (fallback).
-    if let Some(text) = extract_html2text(&cleaned)
-        && !text.trim().is_empty()
-    {
-        let (content, is_truncated) = truncate(&text, max_chars);
-        return Ok(ExtractResult {
-            content,
-            title: None,
-            method: ExtractMethod::Html2Text,
-            is_truncated,
-            total_chars: text.chars().count(),
-        });
-    }
+        // Stage 3: raw text (last resort).
+        Ok(raw_text_result(&cleaned, max_chars))
+    });
 
-    // Stage 3: raw text (last resort).
-    let text = ragent_types::html::strip_tags(&cleaned);
+    match result {
+        Ok(inner) => inner,
+        Err(_) => {
+            tracing::warn!("extractor: markdown chain panicked; falling back to raw text");
+            Ok(raw_text_result(&strip_noise_tags(html), max_chars))
+        }
+    }
+}
+
+/// Build a raw-text fallback [`ExtractResult`] from already-cleaned HTML.
+fn raw_text_result(cleaned_html: &str, max_chars: usize) -> ExtractResult {
+    let text = ragent_types::html::strip_tags(cleaned_html);
     let normalised = collapse_whitespace(&text);
     let (content, is_truncated) = truncate(&normalised, max_chars);
-    Ok(ExtractResult {
+    ExtractResult {
         content,
         title: None,
         method: ExtractMethod::RawText,
         is_truncated,
         total_chars: normalised.chars().count(),
-    })
+    }
 }
 
 /// Extract article text and title using `readability-rs`.

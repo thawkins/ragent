@@ -23,9 +23,13 @@ use super::super::extractor::{ExtractOptions, OutputFormat, extract};
 use super::super::focus::focus_content;
 use super::super::links::classify_links;
 use super::super::metadata::extract_metadata;
+use super::super::pdf::{extract_pdf_text, extract_pdf_title};
 use super::super::robots::RobotsChecker;
 use super::super::security::validate_url;
 use super::super::urlnorm::normalise_url;
+use super::super::youtube::{
+    extract_transcript_from_watch_page, fallback_title_from_html, is_youtube_url,
+};
 use crate::{Tool, ToolContext, ToolOutput};
 
 /// Fetch any URL or PDF with automatic content extraction and envelope signals.
@@ -276,12 +280,33 @@ async fn fetch_one_url(
         .unwrap_or("text/html")
         .to_string();
 
+    let is_pdf = content_type
+        .to_ascii_lowercase()
+        .contains("application/pdf")
+        || url.to_ascii_lowercase().ends_with(".pdf");
+
+    if is_pdf {
+        let bytes = match response.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                return fetch_error_output(url, status, &e.to_string());
+            }
+        };
+        return pdf_tool_output(url, status, &content_type, &bytes, params).await;
+    }
+
+    let is_youtube = is_youtube_url(url);
+
     let body = match response.text().await {
         Ok(t) => t,
         Err(e) => {
             return fetch_error_output(url, status, &e.to_string());
         }
     };
+
+    if is_youtube {
+        return youtube_tool_output(url, status, &content_type, &body).await;
+    }
 
     let total_size_bytes = body.len();
 
@@ -414,6 +439,191 @@ async fn fetch_one_url(
     ToolOutput {
         content,
         metadata: Some(metadata_json),
+    }
+}
+
+/// Build a `ToolOutput` for a successfully fetched PDF.
+///
+/// Extracts text from the PDF bytes and returns it as the page body, with
+/// metadata signals that identify the source as a PDF document.
+async fn pdf_tool_output(
+    url: &str,
+    status: u16,
+    content_type: &str,
+    bytes: &[u8],
+    params: &FetchParams,
+) -> ToolOutput {
+    let total_size_bytes = bytes.len();
+    let start = Instant::now();
+    let bytes_owned = bytes.to_vec();
+    let extracted = match tokio::task::spawn_blocking(move || extract_pdf_text(&bytes_owned)).await
+    {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => {
+            return pdf_error_output(url, status, &e.to_string());
+        }
+        Err(e) => {
+            return pdf_error_output(url, status, &format!("PDF extraction task panicked: {e}"));
+        }
+    };
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    let title = extract_pdf_title(bytes);
+    let total_extracted_chars = extracted.chars().count();
+    let display_content: String = extracted
+        .chars()
+        .skip(params.offset)
+        .take(params.max_content_chars)
+        .collect();
+    let is_truncated = total_extracted_chars > params.offset + params.max_content_chars;
+    let next_offset = if is_truncated {
+        params.offset + params.max_content_chars
+    } else {
+        0
+    };
+    let content_ok = !display_content.trim().is_empty();
+
+    let content = format!(
+        "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: pdf\nContent OK: {content_ok}\nFetcher: http\n\n{display_content}"
+    );
+
+    let metadata_json = json!({
+        "url": url,
+        "status": status,
+        "content_ok": content_ok,
+        "content_type": content_type,
+                "content_type": "application/pdf",
+                "page_type": "pdf",        "source_type": "unknown",
+        "is_official": false,
+        "content_age_days": -1,
+        "is_stale": false,
+        "next_action": if content_ok { "pdf text extracted" } else { "pdf extraction produced no text" },
+        "summary": title.clone().unwrap_or_else(|| "PDF document".into()),
+        "fetcher_used": "http",
+        "is_truncated": is_truncated,
+        "next_offset": next_offset,
+        "total_size_bytes": total_size_bytes,
+        "total_extracted_chars": total_extracted_chars,
+        "duration_ms": duration_ms,
+        "cached": false,
+        "version": MASTERFETCH_VERSION,
+    });
+
+    ToolOutput {
+        content,
+        metadata: Some(metadata_json),
+    }
+}
+
+/// Build a `ToolOutput` when PDF text extraction fails.
+fn pdf_error_output(url: &str, status: u16, error: &str) -> ToolOutput {
+    ToolOutput {
+        content: format!(
+            "mf_fetch: {url}\nStatus: {status}\nContent type: application/pdf\nPage type: pdf\nContent OK: false\nFetcher: http\n\n[PDF text extraction failed: {error}]"
+        ),
+        metadata: Some(json!({
+            "url": url,
+            "status": status,
+            "content_ok": false,
+            "content_type": "application/pdf",
+            "page_type": "pdf",
+            "source_type": "unknown",
+            "is_official": false,
+            "content_age_days": -1,
+            "is_stale": false,
+            "next_action": "try a different PDF URL or use a dedicated PDF reader",
+            "summary": "PDF text extraction failed",
+            "fetcher_used": "http",
+            "is_truncated": false,
+            "next_offset": 0,
+            "total_size_bytes": 0,
+            "total_extracted_chars": 0,
+            "duration_ms": 0,
+            "cached": false,
+            "error": error,
+            "version": MASTERFETCH_VERSION,
+        })),
+    }
+}
+
+/// Build a `ToolOutput` for a successfully transcribed YouTube video.
+///
+/// Parses the watch-page HTML for `ytInitialPlayerResponse`, fetches captions,
+/// and returns the transcript as the page body.
+async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &str) -> ToolOutput {
+    let total_size_bytes = html.len();
+    let start = Instant::now();
+    let (title, transcript) = match extract_transcript_from_watch_page(html).await {
+        Ok(t) => t,
+        Err(e) => {
+            let fallback_title =
+                fallback_title_from_html(html).unwrap_or_else(|| "YouTube video".to_string());
+            return youtube_error_output(url, status, &fallback_title, &e.to_string());
+        }
+    };
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    let total_extracted_chars = transcript.chars().count();
+    let content_ok = !transcript.trim().is_empty();
+
+    let content = format!(
+        "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: youtube\nContent OK: {content_ok}\nFetcher: http\n\nTitle: {title}\n\n{transcript}"
+    );
+
+    let metadata_json = json!({
+        "url": url,
+        "status": status,
+        "content_ok": content_ok,
+        "page_type": "youtube",
+        "source_type": "unknown",
+        "is_official": false,
+        "content_age_days": -1,
+        "is_stale": false,
+        "next_action": if content_ok { "youtube transcript extracted" } else { "no captions available" },
+        "summary": title,
+        "fetcher_used": "http",
+        "is_truncated": false,
+        "next_offset": 0,
+        "total_size_bytes": total_size_bytes,
+        "total_extracted_chars": total_extracted_chars,
+        "duration_ms": duration_ms,
+        "cached": false,
+        "version": MASTERFETCH_VERSION,
+    });
+
+    ToolOutput {
+        content,
+        metadata: Some(metadata_json),
+    }
+}
+
+/// Build a `ToolOutput` when YouTube transcript extraction fails.
+fn youtube_error_output(url: &str, status: u16, title: &str, error: &str) -> ToolOutput {
+    ToolOutput {
+        content: format!(
+            "mf_fetch: {url}\nStatus: {status}\nContent type: text/html\nPage type: youtube\nContent OK: false\nFetcher: http\n\nTitle: {title}\n\n[YouTube transcript extraction failed: {error}]"
+        ),
+        metadata: Some(json!({
+            "url": url,
+            "status": status,
+            "content_ok": false,
+            "page_type": "youtube",
+            "source_type": "unknown",
+            "is_official": false,
+            "content_age_days": -1,
+            "is_stale": false,
+            "next_action": "this video may not have captions; try a different source",
+            "summary": title,
+            "fetcher_used": "http",
+            "is_truncated": false,
+            "next_offset": 0,
+            "total_size_bytes": 0,
+            "total_extracted_chars": 0,
+            "duration_ms": 0,
+            "cached": false,
+            "error": error,
+            "version": MASTERFETCH_VERSION,
+        })),
     }
 }
 

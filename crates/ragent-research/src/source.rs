@@ -174,6 +174,19 @@ impl Source {
         }
     }
 
+    /// Media-type classifier used in the References Index table.
+    ///
+    /// Only [`Source::Web`] carries a meaningful media type (`"page"`, `"pdf"`,
+    /// or `"youtube"`). Local, spec, and other sources do not have a media
+    /// classifier and return `"—"`.
+    #[must_use]
+    pub fn media_type(&self) -> &str {
+        match self {
+            Self::Web { media_type, .. } => media_type,
+            _ => "—",
+        }
+    }
+
     /// Title or label for this source, used in the References Index table.
     #[must_use]
     pub fn title(&self) -> &str {

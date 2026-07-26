@@ -214,24 +214,29 @@ impl ResearchIo {
     /// **Relevance**) showing each web source's publication date when it
     /// could be parsed from the page's embedded metadata, and `—` otherwise.
     /// Non-web sources have no publication date and always show `—`.
+    ///
+    /// The table also includes a **Media** column (between **Type** and
+    /// **Path/URL**) showing the classified media type for web sources
+    /// (`page`, `pdf`, or `youtube`), and `—` for non-web sources.
     #[must_use]
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
-                "## References Index\n\n| # | Type | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
-                           |---|------|----------|-------|-----------|-----------|-------------|--------|----------|\n\
-                           | 1 | other | — | No sources captured | — | (no gathering run) | — | — | {} |\n",
+                "## References Index\n\n| # | Type | Media | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+                           |---|------|-------|----------|-------|-----------|-----------|-------------|--------|----------|\n\
+                           | 1 | other | — | — | No sources captured | — | (no gathering run) | — | — | {} |\n",
                 captured_at.to_rfc3339()
             );
         }
         let mut out = String::from(
             "## References Index\n\n\
-             | # | Type | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
-             |---|------|----------|-------|-----------|-----------|-------------|--------|----------|\n",
+             | # | Type | Media | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+             |---|------|-------|----------|-------|-----------|-----------|-------------|--------|----------|\n",
         );
         for (idx, source) in sources.iter().enumerate() {
             let n = idx + 1;
             let kind = source.type_str();
+            let media = sanitize_inline(source.media_type());
             let path = source.path_or_url();
             let title = sanitize_inline(source.title());
             let published = source
@@ -257,7 +262,7 @@ impl ResearchIo {
             };
             let captured = source.captured_at().to_rfc3339();
             out.push_str(&format!(
-                "| {n} | {kind} | {path} | {title} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
+                "| {n} | {kind} | {media} | {path} | {title} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
             ));
         }
         out

@@ -54,7 +54,7 @@ pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
 /// set of candidate URLs before the synthesis phase.
 /// Default cap on the number of web sources captured when the caller does not
 /// supply an explicit `max_web_results` (FR-011).
-pub const DEFAULT_MAX_WEB_RESULTS: usize = 100;
+pub const DEFAULT_MAX_WEB_RESULTS: usize = 250;
 
 /// Default upper bound on the number of concurrent page fetches issued during
 /// the capture phase of [`WebGatherer::gather_with_observer`]. 10 is a safe
@@ -69,6 +69,144 @@ pub const DEFAULT_FETCH_CONCURRENCY: usize = 10;
 /// disk. Keeps runaway pages from blowing up the synthesis prompt.
 fn fence_captured_body(body: &str) -> String {
     fence_source_body(body)
+}
+
+/// Maximum length enforced for a stored web-source title. Longer titles are
+/// truncated at a word boundary with an ellipsis so the References Index and
+/// the per-finding `**Sources:**` bullets stay readable. Captured titles come
+/// from the page's readability-extracted `<title>`/heading or the search-hit
+/// title and frequently contain nav chrome ("Skip to main content") or consent
+/// banners ("We use essential cookies to make our site work..."); see
+/// [`clean_web_source_title`].
+const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
+
+/// Leading phrases that mark a captured title as page chrome rather than
+/// article content. When the cleaned title starts with one of these it is
+/// stripped; when the *entire* cleaned title is one of these (after markdown
+/// link syntax is removed) the title is discarded in favour of the fallback.
+const TITLE_NOISE_PHRASES: &[&str] = &[
+    "skip to main content",
+    "skip to content",
+    "skip navigation",
+    "skip to nav",
+    "jump to content",
+    "we use essential cookies",
+    "we use cookies",
+    "this site uses cookies",
+    "agree & join",
+    "agree and join",
+    "sign in",
+    "sign up",
+    "log in",
+    "join/login",
+    "join sign in",
+];
+
+/// Clean a page title captured from a fetch or search hit before it is stored
+/// on a [`Source::Web`], so the title shown in the References Index and the
+/// per-finding `**Sources:**` bullets is short and meaningful rather than nav
+/// chrome or a consent banner. This is a pure code transform — no LLM.
+///
+/// Steps:
+/// 1. Strip markdown reference-link (`[text][n]`) and inline-link
+///    (`[text](url)`) syntax, keeping the link text.
+/// 2. Drop a leading nav/cookie/consent phrase from [`TITLE_NOISE_PHRASES`].
+/// 3. Collapse internal whitespace and trim.
+/// 4. Truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary with an
+///    ellipsis.
+/// 5. When the cleaned primary is empty (or was pure noise), repeat on
+///    `fallback` (typically the search-hit title or the URL). When both are
+///    empty/noise, return the raw fallback so the title is never blank.
+#[must_use]
+fn clean_web_source_title(primary: &str, fallback: &str) -> String {
+    let cleaned = clean_title_text(primary);
+    if !cleaned.is_empty() {
+        return cleaned;
+    }
+    let cleaned_fallback = clean_title_text(fallback);
+    if !cleaned_fallback.is_empty() {
+        return cleaned_fallback;
+    }
+    // Both reduced to nothing — surface a non-empty raw value so the
+    // References Index never shows a blank title cell.
+    fallback.trim().to_string()
+}
+
+/// Strip markdown link syntax, leading nav/consent noise, collapse whitespace,
+/// and truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary.
+fn clean_title_text(s: &str) -> String {
+    let stripped = strip_markdown_link_text(s);
+    let stripped = strip_leading_noise(&stripped);
+    let collapsed = collapse_title_ws(&stripped);
+    truncate_title_words(&collapsed, MAX_WEB_SOURCE_TITLE_CHARS)
+}
+
+/// Replace markdown reference links (`[text][n]`, `[text][]`) and inline links
+/// (`[text](url)`) with just the link `text`, leaving non-link content intact.
+fn strip_markdown_link_text(s: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        // Match `[text]` immediately followed by either `[...]` or `(...)`.
+        regex::Regex::new(r"\[([^\]]*)\](?:\[[^\]]*\]|\([^)]*\))").expect("title link regex")
+    });
+    RE.replace_all(s, "$1").into_owned()
+}
+
+/// Remove a single leading nav/cookie/consent phrase (case-insensitive) from
+/// `s`, including any trailing separator punctuation. Returns `s` unchanged
+/// when no noise phrase matches the start.
+fn strip_leading_noise(s: &str) -> String {
+    let trimmed = s.trim_start();
+    let lower = trimmed.to_lowercase();
+    for phrase in TITLE_NOISE_PHRASES {
+        if lower.starts_with(phrase) {
+            // Map the matched prefix length back to the original slice so we
+            // keep the original casing of the remainder.
+            let kept = &trimmed[phrase.len()..];
+            let after = kept.trim_start_matches([' ', ',', ':', '|', '-', '—', '·']);
+            return after.trim().to_string();
+        }
+    }
+    trimmed.trim().to_string()
+}
+
+/// Collapse runs of whitespace into single spaces and trim the ends.
+fn collapse_title_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Truncate `s` to at most `max_chars` Unicode scalar values, cutting at the
+/// last whitespace boundary at or before the limit so words are not split. An
+/// ellipsis is appended when truncation occurs.
+fn truncate_title_words(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    // Reserve two chars for the " …" suffix when possible.
+    let budget = max_chars.saturating_sub(2);
+    let mut end_byte = 0usize;
+    let mut last_space_byte = 0usize;
+    for (i, (byte_idx, ch)) in s.char_indices().enumerate() {
+        if i >= budget {
+            break;
+        }
+        end_byte = byte_idx + ch.len_utf8();
+        if ch.is_whitespace() {
+            last_space_byte = byte_idx;
+        }
+    }
+    // Prefer to cut at the last whitespace so we don't split a word.
+    let cut_byte = if last_space_byte > 0 {
+        last_space_byte
+    } else {
+        end_byte
+    };
+    // Walk back to a UTF-8 char boundary (last_space_byte is already on a
+    // boundary; end_byte is a char-end boundary by construction).
+    let mut out = s[..cut_byte].trim_end().to_string();
+    if !out.is_empty() {
+        out.push('…');
+    }
+    out
 }
 
 /// Trait abstracting the decomposition of a research topic into focused
@@ -530,8 +668,9 @@ pub enum WebSourceKind {
     Page,
     /// A PDF document detected by `Content-Type` or URL extension.
     Pdf,
-    /// A YouTube video URL (transcript extraction is future work; for now
-    /// this counts video URLs returned by search).
+    /// A YouTube video URL. When the fetch layer extracts a transcript the
+    /// captured body contains the caption text; otherwise the body contains the
+    /// watch-page chrome and description.
     YouTube,
 }
 
@@ -719,11 +858,10 @@ impl WebGatherer {
     pub async fn fetch_url_as_source(&self, url: &str) -> anyhow::Result<(Source, WebFetchedPage)> {
         let page = self.fetch.fetch(url).await?;
         let body = fence_captured_body(&page.body);
-        let title = if page.title.is_empty() {
-            url.to_string()
-        } else {
-            page.title.clone()
-        };
+        let title = clean_web_source_title(&page.title, url);
+        let media_type = classify_web_source(url, page.content_type.as_deref())
+            .as_str()
+            .to_string();
         let source = Source::Web {
             url: page.url.clone(),
             title,
@@ -734,9 +872,9 @@ impl WebGatherer {
             relevance: "User-supplied seed URL".into(),
             search_tool: String::new(),
             search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".into(),
+            content_type: page.content_type.clone(),
+            page_type: page.page_type.clone(),
+            media_type,
         };
         Ok((source, page))
     }
@@ -904,11 +1042,7 @@ impl WebGatherer {
         while let Some((index, query, hit, result)) = stream.next().await {
             match result {
                 Ok(page) => {
-                    let title = if page.title.is_empty() {
-                        hit.title
-                    } else {
-                        page.title
-                    };
+                    let title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
                     let relevance = compute_relevance_note(&query, &title, &hit.snippet, &page.url);
@@ -959,7 +1093,12 @@ impl WebGatherer {
                             error: e.to_string(),
                         });
                     }
-                    tracing::warn!(query = %query, url = %hit.url, error = %e, "research: webfetch failed; skipping");
+                    tracing::warn!(
+                        query = %query,
+                        url = %hit.url,
+                        error = %e,
+                        "research: webfetch failed; skipping"
+                    );
                     collected.push((index, None));
                 }
             }
@@ -1072,6 +1211,114 @@ fn compute_relevance_note(query: &str, title: &str, snippet: &str, url: &str) ->
 /// relative to the research item directory (`research/<name>/`).
 fn web_body_path(index: usize) -> PathBuf {
     PathBuf::from(format!("sources/web-{:02}.md", index + 1))
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn clean_title_strips_markdown_reference_links() {
+        let out = clean_web_source_title("[Skip to main content][1]", "");
+        // The whole title was nav chrome → reduces to empty → fallback empty.
+        assert!(
+            out.is_empty(),
+            "pure-noise title with empty fallback should be empty, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn clean_title_strips_markdown_links_but_keeps_text() {
+        let out = clean_web_source_title("[DeepSeek V4 Pro][1] model card", "");
+        assert_eq!(out, "DeepSeek V4 Pro model card");
+    }
+
+    #[test]
+    fn clean_title_strips_inline_markdown_links() {
+        let out = clean_web_source_title("[DeepSeek](https://deepseek.com) overview", "");
+        assert_eq!(out, "DeepSeek overview");
+    }
+
+    #[test]
+    fn clean_title_strips_leading_cookie_banner() {
+        let long = "We use essential cookies to make our site work. With your consent, we may also use non-essential cookies to improve your site for you and your experience";
+        let out = clean_web_source_title(long, "");
+        // Leading cookie phrase is stripped; remainder is truncated to the cap.
+        assert!(
+            out.chars().count() <= MAX_WEB_SOURCE_TITLE_CHARS,
+            "got {} chars: {out}",
+            out.chars().count()
+        );
+        assert!(!out.to_lowercase().contains("we use essential cookies"));
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn clean_title_truncates_long_title_at_word_boundary() {
+        let long = "This is a genuinely long and meaningful article title that goes well beyond the one hundred and twenty character cap so it must be truncated by the gatherer";
+        let out = clean_web_source_title(long, "");
+        assert!(
+            out.chars().count() <= MAX_WEB_SOURCE_TITLE_CHARS,
+            "got {} chars: {out}",
+            out.chars().count()
+        );
+        assert!(out.ends_with('…'));
+        // Should not split a word mid-way.
+        assert!(!out.ends_with("… "));
+    }
+
+    #[test]
+    fn clean_title_falls_back_when_primary_is_noise() {
+        // page.title is pure nav chrome; fallback (search-hit title) should win.
+        let out = clean_web_source_title("[Skip to main content][1]", "Real Article Title");
+        assert_eq!(out, "Real Article Title");
+    }
+
+    #[test]
+    fn clean_title_falls_back_when_primary_is_empty() {
+        let out = clean_web_source_title("", "Hit Title");
+        assert_eq!(out, "Hit Title");
+    }
+
+    #[test]
+    fn clean_title_preserves_short_meaningful_title() {
+        let out = clean_web_source_title("A — resolved", "fallback");
+        assert_eq!(out, "A — resolved");
+    }
+
+    #[test]
+    fn clean_title_returns_raw_fallback_when_both_reduce_to_empty() {
+        let out = clean_web_source_title("[Skip to content][2]", "");
+        assert!(
+            out.is_empty(),
+            "both-noise with empty fallback yields empty, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn clean_title_url_fallback_is_preserved() {
+        // fetch_url_as_source passes the URL as fallback; a URL is not noise.
+        let out = clean_web_source_title("", "https://example.com/deepseek-v4");
+        assert_eq!(out, "https://example.com/deepseek-v4");
+    }
+
+    #[test]
+    fn strip_leading_noise_is_case_insensitive() {
+        let out = clean_title_text("SKIP TO MAIN CONTENT: DeepSeek V4 Pro");
+        assert_eq!(out, "DeepSeek V4 Pro");
+    }
+
+    #[test]
+    fn truncate_title_words_keeps_short_input_intact() {
+        let out = truncate_title_words("short title", 120);
+        assert_eq!(out, "short title");
+    }
+
+    #[test]
+    fn truncate_title_words_returns_empty_for_empty_input() {
+        let out = truncate_title_words("", 120);
+        assert!(out.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -1907,5 +2154,123 @@ mod tests {
         let g = WebGatherer::new(search, fetch);
         assert_eq!(g.fetch_concurrency, DEFAULT_FETCH_CONCURRENCY);
         assert_eq!(DEFAULT_FETCH_CONCURRENCY, 10);
+    }
+
+    /// `fetch_url_as_source` classifies the media type from the fetched page's
+    /// content type so PDF and YouTube seed URLs are reported correctly.
+    #[tokio::test]
+    async fn fetch_url_as_source_classifies_pdf_and_youtube_media_types() {
+        struct TypedFetch {
+            pages: std::collections::HashMap<String, WebFetchedPage>,
+        }
+        #[async_trait]
+        impl WebFetchTool for TypedFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                self.pages
+                    .get(url)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("no fake page for {url}"))
+            }
+        }
+
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://example.com/paper.pdf".into(),
+            WebFetchedPage {
+                url: "https://example.com/paper.pdf".into(),
+                title: "Paper".into(),
+                body: "extracted pdf text".into(),
+                content_type: Some("application/pdf".into()),
+                page_type: Some("pdf".into()),
+                published_at: None,
+            },
+        );
+        pages.insert(
+            "https://www.youtube.com/watch?v=abc123".into(),
+            WebFetchedPage {
+                url: "https://www.youtube.com/watch?v=abc123".into(),
+                title: "Video".into(),
+                body: "transcript text".into(),
+                content_type: Some("text/html; charset=utf-8".into()),
+                page_type: Some("youtube".into()),
+                published_at: None,
+            },
+        );
+
+        let g = WebGatherer::new(
+            Arc::new(FakeSearch::default()),
+            Arc::new(TypedFetch { pages }),
+        );
+
+        let (pdf_source, _) = g
+            .fetch_url_as_source("https://example.com/paper.pdf")
+            .await
+            .unwrap();
+        if let Source::Web { media_type, .. } = &pdf_source {
+            assert_eq!(media_type, "pdf");
+        } else {
+            panic!("expected Source::Web for PDF");
+        }
+
+        let (yt_source, _) = g
+            .fetch_url_as_source("https://www.youtube.com/watch?v=abc123")
+            .await
+            .unwrap();
+        if let Source::Web { media_type, .. } = &yt_source {
+            assert_eq!(media_type, "youtube");
+        } else {
+            panic!("expected Source::Web for YouTube");
+        }
+    }
+
+    /// `gather` counts PDF and YouTube sources returned by the fetch tool.
+    #[tokio::test]
+    async fn gather_counts_pdf_and_youtube_sources() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://example.com/paper.pdf".into(),
+                title: "PDF".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+            WebSearchHit {
+                url: "https://www.youtube.com/watch?v=abc123".into(),
+                title: "YouTube".into(),
+                snippet: String::new(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://example.com/paper.pdf".into(),
+            WebFetchedPage {
+                url: "https://example.com/paper.pdf".into(),
+                title: "PDF".into(),
+                body: "pdf body".into(),
+                content_type: Some("application/pdf".into()),
+                page_type: Some("pdf".into()),
+                published_at: None,
+            },
+        );
+        pages.insert(
+            "https://www.youtube.com/watch?v=abc123".into(),
+            WebFetchedPage {
+                url: "https://www.youtube.com/watch?v=abc123".into(),
+                title: "YouTube".into(),
+                body: "youtube transcript".into(),
+                content_type: Some("text/html".into()),
+                page_type: Some("youtube".into()),
+                published_at: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let result = g.gather_with_observer("topic", 5, None).await.unwrap();
+        assert_eq!(result.pdf_count, 1);
+        assert_eq!(result.youtube_count, 1);
+        assert_eq!(result.sources.len(), 2);
     }
 }

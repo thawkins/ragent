@@ -446,10 +446,17 @@ impl WebFetchTool for AgentWebFetchTool {
 
 /// Parse the `mf_fetch` tool's output envelope.
 ///
-/// `mf_fetch` returns a JSON object with `content`, `content_type`,
+/// `mf_fetch` normally returns a JSON object with `content`, `content_type`,
 /// `page_type`, `content_ok`, and nested `metadata.title` /
 /// `metadata.published_time`. The body is returned as Markdown/text. The legacy
 /// `webfetch` tool returns plain text without this envelope.
+///
+/// For non-JSON outputs (cache hits, PDF pages, YouTube transcripts, and error
+/// responses) the tool still prefixes the human-readable payload with a header
+/// block starting with `mf_fetch: <url>`. This header is useful in the raw tool
+/// response but redundant in the research output, where the URL already appears
+/// in the References Index and per-finding source lists. The function strips
+/// that header so the research layer only stores the actual content.
 fn parse_mf_fetch_output(
     url: &str,
     content: &str,
@@ -498,7 +505,10 @@ fn parse_mf_fetch_output(
             return (body, title, content_type, page_type);
         }
     }
-    // Not an envelope: treat the whole content as the body.
+
+    // Not an envelope: strip the `mf_fetch:` header block if present and use
+    // the remaining text as the page body.
+    let body = strip_mf_fetch_header(content);
     let title = metadata
         .and_then(|m| m.get("title"))
         .and_then(|v| v.as_str())
@@ -506,8 +516,7 @@ fn parse_mf_fetch_output(
         .filter(|t| !t.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| {
-            content
-                .lines()
+            body.lines()
                 .find(|l| !l.trim().is_empty())
                 .unwrap_or(url)
                 .to_string()
@@ -520,7 +529,33 @@ fn parse_mf_fetch_output(
         .and_then(|m| m.get("page_type"))
         .and_then(|v| v.as_str())
         .map(String::from);
-    (content.to_string(), title, content_type, page_type)
+    (body.to_string(), title, content_type, page_type)
+}
+
+/// Strip the leading `mf_fetch:` header block from a plain-text tool output.
+///
+/// The header has the form:
+///
+/// ```text
+/// mf_fetch: <url>
+/// Status: ...
+/// Content type: ...
+/// ...
+///
+/// <actual body>
+/// ```
+///
+/// If the first non-empty line does not start with `mf_fetch:` the content is
+/// returned unchanged so that unrelated plain-text responses are not damaged.
+fn strip_mf_fetch_header(content: &str) -> &str {
+    let first_line = content.lines().find(|l| !l.trim().is_empty());
+    if first_line.is_none_or(|l| !l.starts_with("mf_fetch:")) {
+        return content;
+    }
+    content
+        .split_once("\n\n")
+        .map(|(_, rest)| rest)
+        .unwrap_or(content)
 }
 
 /// Fetch the raw HTML for `url` and attempt to extract a publication date.

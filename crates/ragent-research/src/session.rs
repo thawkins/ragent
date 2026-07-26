@@ -92,7 +92,7 @@ pub struct SessionConfig {
     pub sources_dir: Option<PathBuf>,
     /// Optional FR-020 template file (resolved against `_templates/`).
     pub template: Option<String>,
-    /// Maximum web sources to capture (default `5`).
+    /// Maximum web sources to capture (default `250`).
     pub max_web_results: usize,
     /// Maximum in-project local sources to capture (default `10`).
     pub max_local_sources: usize,
@@ -1628,7 +1628,7 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
         .filter(|s| matches!(s, Source::Spec { .. }))
         .collect();
 
-    // Per-web-source finding. The reader gets the title and a 240-char
+    // Per-web-source finding. The reader gets the title and a 200-char
     // excerpt so the finding stands on its own without opening the
     // supporting file.
     for (idx, src) in web.iter().enumerate() {
@@ -1645,7 +1645,7 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             } else {
                 title.as_str()
             };
-            let excerpt = body_excerpt(body, 240);
+            let excerpt = body_excerpt(body, 200);
             let observation = if excerpt.is_empty() {
                 format!(
                     "The web source **{label}** from <{url}> was captured, but no body text was returned by the fetch. [#{n}]",
@@ -1682,7 +1682,7 @@ fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
             ..
         } = src
         {
-            let excerpt = body_excerpt(body, 240);
+            let excerpt = body_excerpt(body, 200);
             let observation = if excerpt.is_empty() {
                 format!(
                     "The in-project file `{path}` was matched as relevant (`{relevance}`), but no excerpt was captured. [#{n}]",
@@ -1774,16 +1774,30 @@ fn body_excerpt(body: &str, max_chars: usize) -> String {
     let stripped = body.strip_prefix("Excerpt —").map_or(body, |rest| {
         rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n')
     });
+    // Strip markdown code fences (e.g. ```text) that can appear at the start
+    // of supporting-file bodies so the excerpt begins with real content.
+    let stripped = stripped
+        .trim_start()
+        .trim_start_matches("```text")
+        .trim_start_matches("```")
+        .trim_start();
     // Collapse whitespace so the excerpt fits on one logical line.
     let collapsed: String = stripped
         .chars()
         .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
         .collect();
     let collapsed = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Drop a trailing markdown fence that survived the collapse.
+    let collapsed = collapsed
+        .strip_suffix("```")
+        .map_or(collapsed.clone(), |s| s.trim_end().to_string());
     if collapsed.chars().count() <= max_chars {
         collapsed
     } else {
-        let mut out: String = collapsed.chars().take(max_chars).collect();
+        // Reserve one character for the ellipsis so the total output never
+        // exceeds the requested limit.
+        let budget = max_chars.saturating_sub(1);
+        let mut out: String = collapsed.chars().take(budget).collect();
         out.push('…');
         out
     }
@@ -2947,6 +2961,72 @@ mod tests {
         // Spec finding carries the id and references the local finding.
         assert!(out[2].contains("foo"));
         assert!(out[2].contains("Finding 2"));
+    }
+
+    #[test]
+    fn body_excerpt_respects_max_chars_and_counts_ellipsis() {
+        let body = "word ".repeat(50);
+        let excerpt = body_excerpt(&body, 200);
+        assert!(
+            excerpt.chars().count() <= 200,
+            "excerpt must not exceed 200 chars, got {} chars",
+            excerpt.chars().count()
+        );
+        assert!(
+            excerpt.ends_with('…'),
+            "truncated excerpt should end with ellipsis"
+        );
+    }
+
+    #[test]
+    fn body_excerpt_strips_trailing_markdown_fences() {
+        let body = "Real content line.\n```";
+        let excerpt = body_excerpt(body, 200);
+        assert!(!excerpt.contains("```"));
+        assert!(excerpt.starts_with("Real content line"));
+    }
+
+    #[test]
+    fn body_excerpt_strips_leading_markdown_fences() {
+        let body = "```text\nThis is the real content that should appear first.\n```";
+        let excerpt = body_excerpt(body, 200);
+        assert!(!excerpt.starts_with("`"));
+        assert!(excerpt.starts_with("This is the real content"));
+    }
+
+    #[test]
+    fn default_findings_web_excerpt_does_not_exceed_limit() {
+        let long_body = "a".repeat(500);
+        let s = vec![Source::Web {
+            published_at: None,
+            url: "https://a".into(),
+            title: "Long Article".into(),
+            captured_at: chrono::Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
+            body: long_body,
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+        }];
+        let out = default_findings(&s, "topic");
+        assert_eq!(out.len(), 1);
+        let observation = &out[0];
+        let obs_start = observation
+            .find("**Observation:**")
+            .expect("Observation paragraph");
+        let obs_body = &observation[obs_start + "**Observation:**".len()..];
+        let prefix = "states: \"";
+        let start = obs_body.find(prefix).expect("quoted excerpt start") + prefix.len();
+        let end = obs_body[start..].find("\" [#").expect("quoted excerpt end");
+        let excerpt = &obs_body[start..start + end];
+        assert!(
+            excerpt.chars().count() <= 200,
+            "web source excerpt must be at most 200 chars, got {}: {excerpt}",
+            excerpt.chars().count()
+        );
     }
 
     #[test]

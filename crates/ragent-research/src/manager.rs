@@ -928,7 +928,7 @@ mod tests {
         assert!(doc.content.contains("# Title: Rust Async"));
         assert!(
             doc.content
-                .contains("| 1 | web | [https://example.com](https://example.com)")
+                .contains("| 1 | web | page | [https://example.com](https://example.com)")
         );
     }
 

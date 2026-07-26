@@ -231,7 +231,7 @@ fn imrad_references_index_unchanged() {
     assert!(
         assembled
             .body
-            .contains("| 1 | web | [https://example.com](https://example.com) |"),
+            .contains("| 1 | web | page | [https://example.com](https://example.com) |"),
         "References Index must linkify the source URL: {}",
         assembled.body
     );

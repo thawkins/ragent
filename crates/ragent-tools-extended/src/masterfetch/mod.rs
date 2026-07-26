@@ -36,11 +36,13 @@ pub mod focus;
 pub mod http;
 pub mod links;
 pub mod metadata;
+pub mod pdf;
 pub mod robots;
 pub mod search;
 pub mod security;
 pub mod tools;
 pub mod urlnorm;
+pub mod youtube;
 
 // ---------------------------------------------------------------------------
 // Integration version (FR-017)

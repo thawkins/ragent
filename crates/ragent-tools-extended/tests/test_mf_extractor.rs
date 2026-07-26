@@ -588,3 +588,38 @@ fn test_text_format_collapses_whitespace() {
     // Should not contain multiple consecutive spaces.
     assert!(!result.content.contains("  "));
 }
+
+// ---------------------------------------------------------------------------
+// Panic-isolation regression
+// ---------------------------------------------------------------------------
+
+/// Regression test for the html2text overflow panic seen on real mdBook pages.
+///
+/// The `rust-book.cs.brown.edu` HTML triggers a debug-mode
+/// `attempt to subtract with overflow` panic inside `html2text` 0.16.7's
+/// `text_renderer.rs:509` when used as the html2text fallback. The extractor
+/// must catch (or never expose) that panic and degrade to raw text rather than
+/// crashing the calling web gatherer.
+#[test]
+fn test_html2text_overflow_panic_degrades_to_raw_text() {
+    let html = include_str!("fixtures/rust_book_brown.html");
+    let opts = ExtractOptions::default();
+    let result = extract(html, "https://rust-book.cs.brown.edu/", "text/html", &opts);
+
+    // Must not propagate the panic.
+    let result = result.expect("extractor should return Ok on a panic-prone page");
+
+    // Readability produces very short text on this page, so we should end up
+    // with a non-empty fallback (either html2text or raw text). The exact method
+    // depends on whether the inner html2text catch_unwind succeeded; what
+    // matters is that the result is usable and the process survived.
+    assert!(
+        !result.content.is_empty(),
+        "fallback content should not be empty"
+    );
+    assert!(
+        result.method == ExtractMethod::Html2Text || result.method == ExtractMethod::RawText,
+        "expected fallback method, got {:?}",
+        result.method
+    );
+}
