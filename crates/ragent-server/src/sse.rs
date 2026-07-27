@@ -132,6 +132,16 @@ struct TokenUsageP<'a> {
 }
 
 #[derive(Serialize)]
+struct RunCostSummaryP<'a> {
+    session_id: &'a str,
+    model_id: &'a str,
+    input_tokens: u64,
+    output_tokens: u64,
+    total_cost_usd: f64,
+    duration_ms: u64,
+}
+
+#[derive(Serialize)]
 struct RequestStartedP<'a> {
     session_id: &'a str,
     outbound_bytes: u64,
@@ -291,6 +301,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::AgentError { .. } => "agent_error",
         Event::McpStatusChanged { .. } => "mcp_status_changed",
         Event::TokenUsage { .. } => "token_usage",
+        Event::RunCostSummary { .. } => "run_cost_summary",
         Event::RequestStarted { .. } => "request_started",
         Event::ToolsSent { .. } => "tools_sent",
         Event::ModelResponse { .. } => "model_response",
@@ -335,9 +346,10 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::CompressionFinished { .. } => "compression_finished",
         Event::OpenResearchView { .. } => "open_research_view",
         Event::RouterClassification { .. } => "router_classification",
+        Event::HookWarning { .. } => "hook_warning",
+        Event::ToolResultFlagged { .. } => "tool_result_flagged",
     }
-}
-// ── Public API ───────────────────────────────────────────────────────────
+} // ── Public API ───────────────────────────────────────────────────────────
 
 /// Return the SSE event-type name and serialized JSON payload for an [`Event`].
 ///
@@ -494,6 +506,22 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             session_id,
             input_tokens: *input_tokens,
             output_tokens: *output_tokens,
+        }),
+
+        Event::RunCostSummary {
+            session_id,
+            model_id,
+            input_tokens,
+            output_tokens,
+            total_cost_usd,
+            duration_ms,
+        } => to_data(&RunCostSummaryP {
+            session_id,
+            model_id,
+            input_tokens: *input_tokens,
+            output_tokens: *output_tokens,
+            total_cost_usd: *total_cost_usd,
+            duration_ms: *duration_ms,
         }),
 
         Event::RequestStarted {
@@ -962,6 +990,28 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "composite_score": composite_score,
             "prompt": prompt,
             "dimensions": dimensions,
+        })),
+        Event::HookWarning {
+            session_id,
+            hook_command,
+            tool,
+            stderr,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "hook_command": hook_command,
+            "tool": tool,
+            "stderr": stderr,
+        })),
+        Event::ToolResultFlagged {
+            session_id,
+            tool,
+            hook_command,
+            reason,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "tool": tool,
+            "hook_command": hook_command,
+            "reason": reason,
         })),
     };
     (name, data)

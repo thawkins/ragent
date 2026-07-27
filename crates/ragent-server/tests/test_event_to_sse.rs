@@ -338,6 +338,26 @@ fn test_copilot_device_flow_complete_empty_token() {
 // ── Quota / usage events ─────────────────────────────────────────────────
 
 #[test]
+fn test_run_cost_summary() {
+    let (name, v) = parse_data(&Event::RunCostSummary {
+        session_id: "s1".into(),
+        model_id: "gpt-4o".into(),
+        input_tokens: 100,
+        output_tokens: 50,
+        total_cost_usd: 0.00075,
+        duration_ms: 1234,
+    });
+    assert_eq!(name, "run_cost_summary");
+    assert_eq!(v["session_id"], "s1");
+    assert_eq!(v["model_id"], "gpt-4o");
+    assert_eq!(v["input_tokens"], 100);
+    assert_eq!(v["output_tokens"], 50);
+    let cost = v["total_cost_usd"].as_f64().unwrap();
+    assert!((cost - 0.00075).abs() < 1e-9);
+    assert_eq!(v["duration_ms"], 1234);
+}
+
+#[test]
 fn test_token_usage() {
     let (name, v) = parse_data(&Event::TokenUsage {
         session_id: "s1".into(),

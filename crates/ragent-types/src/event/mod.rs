@@ -359,6 +359,25 @@ pub enum Event {
         /// Number of output (completion) tokens consumed.
         output_tokens: u64,
     },
+    /// Estimated cost summary for a completed agent run.
+    ///
+    /// Published once at the end of a `process_user_message` turn so the TUI
+    /// and HTTP consumers can surface per-run spend without having to
+    /// accumulate per-request usage events themselves.
+    RunCostSummary {
+        /// Session the summary belongs to.
+        session_id: String,
+        /// Model identifier that produced the usage.
+        model_id: String,
+        /// Total input (prompt) tokens across all LLM requests in the run.
+        input_tokens: u64,
+        /// Total output (completion) tokens across all LLM requests in the run.
+        output_tokens: u64,
+        /// Estimated total cost in USD.
+        total_cost_usd: f64,
+        /// Wall-clock duration of the run in milliseconds.
+        duration_ms: u64,
+    },
     /// A new LLM request has been sent, including its serialized outbound size.
     RequestStarted {
         /// Session this request belongs to.
@@ -715,6 +734,30 @@ pub enum Event {
         /// Search mode used: "semantic" or "fts".
         mode: String,
     },
+    /// A `PreToolUse` or `PostToolUse` hook exited with code 1, signalling a
+    /// warning but not a block.
+    HookWarning {
+        /// Session that triggered the hook.
+        session_id: String,
+        /// Hook command that produced the warning.
+        hook_command: String,
+        /// Name of the tool being checked.
+        tool: String,
+        /// Trimmed stderr from the hook (capped at 500 characters).
+        stderr: String,
+    },
+    /// A `PostToolUse` hook exited with code 2, flagging the tool result as
+    /// policy-violated.
+    ToolResultFlagged {
+        /// Session that triggered the flag.
+        session_id: String,
+        /// Name of the tool whose result was flagged.
+        tool: String,
+        /// Hook command that produced the flag.
+        hook_command: String,
+        /// Trimmed stderr from the hook (capped at 500 characters).
+        reason: String,
+    },
     /// A memory candidate was extracted automatically (requires confirmation).
     MemoryCandidateExtracted {
         /// Session that triggered the extraction.
@@ -773,6 +816,7 @@ impl Event {
             Self::ServiceStartError { .. } => "ServiceStartError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
+            Self::RunCostSummary { .. } => "RunCostSummary",
             Self::RequestStarted { .. } => "RequestStarted",
             Self::ToolsSent { .. } => "ToolsSent",
             Self::ModelResponse { .. } => "ModelResponse",
@@ -807,6 +851,8 @@ impl Event {
             Self::MemoryForgotten { .. } => "MemoryForgotten",
             Self::MemorySearched { .. } => "MemorySearched",
             Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
+            Self::HookWarning { .. } => "HookWarning",
+            Self::ToolResultFlagged { .. } => "ToolResultFlagged",
             Self::CompressionStarted { .. } => "CompressionStarted",
             Self::CompressionFinished { .. } => "CompressionFinished",
             Self::ProviderLoadingStarted { .. } => "ProviderLoadingStarted",
@@ -845,6 +891,7 @@ impl Event {
             | Self::AgentError { session_id, .. }
             | Self::ServiceStartError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
+            | Self::RunCostSummary { session_id, .. }
             | Self::RequestStarted { session_id, .. }
             | Self::ToolsSent { session_id, .. }
             | Self::ModelResponse { session_id, .. }
@@ -881,6 +928,8 @@ impl Event {
             | Self::MemoryForgotten { session_id, .. }
             | Self::MemorySearched { session_id, .. }
             | Self::MemoryCandidateExtracted { session_id, .. }
+            | Self::HookWarning { session_id, .. }
+            | Self::ToolResultFlagged { session_id, .. }
             | Self::ModelDownloadStarted { session_id, .. }
             | Self::ModelDownloadProgress { session_id, .. }
             | Self::ModelDownloadFinished { session_id, .. } => Some(session_id.as_str()),

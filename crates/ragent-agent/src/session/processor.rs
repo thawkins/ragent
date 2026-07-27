@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -26,6 +27,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::agent::AgentInfo;
+use crate::cost::{UsageRecord, compute_run_cost, merged_prices};
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
@@ -141,6 +143,13 @@ pub struct SessionProcessor {
     /// Telemetry subsystem for recording LLM, tool, session, and permission
     /// metrics. Wired into the binary unconditionally.
     pub telemetry: Arc<crate::telemetry::TelemetrySubsystem>,
+    /// Per-session cache of invoked skill bodies (FR-008).
+    ///
+    /// Maps skill name → processed body text. Populated on demand when a skill
+    /// is invoked, so repeated invocations of the same skill within a session
+    /// avoid re-reading the `SKILL.md` body from disk. The cache is a
+    /// best-effort optimisation: a miss simply triggers a fresh load.
+    pub skill_body_cache: Arc<RwLock<HashMap<String, String>>>,
 }
 
 /// P-2: the cached resolved config plus the inputs used to build it.
@@ -475,6 +484,77 @@ impl SessionProcessor {
             .prepare_client(session_id, &user_msg.id, agent, &profiler)
             .await?;
 
+        // T-012: per-run cost tracking. Set up a listener for `Event::TokenUsage`
+        // so we can accumulate usage across the init exchange and all loop
+        // iterations, then publish a single `Event::RunCostSummary` when the
+        // run ends. The listener is aborted on return so it never leaks.
+        let usage_accum = Arc::new(Mutex::new((0u64, 0u64)));
+        let usage_listener = {
+            let bus = self.event_bus.clone();
+            let sid = session_id.to_string();
+            let accum = usage_accum.clone();
+            tokio::spawn(async move {
+                let mut rx = bus.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok(Event::TokenUsage {
+                            session_id,
+                            input_tokens,
+                            output_tokens,
+                        }) if session_id == sid => {
+                            let mut locked = accum
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            locked.0 += input_tokens;
+                            locked.1 += output_tokens;
+                        }
+                        Ok(Event::MessageEnd { session_id, .. }) if session_id == sid => break,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            })
+        };
+        struct AbortOnDrop(tokio::task::JoinHandle<()>);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let _usage_guard = AbortOnDrop(usage_listener);
+
+        let prices = merged_prices(&turn.session_config.prices);
+        let publish_run_cost_summary = {
+            let bus = self.event_bus.clone();
+            let sid = session_id.to_string();
+            let model_id = turn.model_ref.model_id.clone();
+            let accum = usage_accum.clone();
+            move |duration_ms: u64| {
+                let (input_tokens, output_tokens) = accum
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                let model_static: &'static str = Box::leak(model_id.clone().into_boxed_str());
+                let summary = compute_run_cost(
+                    vec![UsageRecord {
+                        model_id: model_static,
+                        input_tokens,
+                        output_tokens,
+                    }],
+                    &prices,
+                );
+                ragent_telemetry::counters::set_cost_session_last(summary.total_cost_usd);
+                bus.publish(Event::RunCostSummary {
+                    session_id: sid.clone(),
+                    model_id: model_id.clone(),
+                    input_tokens: summary.total_input_tokens,
+                    output_tokens: summary.total_output_tokens,
+                    total_cost_usd: summary.total_cost_usd,
+                    duration_ms,
+                });
+            }
+        };
+
         // 3. Build system prompt
         let system_prompt = self
             .build_turn_system_prompt(
@@ -619,9 +699,9 @@ impl SessionProcessor {
                     message_id: cancelled_id,
                     reason: FinishReason::Cancelled,
                 });
+                publish_run_cost_summary(total_elapsed_ms);
                 return Ok(Message::new(session_id, Role::Assistant, vec![]));
             }
-
             debug!("Agent loop step {}/{}", step, max_steps);
 
             // P-4: only publish `ToolsSent` on the first step of the turn —
@@ -1015,6 +1095,8 @@ impl SessionProcessor {
                                 &hook_working_dir,
                                 &tc_clone.name,
                                 &tc_clone.args_json,
+                                &session_id_str,
+                                Some(&event_bus),
                             )
                         };
                         let tool_input = match pre_hook_result {
@@ -1025,6 +1107,29 @@ impl SessionProcessor {
                             crate::hooks::PreToolUseResult::Deny { reason } => {
                                 tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook denied tool execution");
                                 let err_msg = format!("Permission denied by hook: {}", reason);
+                                event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id_str.clone(),
+                                    call_id: tc_clone.id.clone(),
+                                    tool: tc_clone.name.clone(),
+                                    error: Some(err_msg.clone()),
+                                    duration_ms: 0,
+                                });
+                                let input_val: Value = serde_json::from_str(&tc_clone.args_json)
+                                    .unwrap_or_else(|_| serde_json::json!({}));
+                                return (
+                                    tc_clone.clone(),
+                                    input_val,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(err_msg),
+                                    0u64,
+                                    String::new(),
+                                    None,
+                                );
+                            }
+                            crate::hooks::PreToolUseResult::Blocked { reason } => {
+                                tracing::info!(tool = %tc_clone.name, reason = %reason, "PreToolUse hook blocked tool execution");
+                                let err_msg = format!("Blocked by hook: {}", reason);
                                 event_bus.publish(Event::ToolCallEnd {
                                     session_id: session_id_str.clone(),
                                     call_id: tc_clone.id.clone(),
@@ -1171,7 +1276,7 @@ impl SessionProcessor {
                             .and_then(|o| o.metadata.clone())
                             .unwrap_or_else(|| serde_json::json!({"content": output_content}));
                         let success = result.is_ok();
-                        let modified_output = {
+                        let post_hook_result = {
                             crate::hooks::run_post_tool_use_hooks(
                                 &hook_configs,
                                 &hook_working_dir,
@@ -1179,8 +1284,31 @@ impl SessionProcessor {
                                 &tool_input_for_post_hook,
                                 &output_json.to_string(),
                                 success,
+                                &session_id_str,
+                                Some(&event_bus),
                             )
                             .await
+                        };
+                        let modified_output = match post_hook_result {
+                            crate::hooks::PostToolUseResult::Ok { modified_output } => {
+                                modified_output
+                            }
+                            crate::hooks::PostToolUseResult::Flagged { reason } => {
+                                tracing::info!(
+                                    tool = %tc_clone.name,
+                                    reason = %reason,
+                                    "PostToolUse hook flagged tool result as policy-violated"
+                                );
+                                None
+                            }
+                            crate::hooks::PostToolUseResult::Warn { message } => {
+                                tracing::info!(
+                                    tool = %tc_clone.name,
+                                    message = %message,
+                                    "PostToolUse hook emitted warning"
+                                );
+                                None
+                            }
                         };
                         let result = if let Some(modified) = modified_output {
                             if let Some(modified_content) =
@@ -1504,6 +1632,7 @@ impl SessionProcessor {
         let iterations = self.event_bus.current_step(session_id);
         session_recorder.record_session_end();
         session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
+        publish_run_cost_summary(total_elapsed_ms);
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
             message_id: msg_id_for_end,

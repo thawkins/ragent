@@ -430,6 +430,9 @@ async fn main() -> Result<()> {
         stream_config,
         auto_approve: cli.yes,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),

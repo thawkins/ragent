@@ -2,6 +2,23 @@
 
 ## Version: 0.1.0-beta.12
 
+### Added — Per-run cost summary (`Event::RunCostSummary`)
+
+- At the end of every `process_user_message` turn, the session processor now
+  accumulates `Event::TokenUsage` totals, calls `compute_run_cost`, and publishes
+  a single `Event::RunCostSummary` on the event bus.
+- The summary carries `session_id`, `model_id`, `input_tokens`,
+  `output_tokens`, `total_cost_usd`, and `duration_ms`.
+- Cost computation respects user-defined price overrides from `ragent.json`
+  (`Config::prices`) via `merged_prices` and falls back to the built-in price
+  table; unknown models count tokens with zero cost.
+- The TUI logs a one-line `⟡ run complete` banner on `Event::RunCostSummary`
+  and updates the `ragent.cost.session` telemetry counter.
+- The HTTP server serializes `RunCostSummary` as SSE event type
+  `run_cost_summary`.
+- Added integration test `crates/ragent-agent/tests/test_run_cost_summary.rs`
+  and SSE serialization test `test_run_cost_summary`.
+
 ### Changed — Version bump
 
 - Workspace version bumped from `0.1.0-beta.11` to `0.1.0-beta.12`.

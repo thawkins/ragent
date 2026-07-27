@@ -792,6 +792,23 @@ impl App {
                     ),
                 );
             }
+            Event::RunCostSummary {
+                ref session_id,
+                ref model_id,
+                input_tokens,
+                output_tokens,
+                total_cost_usd,
+                duration_ms,
+            } if self.is_current_session(session_id) => {
+                telemetry_counters::set_cost_session_last(total_cost_usd);
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "⟡ run complete · {}in / {}out tokens · model {} · ${:.6} · {}ms",
+                        input_tokens, output_tokens, model_id, total_cost_usd, duration_ms
+                    ),
+                );
+            }
             Event::QuotaUpdate {
                 ref session_id,
                 percent,
