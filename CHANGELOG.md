@@ -1,5 +1,19 @@
 # Changelog
 
+## Version: 0.1.0-beta.14
+
+### Fixed — TUI read tool header always shows icon, and missing path surfaces in UI
+
+- `tool_input_summary` in `crates/ragent-tui/src/widgets/message_widget.rs` no
+  longer returns an empty string for `read` calls with a missing/empty `path`.
+- When `path` is absent the header now renders `📄 missing path`, keeping the
+  file icon visible and clearly signalling the malformed input to the model.
+- Added `test_input_summary_read_tool_missing_path_shows_placeholder` in
+  `crates/ragent-tui/tests/test_tool_display.rs`.
+- The underlying `ReadTool::execute` already errors with
+  "Missing required 'path' parameter", so the LLM receives an actionable
+  diagnostic prompting it to correct the call.
+
 ## Version: 0.1.0-beta.13
 
 ### Changed — Version bump
