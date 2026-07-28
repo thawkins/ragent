@@ -78,6 +78,51 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.history_picker.is_some() {
         render_history_picker(frame, app);
     }
+    // Run-cost summary banner (FR-012): a transient one-line overlay rendered
+    // last so it sits above all other UI. Dismissed on the next keypress.
+    if app.run_cost_banner.is_some() {
+        render_run_cost_banner(frame, app);
+    }
+}
+
+/// Render the transient run-complete banner as a centered one-line popup
+/// near the top of the screen (FR-012).
+///
+/// The banner text is produced by the `Event::RunCostSummary` handler and
+/// takes the form `⟡ run complete · {in}+{out} tokens · ${cost} · {dur}s`.
+/// It is drawn on top of all other UI and cleared on the next keypress.
+fn render_run_cost_banner(frame: &mut Frame, app: &mut App) {
+    let Some(text) = app.run_cost_banner.as_ref() else {
+        return;
+    };
+    let area = frame.area();
+    // One content line + top/bottom borders = 3 rows tall.
+    let height = 3u16;
+    // Width fits the text plus padding, capped to the screen width.
+    let text_width = text.chars().count() as u16;
+    let width = text_width
+        .saturating_add(4)
+        .min(area.width.saturating_sub(2))
+        .max(text_width.saturating_add(2));
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    // Anchor near the top of the screen, just below the status bar.
+    let y = area.y + 1;
+    let popup = Rect::new(x, y, width, height);
+
+    frame.render_widget(Clear, popup);
+    let style = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(style)
+        .style(Style::default().bg(Color::Black));
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(text.clone(), style)))
+            .alignment(Alignment::Center)
+            .block(block),
+        popup,
+    );
 }
 
 fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Rect) {

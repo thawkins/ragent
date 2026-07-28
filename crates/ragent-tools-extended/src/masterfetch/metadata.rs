@@ -111,6 +111,7 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
         published_time: article_published.or(jsonld.date_published),
         modified_time: article_modified.or(jsonld.date_modified),
         author: article_author.or(jsonld.author),
+        detected_language: None,
     }
 }
 

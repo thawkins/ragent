@@ -12,10 +12,18 @@ use anyhow::{Context, Result};
 /// string with page breaks approximated by newlines where the extractor
 /// provides them.
 ///
+/// # Panic isolation
+///
+/// The underlying `pdf-extract` crate can panic on malformed or unusual PDFs
+/// (e.g. inside its CFF font parser). The call is wrapped in
+/// [`std::panic::catch_unwind`] so that such a panic is converted into an
+/// `Err` instead of aborting the calling task or process.
+///
 /// # Errors
 ///
-/// Returns an error if `pdf_extract` cannot parse the bytes or if the
-/// extracted text cannot be converted to a UTF-8 string.
+/// Returns an error if `pdf_extract` cannot parse the bytes, if the
+/// extracted text cannot be converted to a UTF-8 string, or if extraction
+/// panicked and was caught.
 ///
 /// # Examples
 ///
@@ -28,7 +36,17 @@ use anyhow::{Context, Result};
 /// # Ok(()) }
 /// ```
 pub fn extract_pdf_text(bytes: &[u8]) -> Result<String> {
-    pdf_extract::extract_text_from_mem(bytes).with_context(|| "Failed to extract text from PDF")
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::extract_text_from_mem(bytes)
+    }));
+
+    match result {
+        Ok(Ok(text)) => Ok(text),
+        Ok(Err(e)) => Err(e).with_context(|| "Failed to extract text from PDF"),
+        Err(_) => anyhow::bail!(
+            "PDF text extraction panicked (likely due to an unsupported or malformed font stream)"
+        ),
+    }
 }
 
 /// Extract document metadata title from a PDF byte slice.

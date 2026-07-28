@@ -636,6 +636,29 @@ fn test_auth_wall_detected_before_paywall() {
 }
 
 // ===========================================================================
+// detect_page_type: UTF-8 boundary safety (regression for panic at 5000 bytes)
+// ===========================================================================
+
+#[test]
+fn test_detect_page_type_multibyte_at_5000_byte_boundary() {
+    // Regression: `head_len` previously returned `s.len().min(5000)`, which can
+    // land inside a multi-byte UTF-8 sequence and panic on slicing. Build HTML
+    // where byte 5000 falls in the middle of a 3-byte '…' (U+2026) character.
+    let prefix = "x".repeat(4999);
+    let html = format!("<html><body>{prefix}…sign in</body></html>");
+    // Should not panic — classification result is not the point of this test.
+    let _ = detect_page_type(&html, "https://example.com", 50);
+}
+
+#[test]
+fn test_detect_page_type_multibyte_4byte_at_boundary() {
+    // 4-byte emoji exactly straddling the 5000-byte cut.
+    let prefix = "x".repeat(4998);
+    let html = format!("<html><body>{prefix}😀sign in</body></html>");
+    let _ = detect_page_type(&html, "https://example.com", 50);
+}
+
+// ===========================================================================
 // classify_source_type: government
 // ===========================================================================
 

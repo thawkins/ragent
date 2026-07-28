@@ -51,6 +51,9 @@ fn make_app_with_manager() -> (App, Arc<SessionManager>) {
         )),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),

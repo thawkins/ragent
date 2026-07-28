@@ -9,11 +9,13 @@
 //! MCP registry directories for available servers (see [`discovery`] module).
 
 pub mod discovery;
+pub mod http;
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, Tool as RmcpTool};
 use rmcp::service::{RoleClient, RunningService};
@@ -171,10 +173,54 @@ pub struct McpToolDef {
     pub parameters: Value,
 }
 
-/// An active connection to a single MCP server, wrapping the rmcp
-/// [`RunningService`].
-struct McpConnection {
-    service: RunningService<RoleClient, ()>,
+/// Backend trait shared by all MCP client implementations.
+///
+/// The existing [`McpClient`] and the new [`http::HttpMcpClient`] both implement
+/// this trait so callers can dispatch tool discovery and invocation through a
+/// single, transport-agnostic interface.
+///
+/// [`http::HttpMcpClient`]: crate::mcp::http::HttpMcpClient
+#[async_trait]
+pub trait McpClientBackend: Send + Sync {
+    /// List tools from all connected servers.
+    async fn list_tools(&self) -> Vec<McpToolDef>;
+
+    /// List tools for a specific server by ID.
+    async fn list_tools_for_server(&self, server_id: &str) -> Vec<McpToolDef>;
+
+    /// Refresh the cached tool manifest for all connected servers.
+    async fn refresh_tools(&mut self) -> anyhow::Result<()>;
+
+    /// Refresh the cached tool manifest for a specific server.
+    async fn refresh_tools_for_server(
+        &mut self,
+        server_id: &str,
+    ) -> anyhow::Result<Vec<McpToolDef>>;
+
+    /// Call a tool on a specific server.
+    async fn call_tool(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        input: Value,
+    ) -> anyhow::Result<Value>;
+
+    /// Call a tool by name, resolving the server automatically.
+    async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value>;
+}
+
+/// An active connection to a single MCP server.
+///
+/// Wraps either an rmcp [`RunningService`] (for stdio and SSE transports) or
+/// an [`HttpMcpClient`] (for plain HTTP transport, FR-013). Both variants are
+/// wrapped in `Arc` so the enum is cheaply `Clone` — needed when a connection
+/// is pulled out of the `RwLock`-guarded map for a per-server refresh.
+#[derive(Clone)]
+enum McpConnection {
+    /// rmcp-based connection (stdio child process or SSE).
+    Rmcp(Arc<RunningService<RoleClient, ()>>),
+    /// Custom HTTP JSON-RPC connection (FR-013).
+    Http(Arc<http::HttpMcpClient>),
 }
 
 /// MCP client managing connections to one or more MCP servers.
@@ -260,17 +306,7 @@ impl McpClient {
             .map_err(|_| anyhow::anyhow!("MCP spawn semaphore closed"))?;
 
         match self.connect_inner(id, &config).await {
-            Ok((service, tools)) => {
-                let tool_defs: Vec<McpToolDef> = tools
-                    .iter()
-                    .map(|t| McpToolDef {
-                        name: t.name.to_string(),
-                        description: t.description.as_deref().unwrap_or_default().to_string(),
-                        parameters: serde_json::to_value(&*t.input_schema)
-                            .unwrap_or(Value::Object(serde_json::Map::new())),
-                    })
-                    .collect();
-
+            Ok((connection, tool_defs)) => {
                 let tool_count = tool_defs.len();
                 let server = McpServer {
                     id: id.to_string(),
@@ -281,8 +317,7 @@ impl McpClient {
                 self.servers.push(server);
 
                 let mut conns = self.connections.write().await;
-                conns.insert(id.to_string(), McpConnection { service });
-
+                conns.insert(id.to_string(), connection);
                 tracing::info!(
                     server_id = id,
                     tool_count,
@@ -320,13 +355,13 @@ impl McpClient {
     ///
     /// # Returns
     ///
-    /// The running service and discovered tools on success.
+    /// The active connection and discovered tools on success.
     async fn connect_inner(
         &self,
         id: &str,
         config: &McpServerConfig,
-    ) -> anyhow::Result<(RunningService<RoleClient, ()>, Vec<RmcpTool>)> {
-        let service = match config.type_ {
+    ) -> anyhow::Result<(McpConnection, Vec<McpToolDef>)> {
+        match config.type_ {
             McpTransport::Stdio => {
                 let command_str = config
                     .command
@@ -352,24 +387,53 @@ impl McpClient {
                     command = %crate::sanitize::redact_secrets(command_str),
                     "Spawning stdio MCP server"
                 );
-                ().serve(transport).await?
+                let service = Arc::new(().serve(transport).await?);
+                let tools = service.peer().list_all_tools().await?;
+                let tool_defs = rmcp_tools_to_defs(&tools);
+                Ok((McpConnection::Rmcp(service), tool_defs))
             }
-            McpTransport::Http | McpTransport::Sse => {
+            McpTransport::Sse => {
                 let url = config
                     .url
                     .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("HTTP/SSE transport requires a 'url' field"))?;
+                    .ok_or_else(|| anyhow::anyhow!("SSE transport requires a 'url' field"))?;
 
                 let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url);
 
-                tracing::info!(server_id = id, url = %crate::sanitize::redact_secrets(url), "Connecting to HTTP MCP server");
-                ().serve(transport).await?
+                tracing::info!(
+                    server_id = id,
+                    url = %crate::sanitize::redact_secrets(url),
+                    "Connecting to SSE MCP server"
+                );
+                let service = Arc::new(().serve(transport).await?);
+                let tools = service.peer().list_all_tools().await?;
+                let tool_defs = rmcp_tools_to_defs(&tools);
+                Ok((McpConnection::Rmcp(service), tool_defs))
             }
-        };
+            McpTransport::Http => {
+                let url = config
+                    .url
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("HTTP transport requires a 'url' field"))?;
 
-        let tools = service.peer().list_all_tools().await?;
+                tracing::info!(
+                    server_id = id,
+                    url = %crate::sanitize::redact_secrets(url),
+                    "Connecting to HTTP MCP server via HttpMcpClient"
+                );
 
-        Ok((service, tools))
+                let client = http::HttpMcpClient::new(url, config.headers.clone());
+                let tool_defs = client.list_tools().await;
+
+                tracing::info!(
+                    server_id = id,
+                    tool_count = tool_defs.len(),
+                    "HTTP MCP server connected and tools discovered"
+                );
+
+                Ok((McpConnection::Http(Arc::new(client)), tool_defs))
+            }
+        }
     }
 
     /// List tools from all connected servers (cached).
@@ -455,22 +519,19 @@ impl McpClient {
             }
 
             if let Some(conn) = conns.get(&server.id) {
-                match conn.service.peer().list_all_tools().await {
-                    Ok(tools) => {
-                        let tool_defs: Vec<McpToolDef> = tools
-                            .iter()
-                            .map(|t| McpToolDef {
-                                name: t.name.to_string(),
-                                description: t
-                                    .description
-                                    .as_deref()
-                                    .unwrap_or_default()
-                                    .to_string(),
-                                parameters: serde_json::to_value(&*t.input_schema)
-                                    .unwrap_or(Value::Object(serde_json::Map::new())),
-                            })
-                            .collect();
+                let tools_result = match conn {
+                    McpConnection::Rmcp(service) => match service.peer().list_all_tools().await {
+                        Ok(tools) => Ok(rmcp_tools_to_defs(&tools)),
+                        Err(e) => Err(e),
+                    },
+                    McpConnection::Http(client) => {
+                        // list_tools never errors; it returns an empty vec on failure.
+                        Ok(client.list_tools().await)
+                    }
+                };
 
+                match tools_result {
+                    Ok(tool_defs) => {
                         tracing::info!(
                             server_id = %server.id,
                             tool_count = tool_defs.len(),
@@ -519,23 +580,22 @@ impl McpClient {
         &mut self,
         server_id: &str,
     ) -> anyhow::Result<Vec<McpToolDef>> {
-        let conns = self.connections.read().await;
-        let conn = conns
-            .get(server_id)
-            .ok_or_else(|| anyhow::anyhow!("MCP server '{server_id}' is not connected"))?;
+        let conn = {
+            let conns = self.connections.read().await;
+            conns.get(server_id).cloned()
+        };
 
-        let tools = conn.service.peer().list_all_tools().await?;
-        let tool_defs: Vec<McpToolDef> = tools
-            .iter()
-            .map(|t| McpToolDef {
-                name: t.name.to_string(),
-                description: t.description.as_deref().unwrap_or_default().to_string(),
-                parameters: serde_json::to_value(&*t.input_schema)
-                    .unwrap_or(Value::Object(serde_json::Map::new())),
-            })
-            .collect();
+        let Some(conn) = conn else {
+            anyhow::bail!("MCP server '{server_id}' is not connected");
+        };
 
-        drop(conns);
+        let tool_defs = match &conn {
+            McpConnection::Rmcp(service) => {
+                let tools = service.peer().list_all_tools().await?;
+                rmcp_tools_to_defs(&tools)
+            }
+            McpConnection::Http(client) => client.list_tools().await,
+        };
 
         if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
             server.tools = tool_defs.clone();
@@ -589,34 +649,55 @@ impl McpClient {
             .get(server_id)
             .ok_or_else(|| anyhow::anyhow!("MCP server '{server_id}' is not connected"))?;
 
-        let arguments = match input {
-            Value::Object(map) => Some(map),
-            Value::Null => None,
-            other => {
-                let mut map = serde_json::Map::new();
-                map.insert("value".to_string(), other);
-                Some(map)
+        match conn {
+            McpConnection::Rmcp(service) => {
+                let arguments = match input {
+                    Value::Object(map) => Some(map),
+                    Value::Null => None,
+                    other => {
+                        let mut map = serde_json::Map::new();
+                        map.insert("value".to_string(), other);
+                        Some(map)
+                    }
+                };
+
+                let params = CallToolRequestParams::new(tool_name.to_string())
+                    .with_arguments(arguments.unwrap_or_default());
+
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),
+                    service.peer().call_tool(params),
+                )
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "MCP tool call '{}' on server '{}' timed out after {}s",
+                        tool_name,
+                        server_id,
+                        Self::TOOL_CALL_TIMEOUT_SECS,
+                    )
+                })??;
+
+                Self::format_call_result(&result)
             }
-        };
+            McpConnection::Http(client) => {
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),
+                    client.call_tool(server_id, tool_name, input),
+                )
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "MCP tool call '{}' on server '{}' timed out after {}s",
+                        tool_name,
+                        server_id,
+                        Self::TOOL_CALL_TIMEOUT_SECS,
+                    )
+                })??;
 
-        let params = CallToolRequestParams::new(tool_name.to_string())
-            .with_arguments(arguments.unwrap_or_default());
-
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),
-            conn.service.peer().call_tool(params),
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "MCP tool call '{}' on server '{}' timed out after {}s",
-                tool_name,
-                server_id,
-                Self::TOOL_CALL_TIMEOUT_SECS,
-            )
-        })??;
-
-        Self::format_call_result(&result)
+                Ok(result)
+            }
+        }
     }
 
     /// Call a tool by name, automatically resolving which server owns it.
@@ -720,11 +801,23 @@ impl McpClient {
         };
 
         if let Some(conn) = conn {
-            conn.service
-                .cancel()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to cancel MCP service: {e}"))?;
-
+            match conn {
+                McpConnection::Rmcp(service) => {
+                    // cancel() takes ownership; unwrap the Arc.
+                    // If there are other holders, the Arc strong count > 1
+                    // and we skip cancellation (the service will be
+                    // dropped when the last Arc is released).
+                    if let Some(service) = Arc::into_inner(service) {
+                        let _ = service
+                            .cancel()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("Failed to cancel MCP service: {e}"));
+                    }
+                }
+                McpConnection::Http(_) => {
+                    // HTTP connections are stateless; nothing to cancel.
+                }
+            }
             if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
                 server.status = McpStatus::Disabled;
                 server.tools.clear();
@@ -790,5 +883,53 @@ impl McpClient {
 impl Default for McpClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Convert rmcp tool descriptors to ragent's [`McpToolDef`] format.
+fn rmcp_tools_to_defs(tools: &[RmcpTool]) -> Vec<McpToolDef> {
+    tools
+        .iter()
+        .map(|t| McpToolDef {
+            name: t.name.to_string(),
+            description: t.description.as_deref().unwrap_or_default().to_string(),
+            parameters: serde_json::to_value(&*t.input_schema)
+                .unwrap_or(Value::Object(serde_json::Map::new())),
+        })
+        .collect()
+}
+
+#[async_trait]
+impl McpClientBackend for McpClient {
+    async fn list_tools(&self) -> Vec<McpToolDef> {
+        self.list_tools()
+    }
+
+    async fn list_tools_for_server(&self, server_id: &str) -> Vec<McpToolDef> {
+        self.list_tools_for_server(server_id)
+    }
+
+    async fn refresh_tools(&mut self) -> anyhow::Result<()> {
+        self.refresh_tools().await
+    }
+
+    async fn refresh_tools_for_server(
+        &mut self,
+        server_id: &str,
+    ) -> anyhow::Result<Vec<McpToolDef>> {
+        self.refresh_tools_for_server(server_id).await
+    }
+
+    async fn call_tool(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        input: Value,
+    ) -> anyhow::Result<Value> {
+        self.call_tool(server_id, tool_name, input).await
+    }
+
+    async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value> {
+        self.call_tool_by_name(tool_name, input).await
     }
 }

@@ -516,8 +516,22 @@ fn is_qa_page(html_lower: &str, url: &str) -> bool {
 }
 
 /// Safely get the first `n` bytes of a string (or the whole string if shorter).
+/// Return a byte index ≤ `n` that is also a valid UTF-8 char boundary.
+///
+/// `str::len()` counts **bytes**, so `&s[..min(s.len(), n)]` can panic when
+/// byte index `n` lands inside a multi-byte UTF-8 sequence. This helper walks
+/// backwards from `n` until it finds a char boundary, guaranteeing that
+/// `&s[..head_len(s, n)]` never panics.
 fn head_len(s: &str, n: usize) -> usize {
-    s.len().min(n)
+    let target = s.len().min(n);
+    if target >= s.len() {
+        return s.len();
+    }
+    let mut idx = target;
+    while !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
 }
 
 // ---------------------------------------------------------------------------

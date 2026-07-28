@@ -69,8 +69,9 @@ struct SkillFrontmatter {
     /// Whether this skill allows `!`command`` dynamic context injection.
     #[serde(rename = "allow-dynamic-context", default)]
     allow_dynamic_context: bool,
+    /// Trigger phrase for invoking the skill (e.g. `/deploy`).
+    trigger: Option<String>,
 }
-
 const fn default_true() -> bool {
     true
 }
@@ -143,6 +144,30 @@ pub fn parse_skill_md(
     dir_name: &str,
     scope: SkillScope,
 ) -> anyhow::Result<SkillInfo> {
+    parse_skill_md_inner(content, source_path, dir_name, scope, true)
+}
+
+/// Parse a `SKILL.md` file's metadata without loading the markdown body.
+///
+/// This is used by skill discovery so that the registry can hold a compact
+/// catalog of skills without reading the full instructions into memory. The
+/// body can be loaded later via [`SkillInfo::body_or_load`].
+pub(crate) fn parse_skill_md_metadata(
+    content: &str,
+    source_path: &Path,
+    dir_name: &str,
+    scope: SkillScope,
+) -> anyhow::Result<SkillInfo> {
+    parse_skill_md_inner(content, source_path, dir_name, scope, false)
+}
+
+pub(crate) fn parse_skill_md_inner(
+    content: &str,
+    source_path: &Path,
+    dir_name: &str,
+    scope: SkillScope,
+    include_body: bool,
+) -> anyhow::Result<SkillInfo> {
     let (frontmatter_str, body) = split_frontmatter(content)?;
 
     let frontmatter: SkillFrontmatter = serde_yaml::from_str(frontmatter_str)
@@ -176,12 +201,26 @@ pub fn parse_skill_md(
         license: frontmatter.license,
         compatibility: frontmatter.compatibility,
         metadata: frontmatter.metadata,
+        trigger: frontmatter.trigger,
         allow_dynamic_context: frontmatter.allow_dynamic_context,
         source_path: source_path.to_path_buf(),
         skill_dir,
         scope,
-        body: body.to_string(),
+        body: if include_body {
+            body.to_string()
+        } else {
+            String::new()
+        },
+        body_cache: super::default_body_cache(),
     })
+}
+
+/// Extract the markdown body from the content of a `SKILL.md` file.
+///
+/// Skips the YAML frontmatter delimited by `---` lines and returns only the
+/// markdown instructions.
+pub(crate) fn extract_body(content: &str) -> anyhow::Result<&str> {
+    split_frontmatter(content).map(|(_, body)| body)
 }
 
 /// Split a SKILL.md file into frontmatter and body.
@@ -376,7 +415,7 @@ fn load_skills_from_dir(skills_dir: &Path, scope: SkillScope, out: &mut Vec<Skil
             .unwrap_or("unknown");
 
         match std::fs::read_to_string(&skill_md) {
-            Ok(content) => match parse_skill_md(&content, &skill_md, dir_name, scope) {
+            Ok(content) => match parse_skill_md_metadata(&content, &skill_md, dir_name, scope) {
                 Ok(skill) => {
                     tracing::debug!(
                         "Loaded skill '{}' from {} (scope: {})",

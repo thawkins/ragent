@@ -173,6 +173,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         }
     }
 

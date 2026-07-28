@@ -329,6 +329,7 @@ impl App {
             skill_registry_cache: None,
             skill_dirs_cache: Vec::new(),
             skill_registry_last_refresh: std::time::Instant::now(),
+            run_cost_banner: None,
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {

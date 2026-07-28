@@ -733,6 +733,13 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // Dismiss the transient run-cost banner on any keypress (FR-012).
+        // The first key simply clears the banner and is consumed; subsequent
+        // keys are processed normally.
+        if self.run_cost_banner.take().is_some() {
+            self.needs_redraw = true;
+            return;
+        }
         // Config-save picker intercepts all keys while it is open.
         if self.config_save_picker.is_some() {
             self.handle_config_save_picker_key(key);

@@ -526,6 +526,7 @@ impl SessionProcessor {
         let prices = merged_prices(&turn.session_config.prices);
         let publish_run_cost_summary = {
             let bus = self.event_bus.clone();
+            let storage = self.session_manager.storage().clone();
             let sid = session_id.to_string();
             let model_id = turn.model_ref.model_id.clone();
             let accum = usage_accum.clone();
@@ -544,6 +545,23 @@ impl SessionProcessor {
                     &prices,
                 );
                 ragent_telemetry::counters::set_cost_session_last(summary.total_cost_usd);
+                // Persist the summary so it can be attached to an explicit
+                // `--include-cost` session export (FR-018). Stored separately
+                // from the transcript so the default export never leaks cost.
+                let row = crate::storage::RunCostSummaryRow {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: sid.clone(),
+                    model_id: model_id.clone(),
+                    input_tokens: summary.total_input_tokens,
+                    output_tokens: summary.total_output_tokens,
+                    total_cost_usd: summary.total_cost_usd,
+                    duration_ms,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                };
+                let storage_for_persist = storage.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = storage_for_persist.create_run_cost_summary(&row);
+                });
                 bus.publish(Event::RunCostSummary {
                     session_id: sid.clone(),
                     model_id: model_id.clone(),
@@ -1059,6 +1077,16 @@ impl SessionProcessor {
                         id: tc.id.clone(),
                         name: tc.name.clone(),
                         input: input.clone(),
+                    });
+                    // Publish the fully-assembled tool arguments so the TUI can
+                    // render the call summary regardless of provider-specific
+                    // streaming quirks (some local providers omit ToolCallEnd
+                    // stream events for the argument payload).
+                    self.event_bus.publish(Event::ToolCallArgs {
+                        session_id: session_id.to_string(),
+                        call_id: tc.id.clone(),
+                        tool: tc.name.clone(),
+                        args: tc.args_json.clone(),
                     });
                     // P-8/P-9: clone the per-step `ToolContext` rather than
                     // rebuilding it (and re-acquiring the `active_spec` async

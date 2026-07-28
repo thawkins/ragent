@@ -112,6 +112,13 @@ pub enum Source {
         /// `"youtube"`. Defaults to `"page"` for sources that predate this field.
         #[serde(default = "default_media_type")]
         media_type: String,
+        /// Human language detected from the page's extracted text at fetch
+        /// time (e.g. `"English"`, `"French"`), when the fetcher performs
+        /// language detection. `None` when no language could be confidently
+        /// detected, the fetcher does not detect languages, or the source
+        /// predates this field.
+        #[serde(default)]
+        language: Option<String>,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -184,6 +191,19 @@ impl Source {
         match self {
             Self::Web { media_type, .. } => media_type,
             _ => "—",
+        }
+    }
+
+    /// Detected human language of the source, when known.
+    ///
+    /// Only [`Source::Web`] carries a detected language (e.g. `"English"`,
+    /// `"French"`), populated by the fetcher at capture time. Local, spec,
+    /// and other sources do not have a meaningful language and return `None`.
+    #[must_use]
+    pub fn language(&self) -> Option<&str> {
+        match self {
+            Self::Web { language, .. } => language.as_deref(),
+            _ => None,
         }
     }
 
@@ -293,6 +313,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(web.type_str(), "web");
 
@@ -347,6 +368,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -387,6 +409,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -406,6 +429,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -503,6 +527,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -520,6 +545,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -553,6 +579,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -575,6 +602,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         assert_eq!(s.relevance(), Some(""));
     }

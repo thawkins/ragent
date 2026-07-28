@@ -395,7 +395,7 @@ impl WebFetchTool for AgentWebFetchTool {
         // `mf_fetch` returns a structured envelope. If the envelope is present,
         // use its metadata and content; otherwise treat the legacy `webfetch`
         // output as the page body directly.
-        let (body, title, content_type, page_type) = if is_mf_fetch {
+        let (body, title, content_type, page_type, language) = if is_mf_fetch {
             parse_mf_fetch_output(url, &output.content, output.metadata.as_ref())
         } else {
             let title = output
@@ -423,9 +423,9 @@ impl WebFetchTool for AgentWebFetchTool {
                         .and_then(|v| v.as_str())
                         .map(String::from)
                 }),
+                None,
             )
         };
-
         // Opportunistically fetch the raw HTML head to extract a publication
         // date from the page's embedded metadata. This is a best-effort step:
         // any failure (network error, non-HTML content, missing date) simply
@@ -440,6 +440,7 @@ impl WebFetchTool for AgentWebFetchTool {
             published_at,
             content_type,
             page_type,
+            language,
         })
     }
 }
@@ -457,11 +458,23 @@ impl WebFetchTool for AgentWebFetchTool {
 /// response but redundant in the research output, where the URL already appears
 /// in the References Index and per-finding source lists. The function strips
 /// that header so the research layer only stores the actual content.
+///
+/// Returns the `(body, title, content_type, page_type, detected_language)`
+/// tuple. The `detected_language` is read from the top-level
+/// `detected_language` field (present on HTML, PDF, and YouTube responses) with
+/// a fallback to the nested `metadata.detected_language` for older payloads.
+#[allow(clippy::type_complexity)]
 fn parse_mf_fetch_output(
     url: &str,
     content: &str,
     metadata: Option<&serde_json::Value>,
-) -> (String, String, Option<String>, Option<String>) {
+) -> (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     // If the content looks like the mf_fetch envelope, parse it.
     if let Ok(envelope) = serde_json::from_str::<serde_json::Value>(content) {
         if let Some(body) = envelope
@@ -502,7 +515,30 @@ fn parse_mf_fetch_output(
                         .and_then(|v| v.as_str())
                         .map(String::from)
                 });
-            return (body, title, content_type, page_type);
+            // Detected human language: prefer the top-level field (set on
+            // HTML, PDF, and YouTube responses), fall back to the nested
+            // PageMetadata object for older payloads.
+            let detected_language = envelope
+                .get("detected_language")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .or_else(|| {
+                    envelope
+                        .get("metadata")
+                        .and_then(|m| m.get("detected_language"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                })
+                .or_else(|| {
+                    metadata
+                        .and_then(|m| m.get("detected_language"))
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                });
+            return (body, title, content_type, page_type, detected_language);
         }
     }
 
@@ -529,7 +565,18 @@ fn parse_mf_fetch_output(
         .and_then(|m| m.get("page_type"))
         .and_then(|v| v.as_str())
         .map(String::from);
-    (body.to_string(), title, content_type, page_type)
+    let detected_language = metadata
+        .and_then(|m| m.get("detected_language"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    (
+        body.to_string(),
+        title,
+        content_type,
+        page_type,
+        detected_language,
+    )
 }
 
 /// Strip the leading `mf_fetch:` header block from a plain-text tool output.

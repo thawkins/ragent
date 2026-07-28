@@ -30,6 +30,9 @@ ragent-llm = { path = "../ragent-llm" }
 ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-types = { path = "../ragent-types" }
 
+[dev-dependencies]
+criterion = { workspace = true }
+
 [[bench]]
 name = "agent_loop"
 harness = false

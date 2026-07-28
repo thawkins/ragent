@@ -78,6 +78,7 @@ async fn write_document_persists_supports_files_and_index() {
         content_type: None,
         page_type: None,
         media_type: "page".into(),
+        language: None,
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -324,13 +325,13 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     impl WebSearchTool for FakeSearch {
         async fn search(
             &self,
-            _query: &str,
+            query: &str,
             _max_results: usize,
         ) -> anyhow::Result<Vec<WebSearchHit>> {
             Ok(vec![WebSearchHit {
                 url: "https://example.com/page".into(),
                 title: "Example Page".into(),
-                snippet: String::new(),
+                snippet: query.to_string(),
                 matched_query: "Rust lifetimes".into(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -345,10 +346,10 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 published_at: None,
                 url: url.to_string(),
                 title: "Example Page".into(),
-                body: "Real page body — talks about Rust lifetimes.".into(),
-                content_type: None,
-                page_type: None,
-            })
+                              body: "Real page body — talks about Rust lifetimes.".into(),
+                              content_type: None,
+                              page_type: None,
+                              language: Some("English".into()),            })
         }
     }
     struct NoLocal;
@@ -440,11 +441,16 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     let research_md = tokio::fs::read_to_string(research_root.join("lifetime-check/RESEARCH.md"))
         .await
         .unwrap();
-    assert!(
-        research_md.contains("Example Page"),
-        "RESEARCH.md must reference the captured web title, got:\n{research_md}"
-    );
+          assert!(
+              research_md.contains("Example Page"),
+              "RESEARCH.md must reference the captured web title, got:\n{research_md}"
+          );
 
+          // The References Index must surface the detected language.
+          assert!(
+              research_md.contains("English"),
+              "RESEARCH.md References Index must show the detected language, got:\n{research_md}"
+          );
     // The SynthesizeResult event must have fired.
     let events = observer.events.lock().unwrap();
     assert!(

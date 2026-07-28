@@ -49,6 +49,7 @@ pdf-extract = { workspace = true }
 lopdf = { workspace = true }
 url = { workspace = true }
 rusqlite = { workspace = true }
+lingua = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"

@@ -1053,14 +1053,8 @@ impl SessionProcessor {
                             }
                         }
                         StreamEvent::ToolCallEnd { id } => {
-                            if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                            if let Some(_tc) = tool_calls.iter().find(|t| t.id == id) {
                                 saw_completed_tool_call = true;
-                                self.event_bus.publish(Event::ToolCallArgs {
-                                    session_id: session_id.to_string(),
-                                    call_id: tc.id.clone(),
-                                    tool: tc.name.clone(),
-                                    args: tc.args_json.clone(),
-                                });
                             }
                         }
                         StreamEvent::Usage {

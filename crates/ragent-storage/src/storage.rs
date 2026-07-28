@@ -360,6 +360,21 @@ impl Storage {
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS run_cost_summaries (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL,
+                output_tokens INTEGER NOT NULL,
+                total_cost_usd REAL NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_run_cost_session
+                ON run_cost_summaries(session_id, created_at);
+
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
@@ -875,6 +890,105 @@ impl Storage {
             params![session_id],
         )?;
         Ok(n)
+    }
+
+    // ── Run-cost summaries (FR-018) ────────────────────────────────────
+
+    /// Inserts a persisted run-cost summary row (FR-018).
+    ///
+    /// Run-cost summaries are stored separately from the session transcript so
+    /// that the default session export never exposes per-run dollar costs.
+    /// They are only included in an export when the caller explicitly opts in
+    /// via the `include_cost` flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails (e.g., foreign-key violation when
+    /// the referenced session does not exist).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{RunCostSummaryRow, Storage};
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// let row = RunCostSummaryRow {
+    ///     id: "rc-1".to_string(),
+    ///     session_id: "sess-1".to_string(),
+    ///     model_id: "gpt-4o".to_string(),
+    ///     input_tokens: 100,
+    ///     output_tokens: 50,
+    ///     total_cost_usd: 0.001,
+    ///     duration_ms: 1_200,
+    ///     created_at: chrono::Utc::now().to_rfc3339(),
+    /// };
+    /// storage.create_run_cost_summary(&row).unwrap();
+    /// let summaries = storage.list_run_cost_summaries("sess-1").unwrap();
+    /// assert_eq!(summaries.len(), 1);
+    /// assert_eq!(summaries[0].model_id, "gpt-4o");
+    /// ```
+    pub fn create_run_cost_summary(&self, row: &RunCostSummaryRow) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "INSERT INTO run_cost_summaries \
+             (id, session_id, model_id, input_tokens, output_tokens, total_cost_usd, duration_ms, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                row.id,
+                row.session_id,
+                row.model_id,
+                row.input_tokens as i64,
+                row.output_tokens as i64,
+                row.total_cost_usd,
+                row.duration_ms as i64,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves all run-cost summaries for a session, ordered chronologically
+    /// (oldest first) by `created_at`.
+    ///
+    /// Used by the `--include-cost` session export path (FR-018) to attach
+    /// per-run cost data to an export that explicitly requested it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query or row mapping fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// // No summaries yet for a fresh session.
+    /// assert!(storage.list_run_cost_summaries("sess-1").unwrap().is_empty());
+    /// ```
+    pub fn list_run_cost_summaries(&self, session_id: &str) -> Result<Vec<RunCostSummaryRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, model_id, input_tokens, output_tokens, total_cost_usd, \
+             duration_ms, created_at \
+             FROM run_cost_summaries WHERE session_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(RunCostSummaryRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    model_id: row.get(2)?,
+                    input_tokens: row.get::<_, i64>(3)? as u64,
+                    output_tokens: row.get::<_, i64>(4)? as u64,
+                    total_cost_usd: row.get(5)?,
+                    duration_ms: row.get::<_, i64>(6)? as u64,
+                    created_at: row.get(7)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     // ── Provider Auth ─────────────────────────────────────────────
@@ -2156,6 +2270,32 @@ pub struct TodoRow {
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
+}
+
+/// Row representation of a persisted run-cost summary (FR-018).
+///
+/// Mirrors the `run_cost_summaries` table. Run-cost summaries are stored
+/// separately from the session transcript so the default session export
+/// never exposes per-run dollar costs; they are only attached to an export
+/// when the caller explicitly opts in via the `include_cost` flag.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RunCostSummaryRow {
+    /// Unique identifier for this summary record (UUID v4).
+    pub id: String,
+    /// Session this summary belongs to.
+    pub session_id: String,
+    /// Model identifier that produced the usage.
+    pub model_id: String,
+    /// Total input (prompt) tokens across all LLM requests in the run.
+    pub input_tokens: u64,
+    /// Total output (completion) tokens across all LLM requests in the run.
+    pub output_tokens: u64,
+    /// Estimated total cost in USD.
+    pub total_cost_usd: f64,
+    /// Wall-clock duration of the run in milliseconds.
+    pub duration_ms: u64,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
 }
 
 /// Row representation of a structured memory.

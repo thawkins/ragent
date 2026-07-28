@@ -40,6 +40,8 @@ pub mod loader;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Execution context mode for a skill.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -125,6 +127,9 @@ pub struct SkillInfo {
     /// Arbitrary key-value metadata (Anthropic Agent Skills spec).
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// Trigger phrase used for skill catalog and auto-invocation matching.
+    /// Defaults to the skill name when not specified in frontmatter.
+    pub trigger: Option<String>,
     /// Whether this skill allows `!`command`` dynamic context injection.
     /// Defaults to `false` — skills must opt in explicitly via
     /// `allow_dynamic_context: true` in the YAML frontmatter.
@@ -139,8 +144,19 @@ pub struct SkillInfo {
     /// Where this skill was discovered.
     pub scope: SkillScope,
     /// Markdown body after the YAML frontmatter (the skill instructions).
+    ///
+    /// For skills discovered from disk this is left empty until the skill is
+    /// invoked; use [`SkillInfo::body_or_load`] to read it on demand.
     #[serde(skip)]
     pub body: String,
+    /// On-demand body cache. Populated by [`SkillInfo::body_or_load`] so that
+    /// repeated invocations avoid re-reading the `SKILL.md` file from disk.
+    #[serde(skip, default = "default_body_cache")]
+    body_cache: Arc<Mutex<Option<String>>>,
+}
+
+fn default_body_cache() -> Arc<Mutex<Option<String>>> {
+    Arc::new(Mutex::new(None))
 }
 
 const fn default_true() -> bool {
@@ -180,12 +196,61 @@ impl SkillInfo {
             license: None,
             compatibility: None,
             metadata: HashMap::new(),
+            trigger: None,
             allow_dynamic_context: false,
             source_path: PathBuf::new(),
             skill_dir: PathBuf::new(),
             scope: SkillScope::Project,
             body: body.into(),
+            body_cache: default_body_cache(),
         }
+    }
+
+    /// Returns the skill body, loading it from [`source_path`] on demand if it
+    /// has not been loaded yet.
+    ///
+    /// For skills constructed with an in-memory body (e.g. bundled skills or
+    /// [`SkillInfo::new`]), the stored body is returned directly. For skills
+    /// loaded from disk with an empty body field, this method reads the
+    /// `SKILL.md` file from [`source_path`], caches it, and returns the
+    /// content. Subsequent calls return the cached copy without touching disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the body is not present, [`source_path`] is empty,
+    /// or the file cannot be read.
+    pub async fn body_or_load(&self) -> anyhow::Result<String> {
+        if !self.body.is_empty() {
+            return Ok(self.body.clone());
+        }
+
+        let mut cache = self.body_cache.lock().await;
+        if let Some(body) = cache.as_ref() {
+            return Ok(body.clone());
+        }
+
+        if self.source_path.as_os_str().is_empty() {
+            return Err(anyhow::anyhow!(
+                "Skill '{}' has no source path and no loaded body",
+                self.name
+            ));
+        }
+
+        let content = tokio::fs::read_to_string(&self.source_path)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to load skill body for '{}' from {}: {e}",
+                    self.name,
+                    self.source_path.display()
+                )
+            })?;
+
+        let body = loader::extract_body(&content)
+            .map_err(|e| anyhow::anyhow!("Failed to extract body for '{}': {e}", self.name))?;
+
+        *cache = Some(body.to_string());
+        Ok(body.to_string())
     }
 
     /// Returns `true` if the user can invoke this skill via `/name`.
@@ -228,6 +293,28 @@ impl Default for SkillInfo {
     }
 }
 
+/// A lightweight catalog entry for a skill, suitable for startup-time
+/// progressive disclosure. It contains only metadata; the full skill body is
+/// not included and is loaded on demand when the skill is invoked.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillCatalogEntry {
+    /// Unique identifier for the skill.
+    pub name: String,
+    /// Human-readable description of what the skill does.
+    pub description: String,
+    /// Trigger phrase for invoking the skill (e.g. `/deploy`).
+    /// Falls back to the skill name when no explicit trigger is configured.
+    pub trigger: String,
+    /// Resolution scope where the skill was discovered.
+    pub scope: SkillScope,
+    /// `true` if the user can invoke this skill via `/name`.
+    pub user_invocable: bool,
+    /// `true` if the agent (model) can auto-invoke this skill.
+    pub agent_invocable: bool,
+    /// Optional argument hint shown during autocomplete (e.g. `"[environment]"`).
+    pub argument_hint: Option<String>,
+}
+
 /// Registry of discovered skills, indexed by name.
 ///
 /// Skills are loaded from multiple scopes (bundled, personal, project) and
@@ -251,6 +338,8 @@ impl Default for SkillInfo {
 #[derive(Debug, Clone, Default)]
 pub struct SkillRegistry {
     skills: HashMap<String, SkillInfo>,
+    bundled_count: usize,
+    discovered_count: usize,
 }
 
 impl SkillRegistry {
@@ -259,6 +348,8 @@ impl SkillRegistry {
     pub fn new() -> Self {
         Self {
             skills: HashMap::new(),
+            bundled_count: 0,
+            discovered_count: 0,
         }
     }
 
@@ -284,11 +375,11 @@ impl SkillRegistry {
         for skill in bundled::bundled_skills() {
             registry.register(skill);
         }
-        let bundled_count = registry.len();
+        registry.bundled_count = registry.len();
 
         // 2. Overlay discovered skills (personal + extra + project scope)
         let discovered = loader::discover_skills(working_dir, extra_dirs);
-        let disc_count = discovered.len();
+        registry.discovered_count = discovered.len();
 
         for skill in discovered {
             registry.register(skill);
@@ -296,8 +387,8 @@ impl SkillRegistry {
 
         tracing::info!(
             "Skill registry loaded: {} bundled, {} discovered, {} registered (after dedup)",
-            bundled_count,
-            disc_count,
+            registry.bundled_count,
+            registry.discovered_count,
             registry.len()
         );
 
@@ -355,10 +446,49 @@ impl SkillRegistry {
         self.skills.len()
     }
 
+    /// Returns the number of bundled skills that were registered before
+    /// discovered skills were overlaid.
+    #[must_use]
+    pub fn bundled_count(&self) -> usize {
+        self.bundled_count
+    }
+
+    /// Returns the number of skills discovered on disk (before deduplication
+    /// against bundled entries).
+    #[must_use]
+    pub fn discovered_count(&self) -> usize {
+        self.discovered_count
+    }
+
     /// Returns `true` if no skills are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
+    }
+
+    /// Returns a lightweight catalog of all registered skills.
+    ///
+    /// The catalog is derived from the already-loaded skill metadata, so it
+    /// does not read `SKILL.md` bodies from disk. This makes it cheap to
+    /// build at startup and suitable for progressive disclosure (display the
+    /// compact list and defer full body loading until invocation).
+    #[must_use]
+    pub fn catalog(&self) -> Vec<SkillCatalogEntry> {
+        let mut entries: Vec<SkillCatalogEntry> = self
+            .skills
+            .values()
+            .map(|skill| SkillCatalogEntry {
+                name: skill.name.clone(),
+                description: skill.description.clone().unwrap_or_default(),
+                trigger: skill.trigger.clone().unwrap_or_else(|| skill.name.clone()),
+                scope: skill.scope,
+                user_invocable: skill.user_invocable,
+                agent_invocable: !skill.disable_model_invocation,
+                argument_hint: skill.argument_hint.clone(),
+            })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        entries
     }
 }
 

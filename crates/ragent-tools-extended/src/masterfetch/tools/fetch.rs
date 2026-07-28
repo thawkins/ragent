@@ -21,6 +21,7 @@ use super::super::cache::{CacheKey, ContentCache};
 use super::super::envelope::build_envelope;
 use super::super::extractor::{ExtractOptions, OutputFormat, extract};
 use super::super::focus::focus_content;
+use super::super::language::detect_language;
 use super::super::links::classify_links;
 use super::super::metadata::extract_metadata;
 use super::super::pdf::{extract_pdf_text, extract_pdf_title};
@@ -349,7 +350,11 @@ async fn fetch_one_url(
     };
 
     // FR-006: structured metadata.
-    let metadata = extract_metadata(&body);
+    let mut metadata = extract_metadata(&body);
+    // Detect the human language of the extracted text so downstream consumers
+    // (e.g. the research References Index) can report it. Best-effort: empty
+    // or non-linguistic content leaves the field as `None`.
+    metadata.detected_language = detect_language(&display_content);
 
     // FR-007: outgoing link classification.
     let links = if params.include_links {
@@ -418,6 +423,7 @@ async fn fetch_one_url(
         "total_extracted_chars": total_extracted_chars,
         "duration_ms": duration_ms,
         "cached": false,
+        "detected_language": metadata.detected_language,
         "metadata": metadata,
         "version": MASTERFETCH_VERSION,
     });
@@ -483,6 +489,9 @@ async fn pdf_tool_output(
     };
     let content_ok = !display_content.trim().is_empty();
 
+    // Detect the human language of the extracted PDF text (best-effort).
+    let detected_language = detect_language(&display_content);
+
     let content = format!(
         "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: pdf\nContent OK: {content_ok}\nFetcher: http\n\n{display_content}"
     );
@@ -506,6 +515,7 @@ async fn pdf_tool_output(
         "total_extracted_chars": total_extracted_chars,
         "duration_ms": duration_ms,
         "cached": false,
+        "detected_language": detected_language,
         "version": MASTERFETCH_VERSION,
     });
 
@@ -566,6 +576,9 @@ async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &
     let total_extracted_chars = transcript.chars().count();
     let content_ok = !transcript.trim().is_empty();
 
+    // Detect the human language of the transcript (best-effort).
+    let detected_language = detect_language(&transcript);
+
     let content = format!(
         "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: youtube\nContent OK: {content_ok}\nFetcher: http\n\nTitle: {title}\n\n{transcript}"
     );
@@ -588,6 +601,7 @@ async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &
         "total_extracted_chars": total_extracted_chars,
         "duration_ms": duration_ms,
         "cached": false,
+        "detected_language": detected_language,
         "version": MASTERFETCH_VERSION,
     });
 

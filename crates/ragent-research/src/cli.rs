@@ -448,12 +448,14 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             total_sources,
             pdf_count,
             youtube_count,
+            excluded_count,
         } => (
             "done",
             serde_json::json!({
                 "total_sources": total_sources,
                 "pdf_count": pdf_count,
                 "youtube_count": youtube_count,
+                "excluded_count": excluded_count,
             }),
         ),
         SessionEvent::ConfigSnapshot {

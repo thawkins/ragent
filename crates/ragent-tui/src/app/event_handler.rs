@@ -306,6 +306,7 @@ impl App {
                         tool
                     ),
                 );
+                self.needs_redraw = true;
             }
             Event::ToolCallEnd {
                 ref session_id,
@@ -348,6 +349,28 @@ impl App {
                         format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
                     );
                 }
+                self.needs_redraw = true;
+            }
+            Event::ToolCallBatch {
+                ref session_id,
+                ref calls,
+                ..
+            } if self.is_current_session(session_id) => {
+                // Atomic fallback: if per-call ToolCallStart/End events were
+                // dropped by the broadcast bridge during a burst, the batch
+                // still carries the final status/duration for every call.
+                for entry in calls {
+                    if !self.find_tool_call_part(&entry.call_id) {
+                        self.add_tool_call_part(&entry.tool, &entry.call_id);
+                    }
+                    self.update_tool_call_status(
+                        &entry.call_id,
+                        entry.success,
+                        entry.error.as_deref(),
+                        entry.duration_ms,
+                    );
+                }
+                self.needs_redraw = true;
             }
             Event::MessageStart {
                 ref session_id,
@@ -711,7 +734,12 @@ impl App {
                     };
                     progress.apply(decoded.phase, decoded.status, decoded.detail);
                     if let Some(total) = decoded.total_sources {
-                        progress.finish(total, decoded.pdf_count, decoded.youtube_count);
+                        progress.finish(
+                            total,
+                            decoded.pdf_count,
+                            decoded.youtube_count,
+                            decoded.excluded_count,
+                        );
                         // The final progress event marks the run complete.
                         // Drop the `⏳` in-progress status for a terminal
                         // message and arm the auto-expiry timer so it
@@ -731,6 +759,9 @@ impl App {
                                 decoded.youtube_count,
                                 if decoded.youtube_count == 1 { "" } else { "s" }
                             ));
+                        }
+                        if decoded.excluded_count > 0 {
+                            status.push_str(&format!(", {} excluded", decoded.excluded_count));
                         }
                         self.status = status;
                         self.arm_status_expiry();
@@ -801,12 +832,66 @@ impl App {
                 duration_ms,
             } if self.is_current_session(session_id) => {
                 telemetry_counters::set_cost_session_last(total_cost_usd);
+                let duration_secs = (duration_ms as f64) / 1000.0;
+                // Compact one-line banner shown transiently (dismissed on keypress).
+                let banner = format!(
+                    "⟡ run complete · {in}+{out} tokens · ${cost:.4} · {dur:.1}s",
+                    in = input_tokens,
+                    out = output_tokens,
+                    cost = total_cost_usd,
+                    dur = duration_secs,
+                );
+                self.run_cost_banner = Some(banner);
+                self.needs_redraw = true;
+                // Full details always go to the log panel (model + ms precision).
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
-                        "⟡ run complete · {}in / {}out tokens · model {} · ${:.6} · {}ms",
-                        input_tokens, output_tokens, model_id, total_cost_usd, duration_ms
+                        "⟡ run complete · {in}in / {out}out tokens · model {model} · ${cost:.6} · {ms}ms ({dur:.2}s)",
+                        in = input_tokens,
+                        out = output_tokens,
+                        model = model_id,
+                        cost = total_cost_usd,
+                        ms = duration_ms,
+                        dur = duration_secs,
                     ),
+                );
+            }
+            Event::HookWarning {
+                ref session_id,
+                ref hook_command,
+                ref tool,
+                ref stderr,
+            } if self.is_current_session(session_id) => {
+                // Show a short transient toast in the status bar.  We deliberately
+                // omit the "⚠" prefix so that `arm_status_expiry()` will
+                // auto-clear the toast after the standard grace period.
+                let short_reason = if stderr.len() > 80 {
+                    let mut end = 80;
+                    while end > 0 && !stderr.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &stderr[..end])
+                } else {
+                    stderr.clone()
+                };
+                self.status = format!("hook warning: {} — {}", tool, short_reason);
+                self.arm_status_expiry();
+                self.push_log_no_agent(
+                    LogLevel::Warn,
+                    format!("hook warning on {} ({}): {}", tool, hook_command, stderr),
+                );
+            }
+            Event::ToolResultFlagged {
+                ref session_id,
+                ref tool,
+                ref hook_command,
+                ref reason,
+            } if self.is_current_session(session_id) => {
+                self.status = format!("⚠ {} flagged", tool);
+                self.push_log_no_agent(
+                    LogLevel::Error,
+                    format!("🚩 tool {} flagged by {}: {}", tool, hook_command, reason),
                 );
             }
             Event::QuotaUpdate {
@@ -900,6 +985,7 @@ impl App {
                         format!("{}→ {}({})", step_tag, tool, args),
                     );
                 }
+                self.needs_redraw = true;
             }
             Event::ToolResult {
                 ref session_id,
@@ -947,6 +1033,7 @@ impl App {
                     LogLevel::Tool,
                     format!("{}← {} {} {}", step_tag, tool, icon, content),
                 );
+                self.needs_redraw = true;
             }
             Event::SubagentStart {
                 ref session_id,
@@ -2005,6 +2092,19 @@ impl App {
                         state.input = input;
                         return true;
                     }
+                }
+            }
+        }
+        false
+    }
+
+    pub(crate) fn find_tool_call_part(&self, call_id: &str) -> bool {
+        for msg in self.messages.iter().rev() {
+            for part in &msg.parts {
+                if let MessagePart::ToolCall { call_id: cid, .. } = part
+                    && cid == call_id
+                {
+                    return true;
                 }
             }
         }

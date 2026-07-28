@@ -54,6 +54,7 @@ impl DiscoveredMcpServer {
             args: self.args.clone(),
             env: self.env.clone(),
             url: None,
+            headers: HashMap::new(),
             disabled: true, // discovered servers are disabled until the user opts in
         }
     }

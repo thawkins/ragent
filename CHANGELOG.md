@@ -1,6 +1,29 @@
 # Changelog
 
+## Version: 0.1.0-beta.13
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.12` to `0.1.0-beta.13`.
+- Added JCode cost accounting and fixed tool widgets.
+
 ## Version: 0.1.0-beta.12
+
+### Added — Research completion reports excluded web sources
+
+- `ragent-research` now counts web pages that were fetched but excluded due to
+  low relevance (`excluded_count`).
+- `GatherResult`, `RunOutcome`, and `SessionEvent::Done` all carry the new
+  `excluded_count` field so the information flows from the gatherer through the
+  session to observers.
+- `WebFetchedPage` now includes an optional `language` field populated by the
+  `mf_fetch` layer and propagated into `Source::Web`.
+- CLI final output updated to
+  `Done: N sources (PDF P, YouTube Y, X excluded)` and the JSON event now
+  includes `excluded_count`.
+- TUI `/research create` progress now decodes `excluded_count`, passes it to
+  `ResearchProgress::finish`, and includes it in both the rendered markdown log
+  and the final status-bar message.
 
 ### Added — Per-run cost summary (`Event::RunCostSummary`)
 
@@ -14,10 +37,35 @@
   table; unknown models count tokens with zero cost.
 - The TUI logs a one-line `⟡ run complete` banner on `Event::RunCostSummary`
   and updates the `ragent.cost.session` telemetry counter.
-- The HTTP server serializes `RunCostSummary` as SSE event type
-  `run_cost_summary`.
-- Added integration test `crates/ragent-agent/tests/test_run_cost_summary.rs`
-  and SSE serialization test `test_run_cost_summary`.
+- The TUI now also renders a transient one-line
+  `⟡ run complete · {in}+{out} tokens · ${cost} · {dur}s` banner overlay
+  (FR-012, T-013) on `Event::RunCostSummary`, dismissed on the next keypress,
+  while the full summary (model id + millisecond duration) is logged to the
+  log panel.
+  - Added TUI tests `crates/ragent-tui/tests/test_run_cost_banner.rs` covering
+    banner population, log content, cross-session filtering, keypress dismissal,
+    and default state.
+  - Run-cost summaries are now persisted in a dedicated `run_cost_summaries`
+    SQLite table (FR-018, T-024) so they can be retrieved for `--include-cost`
+    exports, but are **omitted** from the default session export JSON.
+  - `session export` CLI command now accepts a `--include-cost` flag; when set,
+    the export JSON is wrapped as `{ "messages": [...], "cost_summaries": [...] }`
+    with per-run cost records (`input_tokens`, `output_tokens`,
+    `total_cost_usd`, `duration_ms`, `model_id`, `created_at`). Without the
+    flag, only the messages array is exported (no cost data).
+  - `RunCostSummaryRow` derives `Serialize`/`Deserialize` for JSON export and
+    is re-exported from `ragent-storage` and `ragent-agent::storage`.
+  - The session processor persists each `RunCostSummary` via
+    `spawn_blocking` (non-blocking) alongside publishing the event.
+  - Added storage tests `crates/ragent-storage/tests/test_run_cost_summaries.rs`
+    covering round-trip persistence, session scoping, JSON serialization, and
+    default-vs-opt-in export separation.
+  - Extended `crates/ragent-agent/tests/test_run_cost_summary.rs` to assert the
+    summary is persisted in storage after `process_message` completes.
+  - The HTTP server serializes `RunCostSummary` as SSE event type
+    `run_cost_summary`.
+  - Added integration test `crates/ragent-agent/tests/test_run_cost_summary.rs`
+    and SSE serialization test `test_run_cost_summary`.
 
 ### Changed — Version bump
 
@@ -2307,6 +2355,20 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 - **Initial commit** — Project created.
 
 ## [Unreleased]
+
+### Added — Low-relevance web-source filter in `/research` gathering
+
+- `WebGatherer` now computes a deterministic relevance label for every
+  fetched candidate and drops sources labelled **Low** or **Very low** before
+  they are added to the research state.
+- The relevance score is based only on the query, title, snippet, and URL, so
+  it adds zero LLM cost. Common English stopwords are stripped from the query
+  so question-style queries (e.g. "What is Rust?") are not penalised for
+  missing auxiliary words.
+- Skipped sources still emit a `GatherEvent::FetchFailed` diagnostic with the
+  reason `relevance too low (...)`, preserving the index slot so `web-NN.md`
+  numbering remains stable.
+- Added unit test `gather_filters_low_relevance_hits_and_notifies_observer`.
 
 ### Fixed — Mermaid findings diagram now renders when labels contain quotes or backticks
 

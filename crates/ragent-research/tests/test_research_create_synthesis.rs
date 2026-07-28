@@ -193,6 +193,7 @@ fn session_with_engine(
                     body: "Use async/await for concurrent Rust.".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 },
             )]),
         }),

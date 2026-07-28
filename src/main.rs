@@ -67,6 +67,14 @@ struct Cli {
     #[arg(long, global = true)]
     maxsteps: Option<u32>,
 
+    /// Run a readiness check without invoking any model or tool.
+    #[arg(long, global = true)]
+    dry_run: bool,
+
+    /// Emit the dry-run readiness report as JSON.
+    #[arg(long, global = true)]
+    json: bool,
+
     /// Disable automatic git context injection
     #[arg(long, global = true)]
     no_git_context: bool,
@@ -120,11 +128,27 @@ enum Commands {
         ollama_url: Option<String>,
     },
     /// Show resolved configuration
-    Config,
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommands>,
+    },
     /// Manage research items under `research/`
     Research {
         #[command(subcommand)]
         command: cli::ResearchCommands,
+    },
+}
+
+/// Sub-commands for the `config` namespace.
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Print the resolved configuration
+    Show,
+    /// Run a dry-run readiness check
+    Check {
+        /// Output the readiness report as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -142,6 +166,16 @@ enum SessionCommands {
     Export {
         /// Session ID
         id: String,
+        /// Include persisted run-cost summaries in the export (FR-018).
+        ///
+        /// By default the export is a JSON array of messages only; per-run
+        /// dollar costs are omitted. When this flag is set the output is a
+        /// JSON object of the form `{"messages":[...],"cost_summaries":[...]}`
+        /// where each `cost_summaries` entry carries `input_tokens`,
+        /// `output_tokens`, `total_cost_usd`, `duration_ms`, `model_id` and
+        /// `created_at` for a single run.
+        #[arg(long)]
+        include_cost: bool,
     },
     /// Import a session from file
     Import {
@@ -236,6 +270,49 @@ async fn main() -> Result<()> {
         None
     };
     tracing::info!(log_level = %cli.log_level, tui_mode = tui_will_run, "Tracing initialized");
+
+    /// Run the dry-run readiness check and exit the process.
+    ///
+    /// This helper is intentionally terminal: it prints the report and calls
+    /// `std::process::exit` with the readiness-derived exit code.
+    async fn run_dry_run_and_exit(
+        config_path: Option<String>,
+        agent_name: &str,
+        model_override: Option<&str>,
+        json_output: bool,
+        config: Arc<tokio::sync::RwLock<Config>>,
+        provider_registry: Arc<ragent_agent::provider::ProviderRegistry>,
+        tool_registry: Arc<ragent_agent::tool::ToolRegistry>,
+    ) {
+        let config_path = config_path.map(PathBuf::from);
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let hidden_tools = config.read().await.effective_hidden_tools();
+        let inputs = ragent_agent::dry_run::DryRunInputs {
+            config_path,
+            agent_name: agent_name.to_string(),
+            model_override: model_override.map(std::string::ToString::to_string),
+            provider_registry,
+            tool_registry,
+            working_dir,
+            hidden_tools,
+        };
+
+        let (report, exit_code) = ragent_agent::dry_run::run_dry_run(inputs).await;
+
+        if json_output {
+            match report.to_json() {
+                Ok(json) => println!("{json}"),
+                Err(e) => {
+                    eprintln!("Failed to serialise readiness report: {e}");
+                    std::process::exit(2);
+                }
+            }
+        } else {
+            print!("{}", report.to_human_string());
+        }
+
+        std::process::exit(i32::from(exit_code));
+    }
 
     // Load config
     let config = if let Some(ref path_str) = cli.config {
@@ -491,6 +568,19 @@ async fn main() -> Result<()> {
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
 
+    if cli.dry_run {
+        run_dry_run_and_exit(
+            cli.config.clone(),
+            &cli.agent,
+            cli.model.as_deref(),
+            cli.json,
+            Arc::clone(&config),
+            Arc::clone(&provider_registry),
+            Arc::clone(&tool_registry),
+        )
+        .await;
+    }
+
     match cli.command {
         None => {
             // Default: run TUI
@@ -638,10 +728,23 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            SessionCommands::Export { id } => {
+            SessionCommands::Export { id, include_cost } => {
                 let messages = storage.get_messages(&id)?;
-                let json = serde_json::to_string_pretty(&messages)?;
-                writeln!(std::io::stdout(), "{json}")?;
+                if include_cost {
+                    // FR-018: attach persisted run-cost summaries only when the
+                    // caller explicitly opts in. Default export remains a plain
+                    // JSON array of messages (no dollar costs).
+                    let cost_summaries = storage.list_run_cost_summaries(&id)?;
+                    let export = serde_json::json!({
+                        "messages": messages,
+                        "cost_summaries": cost_summaries,
+                    });
+                    let json = serde_json::to_string_pretty(&export)?;
+                    writeln!(std::io::stdout(), "{json}")?;
+                } else {
+                    let json = serde_json::to_string_pretty(&messages)?;
+                    writeln!(std::io::stdout(), "{json}")?;
+                }
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
@@ -773,11 +876,25 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Some(Commands::Config) => {
-            let config = config.read().await;
-            println!("{:#?}", *config);
-            drop(config);
-        }
+        Some(Commands::Config { command }) => match command {
+            Some(ConfigCommands::Check { json }) => {
+                run_dry_run_and_exit(
+                    cli.config.clone(),
+                    &cli.agent,
+                    cli.model.as_deref(),
+                    cli.json || json,
+                    Arc::clone(&config),
+                    Arc::clone(&provider_registry),
+                    Arc::clone(&tool_registry),
+                )
+                .await;
+            }
+            _ => {
+                let config = config.read().await;
+                println!("{:#?}", *config);
+                drop(config);
+            }
+        },
         Some(Commands::Memory { command }) => {
             let working_dir =
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));

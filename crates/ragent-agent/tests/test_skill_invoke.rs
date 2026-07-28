@@ -114,3 +114,84 @@ fn test_resolve_forked_skill_agent_prefers_explicit_skill_model() {
     assert_eq!(model.provider_id, "openai");
     assert_eq!(model.model_id, "gpt-4o");
 }
+
+// On-demand skill body loading (T-009).
+
+use ragent_agent::skill::SkillRegistry;
+use std::path::Path;
+
+#[tokio::test]
+async fn test_invoke_skill_loads_body_on_demand() {
+    let tmp = std::env::temp_dir().join("ragent_test_invoke_on_demand");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let skill_dir = tmp.join(".ragent").join("skills").join("deploy");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\ndescription: Deploy app\n---\nDeploy $ARGUMENTS to production\n",
+    )
+    .unwrap();
+
+    let registry = SkillRegistry::load(&tmp, &[]);
+    let skill = registry
+        .get("deploy")
+        .expect("deploy skill should be registered")
+        .clone();
+
+    // The registry should have discovered the skill metadata but deferred the body.
+    assert!(skill.body.is_empty());
+    assert_eq!(skill.description.as_deref(), Some("Deploy app"));
+
+    let result =
+        ragent_agent::skill::invoke::invoke_skill(&skill, "staging", "sess-1", Path::new("/tmp"))
+            .await
+            .expect("invoke_skill should load the body on demand");
+
+    assert_eq!(result.skill_name, "deploy");
+    assert_eq!(result.content.trim(), "Deploy staging to production");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[tokio::test]
+async fn test_invoke_skill_caches_body_from_disk() {
+    let tmp = std::env::temp_dir().join("ragent_test_invoke_cache");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let skill_dir = tmp.join(".ragent").join("skills").join("deploy");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let skill_md = skill_dir.join("SKILL.md");
+    std::fs::write(
+        &skill_md,
+        "---\ndescription: Deploy app\n---\nDeploy $ARGUMENTS to production\n",
+    )
+    .unwrap();
+
+    let registry = SkillRegistry::load(&tmp, &[]);
+    let skill = registry
+        .get("deploy")
+        .expect("deploy skill should be registered")
+        .clone();
+
+    let first =
+        ragent_agent::skill::invoke::invoke_skill(&skill, "staging", "sess-1", Path::new("/tmp"))
+            .await
+            .expect("first invocation should load body");
+    assert_eq!(first.content.trim(), "Deploy staging to production");
+
+    // Tamper with the on-disk body. A cached invocation must return the original content.
+    std::fs::write(
+        &skill_md,
+        "---\ndescription: Deploy app\n---\nTAMPERED $ARGUMENTS content\n",
+    )
+    .unwrap();
+
+    let second =
+        ragent_agent::skill::invoke::invoke_skill(&skill, "staging", "sess-1", Path::new("/tmp"))
+            .await
+            .expect("second invocation should use cached body");
+    assert_eq!(second.content.trim(), "Deploy staging to production");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

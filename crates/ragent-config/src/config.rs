@@ -127,6 +127,12 @@ pub struct Config {
     /// YOLO mode — bypass command validation and tool restrictions.
     #[serde(default)]
     pub yolo: bool,
+    /// User-defined price overrides for cost estimation (FR-011).
+    ///
+    /// Each entry overrides the built-in price table for a specific model.
+    /// Prices are in USD per 1,000,000 tokens.
+    #[serde(default)]
+    pub prices: Vec<PriceEntry>,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -976,6 +982,9 @@ pub struct McpServerConfig {
     pub env: HashMap<String, String>,
     /// URL endpoint (for SSE or HTTP transports).
     pub url: Option<String>,
+    /// Optional HTTP headers sent with every request for HTTP/SSE transports.
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
     /// If `true`, this server is configured but will not be started.
     #[serde(default)]
     pub disabled: bool,
@@ -989,9 +998,24 @@ impl Default for McpServerConfig {
             args: Vec::new(),
             env: HashMap::new(),
             url: None,
+            headers: HashMap::new(),
             disabled: false,
         }
     }
+}
+
+/// User-defined price override for a single model (FR-011).
+///
+/// Prices are in USD per 1,000,000 tokens. When a `PriceEntry` matches a
+/// model id in the built-in price table, the entry's values take precedence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PriceEntry {
+    /// Model identifier as returned by the provider (e.g. `"gpt-4o"`).
+    pub model: String,
+    /// Price per 1M input/prompt tokens in USD.
+    pub input_per_1m: f64,
+    /// Price per 1M output/completion tokens in USD.
+    pub output_per_1m: f64,
 }
 
 /// Transport protocol for MCP server communication.
@@ -1566,6 +1590,15 @@ impl Config {
         }
         for (k, v) in overlay.mcp {
             base.mcp.insert(k, v);
+        }
+        // Price overrides: append entries from the overlay, replacing any
+        // existing entries with the same model id (last-wins per model).
+        for entry in overlay.prices {
+            if let Some(existing) = base.prices.iter_mut().find(|e| e.model == entry.model) {
+                *existing = entry;
+            } else {
+                base.prices.push(entry);
+            }
         }
         // Permissions, instructions, and skill dirs append
         base.permission.extend(overlay.permission);

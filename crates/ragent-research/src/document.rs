@@ -1285,6 +1285,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
@@ -1307,6 +1308,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("no body captured"));
@@ -1364,6 +1366,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         };
         let out = render_bibliography(&[source]);
         assert!(out.contains("Example"));
@@ -1407,6 +1410,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1449,6 +1453,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1463,6 +1468,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
@@ -1499,6 +1505,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         item.add_source(Source::Web {
             published_at: Some(
@@ -1517,6 +1524,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1531,6 +1539,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1570,6 +1579,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1614,6 +1624,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.

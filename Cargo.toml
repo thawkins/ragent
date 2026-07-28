@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-beta.12"
+version = "0.1.0-beta.13"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -236,6 +236,12 @@ ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"
 tokenizers = { version = "0.21", features = ["onig"] }
 ndarray = "0.17"
 
+# ── Natural-language detection ──────────────────────────────────────────
+# Used by masterfetch (`mf_fetch`) to derive the human language of each
+# fetched page so the research References Index can report it. Default
+# features pull in all 75 language models (~300 MB of embedded FSTs).
+lingua = "1.8"
+
 [[bin]]
 name = "ragent"
 path = "src/main.rs"
@@ -271,6 +277,8 @@ dirs = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
 
 [lints]
 workspace = true

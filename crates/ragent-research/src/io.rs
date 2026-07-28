@@ -218,25 +218,34 @@ impl ResearchIo {
     /// The table also includes a **Media** column (between **Type** and
     /// **Path/URL**) showing the classified media type for web sources
     /// (`page`, `pdf`, or `youtube`), and `—` for non-web sources.
+    ///
+    /// The table also includes a **Language** column (between **Media** and
+    /// **Path/URL**) showing the human language detected from each web
+    /// source's extracted text (e.g. `English`, `French`), and `—` for
+    /// non-web sources or when detection was inconclusive.
     #[must_use]
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
-                "## References Index\n\n| # | Type | Media | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
-                           |---|------|-------|----------|-------|-----------|-----------|-------------|--------|----------|\n\
-                           | 1 | other | — | — | No sources captured | — | (no gathering run) | — | — | {} |\n",
+                "## References Index\n\n| # | Type | Media | Language | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+                           |---|------|-------|----------|----------|-------|-----------|-----------|-------------|--------|----------|\n\
+                           | 1 | other | — | — | — | No sources captured | — | (no gathering run) | — | — | {} |\n",
                 captured_at.to_rfc3339()
             );
         }
         let mut out = String::from(
             "## References Index\n\n\
-             | # | Type | Media | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
-             |---|------|-------|----------|-------|-----------|-----------|-------------|--------|----------|\n",
+             | # | Type | Media | Language | Path/URL | Title | Published | Relevance | Search tool | Engine | Captured |\n\
+             |---|------|-------|----------|----------|-------|-----------|-----------|-------------|--------|----------|\n",
         );
         for (idx, source) in sources.iter().enumerate() {
             let n = idx + 1;
             let kind = source.type_str();
             let media = sanitize_inline(source.media_type());
+            let language = match source.language() {
+                Some(l) if !l.is_empty() => sanitize_inline(l),
+                _ => "—".to_string(),
+            };
             let path = source.path_or_url();
             let title = sanitize_inline(source.title());
             let published = source
@@ -262,7 +271,7 @@ impl ResearchIo {
             };
             let captured = source.captured_at().to_rfc3339();
             out.push_str(&format!(
-                "| {n} | {kind} | {media} | {path} | {title} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
+                "| {n} | {kind} | {media} | {language} | {path} | {title} | {published} | {relevance} | {search_tool} | {search_engine} | {captured} |\n"
             ));
         }
         out
@@ -514,6 +523,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
             Source::Web {
                 url: "https://undated.example".into(),
@@ -529,6 +539,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
         ];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());

@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod compaction;
+pub mod cost;
 pub mod error;
 pub mod event;
 
@@ -43,11 +44,13 @@ pub mod updater;
 /// system's web/local gatherers.
 pub mod research_adapter;
 
+pub mod dry_run;
+
 pub use ragent_config::config::StreamConfig;
 pub use ragent_config::{
     AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, GitLabIntegrationConfig,
-    McpServerConfig, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig, bash_lists,
-    dir_lists, tool_family_names,
+    McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PriceEntry, ProviderConfig,
+    ToolVisibilityConfig, bash_lists, dir_lists, tool_family_names,
 };
 pub use ragent_llm::{llm, provider};
 pub use ragent_tools_vcs::{github, gitlab};

@@ -923,12 +923,13 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
         assert!(
             doc.content
-                .contains("| 1 | web | page | [https://example.com](https://example.com)")
+                .contains("| 1 | web | page | — | [https://example.com](https://example.com)")
         );
     }
 
@@ -967,6 +968,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         let doc = ResearchDocument {
             item,
@@ -1015,6 +1017,7 @@ mod frontmatter_tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         });
         item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
         let doc = ResearchDocument {

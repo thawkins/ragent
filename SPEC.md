@@ -406,6 +406,7 @@ Key event types include:
 | `CompressionStarted` / `CompressionFinished` | Context compaction lifecycle (auto pre-send summarisation and emergency overflow compaction) |
 | `TeammateIdle` / `TeammateFailed` / `TeammateResumed` | Team coordination |
 | `SubagentSpawned` / `SubagentCompleted` / `SubagentKilled` | Background agents |
+| `RunCostSummary` | Per-run token/cost summary emitted at session run end |
 
 ---
 
@@ -1474,6 +1475,13 @@ Skills are loadable YAML packs that inject tools, system prompts, and file
 context into an agent session. They are useful for domain-specific workflows
 (e.g., Rust embedded development, Terraform infrastructure).
 
+At startup the agent builds a `SkillCatalog` — a lightweight, metadata-only
+list of skill names, descriptions, and trigger phrases. The catalog is cheap to
+produce and lets the agent advertise available skills without loading full
+skill bodies into the system prompt. Full `SkillInfo` bodies are loaded on
+demand when the skill is invoked (`SkillRegistry::catalog()` for discovery,
+`SkillRegistry::get()` for activation).
+
 ### 12.2 Skill Locations
 
 - Bundled skills in `assets/skills/`
@@ -1949,6 +1957,43 @@ message. When completed, this subsystem will:
 
 Until then, users should update via `cargo install` or by downloading the latest
 release binary manually.
+
+---
+
+## 21. Harness Enhancements
+
+This section captures cross-cutting harness-layer behaviours that the
+implementation exposes for operators and CI/CD pipelines.
+
+### 21.1 Skill Catalog (`SkillCatalog`)
+
+The agent does not load full skill bodies into the system prompt at session
+start. Instead, `SkillRegistry::load()` first discovers skill metadata and
+produces a compact `SkillCatalogEntry` for each skill via
+`SkillRegistry::catalog()`. The catalog contains only the skill name,
+description, trigger phrase, scope, and invocation flags; it is cheap to build
+and keeps the startup context small. Full skill bodies (prompts, context
+files, and tool lists) are loaded lazily when a skill is invoked.
+
+### 21.2 Per-Run Cost Summary (`RunCostSummary`)
+
+At the end of each `process_user_message` turn, the agent accumulates token
+usage records, applies the built-in (or configured) per-model price table, and
+publishes `Event::RunCostSummary` on the event bus. Consumers such as the TUI
+and the HTTP SSE stream use this event to surface per-run spend without having
+to accumulate per-request `TokenUsage` events themselves. The summary includes
+input tokens, output tokens, estimated USD cost, model identifier, and
+wall-clock duration.
+
+### 21.3 Dry-Run Readiness Report
+
+The `ragent --dry-run` / `ragent config check` flow builds a
+`ReadinessReport` by loading and merging configuration, resolving provider/model
+auth state, discovering skills via the skill catalog, enumerating visible tools,
+and performing lightweight MCP connectivity checks — all without invoking the
+LLM or executing any tool. The report is rendered as human-readable text by
+default and as JSON when `--json` is supplied. See `QUICKSTART.md` for usage
+examples.
 
 ---
 

@@ -363,6 +363,24 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .and_then(|v| v.as_str())
             .map(|q| format!("🌐 \"{}\"", trunc120(q)))
             .unwrap_or_else(|| "🌐 search".to_string()),
+        "mf_fetch" => input
+            .get("url")
+            .or_else(|| input.get("urls").and_then(|v| v.as_array()?.first()))
+            .and_then(|v| v.as_str())
+            .map(|u| format!("🌐 {}", trunc120(u)))
+            .unwrap_or_else(|| "🌐 fetch".to_string()),
+        "mf_crawl" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| format!("🕷️ {}", trunc120(u)))
+            .unwrap_or_else(|| "🕷️ crawl".to_string()),
+        "mf_screenshot" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| format!("📸 {}", trunc120(u)))
+            .unwrap_or_else(|| "📸 screenshot".to_string()),
+        "mf_cache_clear" => "🧹 clear cache".to_string(),
+        "mf_version" => "ℹ️ masterfetch version".to_string(),
         "mf_search" => input
             .get("query")
             .and_then(|v| v.as_str())
@@ -674,15 +692,15 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
 
         // ═══════════════════════════════════════════════════════════════════
         // 📄 DOCUMENT (Office/PDF)        // ═══════���═══════════════════════════════════════════════════════════
-        "office_read" | "pdf_read" | "libreoffice_read" => {
+        "office_read" | "pdf_read" | "libre_read" | "libreoffice_read" => {
             let path = get_relative_path(&["path"]);
             format!("📄 {}", path)
         }
-        "office_write" | "pdf_write" | "libreoffice_write" => {
+        "office_write" | "pdf_write" | "libre_write" | "libreoffice_write" => {
             let path = get_relative_path(&["path"]);
             format!("📄 {}", path)
         }
-        "office_info" | "libreoffice_info" => {
+        "office_info" | "libre_info" | "libreoffice_info" => {
             let path = get_relative_path(&["path"]);
             format!("📄 {}", path)
         }
@@ -1077,10 +1095,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
-        // DEFAULT: Unknown tools        // ═══════════════════════════════════════════════════════════════════
+        // DEFAULT: Unknown tools
+        // ═══════════════════════════════════════════════════════════════════
         _ => {
             if tool.starts_with("team_") {
                 format!("👥 {}", summarize_tool_args(input, 40))
+            } else if tool.starts_with("mcp_") {
+                let server_tool = tool.strip_prefix("mcp_").unwrap_or(tool);
+                format!("🔌 {}", server_tool)
             } else {
                 summarize_tool_args(input, 40)
             }
@@ -1825,10 +1847,10 @@ pub fn tool_result_summary(
         }
         // ═══════════════════════════════════════════════════════════════════
         // 📄 DOCUMENT (Office/PDF)        // ═════════════════════��═════════════════════════════════════════════
-        "office_read" | "pdf_read" | "libreoffice_read" => {
+        "office_read" | "pdf_read" | "libre_read" | "libreoffice_read" => {
             Some(format!("{} read", pluralize(line_count, "line", "lines")))
         }
-        "office_write" | "pdf_write" | "libreoffice_write" => {
+        "office_write" | "pdf_write" | "libre_write" | "libreoffice_write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
@@ -1839,7 +1861,7 @@ pub fn tool_result_summary(
                 path
             ))
         }
-        "office_info" | "libreoffice_info" => Some(format!(
+        "office_info" | "libre_info" | "libreoffice_info" => Some(format!(
             "{} of metadata",
             pluralize(line_count, "line", "lines")
         )),

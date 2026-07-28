@@ -1,5 +1,12 @@
 # Release Notes
 
+## v0.1.0-beta.13
+
+### Changed — Version bump
+
+- Workspace version bumped from `0.1.0-beta.12` to `0.1.0-beta.13`.
+- Added JCode cost accounting and fixed tool widgets.
+
 ## v0.1.0-beta.12
 
 ### Added — Per-run cost summary (`Event::RunCostSummary`)

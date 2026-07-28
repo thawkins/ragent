@@ -62,14 +62,15 @@ pub fn make_bundled_skill(
         license: None,
         compatibility: None,
         metadata: HashMap::new(),
+        trigger: None,
         allow_dynamic_context: false,
         source_path: PathBuf::new(),
         skill_dir: PathBuf::new(),
         scope: SkillScope::Bundled,
         body: body.to_string(),
+        body_cache: super::default_body_cache(),
     }
 }
-
 /// Returns the set of skills bundled with ragent.
 ///
 /// Bundled skills include:

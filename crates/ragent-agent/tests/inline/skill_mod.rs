@@ -326,8 +326,8 @@ fn test_registry_load_monorepo_nested() {
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn test_registry_load_project_overrides_bundled() {
+#[tokio::test]
+async fn test_registry_load_project_overrides_bundled() {
     let tmp = std::env::temp_dir().join("ragent_test_load_override_bundled");
     let _ = std::fs::remove_dir_all(&tmp);
 
@@ -349,13 +349,19 @@ fn test_registry_load_project_overrides_bundled() {
         "Project skill should override bundled skill"
     );
     assert_eq!(simplify.scope, SkillScope::Project);
-    assert!(simplify.body.contains("My custom simplify"));
+    assert!(
+        simplify
+            .body_or_load()
+            .await
+            .expect("should load body")
+            .contains("My custom simplify")
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
-#[test]
-fn test_registry_load_with_extra_dirs() {
+#[tokio::test]
+async fn test_registry_load_with_extra_dirs() {
     let tmp = std::env::temp_dir().join("ragent_test_load_extra_dirs");
     let _ = std::fs::remove_dir_all(&tmp);
 

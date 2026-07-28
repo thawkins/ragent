@@ -212,4 +212,28 @@ async fn test_process_message_publishes_run_cost_summary() {
         (cost - expected).abs() < 1e-9,
         "cost should match built-in price table: got {cost}, expected {expected}"
     );
+
+    // FR-018: the summary should also be persisted in the storage layer so
+    // an explicit `--include-cost` export can retrieve it. The persist is
+    // done via `spawn_blocking`, so poll briefly for the row to land.
+    let storage = session_manager.storage().clone();
+    let mut persisted = Vec::new();
+    for _ in 0..50 {
+        persisted = storage
+            .list_run_cost_summaries(&session.id)
+            .unwrap_or_default();
+        if !persisted.is_empty() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(persisted.len(), 1, "run-cost summary should be persisted");
+    assert_eq!(persisted[0].model_id, "gpt-4o");
+    assert_eq!(persisted[0].input_tokens, 100);
+    assert_eq!(persisted[0].output_tokens, 50);
+    assert!(
+        (persisted[0].total_cost_usd - expected).abs() < 1e-9,
+        "persisted cost should match: got {}, expected {expected}",
+        persisted[0].total_cost_usd
+    );
 }

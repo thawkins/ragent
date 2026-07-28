@@ -80,6 +80,8 @@ pub struct ResearchProgress {
     pub pdf_count: usize,
     /// Number of recovered YouTube transcripts / video URLs.
     pub youtube_count: usize,
+    /// Number of web sources fetched but excluded for low relevance.
+    pub excluded_count: usize,
 }
 
 impl ResearchProgress {
@@ -95,6 +97,7 @@ impl ResearchProgress {
             failed_count: 0,
             pdf_count: 0,
             youtube_count: 0,
+            excluded_count: 0,
         }
     }
 
@@ -139,10 +142,17 @@ impl ResearchProgress {
     }
 
     /// Mark the run complete with the final source count.
-    pub fn finish(&mut self, total_sources: usize, pdf_count: usize, youtube_count: usize) {
+    pub fn finish(
+        &mut self,
+        total_sources: usize,
+        pdf_count: usize,
+        youtube_count: usize,
+        excluded_count: usize,
+    ) {
         self.total_sources = Some(total_sources);
         self.pdf_count = pdf_count;
         self.youtube_count = youtube_count;
+        self.excluded_count = excluded_count;
         self.done = true;
     }
 
@@ -190,6 +200,9 @@ impl ResearchProgress {
                     if self.youtube_count == 1 { "" } else { "s" }
                 ));
             }
+            if self.excluded_count > 0 {
+                extras.push(format!("{} excluded", self.excluded_count));
+            }
             if !extras.is_empty() {
                 line.push_str(&format!(", including {}", extras.join(" and ")));
             }
@@ -223,164 +236,178 @@ struct ProgressPayload {
     total_sources: Option<usize>,
     pdf_count: usize,
     youtube_count: usize,
+    excluded_count: usize,
 }
 
 /// Encode a [`SessionEvent`] plus run metadata as a sentinel-prefixed
 /// `AgentNotice` message string.
 pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> String {
-    let (phase, status, detail, total_sources, pdf_count, youtube_count) = match event {
-        SessionEvent::Phase { phase } => (*phase, "started", phase_description(*phase), None, 0, 0),
-        SessionEvent::QueriesDecomposed { queries } => {
-            let detail = if queries.is_empty() {
-                "no decomposition".to_string()
-            } else {
-                format!(
-                    "decomposed into {} quer{}:\n  - {}",
-                    queries.len(),
-                    if queries.len() == 1 { "y" } else { "ies" },
-                    queries.join("\n  - ")
-                )
-            };
-            (SessionPhase::Web, "queries", detail, None, 0, 0)
-        }
-        SessionEvent::WebSearchFailed { error } => (
-            SessionPhase::Web,
-            "error",
-            format!("web search failed: {}", sanitize_for_display(error)),
-            None,
-            0,
-            0,
-        ),
-        SessionEvent::WebFetchFailed { url, error } => (
-            SessionPhase::Web,
-            "failed_url",
-            format!(
-                "fetch failed for {}: {}",
-                sanitize_for_display(url),
-                sanitize_for_display(error)
-            ),
-            None,
-            0,
-            0,
-        ),
-        SessionEvent::WebCaptured {
-            url,
-            title,
-            search_tool,
-            search_engine,
-        } => {
-            let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
-                (true, true) => String::new(),
-                (false, true) => format!(" via {search_tool}"),
-                (true, false) => format!(" via {search_engine}"),
-                (false, false) => format!(" via {search_tool} ({search_engine})"),
-            };
-            (
+    let (phase, status, detail, total_sources, pdf_count, youtube_count, excluded_count) =
+        match event {
+            SessionEvent::Phase { phase } => {
+                (*phase, "started", phase_description(*phase), None, 0, 0, 0)
+            }
+            SessionEvent::QueriesDecomposed { queries } => {
+                let detail = if queries.is_empty() {
+                    "no decomposition".to_string()
+                } else {
+                    format!(
+                        "decomposed into {} quer{}:\n  - {}",
+                        queries.len(),
+                        if queries.len() == 1 { "y" } else { "ies" },
+                        queries.join("\n  - ")
+                    )
+                };
+                (SessionPhase::Web, "queries", detail, None, 0, 0, 0)
+            }
+            SessionEvent::WebSearchFailed { error } => (
                 SessionPhase::Web,
-                "captured",
+                "error",
+                format!("web search failed: {}", sanitize_for_display(error)),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::WebFetchFailed { url, error } => (
+                SessionPhase::Web,
+                "failed_url",
                 format!(
-                    "captured {}{} — {}",
+                    "fetch failed for {}: {}",
                     sanitize_for_display(url),
-                    provenance,
-                    sanitize_for_display(title)
+                    sanitize_for_display(error)
                 ),
                 None,
                 0,
                 0,
-            )
-        }
-        SessionEvent::FromUrlBodyPreview { url, body_preview } => (
-            SessionPhase::Setup,
-            "preview",
-            format!(
-                "--from-url body preview for {}:\n{}",
-                sanitize_for_display(url),
-                sanitize_for_display(body_preview)
+                0,
             ),
-            None,
-            0,
-            0,
-        ),
-        SessionEvent::LocalCaptured { path, score } => (
-            SessionPhase::Local,
-            "captured",
-            format!("captured {} (score {})", sanitize_for_display(path), score),
-            None,
-            0,
-            0,
-        ),
-        SessionEvent::SpecCaptured { spec_id } => (
-            SessionPhase::Specs,
-            "captured",
-            format!("referenced spec {}", sanitize_for_display(spec_id)),
-            None,
-            0,
-            0,
-        ),
-        SessionEvent::SynthesizeResult { outcome, detail } => {
-            let detail = match (outcome, detail) {
-                (SynthesizeOutcome::Llm, _) => "LLM analysis applied".to_string(),
-                (SynthesizeOutcome::FallbackEmpty, _) => {
-                    "LLM returned empty content — using mechanical fallback".to_string()
-                }
-                (SynthesizeOutcome::FallbackError, Some(msg)) => {
-                    format!("LLM synthesis failed: {msg} — using mechanical fallback")
-                }
-                (SynthesizeOutcome::FallbackError, None) => {
-                    "LLM synthesis failed — using mechanical fallback".to_string()
-                }
-                (SynthesizeOutcome::NoLlm, _) => {
-                    "no LLM engine configured — using mechanical fallback".to_string()
-                }
-            };
-            (SessionPhase::Synthesize, "done", detail, None, 0, 0)
-        }
-        SessionEvent::Done {
-            total_sources,
-            pdf_count,
-            youtube_count,
-        } => (
-            SessionPhase::Finalize,
-            "done",
-            "marked complete".to_string(),
-            Some(*total_sources),
-            *pdf_count,
-            *youtube_count,
-        ),
-        SessionEvent::ConfigSnapshot {
-            output_format,
-            depth,
-            iterations,
-            from_url,
-        } => {
-            let mut parts = vec![format!("output format: {output_format}")];
-            if let Some(d) = depth {
-                parts.push(format!("depth: {d}"));
+            SessionEvent::WebCaptured {
+                url,
+                title,
+                search_tool,
+                search_engine,
+            } => {
+                let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
+                    (true, true) => String::new(),
+                    (false, true) => format!(" via {search_tool}"),
+                    (true, false) => format!(" via {search_engine}"),
+                    (false, false) => format!(" via {search_tool} ({search_engine})"),
+                };
+                (
+                    SessionPhase::Web,
+                    "captured",
+                    format!(
+                        "captured {}{} — {}",
+                        sanitize_for_display(url),
+                        provenance,
+                        sanitize_for_display(title)
+                    ),
+                    None,
+                    0,
+                    0,
+                    0,
+                )
             }
-            if let Some(i) = iterations {
-                parts.push(format!("iterations: {i}"));
-            }
-            if let Some(url) = from_url {
-                parts.push(format!("from-url: {}", sanitize_for_display(url)));
-            }
-            (
+            SessionEvent::FromUrlBodyPreview { url, body_preview } => (
                 SessionPhase::Setup,
-                "config",
-                format!("options in use: {}", parts.join(", ")),
+                "preview",
+                format!(
+                    "--from-url body preview for {}:\n{}",
+                    sanitize_for_display(url),
+                    sanitize_for_display(body_preview)
+                ),
                 None,
                 0,
                 0,
-            )
-        }
-        _ => (
-            SessionPhase::Setup,
-            "event",
-            format!("{event:?}"),
-            None,
-            0,
-            0,
-        ),
-    };
+                0,
+            ),
+            SessionEvent::LocalCaptured { path, score } => (
+                SessionPhase::Local,
+                "captured",
+                format!("captured {} (score {})", sanitize_for_display(path), score),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::SpecCaptured { spec_id } => (
+                SessionPhase::Specs,
+                "captured",
+                format!("referenced spec {}", sanitize_for_display(spec_id)),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::SynthesizeResult { outcome, detail } => {
+                let detail = match (outcome, detail) {
+                    (SynthesizeOutcome::Llm, _) => "LLM analysis applied".to_string(),
+                    (SynthesizeOutcome::FallbackEmpty, _) => {
+                        "LLM returned empty content — using mechanical fallback".to_string()
+                    }
+                    (SynthesizeOutcome::FallbackError, Some(msg)) => {
+                        format!("LLM synthesis failed: {msg} — using mechanical fallback")
+                    }
+                    (SynthesizeOutcome::FallbackError, None) => {
+                        "LLM synthesis failed — using mechanical fallback".to_string()
+                    }
+                    (SynthesizeOutcome::NoLlm, _) => {
+                        "no LLM engine configured — using mechanical fallback".to_string()
+                    }
+                };
+                (SessionPhase::Synthesize, "done", detail, None, 0, 0, 0)
+            }
+            SessionEvent::Done {
+                total_sources,
+                pdf_count,
+                youtube_count,
+                excluded_count,
+            } => (
+                SessionPhase::Finalize,
+                "done",
+                "marked complete".to_string(),
+                Some(*total_sources),
+                *pdf_count,
+                *youtube_count,
+                *excluded_count,
+            ),
+            SessionEvent::ConfigSnapshot {
+                output_format,
+                depth,
+                iterations,
+                from_url,
+            } => {
+                let mut parts = vec![format!("output format: {output_format}")];
+                if let Some(d) = depth {
+                    parts.push(format!("depth: {d}"));
+                }
+                if let Some(i) = iterations {
+                    parts.push(format!("iterations: {i}"));
+                }
+                if let Some(url) = from_url {
+                    parts.push(format!("from-url: {}", sanitize_for_display(url)));
+                }
+                (
+                    SessionPhase::Setup,
+                    "config",
+                    format!("options in use: {}", parts.join(", ")),
+                    None,
+                    0,
+                    0,
+                    0,
+                )
+            }
+            _ => (
+                SessionPhase::Setup,
+                "event",
+                format!("{event:?}"),
+                None,
+                0,
+                0,
+                0,
+            ),
+        };
     let payload = ProgressPayload {
         name: name.to_string(),
         topic: topic.to_string(),
@@ -390,6 +417,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
         total_sources,
         pdf_count,
         youtube_count,
+        excluded_count,
     };
     let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
     format!("{PROGRESS_SENTINEL}{json}")
@@ -427,6 +455,8 @@ pub struct DecodedProgress {
     pub pdf_count: usize,
     /// Number of recovered YouTube transcripts / video URLs.
     pub youtube_count: usize,
+    /// Number of web sources fetched but excluded for low relevance.
+    pub excluded_count: usize,
 }
 
 /// Try to decode an [`Event::AgentNotice`] message as a research progress
@@ -451,6 +481,7 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
         total_sources: payload.total_sources,
         pdf_count: payload.pdf_count,
         youtube_count: payload.youtube_count,
+        excluded_count: payload.excluded_count,
     })
 }
 
@@ -556,6 +587,7 @@ mod tests {
                 total_sources: 7,
                 pdf_count: 2,
                 youtube_count: 1,
+                excluded_count: 0,
             },
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
@@ -663,7 +695,7 @@ mod tests {
         );
         p.apply(SessionPhase::Web, StepStatus::Started, "searching the web");
         p.apply(SessionPhase::Web, StepStatus::Done, "3 source(s) captured");
-        p.finish(3, 0, 0);
+        p.finish(3, 0, 0, 0);
         let rendered = p.render();
         assert!(rendered.contains("🔬 Research Progress"));
         assert!(rendered.contains("✓ setup"));
@@ -754,7 +786,7 @@ fn test_complete_message_replaces_totals_line() {
         StepStatus::Error,
         "fetch failed for https://b.com: 403",
     );
-    p.finish(1, 0, 0);
+    p.finish(1, 0, 0, 0);
 
     let rendered = p.render();
     assert!(

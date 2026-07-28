@@ -529,3 +529,69 @@ fn test_input_summary_mf_search_tool() {
         "Should contain query"
     );
 }
+// =============================================================================
+// Extended / newly registered tool input summary tests
+// =============================================================================
+
+#[test]
+fn test_input_summary_mf_fetch_tool() {
+    let input = json!({"url": "https://example.com"});
+    let summary = tool_input_summary("mf_fetch", &input, "/home/user/project");
+    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(summary.contains("example.com"), "Should contain url");
+}
+
+#[test]
+fn test_input_summary_mf_fetch_urls_array() {
+    let input = json!({"urls": ["https://a.com", "https://b.com"]});
+    let summary = tool_input_summary("mf_fetch", &input, "/home/user/project");
+    assert!(summary.contains("🌐"), "Should have network emoji");
+    assert!(summary.contains("a.com"), "Should contain first url");
+}
+
+#[test]
+fn test_input_summary_mf_crawl_tool() {
+    let input = json!({"url": "https://example.com"});
+    let summary = tool_input_summary("mf_crawl", &input, "/home/user/project");
+    assert!(summary.contains("🕷️"), "Should have spider emoji");
+    assert!(summary.contains("example.com"), "Should contain url");
+}
+
+#[test]
+fn test_input_summary_mf_screenshot_tool() {
+    let input = json!({"url": "https://example.com"});
+    let summary = tool_input_summary("mf_screenshot", &input, "/home/user/project");
+    assert!(summary.contains("📸"), "Should have camera emoji");
+    assert!(summary.contains("example.com"), "Should contain url");
+}
+
+#[test]
+fn test_input_summary_libre_read_tool() {
+    let input = json!({"path": "docs/report.odt"});
+    let summary = tool_input_summary("libre_read", &input, "/home/user/project");
+    assert!(summary.contains("📄"), "Should have document emoji");
+    assert!(summary.contains("docs/report.odt"), "Should contain path");
+}
+
+#[test]
+fn test_input_summary_mcp_tool() {
+    let input = json!({"query": "lookup"});
+    let summary = tool_input_summary("mcp_myserver_search", &input, "/home/user/project");
+    assert!(summary.contains("🔌"), "Should have plug emoji");
+    assert!(
+        summary.contains("myserver_search"),
+        "Should contain server/tool suffix"
+    );
+}
+
+#[test]
+fn test_input_summary_mf_cache_clear_tool() {
+    let summary = tool_input_summary("mf_cache_clear", &json!({}), "/home/user/project");
+    assert!(summary.contains("🧹"), "Should have broom emoji");
+}
+
+#[test]
+fn test_input_summary_mf_version_tool() {
+    let summary = tool_input_summary("mf_version", &json!({}), "/home/user/project");
+    assert!(summary.contains("ℹ️"), "Should have info emoji");
+}

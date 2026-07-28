@@ -163,6 +163,66 @@ No API key is needed — authentication uses your AWS credentials.
 
 ---
 
+## 1b. Validate Before You Run (Dry Run)
+
+Before invoking the model or executing any tool, run a readiness check to catch
+missing credentials, misconfigured MCP servers, or broken skill paths:
+
+```bash
+# Human-readable report
+ragent --dry-run
+
+# Same check, machine-readable JSON for CI/CD
+ragent --dry-run --json
+
+# Equivalent subcommand
+ragent config check --json
+```
+
+Example human output:
+
+```text
+config    ready   ragent.json parsed
+provider  ready   anthropic/claude-sonnet-4-20250514 (ANTHROPIC_API_KEY set)
+skills    ready   7 skills loaded (4 bundled + 3 discovered)
+tools     ready   111 tools visible across 15 families
+mcp       ready   1 server reachable
+Verdict: READY
+```
+
+Example CI script consuming the JSON report:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+report=$(ragent --dry-run --json)
+verdict=$(echo "$report" | jq -r '.verdict')
+
+if [[ "$verdict" == "BLOCKED" ]]; then
+  echo "Deployment check failed:" >&2
+  echo "$report" | jq '.sections[] | select(.status == "blocked")' >&2
+  exit 1
+fi
+
+if [[ "$verdict" == "WARNING" ]]; then
+  echo "Deployment usable but has warnings:" >&2
+  echo "$report" | jq '.sections[] | select(.status == "warning")' >&2
+fi
+
+echo "Deployment readiness: $verdict"
+```
+
+Exit codes follow the verdict:
+
+| Verdict  | Exit code | Meaning |
+|----------|-----------|---------|
+| `READY`  | `0`       | Ready to run |
+| `WARNING`| `0`       | Usable, but with non-fatal issues |
+| `BLOCKED`| `1`       | Fatal problem; do not deploy |
+
+---
+
 ## 2. First Run
 
 ```bash

@@ -338,6 +338,8 @@ pub enum SessionEvent {
         pdf_count: usize,
         /// Number of recovered YouTube transcripts / video URLs.
         youtube_count: usize,
+        /// Number of web sources fetched but excluded for low relevance.
+        excluded_count: usize,
     },
     /// Resolved run options, emitted once at the start of a session so that
     /// every observer (CLI JSON, TUI progress log, HTTP response) can confirm
@@ -1095,7 +1097,7 @@ impl ResearchSession {
         // ── Decide single-pass vs. iterative engine ─────────────────────
         let engine_cfg = config.engine_config();
         let use_iterative = config.iterations.is_some() || config.depth == Some(Depth::Deep);
-
+        let mut excluded_count = 0usize;
         if use_iterative && engine_cfg.max_iterations > 1 {
             observer.on_event(SessionEvent::Phase {
                 phase: SessionPhase::Web,
@@ -1104,13 +1106,15 @@ impl ResearchSession {
                 .run_iterative_pass(&topic, config, observer.clone())
                 .await
             {
-                Ok((iter_sources, iter_queries, iterations)) => {
+                Ok((iter_sources, iter_queries, iterations, iter_excluded)) => {
                     web_queries.extend(iter_queries);
+                    excluded_count += iter_excluded;
                     sources.extend(iter_sources);
                     tracing::info!(
                         name = %name,
                         iterations = iterations,
                         sources = sources.len(),
+                        excluded_count = iter_excluded,
                         "research: iterative pass complete"
                     );
                 }
@@ -1144,6 +1148,7 @@ impl ResearchSession {
                         if !gathered_queries.is_empty() {
                             web_queries.extend(gathered_queries);
                         }
+                        excluded_count += result.excluded_count;
                         sources.extend(result.sources);
                     }
                     Err(e) => {
@@ -1368,6 +1373,7 @@ impl ResearchSession {
             total_sources,
             pdf_count,
             youtube_count,
+            excluded_count,
         });
 
         info!(
@@ -1375,6 +1381,7 @@ impl ResearchSession {
             total = total_sources,
             pdf_count,
             youtube_count,
+            excluded_count,
             "research: session complete"
         );
 
@@ -1385,6 +1392,7 @@ impl ResearchSession {
             web_queries,
             pdf_count,
             youtube_count,
+            excluded_count,
         })
     }
 }
@@ -1399,7 +1407,7 @@ impl ResearchSession {
         topic: &str,
         config: &SessionConfig,
         observer: Arc<dyn SessionObserver>,
-    ) -> Result<(Vec<Source>, Vec<String>, u32)> {
+    ) -> Result<(Vec<Source>, Vec<String>, u32, usize)> {
         let planner = self
             .planner
             .clone()
@@ -1425,10 +1433,9 @@ impl ResearchSession {
             .iter()
             .map(|s| s.question.clone())
             .collect();
-        Ok((state.sources, queries, state.iteration_count))
+        Ok((state.sources, queries, state.iteration_count, 0))
     }
 }
-
 impl ResearchSession {
     /// Read captured source bodies from disk and run the analysis engine,
     /// returning the [`AnalysisResult`] paired with an [`AnalysisOutcome`]
@@ -1497,6 +1504,8 @@ pub struct RunOutcome {
     pub pdf_count: usize,
     /// Number of recovered YouTube transcripts / video URLs.
     pub youtube_count: usize,
+    /// Number of web sources fetched but excluded for low relevance.
+    pub excluded_count: usize,
 }
 
 // ── Free helpers ─────────────────────────────────────────────────────────
@@ -1886,8 +1895,15 @@ mod tests {
     }
     #[async_trait]
     impl WebSearchTool for FakeSearch {
-        async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-            Ok(self.hits.clone())
+        async fn search(&self, query: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+            let mut hits = self.hits.clone();
+            for hit in &mut hits {
+                hit.matched_query = query.to_string();
+                if hit.snippet.is_empty() {
+                    hit.snippet = query.to_string();
+                }
+            }
+            Ok(hits)
         }
     }
     struct FakeFetch {
@@ -1972,7 +1988,7 @@ mod tests {
                 hits: vec![WebSearchHit {
                     url: "https://example.com".into(),
                     title: "Example".into(),
-                    snippet: "snippet".into(),
+                    snippet: String::new(),
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
@@ -1988,6 +2004,7 @@ mod tests {
                         body: "body".into(),
                         content_type: None,
                         page_type: None,
+                        language: None,
                     },
                 )]),
             }),
@@ -2070,6 +2087,7 @@ mod tests {
                     body: "b".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2162,6 +2180,7 @@ mod tests {
                     body: "body".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2250,6 +2269,7 @@ mod tests {
                         .into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2282,7 +2302,8 @@ mod tests {
         assert!(
             web_sources.iter().any(|s| matches!(
                 s,
-                Source::Web { url, title, body, .. }
+                Source::Web { url, title, body, ..
+                }
                 if url == "https://example.com/guide"
                     && title == "Rust Async Programming Guide"
                     && body.contains("Long-form article")
@@ -2363,6 +2384,7 @@ mod tests {
                         .into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2446,6 +2468,7 @@ mod tests {
                     body: "Home About Contact\n\nLogin Sign up\n\n© 2024 Example Corp.".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2501,6 +2524,7 @@ mod tests {
                     body: "body text".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -2786,6 +2810,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
             Source::Local {
                 path: "x.md".into(),
@@ -2820,6 +2845,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
             Source::Web {
                 published_at: None,
@@ -2834,6 +2860,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -2884,6 +2911,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);
@@ -2910,6 +2938,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 media_type: "page".into(),
+                language: None,
             },
             Source::Local {
                 path: "src/lib.rs".into(),
@@ -3010,6 +3039,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);
@@ -3044,6 +3074,7 @@ mod tests {
             content_type: None,
             page_type: None,
             media_type: "page".into(),
+            language: None,
         }];
         let out = default_findings(&s, "topic");
         assert_eq!(out.len(), 1);

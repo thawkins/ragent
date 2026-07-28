@@ -34,6 +34,7 @@ pub mod envelope;
 pub mod extractor;
 pub mod focus;
 pub mod http;
+pub mod language;
 pub mod links;
 pub mod metadata;
 pub mod pdf;
@@ -207,6 +208,14 @@ pub struct PageMetadata {
     pub canonical: Option<String>,
     /// Page language (from `<html lang="...">`).
     pub lang: Option<String>,
+    /// Human language detected from the page's extracted text by the
+    /// `lingua` crate (e.g. `"English"`, `"French"`). This is a statistical
+    /// detection result, distinct from the declared `lang` attribute above,
+    /// and is populated by `mf_fetch` after content extraction. `None` when
+    /// the fetcher could not detect a language confidently (very short or
+    /// non-linguistic content), or when the source predates this field.
+    #[serde(default)]
+    pub detected_language: Option<String>,
     /// Publication timestamp (ISO 8601 string from `article:published_time`
     /// or JSON-LD `datePublished`).
     pub published_time: Option<String>,

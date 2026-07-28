@@ -1552,6 +1552,14 @@ pub struct App {
     pub skill_dirs_cache: Vec<String>,
     /// When the skill-registry cache was last refreshed from disk.
     pub skill_registry_last_refresh: std::time::Instant,
+
+    // ── Run-cost summary banner (FR-012) ────────────────────────────────────
+    /// Transient one-line run-complete banner shown after an agent run ends.
+    ///
+    /// Populated from `Event::RunCostSummary` and dismissed on the next
+    /// keypress. The full summary is always logged to the log panel
+    /// regardless of this banner's visibility.
+    pub run_cost_banner: Option<String>,
 }
 
 /// State for the `/research open` markdown viewer overlay.

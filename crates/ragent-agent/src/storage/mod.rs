@@ -22,6 +22,6 @@
 //! to resolve via the re-exports below.
 
 pub use ragent_storage::{
-    EmbeddingMatch, KgEntityRow, KgRelationshipRow, MemoryRow, SessionRow, Storage, TodoRow,
-    decrypt_key, deobfuscate_key, encrypt_key, obfuscate_key,
+    EmbeddingMatch, KgEntityRow, KgRelationshipRow, MemoryRow, RunCostSummaryRow, SessionRow,
+    Storage, TodoRow, decrypt_key, deobfuscate_key, encrypt_key, obfuscate_key,
 };

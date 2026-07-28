@@ -119,8 +119,10 @@ pub async fn invoke_skill(
         "Invoking skill"
     );
 
+    let body = skill.body_or_load().await?;
+
     // 1. Substitute argument placeholders
-    let substituted = substitute_args(&skill.body, args, session_id, &skill.skill_dir);
+    let substituted = substitute_args(&body, args, session_id, &skill.skill_dir);
 
     // 2. Execute dynamic context injection only when the skill opts in.
     let content = if skill.allow_dynamic_context {
@@ -338,11 +340,13 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: HashMap::new(),
+            trigger: None,
             allow_dynamic_context: false,
             source_path: PathBuf::from(format!("/skills/{name}/SKILL.md")),
             skill_dir: PathBuf::from(format!("/skills/{name}")),
             scope: SkillScope::Project,
             body: body.to_string(),
+            body_cache: crate::skill::default_body_cache(),
         }
     }
 

@@ -27,9 +27,20 @@
 //! - `RAGENT_WORKING_DIR` — the session working directory
 //! - `RAGENT_ERROR` — error message (only for `on_error` trigger)
 
+use ragent_types::event::EventBus;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
+
+/// Cap a string at `max` characters, trimming whitespace.
+fn cap_stderr(stderr: &str, max: usize) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.chars().count() <= max {
+        trimmed.to_string()
+    } else {
+        trimmed.chars().take(max).collect::<String>()
+    }
+}
 
 /// Trigger point for a lifecycle hook.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,7 +54,7 @@ pub enum HookTrigger {
     OnError,
     /// Fired when a tool call is rejected due to a permission rule.
     OnPermissionDenied,
-    /// Fired before a tool is executed, allowing hooks to approve/deny/modify.
+    /// Fired before a tool is executed, allowing hooks to approve/deny/modify/block.
     ///
     /// Hooks triggered by `PreToolUse` receive additional environment variables:
     /// - `RAGENT_TOOL_NAME` - the name of the tool being invoked
@@ -54,6 +65,12 @@ pub enum HookTrigger {
     /// - `{"decision": "deny", "reason": "..."}` - deny with optional reason
     /// - `{"modified_input": {...}}` - modify the tool arguments
     /// - Empty output or invalid JSON - normal permission flow applies
+    ///
+    /// In addition, the hook exit code is interpreted as follows:
+    /// - `0` - parse stdout JSON as above
+    /// - `1` - allow the tool but emit a warning (`Event::HookWarning`)
+    /// - `2` - block the tool; stderr is used as the reason and stdout JSON is ignored
+    /// - `>= 3` - treat as a hook failure and fall through to normal permission flow
     PreToolUse,
     /// Fired after a tool is executed, allowing hooks to inspect/modify results.
     ///
@@ -65,6 +82,13 @@ pub enum HookTrigger {
     ///
     /// Hooks can return modified output by writing to stdout:
     /// - `{"modified_output": {"content": "...", ...}}` - replace the tool output
+    ///
+    /// In addition, the hook exit code is interpreted as follows:
+    /// - `0` - parse stdout JSON as above
+    /// - `1` - emit a warning (`Event::HookWarning`) but do not modify output
+    /// - `2` - flag the tool result as policy-violated (`Event::ToolResultFlagged`);
+    ///   the tool result is not suppressed but the flag appears in the session log
+    /// - `>= 3` - treat as a hook failure (error diagnostic only)
     PostToolUse,
 }
 
@@ -129,8 +153,39 @@ pub enum PreToolUseResult {
         /// The modified tool input arguments.
         input: serde_json::Value,
     },
+    /// The hook blocked the tool via a non-zero exit code (exit code 2).
+    Blocked {
+        /// Reason for blocking the tool execution, typically hook stderr.
+        reason: String,
+    },
     /// No decision from hook - use normal permission flow.
     NoDecision,
+}
+
+/// Result of running a post-tool-use hook.
+///
+/// The exit code of each hook determines the variant:
+/// - `0` → [`Ok`](Self::Ok) with optional modified output from stdout JSON.
+/// - `1` → [`Warn`](Self::Warn) — a warning was emitted.
+/// - `2` → [`Flagged`](Self::Flagged) — the result is policy-violated.
+/// - `>= 3` → treated as a hook failure (no effect on the result).
+#[derive(Debug, Clone)]
+pub enum PostToolUseResult {
+    /// The hook completed successfully; optionally carries modified output.
+    Ok {
+        /// Last `modified_output` JSON value from a successful hook, if any.
+        modified_output: Option<serde_json::Value>,
+    },
+    /// The hook flagged the tool result as policy-violated (exit code 2).
+    Flagged {
+        /// Reason for flagging, typically the hook's stderr.
+        reason: String,
+    },
+    /// The hook emitted a warning (exit code 1).
+    Warn {
+        /// Warning message, typically the hook's stderr.
+        message: String,
+    },
 }
 
 /// Run hooks for PreToolUse synchronously and collect their decisions.
@@ -138,23 +193,32 @@ pub enum PreToolUseResult {
 /// This function runs hooks synchronously (unlike `fire_hooks` which is async)
 /// because it needs to potentially modify or block tool execution.
 ///
+/// `session_id` and `event_bus` are used to publish `Event::HookWarning` when a
+/// hook exits with code 1. When `event_bus` is `None`, the warning is only
+/// logged via `tracing::warn!`.
+///
 /// # Returns
 ///
-/// Returns the first hook result that makes a decision (Allow, Deny, or ModifiedInput).
-/// If no hooks make a decision, returns `NoDecision`.
+/// Returns the first hook result that makes a decision (`Allow`, `Deny`,
+/// `ModifiedInput`, or `Blocked`). If no hooks make a decision, returns
+/// `NoDecision`.
 ///
 /// # Examples
 ///
 /// ```
 /// use ragent_agent::hooks::{run_pre_tool_use_hooks, HookConfig, HookTrigger};
+/// use ragent_types::event::EventBus;
 /// use std::path::Path;
 ///
 /// let hooks = vec![];
+/// let bus = EventBus::default();
 /// let result = run_pre_tool_use_hooks(
 ///     &hooks,
 ///     Path::new("/tmp"),
 ///     "read",
 ///     r#"{"path": "src/main.rs"}"#,
+///     "sess-doc",
+///     Some(&bus),
 /// );
 /// // Returns NoDecision when no hooks configured
 /// ```
@@ -163,6 +227,8 @@ pub fn run_pre_tool_use_hooks(
     working_dir: &Path,
     tool_name: &str,
     tool_input: &str,
+    session_id: &str,
+    event_bus: Option<&EventBus>,
 ) -> PreToolUseResult {
     let matching: Vec<HookConfig> = hooks
         .iter()
@@ -247,20 +313,59 @@ pub fn run_pre_tool_use_hooks(
                 );
             }
             Ok(out) => {
-                tracing::warn!(
-                    trigger = "pre_tool_use",
-                    command = %hook.command,
-                    exit_code = ?out.status.code(),
-                    stderr = %String::from_utf8_lossy(&out.stderr),
-                    "PreToolUse hook exited with non-zero status"
-                );
+                let code = out.status.code();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let capped_stderr = cap_stderr(&stderr, 500);
+
+                match code {
+                    Some(2) => {
+                        tracing::info!(
+                            tool = %tool_name,
+                            hook_command = %hook.command,
+                            exit_code = 2,
+                            stderr = %capped_stderr,
+                            "PreToolUse hook blocked tool via exit code 2"
+                        );
+                        return PreToolUseResult::Blocked {
+                            reason: capped_stderr.clone(),
+                        };
+                    }
+                    Some(1) => {
+                        tracing::warn!(
+                            trigger = "pre_tool_use",
+                            command = %hook.command,
+                            tool = %tool_name,
+                            exit_code = 1,
+                            stderr = %capped_stderr,
+                            "PreToolUse hook exited with code 1 - allowing with warning"
+                        );
+                        if let Some(bus) = event_bus {
+                            bus.publish(ragent_types::event::Event::HookWarning {
+                                session_id: session_id.to_string(),
+                                hook_command: hook.command.clone(),
+                                tool: tool_name.to_string(),
+                                stderr: capped_stderr,
+                            });
+                        }
+                    }
+                    _ => {
+                        tracing::error!(
+                            trigger = "pre_tool_use",
+                            command = %hook.command,
+                            tool = %tool_name,
+                            exit_code = ?code,
+                            stderr = %capped_stderr,
+                            "PreToolUse hook failed with exit code >=3 - falling through to normal permission flow"
+                        );
+                    }
+                }
             }
             Err(e) => {
                 tracing::error!(
                     trigger = "pre_tool_use",
                     command = %hook.command,
                     error = %e,
-                    "PreToolUse hook execution failed"
+                    "PreToolUse hook spawn failed — treating as hook error (exit >=3)"
                 );
             }
         }
@@ -271,8 +376,25 @@ pub fn run_pre_tool_use_hooks(
 
 /// Run hooks for PostToolUse asynchronously.
 ///
-/// This function runs hooks asynchronously and allows them to modify the tool output.
-/// The output modifications are collected and the last one is returned.
+/// This function runs hooks asynchronously and allows them to modify the tool
+/// output. It also interprets exit codes to publish warnings and flags:
+///
+/// - **Exit code 0** — parse stdout JSON for `modified_output`.
+/// - **Exit code 1** — emit `tracing::warn!` and publish `Event::HookWarning`.
+/// - **Exit code 2** — publish `Event::ToolResultFlagged` with stderr as the
+///   reason. The tool result is not suppressed, but the flag appears in the
+///   session log and TUI.
+/// - **Exit code ≥ 3** — treat as a hook failure (`tracing::error!`).
+///
+/// `session_id` and `event_bus` are used to publish events. When `event_bus` is
+/// `None`, warnings and flags are only logged.
+///
+/// # Returns
+///
+/// Returns [`PostToolUseResult::Flagged`] if any hook exited with code 2,
+/// [`PostToolUseResult::Warn`] if any hook exited with code 1 (and none with 2),
+/// or [`PostToolUseResult::Ok`] with the last `modified_output` from a
+/// successful hook.
 pub async fn run_post_tool_use_hooks(
     hooks: &[HookConfig],
     working_dir: &Path,
@@ -280,7 +402,9 @@ pub async fn run_post_tool_use_hooks(
     tool_input: &str,
     tool_output: &str,
     success: bool,
-) -> Option<serde_json::Value> {
+    session_id: &str,
+    event_bus: Option<&EventBus>,
+) -> PostToolUseResult {
     let matching: Vec<HookConfig> = hooks
         .iter()
         .filter(|h| h.trigger == HookTrigger::PostToolUse)
@@ -288,10 +412,14 @@ pub async fn run_post_tool_use_hooks(
         .collect();
 
     if matching.is_empty() {
-        return None;
+        return PostToolUseResult::Ok {
+            modified_output: None,
+        };
     }
 
     let mut last_modified_output: Option<serde_json::Value> = None;
+    let mut warn_message: Option<String> = None;
+    let mut flagged_reason: Option<String> = None;
 
     for hook in matching {
         let wd = working_dir.to_path_buf();
@@ -336,41 +464,95 @@ pub async fn run_post_tool_use_hooks(
                 }
             }
             Ok(Ok(Ok(out))) => {
-                tracing::warn!(
-                    trigger = "post_tool_use",
-                    command = %command,
-                    exit_code = ?out.status.code(),
-                    stderr = %String::from_utf8_lossy(&out.stderr),
-                    "PostToolUse hook exited with non-zero status"
-                );
+                let code = out.status.code();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let capped_stderr = cap_stderr(&stderr, 500);
+
+                match code {
+                    Some(2) => {
+                        tracing::info!(
+                            tool = %tool_name,
+                            hook_command = %command,
+                            exit_code = 2,
+                            stderr = %capped_stderr,
+                            "PostToolUse hook flagged tool result as policy-violated"
+                        );
+                        if let Some(bus) = event_bus {
+                            bus.publish(ragent_types::event::Event::ToolResultFlagged {
+                                session_id: session_id.to_string(),
+                                tool: tool_name.to_string(),
+                                hook_command: command.clone(),
+                                reason: capped_stderr.clone(),
+                            });
+                        }
+                        flagged_reason = Some(capped_stderr);
+                    }
+                    Some(1) => {
+                        tracing::warn!(
+                            trigger = "post_tool_use",
+                            command = %command,
+                            tool = %tool_name,
+                            exit_code = 1,
+                            stderr = %capped_stderr,
+                            "PostToolUse hook exited with code 1 - warning"
+                        );
+                        if let Some(bus) = event_bus {
+                            bus.publish(ragent_types::event::Event::HookWarning {
+                                session_id: session_id.to_string(),
+                                hook_command: command.clone(),
+                                tool: tool_name.to_string(),
+                                stderr: capped_stderr.clone(),
+                            });
+                        }
+                        warn_message = Some(capped_stderr);
+                    }
+                    _ => {
+                        tracing::error!(
+                            trigger = "post_tool_use",
+                            command = %command,
+                            tool = %tool_name,
+                            exit_code = ?code,
+                            stderr = %capped_stderr,
+                            "PostToolUse hook failed with exit code >=3"
+                        );
+                    }
+                }
             }
             Ok(Ok(Err(e))) => {
                 tracing::error!(
                     trigger = "post_tool_use",
                     command = %command,
                     error = %e,
-                    "PostToolUse hook execution failed"
+                    "PostToolUse hook spawn failed — treating as hook error (exit >=3)"
                 );
             }
             Ok(Err(_)) => {
-                tracing::warn!(
+                tracing::error!(
                     trigger = "post_tool_use",
                     command = %command,
                     "PostToolUse hook task panicked"
                 );
             }
             Err(_) => {
-                tracing::warn!(
+                tracing::error!(
                     trigger = "post_tool_use",
                     command = %command,
                     timeout_secs = hook.timeout_secs,
-                    "PostToolUse hook timed out"
+                    "PostToolUse hook timed out — treating as hook error (exit >=3)"
                 );
             }
         }
     }
 
-    last_modified_output
+    if let Some(reason) = flagged_reason {
+        PostToolUseResult::Flagged { reason }
+    } else if let Some(message) = warn_message {
+        PostToolUseResult::Warn { message }
+    } else {
+        PostToolUseResult::Ok {
+            modified_output: last_modified_output,
+        }
+    }
 }
 
 /// Fire all hooks matching `trigger`, asynchronously.

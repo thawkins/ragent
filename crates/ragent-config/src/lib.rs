@@ -22,7 +22,7 @@ pub use compaction::{
 pub use config::{
     AgentConfig, AgentPerfConfig, AutoExtractConfig, Capabilities, Config, Cost,
     CrossProjectConfig, GitLabIntegrationConfig, McpServerConfig, McpTransport, MemoryConfig,
-    ModelConfig, ProviderConfig, ToolVisibilityConfig, tool_family_names,
+    ModelConfig, PriceEntry, ProviderConfig, ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,

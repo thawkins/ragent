@@ -482,11 +482,19 @@ mod tests {
     impl WebSearchTool for FakeSearch {
         async fn search(
             &self,
-            _query: &str,
+            query: &str,
             _max_results: usize,
         ) -> anyhow::Result<Vec<WebSearchHit>> {
             let mut hits = self.hits.lock().unwrap();
-            Ok(hits.pop_front().unwrap_or_default())
+            let mut out = hits.pop_front().unwrap_or_default();
+            // Keep synthetic hits from being discarded by the low-relevance
+            // guard when tests leave the snippet blank.
+            for hit in &mut out {
+                if hit.snippet.is_empty() {
+                    hit.snippet = query.to_string();
+                }
+            }
+            Ok(out)
         }
     }
 
@@ -503,6 +511,7 @@ mod tests {
                 body: "body text".to_string(),
                 content_type: None,
                 page_type: None,
+                language: None,
             })
         }
     }
@@ -549,7 +558,7 @@ mod tests {
         let hits = vec![vec![WebSearchHit {
             url: "https://rust-lang.org".to_string(),
             title: "Rust".to_string(),
-            snippet: "snip".to_string(),
+            snippet: String::new(),
             matched_query: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),

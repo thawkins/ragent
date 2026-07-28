@@ -601,6 +601,9 @@ pub struct GatherResult {
     pub pdf_count: usize,
     /// Count of captured YouTube video URLs.
     pub youtube_count: usize,
+    /// Number of candidate web sources that were fetched but excluded because
+    /// their relevance score was too low.
+    pub excluded_count: usize,
 }
 
 impl GatherResult {
@@ -612,6 +615,7 @@ impl GatherResult {
             sources: Vec::new(),
             pdf_count: 0,
             youtube_count: 0,
+            excluded_count: 0,
         }
     }
 }
@@ -659,6 +663,9 @@ pub struct WebFetchedPage {
     /// `docs`). Currently informational; `content_type` drives media
     /// classification.
     pub page_type: Option<String>,
+    /// Detected human language of the page body, when the fetcher reported
+    /// one. `None` when language detection was unavailable.
+    pub language: Option<String>,
 }
 
 /// Classified kind of a captured web source.
@@ -862,21 +869,21 @@ impl WebGatherer {
         let media_type = classify_web_source(url, page.content_type.as_deref())
             .as_str()
             .to_string();
-        let source = Source::Web {
-            url: page.url.clone(),
-            title,
-            captured_at: chrono::Utc::now(),
-            published_at: page.published_at,
-            body_path: web_body_path(0),
-            body,
-            relevance: "User-supplied seed URL".into(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: page.content_type.clone(),
-            page_type: page.page_type.clone(),
-            media_type,
-        };
-        Ok((source, page))
+                  let source = Source::Web {
+                      url: page.url.clone(),
+                      title,
+                      captured_at: chrono::Utc::now(),
+                      published_at: page.published_at,
+                      body_path: web_body_path(0),
+                      body,
+                      relevance: "User-supplied seed URL".into(),
+                      search_tool: String::new(),
+                      search_engine: String::new(),
+                      content_type: page.content_type.clone(),
+                      page_type: page.page_type.clone(),
+                      media_type,
+                      language: page.language.clone(),
+                  };        Ok((source, page))
     }
 
     /// Gather up to `max_results` web sources for `topic`.
@@ -1013,6 +1020,7 @@ impl WebGatherer {
                 sources: Vec::new(),
                 pdf_count: 0,
                 youtube_count: 0,
+                excluded_count: 0,
             });
         }
 
@@ -1038,6 +1046,7 @@ impl WebGatherer {
             }
         });
         let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
+        let mut excluded_count = 0usize;
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
         while let Some((index, query, hit, result)) = stream.next().await {
             match result {
@@ -1045,7 +1054,25 @@ impl WebGatherer {
                     let title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
-                    let relevance = compute_relevance_note(&query, &title, &hit.snippet, &page.url);
+                    let (relevance, retained) =
+                        compute_relevance_label(&query, &title, &hit.snippet, &page.url);
+                    if !retained {
+                        excluded_count += 1;
+                        tracing::info!(
+                            query = %query,
+                            url = %page.url,
+                            relevance = %relevance,
+                            "research: skipping web source due to low relevance"
+                        );
+                        if let Some(obs) = observer {
+                            obs.on_event(GatherEvent::FetchFailed {
+                                url: page.url.clone(),
+                                error: format!("relevance too low ({relevance})"),
+                            });
+                        }
+                        collected.push((index, None));
+                        continue;
+                    }
                     tracing::info!(
                         query = %query,
                         url = %page.url,
@@ -1063,29 +1090,29 @@ impl WebGatherer {
                             search_engine: hit.search_engine.clone(),
                         });
                     }
-                    collected.push((
-                        index,
-                        Some(Source::Web {
-                            url: page.url.clone(),
-                            title,
-                            captured_at: Utc::now(),
-                            published_at: page.published_at,
-                            body_path,
-                            body,
-                            relevance,
-                            search_tool: hit.search_tool,
-                            search_engine: hit.search_engine,
-                            content_type: page.content_type.clone(),
-                            page_type: page.page_type.clone(),
-                            media_type: classify_web_source(
-                                &page.url,
-                                page.content_type.as_deref(),
-                            )
-                            .as_str()
-                            .to_string(),
-                        }),
-                    ));
-                }
+                                          collected.push((
+                                              index,
+                                              Some(Source::Web {
+                                                  url: page.url.clone(),
+                                                  title,
+                                                  captured_at: Utc::now(),
+                                                  published_at: page.published_at,
+                                                  body_path,
+                                                  body,
+                                                  relevance,
+                                                  search_tool: hit.search_tool,
+                                                  search_engine: hit.search_engine,
+                                                  content_type: page.content_type.clone(),
+                                                  page_type: page.page_type.clone(),
+                                                  media_type: classify_web_source(
+                                                      &page.url,
+                                                      page.content_type.as_deref(),
+                                                  )
+                                                  .as_str()
+                                                  .to_string(),
+                                                  language: page.language.clone(),
+                                              }),
+                                          ));                }
                 Err(e) => {
                     if let Some(obs) = observer {
                         obs.on_event(GatherEvent::FetchFailed {
@@ -1128,6 +1155,7 @@ impl WebGatherer {
             count = sources.len(),
             pdf_count,
             youtube_count,
+            excluded_count,
             "research: web-gathering phase complete"
         );
         Ok(GatherResult {
@@ -1135,6 +1163,7 @@ impl WebGatherer {
             sources,
             pdf_count,
             youtube_count,
+            excluded_count,
         })
     }
 }
@@ -1149,15 +1178,16 @@ impl WebGatherer {
 /// - "Medium — snippet matches query"
 /// - "Low — weak match"
 /// - "Very high — exact title match"
-fn compute_relevance_note(query: &str, title: &str, snippet: &str, url: &str) -> String {
+fn compute_relevance_label(query: &str, title: &str, snippet: &str, url: &str) -> (String, bool) {
     let query_lc = query.to_lowercase();
     let query_terms: Vec<String> = query_lc
         .split_whitespace()
+        .filter(|t| !is_stopword(t))
         .filter(|t| t.len() > 2 || t.chars().any(char::is_alphabetic))
         .map(std::string::ToString::to_string)
         .collect();
     if query_terms.is_empty() {
-        return "Match score unavailable".into();
+        return ("Match score unavailable".into(), true);
     }
 
     let hay = format!(
@@ -1184,25 +1214,40 @@ fn compute_relevance_note(query: &str, title: &str, snippet: &str, url: &str) ->
     }
     let ratio = hits as f64 / query_terms.len() as f64;
 
-    if !title.is_empty() && title_lc == query.to_lowercase() {
-        return "Very high — exact title match".into();
-    }
-    if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
-        return "High — title + snippet match query".into();
-    }
-    if ratio >= 0.6 && title_hits > 0 {
-        return "High — title matches query".into();
-    }
-    if ratio >= 0.6 && snippet_hits > 0 {
-        return "Medium-high — snippet matches query".into();
-    }
-    if ratio >= 0.45 {
-        return "Medium — partial query match".into();
-    }
-    if ratio >= 0.2 {
-        return "Low — weak query match".into();
-    }
-    "Very low — no clear query match".into()
+    let label = if !title.is_empty() && title_lc == query.to_lowercase() {
+        "Very high — exact title match"
+    } else if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
+        "High — title + snippet match query"
+    } else if ratio >= 0.6 && title_hits > 0 {
+        "High — title matches query"
+    } else if ratio >= 0.6 && snippet_hits > 0 {
+        "Medium-high — snippet matches query"
+    } else if ratio >= 0.45 {
+        "Medium — partial query match"
+    } else if ratio >= 0.2 {
+        "Low — weak query match"
+    } else {
+        "Very low — no clear query match"
+    };
+
+    let retained = !label.starts_with("Low") && !label.starts_with("Very low");
+    (label.into(), retained)
+}
+
+/// Returns true for common English stopwords that should not dilute the
+/// relevance ratio. Removing them prevents a question like "What is Rust?"
+/// from being scored as low relevance just because the auxiliary words do not
+/// appear in the title or snippet.
+fn is_stopword(word: &str) -> bool {
+    const STOPWORDS: &[&str] = &[
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+        "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "can",
+        "shall", "of", "in", "on", "at", "to", "for", "with", "from", "by", "about", "as", "and",
+        "or", "but", "not", "no", "yes", "what", "which", "who", "when", "where", "why", "how",
+        "this", "that", "these", "those", "i", "you", "he", "she", "it", "we", "they", "their",
+        "there", "them", "his", "her", "its", "our", "your", "my", "me", "him", "us",
+    ];
+    STOPWORDS.contains(&word.to_lowercase().as_str())
 }
 
 /// Compute the zero-padded supporting-file path for the Nth web source.
@@ -1419,6 +1464,7 @@ mod tests {
                     body: "b".into(),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -1436,7 +1482,7 @@ mod tests {
             WebSearchHit {
                 url: "https://a.example".into(),
                 title: "A".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1444,7 +1490,7 @@ mod tests {
             WebSearchHit {
                 url: "https://b.example".into(),
                 title: "B".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1452,7 +1498,7 @@ mod tests {
             WebSearchHit {
                 url: "https://c.example".into(),
                 title: "C".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1468,6 +1514,7 @@ mod tests {
                 body: "body a".into(),
                 content_type: None,
                 page_type: None,
+                language: None,
             },
         );
         pages.insert(
@@ -1479,6 +1526,7 @@ mod tests {
                 body: "body b".into(),
                 content_type: None,
                 page_type: None,
+                language: None,
             },
         );
         pages.insert(
@@ -1490,6 +1538,7 @@ mod tests {
                 body: "body c".into(),
                 content_type: None,
                 page_type: None,
+                language: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -1526,7 +1575,7 @@ mod tests {
             WebSearchHit {
                 url: "https://ok".into(),
                 title: "OK".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1534,7 +1583,7 @@ mod tests {
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1551,6 +1600,7 @@ mod tests {
 
                 content_type: None,
                 page_type: None,
+                language: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -1570,7 +1620,7 @@ mod tests {
             WebSearchHit {
                 url: "https://1".into(),
                 title: "1".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1578,7 +1628,7 @@ mod tests {
             WebSearchHit {
                 url: "https://2".into(),
                 title: "2".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1586,7 +1636,7 @@ mod tests {
             WebSearchHit {
                 url: "https://3".into(),
                 title: "3".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1604,6 +1654,7 @@ mod tests {
 
                     content_type: None,
                     page_type: None,
+                    language: None,
                 },
             );
         }
@@ -1661,6 +1712,7 @@ mod tests {
 
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -1722,7 +1774,7 @@ mod tests {
             WebSearchHit {
                 url: "https://ok".into(),
                 title: "OK".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1730,7 +1782,7 @@ mod tests {
             WebSearchHit {
                 url: "https://bad".into(),
                 title: "Bad".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -1747,6 +1799,7 @@ mod tests {
 
                 content_type: None,
                 page_type: None,
+                language: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -1802,6 +1855,7 @@ mod tests {
                     body: format!("body-{url}"),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 })
             }
         }
@@ -1812,7 +1866,7 @@ mod tests {
                 vec![WebSearchHit {
                     url: "https://a.example".into(),
                     title: "A".into(),
-                    snippet: String::new(),
+                    snippet: "topic Rust async Tokio runtime".into(),
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
@@ -1824,7 +1878,7 @@ mod tests {
                     WebSearchHit {
                         url: "https://a.example".into(), // duplicate URL
                         title: "A2".into(),
-                        snippet: String::new(),
+                        snippet: "topic Rust async Tokio runtime".into(),
                         matched_query: String::new(),
                         search_tool: String::new(),
                         search_engine: String::new(),
@@ -1832,7 +1886,7 @@ mod tests {
                     WebSearchHit {
                         url: "https://b.example".into(),
                         title: "B".into(),
-                        snippet: String::new(),
+                        snippet: "topic Rust async Tokio runtime".into(),
                         matched_query: String::new(),
                         search_tool: String::new(),
                         search_engine: String::new(),
@@ -2056,6 +2110,7 @@ mod tests {
                 body: format!("body-{_url}"),
                 content_type: None,
                 page_type: None,
+                language: None,
             })
         }
     }
@@ -2087,7 +2142,7 @@ mod tests {
             .map(|i| WebSearchHit {
                 url: format!("https://h{i}.example"),
                 title: format!("H{i}"),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
@@ -2183,6 +2238,7 @@ mod tests {
                 content_type: Some("application/pdf".into()),
                 page_type: Some("pdf".into()),
                 published_at: None,
+                language: None,
             },
         );
         pages.insert(
@@ -2194,6 +2250,7 @@ mod tests {
                 content_type: Some("text/html; charset=utf-8".into()),
                 page_type: Some("youtube".into()),
                 published_at: None,
+                language: None,
             },
         );
 
@@ -2223,14 +2280,79 @@ mod tests {
         }
     }
 
-    /// `gather` counts PDF and YouTube sources returned by the fetch tool.
+    /// `gather` copies the detected language from the fetched page into the
+    /// web source so the References Index can render it.
+    #[tokio::test]
+    async fn gather_propagates_detected_language_to_source() {
+        let hits = vec![WebSearchHit {
+            url: "https://fr.example".into(),
+            title: "Article".into(),
+            snippet: "topic Rust async".into(),
+            matched_query: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://fr.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://fr.example".into(),
+                title: "Article".into(),
+                body: "corps de texte".into(),
+                content_type: None,
+                page_type: None,
+                language: Some("French".into()),
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("topic", 5).await.unwrap();
+        assert_eq!(sources.len(), 1);
+        if let Source::Web { language, .. } = &sources[0] {
+            assert_eq!(language.as_deref(), Some("French"));
+        } else {
+            panic!("expected Source::Web");
+        }
+    }
+
+    /// `fetch_url_as_source` copies the detected language from the fetched page
+    /// into the returned web source.
+    #[tokio::test]
+    async fn fetch_url_as_source_propagates_detected_language() {
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://es.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://es.example".into(),
+                title: "Página".into(),
+                body: "cuerpo".into(),
+                content_type: None,
+                page_type: None,
+                language: Some("Spanish".into()),
+            },
+        );
+        let g = WebGatherer::new(
+            Arc::new(FakeSearch::default()),
+            Arc::new(FakeFetch {
+                pages,
+                ..Default::default()
+            }),
+        );
+        let (source, _) = g.fetch_url_as_source("https://es.example").await.unwrap();
+        if let Source::Web { language, .. } = &source {
+            assert_eq!(language.as_deref(), Some("Spanish"));
+        } else {
+            panic!("expected Source::Web");
+        }
+    }
     #[tokio::test]
     async fn gather_counts_pdf_and_youtube_sources() {
         let hits = vec![
             WebSearchHit {
                 url: "https://example.com/paper.pdf".into(),
                 title: "PDF".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
@@ -2238,7 +2360,7 @@ mod tests {
             WebSearchHit {
                 url: "https://www.youtube.com/watch?v=abc123".into(),
                 title: "YouTube".into(),
-                snippet: String::new(),
+                snippet: "topic Rust async Tokio runtime".into(),
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
@@ -2254,6 +2376,7 @@ mod tests {
                 content_type: Some("application/pdf".into()),
                 page_type: Some("pdf".into()),
                 published_at: None,
+                language: None,
             },
         );
         pages.insert(
@@ -2265,6 +2388,7 @@ mod tests {
                 content_type: Some("text/html".into()),
                 page_type: Some("youtube".into()),
                 published_at: None,
+                language: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());

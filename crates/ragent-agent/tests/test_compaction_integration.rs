@@ -174,6 +174,9 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -299,6 +302,9 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -518,6 +524,9 @@ async fn test_emergency_overflow_compaction_retries_once() {
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -648,6 +657,9 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
         stream_config: ragent_agent::StreamConfig::default(),
         auto_approve: false,
         system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
