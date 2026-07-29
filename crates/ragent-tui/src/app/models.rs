@@ -1984,7 +1984,7 @@ impl App {
         }
     }
 
-    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 7] {
+    pub(crate) fn tool_visibility_switches(&self) -> [(&'static str, bool); 9] {
         [
             ("office", self.tool_visibility.office),
             ("github", self.tool_visibility.github),
@@ -1993,6 +1993,8 @@ impl App {
             ("agents", self.tool_visibility.agents),
             ("plan", self.tool_visibility.plan),
             ("codeindex", self.tool_visibility.codeindex),
+            ("masterfetch", self.tool_visibility.masterfetch),
+            ("browser", self.tool_visibility.browser),
         ]
     }
 
@@ -2029,6 +2031,14 @@ impl App {
                 self.tool_visibility.specified.plan = true;
             }
             "codeindex" => self.tool_visibility.set_codeindex(enabled),
+            "masterfetch" => {
+                self.tool_visibility.masterfetch = enabled;
+                self.tool_visibility.specified.masterfetch = true;
+            }
+            "browser" => {
+                self.tool_visibility.browser = enabled;
+                self.tool_visibility.specified.browser = true;
+            }
             _ => return false,
         }
         true

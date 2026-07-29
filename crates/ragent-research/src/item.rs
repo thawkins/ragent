@@ -51,6 +51,8 @@ use crate::status::ResearchStatus;
 /// - `sources` — the FR-011 References Index rows (empty until gathering
 ///   has captured at least one source).
 /// - `output_format` — the output artifact requested via `--format` (FR-012).
+/// - `model` — the LLM model used to perform the analysis, when an
+///   LLM-backed analysis engine was wired in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResearchItem {
     /// Validated URL-safe identifier; also the directory name under `research/`.
@@ -75,6 +77,11 @@ pub struct ResearchItem {
     /// so the rendered document reflects the original request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_format: Option<String>,
+    /// Model used to perform the analysis (e.g. `anthropic/claude-sonnet-4`).
+    /// Persisted in frontmatter as `Model:` so every `RESEARCH.md` records
+    /// which model produced its synthesis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl ResearchItem {
@@ -96,6 +103,7 @@ impl ResearchItem {
             sources: Vec::new(),
             queries: Vec::new(),
             output_format: None,
+            model: None,
         }
     }
 
@@ -163,6 +171,7 @@ impl ResearchItem {
     /// name: rust-async
     /// title: "Rust Async Patterns"
     /// topic: "async/await idioms"
+    /// Model: "anthropic/claude-sonnet-4"
     /// status: draft
     /// created: 2024-01-15T10:30:00Z
     /// modified: 2024-01-15T10:30:00Z
@@ -186,6 +195,12 @@ impl ResearchItem {
             "topic: \"{}\"\n",
             self.topic.replace(['\n', '\r'], " ").replace('\"', "\\\"")
         ));
+        if let Some(model) = &self.model {
+            out.push_str(&format!(
+                "Model: \"{}\"\n",
+                model.replace(['\n', '\r'], " ").replace('\"', "\\\"")
+            ));
+        }
         out.push_str(&format!("status: {}\n", self.status));
         out.push_str(&format!("created: {}\n", self.created_at.to_rfc3339()));
         out.push_str(&format!("modified: {}\n", self.modified_at.to_rfc3339()));
@@ -336,6 +351,7 @@ impl ResearchItem {
         // `sources` is count-only; the IO layer loads the real list.
         let _ = fields.remove("sources");
         let output_format = fields.remove("requested_format");
+        let model = fields.remove("model").map(|v| unquote_yaml_scalar(&v));
 
         Ok(Self {
             name,
@@ -347,6 +363,7 @@ impl ResearchItem {
             sources: Vec::new(),
             queries,
             output_format,
+            model,
         })
     }
 }
@@ -666,6 +683,29 @@ mod tests {
         let fm = item.render_frontmatter();
         let parsed = ResearchItem::from_frontmatter(&fm).expect("frontmatter must parse");
         assert_eq!(parsed.queries, vec!["first query", "second query"]);
+    }
+
+    #[test]
+    fn render_frontmatter_round_trips_with_model() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.model = Some("anthropic/claude-sonnet-4".into());
+        let fm = item.render_frontmatter();
+        assert!(
+            fm.contains("Model: \"anthropic/claude-sonnet-4\""),
+            "frontmatter should contain a Model: line; got:\n{fm}"
+        );
+        let parsed = ResearchItem::from_frontmatter(&fm).expect("frontmatter must parse");
+        assert_eq!(parsed.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+    }
+
+    #[test]
+    fn render_frontmatter_omits_model_line_when_none() {
+        let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains("Model:"),
+            "frontmatter must omit Model: when no model is set; got:\n{fm}"
+        );
     }
 
     #[test]

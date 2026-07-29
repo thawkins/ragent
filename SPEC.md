@@ -215,7 +215,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
 | **Multi-provider** | 12 first-class LLM providers with auto-discovery and health checks |
-| **Tool-rich** | ~111 registered tools across 15 categories |
+| **Tool-rich** | ~113 registered tools across 15 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -509,10 +509,11 @@ share the same ID with different backend modes.)
 The tool system is the primary way agents interact with the world. Each tool
 has a JSON schema, a permission category, and an async `execute` method.
 
-#### File Operations Tools (14)
+#### File Operations Tools (15)
 
 | Tool | Purpose |
 |------|---------|
+| `apply_patch` | Apply a Codex-style patch with add/delete/update and file moves |
 | `read` | Read file contents with line-range support |
 | `write` / `create` | Create or overwrite a file |
 | `edit` | Replace one exact string occurrence |
@@ -537,13 +538,14 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `delete_file` | `rm` |
 | `apply_patch` | `patch` |
 
-#### Execution Tools (3)
+#### Execution Tools (4)
 
 | Tool | Purpose |
 |------|---------|
 | `bash` | Run a shell command with 7-layer safety |
 | `bash_reset` | Reset persistent shell state |
 | `calculator` | Evaluate mathematical expressions |
+| `open` | Open/reveal files, folders, or URLs in the desktop environment |
 
 #### Interactive Tools (4)
 
@@ -566,11 +568,11 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| File operations | `read`, `write`, `create`, `edit`, `multiedit`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 15 |
-| Shell / execution | `bash`, `bash_reset`, `calculator` | 3 |
+| File operations | `read`, `write`, `create`, `edit`, `multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 16 |
+| Shell / execution | `bash`, `bash_reset`, `calculator`, `open` | 4 |
 | Search | `grep`, `codeindex_*` | 6 |
-| Web | `webfetch`, `websearch`, `http_request` | 3 |
-| Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate` | 8 |
+| Web | `webfetch`, `websearch`, `http_request`, `browser` | 4 |
+| Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
 | Teams | 20 team lifecycle/task/message tools | 20 |
 | Sub-agents | `new_task`, `cancel_task`, `list_tasks`, `wait_tasks`, `task_complete` | 5 |
@@ -602,6 +604,12 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `team_shutdown_teammate` | Request teammate shutdown |
 | `team_shutdown_ack` | Acknowledge shutdown request |
 | `team_cleanup` | Delete team on-disk state |
+
+#### Browser Automation Tool (1)
+
+| Tool | Purpose |
+|------|---------|
+| `browser` | Browser automation via Chrome DevTools Protocol (CDP). Actions: `open`, `snapshot`, `click`, `type`, `fill_form`, `select`, `wait`, `eval`, `scroll`, `upload`, `press`, `screenshot`, `status`, `setup`. Requires a running Chrome/Chromium with `--remote-debugging-port=9222` (use `action=setup` to launch one). Configurable via the `browser` config block in `ragent.json`. |
 
 ### 3.3 Agent System
 
@@ -1226,6 +1234,8 @@ filtering is available via `/codeindex lang <language>`.
 | `memory_search` | Semantic/keyword search across memories |
 | `memory_forget` | Delete memories by filter |
 | `memory_migrate` | Split a flat MEMORY.md into blocks |
+| `conversation_search` | Keyword/turn-range/stats search over the current session |
+| `session_search` | Cross-session full-text search with filters and context |
 
 ### 9.3 Automatic Extraction
 
@@ -1941,6 +1951,132 @@ editing are supported via `/mcp` slash commands.
 
 ---
 
+## 19A. Gmail & Messaging Channels
+
+### 19A.1 Gmail Tool (`gmail`)
+
+The `gmail` tool provides Gmail integration via the Gmail REST API with OAuth2
+tokens stored encrypted in the ragent SQLite credential store (never in
+`ragent.json`).
+
+Actions: `search`, `read`, `draft`, `send`, `auth` (import an existing OAuth2
+token set), `status`, `logout`.
+
+Client credentials resolve with the following precedence:
+
+1. Values passed to the `auth` action.
+2. Tokens previously stored via `auth`.
+3. `gmail.client_id` / `gmail.client_secret` in `ragent.json` (supports
+   `env:` indirection).
+4. `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` environment variables.
+
+On HTTP 401 the tool attempts a refresh-token exchange and retries once.
+
+```jsonc
+{
+  "gmail": {
+    "client_id": "env:GMAIL_CLIENT_ID",
+    "client_secret": "env:GMAIL_CLIENT_SECRET"
+  }
+}
+```
+
+### 19A.2 Channel Messenger Tool (`send_channel_message`)
+
+The `send_channel_message` tool sends short messages to external notification
+channels. Supported channels:
+
+- **Telegram** — bot API `sendMessage`
+- **Discord** — incoming webhook
+
+Actions: `send` (targets `telegram`, `discord`, or `all`), `status`.
+
+```jsonc
+{
+  "channels": {
+    "enabled": true,
+    "telegram": {
+      "bot_token": "env:TELEGRAM_BOT_TOKEN",
+      "chat_id": "-1001234567890"
+    },
+    "discord": {
+      "webhook_url": "https://discord.com/api/webhooks/..."
+    }
+  }
+}
+```
+
+Both tools are registered under the `network:send` permission category and
+degrade gracefully (honest errors with a `next_action` hint) when not
+configured.
+
+---
+
+## 19B. Durable Initiatives & Skill Management
+
+### 19B.1 Initiative Tool (`initiative`)
+
+The `initiative` tool manages durable, cross-session goals with milestone
+tracking. Unlike session-scoped `todo_*` items, initiatives are persisted in
+the project-scoped `initiatives` SQLite table and survive compaction, session
+restarts, and machine reboots. Any session running in the same working
+directory sees the same initiatives.
+
+Actions: `create`, `read`, `update`, `checkpoint`, `list`, `close`.
+
+```jsonc
+initiative action="create" id="api-v2" title="Ship API v2"
+           milestones=["design","implement","deprecate v1"]
+initiative action="checkpoint" id="api-v2" milestone="ms-1" progress=33
+           note="Design doc merged"
+initiative action="list"                       // active only (default)
+initiative action="list" status="all"          // includes closed
+initiative action="close" id="api-v2" status="completed"
+```
+
+`checkpoint` marks a milestone complete (recording `completed_at`), bumps the
+overall progress percentage, and appends the free-text `note` as a timestamped
+`Checkpoint:` line in the description so there is a durable audit trail.
+`close` requires `status` of `completed` (auto-fills progress to 100) or
+`abandoned` (keeps the recorded progress).
+
+Active initiatives are injected into the system prompt on every turn under
+`## Active Initiatives`, listing id, progress, and the next pending milestones
+so the agent stays aware of long-term goals across turns and sessions.
+
+Registered under the `storage:write` permission category.
+
+### 19B.2 Skill Management Tool (`skill_manage`)
+
+The `skill_manage` tool exposes runtime control of the skill registry
+(SPEC §12) without requiring a session restart.
+
+Actions:
+
+- `list` — enumerate registered skills (name, scope, invocation flags,
+  description). Optional `scope` filter; `include_bodies=true` also prints each
+  skill's prompt body.
+- `read` — return one skill's fully processed prompt body. `arguments` are
+  substituted into `$ARGUMENTS`-style placeholders, exactly as a `/skill`
+  invocation would.
+- `load` — (re)discover skills from disk and return the named skill's prompt,
+  the same content the model receives on `/skill` invocation. Use it to
+  "inject" a skill added or edited after session start.
+- `reload` — drop cached skill bodies, re-discover from disk, and report
+  which skills were added/removed since the previous scan, plus the bundled
+  baseline count.
+
+```jsonc
+skill_manage action="list"
+skill_manage action="read" name="rust-error-handling" arguments="ctx"
+skill_manage action="load" name="rust-error-handling"
+skill_manage action="reload"
+```
+
+Registered under the `skill:manage` permission category.
+
+---
+
 # Part VII: Operations & Reference
 
 ---
@@ -2067,6 +2203,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 ## Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.116)
 
 ### Added
+- `@<path>` include directive for instruction files — `AGENTS.md`/`CLAUDE.md`/`.ragent.md`/`INSTRUCTIONS.md` can pull in other markdown files with `@path/to/file.md` (or a quoted form for paths with spaces). The `@` must appear in the first column of the line (no leading whitespace); a leading `@@` is an escape sequence that collapses to a single literal `@`. Directives are expanded transitively before the content is loaded into the system prompt; paths resolve relative to the containing file's directory. Cycle detection (visited-path set) and a depth cap (`MAX_INCLUDE_DEPTH = 16`) prevent infinite loops; absolute paths and `../` escapes outside the working dir / global ragent data dir are rejected with an inline marker comment; missing/unreadable files emit a marker comment rather than failing.
 - COMMSPLAN team subsystem hardening (M1–M4)
   - M1: Advisory-lock-protected file stores (`*.json.lock` + UUID temp files) for `Mailbox`, `TaskStore`, and `TeamStore`
   - M2: Single-source team implementation — team runtime (7 modules) and 20 team tools are native to `ragent-agent`; `ragent-team` is a thin re-export shim. CI guard `scripts/check-team-duplication.sh`

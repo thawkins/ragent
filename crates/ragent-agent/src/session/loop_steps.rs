@@ -388,6 +388,18 @@ impl SessionProcessor {
             .await
             .unwrap_or_default()
         };
+        // JCODEPLAN M8 (T-070): surface active durable initiatives on every
+        // turn so the agent stays aware of long-term goals across sessions.
+        let initiatives_section = {
+            let _scope = profiler.scope("prompt.build_initiatives_section");
+            let wd = working_dir.to_path_buf();
+            let storage = Arc::clone(self.session_manager.storage());
+            tokio::task::spawn_blocking(move || {
+                crate::tool::initiative::build_initiatives_prompt_section(&storage, &wd)
+            })
+            .await
+            .unwrap_or_default()
+        };
         let mut system_prompt = {
             let _scope = profiler.scope("prompt.build_system_prompt");
             crate::agent::build_system_prompt_with_storage_and_memory(
@@ -420,6 +432,9 @@ impl SessionProcessor {
                 })
                 .unwrap_or_default()
         };
+        if !initiatives_section.is_empty() {
+            system_prompt.push_str(&initiatives_section);
+        }
         system_prompt.push_str(&tool_reference);
 
         system_prompt.push_str(
@@ -868,6 +883,7 @@ impl SessionProcessor {
                                     &turn.session_config.compaction,
                                     &turn.client,
                                     &self.event_bus,
+                                    &self.stream_config,
                                 )
                                 .await;
                                 match compact_result {
@@ -1114,6 +1130,7 @@ impl SessionProcessor {
                                     &turn.session_config.compaction,
                                     &turn.client,
                                     &self.event_bus,
+                                    &self.stream_config,
                                 )
                                 .await;
                                 match compact_result {

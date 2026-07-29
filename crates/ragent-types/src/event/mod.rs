@@ -549,6 +549,41 @@ pub enum Event {
         task_id: String,
     },
 
+    // ── Background shell task events (M3) ────────────────────────────────
+    /// A background shell task was spawned.
+    BackgroundTaskSpawned {
+        /// Session this task belongs to.
+        session_id: String,
+        /// Unique identifier for this background task.
+        task_id: String,
+        /// The shell command being executed.
+        command: String,
+    },
+    /// A background shell task emitted progress, output, or a status change.
+    BackgroundTaskUpdated {
+        /// Session this task belongs to.
+        session_id: String,
+        /// Unique identifier for this background task.
+        task_id: String,
+        /// Current status: `running`, `completed`, `failed`, `cancelled`.
+        status: String,
+        /// Optional parsed `JCODE_PROGRESS` payload.
+        #[serde(default)]
+        progress: Option<serde_json::Value>,
+    },
+    /// A background shell task finished.
+    BackgroundTaskCompleted {
+        /// Session this task belongs to.
+        session_id: String,
+        /// Unique identifier for this background task.
+        task_id: String,
+        /// Final status: `completed`, `failed`, or `cancelled`.
+        status: String,
+        /// Exit code, if the process exited.
+        #[serde(default)]
+        exit_code: Option<i32>,
+    },
+
     // ── Team lifecycle events ────────────────────────────────────────────
     /// A new teammate session was spawned into a team.
     TeammateSpawned {
@@ -734,6 +769,28 @@ pub enum Event {
         /// Search mode used: "semantic" or "fts".
         mode: String,
     },
+    /// A current-session conversation search was performed.
+    ConversationSearched {
+        /// Session that performed the search.
+        session_id: String,
+        /// The search query or mode descriptor.
+        query: String,
+        /// Number of results returned.
+        result_count: usize,
+        /// Search mode used: "keyword", "turn_range", or "stats".
+        mode: String,
+    },
+    /// A cross-session search was performed.
+    SessionSearched {
+        /// Session that performed the search.
+        session_id: String,
+        /// The search query used.
+        query: String,
+        /// Number of results returned.
+        result_count: usize,
+        /// Search mode used: "keyword" or "semantic".
+        mode: String,
+    },
     /// A `PreToolUse` or `PostToolUse` hook exited with code 1, signalling a
     /// warning but not a block.
     HookWarning {
@@ -833,6 +890,9 @@ impl Event {
             Self::SubagentResumed { .. } => "SubagentResumed",
             Self::SubagentKilled { .. } => "SubagentKilled",
             Self::SubagentCancelled { .. } => "SubagentCancelled",
+            Self::BackgroundTaskSpawned { .. } => "BackgroundTaskSpawned",
+            Self::BackgroundTaskUpdated { .. } => "BackgroundTaskUpdated",
+            Self::BackgroundTaskCompleted { .. } => "BackgroundTaskCompleted",
             Self::TeammateSpawned { .. } => "TeammateSpawned",
             Self::TeammateMessage { .. } => "TeammateMessage",
             Self::TeammateIdle { .. } => "TeammateIdle",
@@ -850,6 +910,8 @@ impl Event {
             Self::MemoryRecalled { .. } => "MemoryRecalled",
             Self::MemoryForgotten { .. } => "MemoryForgotten",
             Self::MemorySearched { .. } => "MemorySearched",
+            Self::ConversationSearched { .. } => "ConversationSearched",
+            Self::SessionSearched { .. } => "SessionSearched",
             Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
             Self::HookWarning { .. } => "HookWarning",
             Self::ToolResultFlagged { .. } => "ToolResultFlagged",
@@ -906,6 +968,9 @@ impl Event {
             | Self::SubagentResumed { session_id, .. }
             | Self::SubagentKilled { session_id, .. }
             | Self::SubagentCancelled { session_id, .. }
+            | Self::BackgroundTaskSpawned { session_id, .. }
+            | Self::BackgroundTaskUpdated { session_id, .. }
+            | Self::BackgroundTaskCompleted { session_id, .. }
             | Self::TeammateSpawned { session_id, .. }
             | Self::TeammateMessage { session_id, .. }
             | Self::TeammateIdle { session_id, .. }
@@ -927,6 +992,8 @@ impl Event {
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }
             | Self::MemorySearched { session_id, .. }
+            | Self::ConversationSearched { session_id, .. }
+            | Self::SessionSearched { session_id, .. }
             | Self::MemoryCandidateExtracted { session_id, .. }
             | Self::HookWarning { session_id, .. }
             | Self::ToolResultFlagged { session_id, .. }

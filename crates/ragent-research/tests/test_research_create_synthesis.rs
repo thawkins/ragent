@@ -256,6 +256,27 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
         body.contains("[https://example.com/async](https://example.com/async)"),
         "RESEARCH.md References Index should list the captured web source"
     );
+    // The title must NOT be derived from the fallback diagnostic summary.
+    // It should be the topic-derived title ("Malformed") passed to `run`.
+    let title_line = body
+        .lines()
+        .find(|l| l.starts_with("# Title:"))
+        .unwrap_or("");
+    assert!(
+        !title_line.contains("model response was malformed"),
+        "RESEARCH.md # Title: line must not be the fallback diagnostic, got: {title_line}"
+    );
+    assert!(
+        title_line.contains("Malformed"),
+        "RESEARCH.md # Title: should be the topic-derived title on fallback, got: {title_line}"
+    );
+    // The frontmatter title must also be the topic-derived title, not the
+    // fallback diagnostic.
+    let fm_title = body.lines().find(|l| l.starts_with("title:")).unwrap_or("");
+    assert!(
+        !fm_title.contains("model response was malformed"),
+        "RESEARCH.md frontmatter title must not be the fallback diagnostic, got: {fm_title}"
+    );
 }
 #[tokio::test]
 async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
@@ -275,7 +296,6 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
         )
         .await
         .unwrap();
-
     // The well-formed mock returns AnalysisOutcome::Llm, so session.rs must
     // surface SynthesizeOutcome::Llm.
     let has_llm;

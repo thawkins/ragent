@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use ragent_config::compaction::CompactionConfig;
+use ragent_config::{CompactionConfig, StreamConfig};
 use ragent_llm::llm::{ChatRequest, LlmClient, StreamEvent};
 use ragent_llm::providers::mock_llm_client::{MockLlmClient, MockScenario};
 use ragent_types::event::EventBus;
@@ -99,21 +99,30 @@ fn test_build_compaction_message_has_compaction_role() {
 
 #[test]
 fn test_build_summary_request_is_single_user_message_no_tools() {
-    let req = build_summary_request("claude-sonnet", "summarise this", 4096);
+    let req = build_summary_request("claude-sonnet", "summarise this", 4096, Some(120));
     assert_eq!(req.model, "claude-sonnet");
     assert_eq!(req.messages.len(), 1);
     assert_eq!(req.messages[0].role, "user");
     assert!(req.tools.is_empty());
     assert_eq!(req.max_tokens, Some(4096));
     assert!(req.system.is_none());
+    assert_eq!(req.stream_timeout_secs, Some(120));
 }
 
 #[tokio::test]
 async fn test_summarize_via_client_collects_text_deltas() {
     let client: Arc<dyn LlmClient> =
         Arc::new(MockLlmClient::with_scenario(MockScenario::SimpleTextReply));
-    let request = build_summary_request("mock-model", "summarise", 4096);
-    let summary = summarize_via_client(&client, request).await.unwrap();
+    let request = build_summary_request("mock-model", "summarise", 4096, None);
+    let summary = summarize_via_client(
+        &client,
+        request,
+        &StreamConfig::default(),
+        &EventBus::new(8),
+        "sess",
+    )
+    .await
+    .unwrap();
     // SimpleTextReply emits "Hello, world from the mock LLM client. Bye!\n".
     assert!(summary.contains("Hello, world from the mock LLM client"));
 }
@@ -136,8 +145,15 @@ impl LlmClient for ErrorClient {
 #[tokio::test]
 async fn test_summarize_via_client_propagates_error_event() {
     let client: Arc<dyn LlmClient> = Arc::new(ErrorClient);
-    let request = build_summary_request("mock", "x", 4096);
-    let result = summarize_via_client(&client, request).await;
+    let request = build_summary_request("mock", "x", 4096, Some(60));
+    let result = summarize_via_client(
+        &client,
+        request,
+        &StreamConfig::default(),
+        &EventBus::new(8),
+        "sess",
+    )
+    .await;
     assert!(result.is_err());
     assert!(
         result
@@ -178,6 +194,7 @@ async fn test_compact_replaces_history_with_summary_and_recent() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await
     .expect("compact should succeed");
@@ -231,6 +248,7 @@ async fn test_compact_bails_when_nothing_to_summarise() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await;
     assert!(result.is_err());
@@ -267,6 +285,7 @@ async fn test_compact_bails_on_empty_summary() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await;
     assert!(result.is_err());
@@ -300,6 +319,7 @@ async fn test_compact_publishes_started_and_finished_events() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await
     .unwrap();

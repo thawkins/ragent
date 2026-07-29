@@ -20,19 +20,23 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — ~111 registered tools across 15 categories:
-  - **File operations** — read, write, create, edit, multiedit, patch, rm, move, copy,
+- **Comprehensive tool system** — ~114 registered tools across 15 categories:
+  - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
-  - **Shell** — bash, bash_reset (7-layer security with safe-command whitelist,
+  - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
     banned commands, denied patterns, directory escape prevention, syntax validation,
     obfuscation detection, and user allowlist/denylist)
   - **Search** — grep
   - **Web** — webfetch, websearch, http_request
+  - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
+    click, type, fill_form, select, wait, eval, scroll, upload, press,
+    screenshot, status, setup)
   - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
     codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
     hardwired always-allowed)
   - **Memory** — memory_read, memory_write, memory_replace, memory_store,
-    memory_recall, memory_forget, memory_search, memory_migrate
+    memory_recall, memory_forget, memory_search, memory_migrate,
+    conversation_search, session_search
   - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
   - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
     and repository management
@@ -351,12 +355,14 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.130** — The core architecture, tool system (~111 tools), TUI, HTTP
+**v0.1.0-beta.17** — The core architecture, tool system (~114 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools — search current and past sessions by keyword with filters and context
+- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions including open, snapshot, click, type, eval, screenshot, and setup
 - TODO side panel added (Alt+T) with `/todo` slash alias
 - Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
 - All 279 compiler warnings eliminated (build, tests, benches, examples)

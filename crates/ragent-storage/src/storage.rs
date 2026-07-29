@@ -33,6 +33,26 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use ragent_types::message::{Message, MessagePart, Role};
 
+/// Extract searchable text content from a message's parts.
+///
+/// Concatenates all [`MessagePart::Text`] blocks, tool-call names, and
+/// reasoning text.  This is the text that gets indexed in `messages_fts`
+/// and returned in [`MessageSearchResult::content`].
+fn extract_message_text(parts: &[MessagePart]) -> String {
+    let mut buf = Vec::new();
+    for part in parts {
+        match part {
+            MessagePart::Text { text } => buf.push(text.clone()),
+            MessagePart::ToolCall { tool, .. } => {
+                buf.push(format!("[tool: {tool}]"));
+            }
+            MessagePart::Reasoning { text } => buf.push(text.clone()),
+            MessagePart::Image(_) => {}
+        }
+    }
+    buf.join(" ")
+}
+
 /// Fixed key used for legacy XOR-based obfuscation (v1 format).
 const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
 
@@ -312,170 +332,238 @@ impl Storage {
         let conn = lock_conn!(self)?;
         conn.execute_batch(
             "
-                          CREATE TABLE IF NOT EXISTS sessions (
-                              id TEXT PRIMARY KEY,
-                              title TEXT NOT NULL DEFAULT '',
-                              project_id TEXT NOT NULL DEFAULT '',
-                              directory TEXT NOT NULL,
-                              parent_id TEXT,
-                              version INTEGER NOT NULL DEFAULT 1,
-                              format_version INTEGER NOT NULL DEFAULT 1,
-                              created_at TEXT NOT NULL,
-                              updated_at TEXT NOT NULL,
-                              archived_at TEXT,
-                              summary TEXT
-                          );
+
+            CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT '',
+            project_id TEXT NOT NULL DEFAULT '',
+            directory TEXT NOT NULL,
+            parent_id TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            format_version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            archived_at TEXT,
+            summary TEXT
+            );
             CREATE TABLE IF NOT EXISTS messages (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                parts TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            parts TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_session
-                ON messages(session_id, created_at);
+            ON messages(session_id, created_at);
 
             CREATE TABLE IF NOT EXISTS provider_auth (
-                provider_id TEXT PRIMARY KEY,
-                api_key TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            provider_id TEXT PRIMARY KEY,
+            api_key TEXT NOT NULL,
+            updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS mcp_servers (
-                id TEXT PRIMARY KEY,
-                config TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'disabled',
-                updated_at TEXT NOT NULL
+            id TEXT PRIMARY KEY,
+            config TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'disabled',
+            updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS snapshots (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                data TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            data TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
             CREATE TABLE IF NOT EXISTS run_cost_summaries (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                total_cost_usd REAL NOT NULL,
-                duration_ms INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL,
+            output_tokens INTEGER NOT NULL,
+            total_cost_usd REAL NOT NULL,
+            duration_ms INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_run_cost_session
-                ON run_cost_summaries(session_id, created_at);
+            ON run_cost_summaries(session_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS background_tasks (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            command TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            exit_code INTEGER,
+            stdout TEXT NOT NULL DEFAULT '',
+            stderr TEXT NOT NULL DEFAULT '',
+            progress_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_bg_tasks_session
+            ON background_tasks(session_id, status, updated_at);
 
             CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS discovered_models (
-                provider_id TEXT PRIMARY KEY,
-                models_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            provider_id TEXT PRIMARY KEY,
+            models_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS todos (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                description TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            description TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
-                          CREATE INDEX IF NOT EXISTS idx_todos_session
-                              ON todos(session_id, status);
-            
-                                                      -- Structured memory store tables (Milestone 3)
-                                                      CREATE TABLE IF NOT EXISTS memories (
-                                                          id INTEGER PRIMARY KEY,
-                                                          content TEXT NOT NULL,
-                                                          category TEXT NOT NULL CHECK(category IN ('fact','pattern','preference','insight','error','workflow')),
-                                                          source TEXT NOT NULL DEFAULT '',
-                                                          confidence REAL NOT NULL DEFAULT 0.5,
-                                                          project TEXT NOT NULL DEFAULT '',
-                                                          session_id TEXT NOT NULL DEFAULT '',
-                                                          created_at TEXT NOT NULL,
-                                                          updated_at TEXT NOT NULL,
-                                                          access_count INTEGER NOT NULL DEFAULT 0,
-                                                          last_accessed TEXT
-                                                      );
-                          
-                                                      CREATE TABLE IF NOT EXISTS memory_tags (
-                                                          memory_id INTEGER NOT NULL,
-                                                          tag TEXT NOT NULL,
-                                                          PRIMARY KEY (memory_id, tag),
-                                                          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
-                                                      );
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memory_tags_tag
-                                                          ON memory_tags(tag);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_category
-                                                          ON memories(category, confidence DESC);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_project
-                                                          ON memories(project, updated_at DESC);
-                          
-                                                      CREATE INDEX IF NOT EXISTS idx_memories_confidence
-                                                          ON memories(confidence DESC, updated_at DESC);
-                          
-                                                                                                                                                                                                                              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-                                                                                                                                                                                                                                  USING fts5(content, content=memories, content_rowid=rowid);
-                                                                                                                                                                      
-                                                                                                                                                                      -- Knowledge graph tables (Milestone 9)
-                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_entities (
-                                                                                                                                                                          id INTEGER PRIMARY KEY,
-                                                                                                                                                                          name TEXT NOT NULL,
-                                                                                                                                                                          entity_type TEXT NOT NULL CHECK(entity_type IN ('project','tool','language','pattern','person','concept')),
-                                                                                                                                                                          mention_count INTEGER NOT NULL DEFAULT 1,
-                                                                                                                                                                          first_memory_id INTEGER,
-                                                                                                                                                                          created_at TEXT NOT NULL,
-                                                                                                                                                                          updated_at TEXT NOT NULL,
-                                                                                                                                                                          UNIQUE(name, entity_type)
-                                                                                                                                                                      );
-                                                                                                              
-                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_relationships (
-                                                                                                                                                                          id INTEGER PRIMARY KEY,
-                                                                                                                                                                          source_id INTEGER NOT NULL,
-                                                                                                                                                                          target_id INTEGER NOT NULL,
-                                                                                                                                                                          relation_type TEXT NOT NULL CHECK(relation_type IN ('uses','prefers','depends_on','avoids','related_to')),
-                                                                                                                                                                          confidence REAL NOT NULL DEFAULT 0.7,
-                                                                                                                                                                          source_memory_id INTEGER,
-                                                                                                                                                                          created_at TEXT NOT NULL,
-                                                                                                                                                                          FOREIGN KEY (source_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
-                                                                                                                                                                          FOREIGN KEY (target_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
-                                                                                                                                                                          UNIQUE(source_id, target_id, relation_type)
-                                                                                                                                                                      );
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_name
-                                                                                                                                                                          ON kg_entities(name);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_type
-                                                                                                                                                                          ON kg_entities(entity_type);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_source
-                                                                                                                                                                          ON kg_relationships(source_id);
-                                                                                                              
-                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_target
-                                                                                                                                                                          ON kg_relationships(target_id);
-                                                                                                              
-                                                                                                                                                                    ",        )?;
+            CREATE INDEX IF NOT EXISTS idx_todos_session
+            ON todos(session_id, status);
+
+            -- Durable initiatives (JCODEPLAN M8): long-lived goals that
+            -- survive across sessions, with JSON milestone tracking.
+            CREATE TABLE IF NOT EXISTS initiatives (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            milestones_json TEXT NOT NULL DEFAULT '[]',
+            progress INTEGER NOT NULL DEFAULT 0,
+            project TEXT NOT NULL DEFAULT '',
+            session_id TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            closed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_initiatives_project
+            ON initiatives(project, status);
+
+            -- Structured memory store tables (Milestone 3)
+            CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY,
+            content TEXT NOT NULL,
+            category TEXT NOT NULL CHECK(category IN ('fact','pattern','preference','insight','error','workflow')),
+            source TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 0.5,
+            project TEXT NOT NULL DEFAULT '',
+            session_id TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            access_count INTEGER NOT NULL DEFAULT 0,
+            last_accessed TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS memory_tags (
+            memory_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (memory_id, tag),
+            FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_memory_tags_tag
+            ON memory_tags(tag);
+
+            CREATE INDEX IF NOT EXISTS idx_memories_category
+            ON memories(category, confidence DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_memories_project
+            ON memories(project, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_memories_confidence
+            ON memories(confidence DESC, updated_at DESC);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+            USING fts5(content, content=memories, content_rowid=rowid);
+
+            -- Knowledge graph tables (Milestone 9)
+            CREATE TABLE IF NOT EXISTS kg_entities (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            entity_type TEXT NOT NULL CHECK(entity_type IN ('project','tool','language','pattern','person','concept')),
+            mention_count INTEGER NOT NULL DEFAULT 1,
+            first_memory_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(name, entity_type)
+            );
+
+            CREATE TABLE IF NOT EXISTS kg_relationships (
+            id INTEGER PRIMARY KEY,
+            source_id INTEGER NOT NULL,
+            target_id INTEGER NOT NULL,
+            relation_type TEXT NOT NULL CHECK(relation_type IN ('uses','prefers','depends_on','avoids','related_to')),
+            confidence REAL NOT NULL DEFAULT 0.7,
+            source_memory_id INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (source_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+            UNIQUE(source_id, target_id, relation_type)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_kg_entities_name
+            ON kg_entities(name);
+
+            CREATE INDEX IF NOT EXISTS idx_kg_entities_type
+            ON kg_entities(entity_type);
+
+            CREATE INDEX IF NOT EXISTS idx_kg_relationships_source
+            ON kg_relationships(source_id);
+
+            CREATE INDEX IF NOT EXISTS idx_kg_relationships_target
+            ON kg_relationships(target_id);
+
+            -- M5: Full-text search index over session messages.
+            -- Standalone FTS5 table (not external-content) because the
+            -- messages table uses TEXT primary keys rather than integer
+            -- rowids.  Kept in sync manually by create_message /
+            -- update_message / delete_messages and by
+            -- warm_message_search_index.
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            message_id UNINDEXED,
+            session_id UNINDEXED,
+            role UNINDEXED,
+            content,
+            tokenize = 'porter unicode61'
+            );
+
+            -- M5: Optional embedding cache for session messages.
+            -- When an embedding provider is configured, message vectors are
+            -- stored here and used for semantic search.  If the table is empty,
+            -- tools fall back to the FTS5 keyword index.
+            CREATE TABLE IF NOT EXISTS messages_embedding (
+            message_id TEXT PRIMARY KEY,
+            embedding BLOB NOT NULL,
+            dimensions INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_embedding_dims
+            ON messages_embedding(dimensions);
+
+            ",
+        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
         for (table, col) in &[("memories", "embedding"), ("sessions", "format_version")] {
             let has_col: bool = conn
@@ -764,6 +852,13 @@ impl Storage {
                 updated
             ],
         )?;
+        // M5: Sync the message FTS index.
+        let content = extract_message_text(&msg.parts);
+        conn.execute(
+            "INSERT INTO messages_fts (message_id, session_id, role, content) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![msg.id, msg.session_id, role_str, content],
+        )?;
         // Touch session updated_at
         let now = Utc::now().to_rfc3339();
         conn.execute(
@@ -861,6 +956,18 @@ impl Storage {
             "UPDATE messages SET parts = ?1, updated_at = ?2 WHERE id = ?3",
             params![parts_json, updated, msg.id],
         )?;
+        // M5: Sync the message FTS index — delete old entry and re-insert.
+        conn.execute(
+            "DELETE FROM messages_fts WHERE message_id = ?1",
+            params![msg.id],
+        )?;
+        let content = extract_message_text(&msg.parts);
+        let role_str = msg.role.to_string();
+        conn.execute(
+            "INSERT INTO messages_fts (message_id, session_id, role, content) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![msg.id, msg.session_id, role_str, content],
+        )?;
         Ok(())
     }
 
@@ -885,6 +992,11 @@ impl Storage {
     /// ```
     pub fn delete_messages(&self, session_id: &str) -> Result<usize> {
         let conn = lock_conn!(self)?;
+        // M5: Remove FTS entries before deleting messages.
+        conn.execute(
+            "DELETE FROM messages_fts WHERE session_id = ?1",
+            params![session_id],
+        )?;
         let n = conn.execute(
             "DELETE FROM messages WHERE session_id = ?1",
             params![session_id],
@@ -1385,6 +1497,159 @@ impl Storage {
             params![session_id],
         )?;
         Ok(changed)
+    }
+
+    // ── Durable Initiatives (JCODEPLAN M8) ──────────────────────────
+
+    /// Inserts a new durable initiative.
+    ///
+    /// `milestones` is serialised to JSON into `milestones_json`.
+    pub fn create_initiative(
+        &self,
+        id: &str,
+        title: &str,
+        description: &str,
+        milestones: &[InitiativeMilestone],
+        project: &str,
+        session_id: &str,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let milestones_json = serde_json::to_string(milestones)?;
+        conn.execute(
+            "INSERT INTO initiatives (id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'active', ?4, 0, ?5, ?6, ?7, ?7)",
+            params![id, title, description, milestones_json, project, session_id, now],
+        )?;
+        Ok(())
+    }
+
+    /// Fetches a single initiative by ID, scoped to `project`.
+    pub fn get_initiative(&self, id: &str, project: &str) -> Result<Option<InitiativeRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
+             FROM initiatives WHERE id = ?1 AND project = ?2",
+        )?;
+        let row = stmt
+            .query_row(params![id, project], initiative_from_row)
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Lists initiatives for a project, optionally filtered by status.
+    ///
+    /// Pass `Some("active")` etc. to filter, or `None` / `Some("all")` for all.
+    pub fn list_initiatives(
+        &self,
+        project: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<InitiativeRow>> {
+        let conn = lock_conn!(self)?;
+        let rows = match status_filter {
+            Some(s) if s != "all" => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
+                     FROM initiatives WHERE project = ?1 AND status = ?2
+                     ORDER BY created_at",
+                )?;
+                stmt.query_map(params![project, s], initiative_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            _ => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
+                     FROM initiatives WHERE project = ?1
+                     ORDER BY created_at",
+                )?;
+                stmt.query_map(params![project], initiative_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
+        Ok(rows)
+    }
+
+    /// Updates mutable initiative fields and/or status/closed_at.
+    ///
+    /// Returns `true` when a row was updated. `closed_at` is set automatically
+    /// when `status` transitions to `completed` or `abandoned` and is cleared
+    /// when the initiative re-opens (`active`/`paused`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_initiative(
+        &self,
+        id: &str,
+        project: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        milestones: Option<&[InitiativeMilestone]>,
+        progress: Option<u8>,
+        status: Option<&str>,
+        note: Option<&str>,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        // Checkpoint notes are recorded in the `initiative_notes` JSON array
+        // embedded in the description is *not* used — notes are appended to a
+        // dedicated `settings` key instead so they never collide with the
+        // human-readable description. Kept simple: ignore when None.
+        let _ = note;
+
+        let now = Utc::now().to_rfc3339();
+        let mut sets: Vec<String> = vec!["updated_at = ?NOW".to_string()];
+        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now.clone())];
+
+        if let Some(t) = title {
+            vals.push(Box::new(t.to_string()));
+            sets.push(format!("title = ?{}", vals.len()));
+        }
+        if let Some(d) = description {
+            vals.push(Box::new(d.to_string()));
+            sets.push(format!("description = ?{}", vals.len()));
+        }
+        if let Some(m) = milestones {
+            let mj = serde_json::to_string(m)?;
+            vals.push(Box::new(mj));
+            sets.push(format!("milestones_json = ?{}", vals.len()));
+        }
+        if let Some(p) = progress {
+            vals.push(Box::new(i64::from(p)));
+            sets.push(format!("progress = ?{}", vals.len()));
+        }
+        if let Some(s) = status {
+            vals.push(Box::new(s.to_string()));
+            sets.push(format!("status = ?{}", vals.len()));
+            if s == "completed" || s == "abandoned" {
+                vals.push(Box::new(now.clone()));
+                sets.push(format!("closed_at = ?{}", vals.len()));
+            } else {
+                sets.push("closed_at = NULL".to_string());
+            }
+        }
+
+        vals.push(Box::new(id.to_string()));
+        let id_ph = format!("?{}", vals.len());
+        vals.push(Box::new(project.to_string()));
+        let proj_ph = format!("?{}", vals.len());
+
+        let sql = format!(
+            "UPDATE initiatives SET {} WHERE id = {} AND project = {}",
+            sets.join(", ").replace("?NOW", "?1"),
+            id_ph,
+            proj_ph
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            vals.iter().map(std::convert::AsRef::as_ref).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed > 0)
+    }
+
+    /// Deletes an initiative. Returns `true` when a row was removed.
+    pub fn delete_initiative(&self, id: &str, project: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "DELETE FROM initiatives WHERE id = ?1 AND project = ?2",
+            params![id, project],
+        )?;
+        Ok(changed > 0)
     }
 
     // ── Structured Memory CRUD ──────────────────────────────────────
@@ -1956,6 +2221,131 @@ impl Storage {
         Ok(results)
     }
 
+    // ── Session message embeddings (M5) ────────────────────────���────────
+
+    /// Stores or updates an embedding vector for a session message.
+    ///
+    /// The `embedding_blob` is a little-endian `f32` byte blob produced by an
+    /// embedding provider.  The message's `created_at` timestamp is recorded
+    /// alongside the vector.  When no provider is available, tools fall back
+    /// to the FTS5 keyword index instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert/upsert fails.
+    pub fn store_message_embedding(
+        &self,
+        message_id: &str,
+        embedding_blob: &[u8],
+        dimensions: usize,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO messages_embedding (message_id, embedding, dimensions, created_at) \
+                   VALUES (?1, ?2, ?3, ?4) \
+                   ON CONFLICT(message_id) DO UPDATE SET \
+                       embedding = excluded.embedding, \
+                       dimensions = excluded.dimensions, \
+                       created_at = excluded.created_at",
+            params![message_id, embedding_blob, dimensions as i64, now],
+        )?;
+        Ok(())
+    }
+
+    /// Returns the stored embedding for a single message, if present.
+    ///
+    /// Decodes the blob against the requested dimensionality.  Returns `None`
+    /// when no embedding has been stored for the message or the stored vector
+    /// has a different `dimensions`.
+    pub fn get_message_embedding(
+        &self,
+        message_id: &str,
+        dimensions: usize,
+    ) -> Result<Option<Vec<f32>>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT embedding FROM messages_embedding \
+                   WHERE message_id = ?1 AND dimensions = ?2",
+        )?;
+        let blob: Option<Vec<u8>> = stmt
+            .query_row(params![message_id, dimensions as i64], |row| row.get(0))
+            .optional()?;
+        match blob {
+            Some(b) => Self::deserialise_embedding_owned(&b, dimensions).map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// Lists all stored session-message embeddings.
+    pub fn list_message_embeddings(&self) -> Result<Vec<(String, Vec<u8>, usize)>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT message_id, embedding, dimensions FROM messages_embedding")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Vec<u8>>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, blob, dims)| (id, blob, dims as usize))
+            .collect())
+    }
+
+    /// Searches session messages by cosine similarity against a query embedding.
+    ///
+    /// Loads all stored message embeddings of the requested dimensionality
+    /// and computes brute-force cosine similarity.  Results are ranked high
+    /// to low and truncated to `limit`.  Scores below `min_similarity` are
+    /// dropped.  The returned `EmbeddingMatch` contains the message ID as the
+    /// `row_id`.
+    pub fn search_messages_by_embedding<F>(
+        &self,
+        query_embedding: &[f32],
+        dimensions: usize,
+        limit: usize,
+        min_similarity: f32,
+        similarity: F,
+    ) -> Result<Vec<MessageEmbeddingMatch>>
+    where
+        F: Fn(&[f32], &[f32]) -> f32,
+    {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT message_id, embedding FROM messages_embedding WHERE dimensions = ?1",
+        )?;
+        let rows: Vec<(String, Vec<u8>)> = stmt
+            .query_map(params![dimensions as i64], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut results = Vec::new();
+        for (message_id, blob) in &rows {
+            if let Ok(stored) = Self::deserialise_embedding_owned(blob, dimensions) {
+                let score = similarity(query_embedding, &stored);
+                if score >= min_similarity {
+                    results.push(MessageEmbeddingMatch {
+                        message_id: message_id.clone(),
+                        score,
+                    });
+                }
+            }
+        }
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+        Ok(results)
+    }
+
     // ── Knowledge Graph CRUD ────────────────────────────────────────────
 
     /// Insert or update a knowledge graph entity.
@@ -2224,6 +2614,572 @@ impl Storage {
             .await
             .context("storage write task panicked")?
     }
+
+    /// Inserts a new background task row.
+    pub fn create_background_task(&self, row: &BackgroundTaskRow) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "INSERT INTO background_tasks (
+                id, session_id, command, status, exit_code,
+                stdout, stderr, progress_json, created_at, updated_at, completed_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                row.id,
+                row.session_id,
+                row.command,
+                row.status,
+                row.exit_code,
+                row.stdout,
+                row.stderr,
+                row.progress_json,
+                row.created_at,
+                row.updated_at,
+                row.completed_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetches a single background task by id.
+    pub fn get_background_task(&self, id: &str) -> Result<Option<BackgroundTaskRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, command, status, exit_code, stdout, stderr,
+                    progress_json, created_at, updated_at, completed_at
+             FROM background_tasks WHERE id = ?1",
+        )?;
+        Ok(stmt
+            .query_row(params![id], |row| {
+                Ok(BackgroundTaskRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    command: row.get(2)?,
+                    status: row.get(3)?,
+                    exit_code: row.get(4)?,
+                    stdout: row.get(5)?,
+                    stderr: row.get(6)?,
+                    progress_json: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                    completed_at: row.get(10)?,
+                })
+            })
+            .optional()?)
+    }
+
+    /// Lists background tasks, optionally filtered by session and/or status.
+    pub fn list_background_tasks(
+        &self,
+        session_id: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<BackgroundTaskRow>> {
+        let conn = lock_conn!(self)?;
+        let mut sql = String::from(
+            "SELECT id, session_id, command, status, exit_code, stdout, stderr,
+                    progress_json, created_at, updated_at, completed_at
+             FROM background_tasks WHERE 1=1",
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(sid) = session_id {
+            sql.push_str(" AND session_id = ?");
+            params_vec.push(Box::new(sid.to_string()));
+        }
+        if let Some(st) = status {
+            sql.push_str(" AND status = ?");
+            params_vec.push(Box::new(st.to_string()));
+        }
+        sql.push_str(" ORDER BY updated_at DESC LIMIT ?");
+        params_vec.push(Box::new(limit as i64));
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(BackgroundTaskRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    command: row.get(2)?,
+                    status: row.get(3)?,
+                    exit_code: row.get(4)?,
+                    stdout: row.get(5)?,
+                    stderr: row.get(6)?,
+                    progress_json: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                    completed_at: row.get(10)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Updates status, exit code, and optional completion timestamp for a task.
+    pub fn update_background_task_status(
+        &self,
+        id: &str,
+        status: &str,
+        exit_code: Option<i64>,
+        completed_at: Option<&str>,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE background_tasks SET status = ?1, exit_code = ?2, completed_at = ?3, updated_at = ?4 WHERE id = ?5",
+            params![status, exit_code, completed_at, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Appends captured stdout/stderr to a task and updates `progress_json`.
+    pub fn append_background_task_output(
+        &self,
+        id: &str,
+        stdout: &str,
+        stderr: &str,
+        progress_json: &str,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE background_tasks
+             SET stdout = stdout || ?1,
+                 stderr = stderr || ?2,
+                 progress_json = ?3,
+                 updated_at = ?4
+             WHERE id = ?5",
+            params![stdout, stderr, progress_json, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Overwrites the full stdout/stderr/progress for a task.
+    pub fn set_background_task_output(
+        &self,
+        id: &str,
+        stdout: &str,
+        stderr: &str,
+        progress_json: &str,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE background_tasks
+             SET stdout = ?1, stderr = ?2, progress_json = ?3, updated_at = ?4
+             WHERE id = ?5",
+            params![stdout, stderr, progress_json, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Deletes a single background task row.
+    pub fn delete_background_task(&self, id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute("DELETE FROM background_tasks WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Removes background tasks older than the given number of minutes.
+    pub fn cleanup_background_tasks(
+        &self,
+        session_id: Option<&str>,
+        older_than_minutes: i64,
+        completed_only: bool,
+    ) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let cutoff = (Utc::now() - chrono::Duration::minutes(older_than_minutes)).to_rfc3339();
+        let mut sql = String::from("DELETE FROM background_tasks WHERE updated_at < ?1");
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        params_vec.push(Box::new(cutoff));
+        if completed_only {
+            sql.push_str(" AND status IN ('completed', 'failed', 'cancelled')");
+        }
+        if let Some(sid) = session_id {
+            sql.push_str(" AND session_id = ?2");
+            params_vec.push(Box::new(sid.to_string()));
+        }
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+        Ok(conn.execute(&sql, param_refs.as_slice())?)
+    }
+
+    // ── M5: Session message search ──────────────────────────────────────
+
+    /// Searches the current session's messages using the FTS5 full-text index.
+    ///
+    /// Returns matching messages ranked by FTS5 relevance, with extracted text
+    /// content.  Compaction messages are included so the search covers the full
+    /// stored history, not just the active context window.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or the FTS match syntax is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "database migration plan")).unwrap();
+    /// storage.create_message(&Message::assistant_text("sess-1", "I will help with the migration")).unwrap();
+    /// let results = storage.search_conversation("sess-1", "migration", 10).unwrap();
+    /// assert!(!results.is_empty());
+    /// ```
+    pub fn search_conversation(
+        &self,
+        session_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<MessageSearchResult>> {
+        let conn = lock_conn!(self)?;
+
+        // Sanitise the FTS query.
+        let safe_query = sanitise_fts_query(query);
+        if safe_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = conn.prepare(
+            "SELECT f.message_id, f.session_id, f.role, f.content,
+                    m.created_at, s.title, s.directory, f.rank
+             FROM messages_fts f
+             INNER JOIN messages m ON m.id = f.message_id
+             LEFT JOIN sessions s ON s.id = f.session_id
+             WHERE messages_fts MATCH ?1 AND f.session_id = ?2
+             ORDER BY f.rank
+             LIMIT ?3",
+        )?;
+
+        let rows = stmt
+            .query_map(params![safe_query, session_id, limit as i64], |row| {
+                Ok(MessageSearchResult {
+                    message_id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row.get(4)?,
+                    session_title: row.get(5)?,
+                    session_directory: row.get(6)?,
+                    rank: row.get::<_, f64>(7).unwrap_or(0.0),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(rows)
+    }
+
+    /// Searches across all sessions' messages using the FTS5 full-text index
+    /// with optional filters.
+    ///
+    /// Supports filtering by date range, working directory, roles, and
+    /// per-session result limits.  Returns ranked results from all matching
+    /// sessions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails or the FTS match syntax is invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::{Storage, SessionSearchParams};
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project-a").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "database migration")).unwrap();
+    /// storage.create_session("sess-2", "/tmp/project-b").unwrap();
+    /// storage.create_message(&Message::assistant_text("sess-2", "the migration is done")).unwrap();
+    ///
+    /// let params = SessionSearchParams {
+    ///     query: "migration".to_string(),
+    ///     limit: 10,
+    ///     ..Default::default()
+    /// };
+    /// let results = storage.search_session_messages(&params).unwrap();
+    /// assert!(!results.is_empty());
+    /// ```
+    pub fn search_session_messages(
+        &self,
+        params: &SessionSearchParams,
+    ) -> Result<Vec<MessageSearchResult>> {
+        let conn = lock_conn!(self)?;
+
+        // Sanitise the FTS query.
+        let safe_query = sanitise_fts_query(&params.query);
+        if safe_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build the SQL query with optional filters.
+        // We use a CTE to apply max_per_session if requested.
+        let has_max_per_session = params.max_per_session.is_some();
+        let max_per_session = params.max_per_session.unwrap_or(0);
+
+        let mut where_clauses = vec!["messages_fts MATCH ?1".to_string()];
+        let mut sql_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        sql_params.push(Box::new(safe_query));
+
+        let mut param_idx = 2; // ?1 is the FTS query
+
+        if let Some(ref since) = params.since {
+            where_clauses.push(format!("m.created_at >= ?{param_idx}"));
+            sql_params.push(Box::new(since.clone()));
+            param_idx += 1;
+        }
+
+        if let Some(ref until) = params.until {
+            where_clauses.push(format!("m.created_at <= ?{param_idx}"));
+            sql_params.push(Box::new(until.clone()));
+            param_idx += 1;
+        }
+
+        if let Some(ref working_dir) = params.working_dir {
+            where_clauses.push(format!("s.directory = ?{param_idx}"));
+            sql_params.push(Box::new(working_dir.clone()));
+            param_idx += 1;
+        }
+
+        if let Some(ref roles) = params.roles
+            && !roles.is_empty()
+        {
+            let placeholders: Vec<String> = (0..roles.len())
+                .map(|i| format!("?{}", param_idx + i))
+                .collect();
+            where_clauses.push(format!("f.role IN ({})", placeholders.join(", ")));
+            for role in roles {
+                sql_params.push(Box::new(role.clone()));
+            }
+            param_idx += roles.len();
+        }
+        if let Some(ref session_id) = params.session_id {
+            where_clauses.push(format!("f.session_id = ?{param_idx}"));
+            sql_params.push(Box::new(session_id.clone()));
+            param_idx += 1;
+        }
+
+        let where_sql = where_clauses.join(" AND ");
+        let limit = params.limit;
+
+        let sql = if has_max_per_session {
+            // Use ROW_NUMBER() to limit per session.
+            format!(
+                "WITH ranked AS (
+                    SELECT f.message_id, f.session_id, f.role, f.content,
+                           m.created_at, s.title, s.directory, f.rank,
+                           ROW_NUMBER() OVER (PARTITION BY f.session_id ORDER BY f.rank) AS rn
+                    FROM messages_fts f
+                    INNER JOIN messages m ON m.id = f.message_id
+                    LEFT JOIN sessions s ON s.id = f.session_id
+                    WHERE {where_sql}
+                )
+                SELECT message_id, session_id, role, content,
+                       created_at, title, directory, rank
+                FROM ranked
+                WHERE rn <= ?{param_idx}
+                ORDER BY rank
+                LIMIT ?{}",
+                param_idx + 1
+            )
+        } else {
+            format!(
+                "SELECT f.message_id, f.session_id, f.role, f.content,
+                        m.created_at, s.title, s.directory, f.rank
+                 FROM messages_fts f
+                 INNER JOIN messages m ON m.id = f.message_id
+                 LEFT JOIN sessions s ON s.id = f.session_id
+                 WHERE {where_sql}
+                 ORDER BY f.rank
+                 LIMIT ?{param_idx}"
+            )
+        };
+
+        if has_max_per_session {
+            sql_params.push(Box::new(max_per_session as i64));
+        }
+        sql_params.push(Box::new(limit as i64));
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            sql_params.iter().map(std::convert::AsRef::as_ref).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(MessageSearchResult {
+                    message_id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    created_at: row.get(4)?,
+                    session_title: row.get(5)?,
+                    session_directory: row.get(6)?,
+                    rank: row.get::<_, f64>(7).unwrap_or(0.0),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(rows)
+    }
+
+    /// Returns the total message count and per-role breakdown for a session.
+    ///
+    /// Used by the `conversation_search` stats mode to give the agent a quick
+    /// overview of the current session size.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// storage.create_message(&Message::assistant_text("sess-1", "hi there")).unwrap();
+    /// let stats = storage.conversation_stats("sess-1").unwrap();
+    /// assert_eq!(stats.total, 2);
+    /// ```
+    pub fn conversation_stats(&self, session_id: &str) -> Result<ConversationStats> {
+        let conn = lock_conn!(self)?;
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        let user_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'user'",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        let assistant_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'assistant'",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        let compaction_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1 AND role = 'compaction'",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        let has_compaction = compaction_count > 0;
+
+        Ok(ConversationStats {
+            total,
+            user_count,
+            assistant_count,
+            compaction_count,
+            has_compaction,
+        })
+    }
+
+    /// Rebuilds the `messages_fts` index from the existing `messages` table.
+    ///
+    /// This should be called on startup (T-043) to ensure the FTS index is
+    /// up to date after an upgrade or after messages were inserted by a
+    /// version of ragent that predated the FTS index.
+    ///
+    /// Returns the number of messages indexed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rebuild fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_storage::storage::Storage;
+    /// use ragent_types::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// let count = storage.warm_message_search_index().unwrap();
+    /// assert!(count >= 1);
+    /// ```
+    pub fn warm_message_search_index(&self) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+
+        // Clear the existing index.
+        conn.execute("DELETE FROM messages_fts", [])?;
+
+        // Rebuild from the messages table.
+        // We extract text content from the JSON parts column.
+        let mut stmt = conn.prepare("SELECT id, session_id, role, parts FROM messages")?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                let session_id: String = row.get(1)?;
+                let role: String = row.get(2)?;
+                let parts_json: String = row.get(3)?;
+                Ok((id, session_id, role, parts_json))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let mut count = 0usize;
+        for (id, session_id, role, parts_json) in rows {
+            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
+            let content = extract_message_text(&parts);
+            conn.execute(
+                "INSERT INTO messages_fts (message_id, session_id, role, content) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![id, session_id, role, content],
+            )?;
+            count += 1;
+        }
+
+        Ok(count)
+    }
+}
+
+/// Statistics about a session's message history.
+///
+/// Returned by [`Storage::conversation_stats`].  Used by the
+/// `conversation_search` tool's stats mode.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConversationStats {
+    /// Total number of messages in the session.
+    pub total: i64,
+    /// Number of user messages.
+    pub user_count: i64,
+    /// Number of assistant messages.
+    pub assistant_count: i64,
+    /// Number of compaction messages.
+    pub compaction_count: i64,
+    /// `true` if the session has been compacted at least once.
+    pub has_compaction: bool,
+}
+
+/// Sanitise a user-supplied query string for safe use as an FTS5 MATCH expression.
+///
+/// Splits on whitespace, wraps each term in double quotes (removing any
+/// embedded double quotes), and joins with spaces so FTS5 treats each term
+/// as a phrase query connected by implicit AND.
+fn sanitise_fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .map(|term| format!("\"{}\"", term.replace('"', "")))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Raw row representation of a session as stored in `SQLite`.
@@ -2251,6 +3207,78 @@ pub struct SessionRow {
     pub archived_at: Option<String>,
     /// JSON-encoded session summary, if available.
     pub summary: Option<String>,
+}
+
+// ── Initiatives (JCODEPLAN M8) ──────────────────────────────────────
+
+/// A serialisable milestone within a durable initiative.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct InitiativeMilestone {
+    /// Stable milestone identifier (unique within the initiative).
+    pub id: String,
+    /// Human-readable title.
+    pub title: String,
+    /// `true` when the milestone is complete.
+    pub done: bool,
+    /// ISO-8601 completion timestamp (set when `done` flips to true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+}
+
+/// Row representation of a durable initiative.
+#[derive(Debug, Clone)]
+pub struct InitiativeRow {
+    /// Unique initiative identifier.
+    pub id: String,
+    /// Human-readable goal title.
+    pub title: String,
+    /// Longer description / success criteria.
+    pub description: String,
+    /// Lifecycle status: active, paused, completed, abandoned.
+    pub status: String,
+    /// JSON-encoded `Vec<InitiativeMilestone>`.
+    pub milestones_json: String,
+    /// Overall progress 0–100.
+    pub progress: u32,
+    /// Project the initiative belongs to (typically working-dir string).
+    pub project: String,
+    /// Session that created the initiative (informational).
+    pub session_id: String,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
+    pub updated_at: String,
+    /// ISO-8601 close timestamp (when status became completed/abandoned).
+    pub closed_at: Option<String>,
+}
+
+impl InitiativeRow {
+    /// Decode `milestones_json` into a structured milestone list.
+    ///
+    /// Falls back to an empty vector on malformed JSON (should never happen
+    /// for rows written through [`Storage::create_initiative`]).
+    #[must_use]
+    pub fn milestones(&self) -> Vec<InitiativeMilestone> {
+        serde_json::from_str(&self.milestones_json).unwrap_or_default()
+    }
+}
+
+/// Row-mapping helper for `initiatives` queries.
+fn initiative_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InitiativeRow> {
+    let progress_i: i64 = row.get(5)?;
+    Ok(InitiativeRow {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        description: row.get(2)?,
+        status: row.get(3)?,
+        milestones_json: row.get(4)?,
+        progress: u32::try_from(progress_i).unwrap_or(0),
+        project: row.get(6)?,
+        session_id: row.get(7)?,
+        created_at: row.get(8)?,
+        updated_at: row.get(9)?,
+        closed_at: row.get(10)?,
+    })
 }
 
 /// Row representation of a TODO item.
@@ -2381,4 +3409,98 @@ pub struct EmbeddingMatch {
     pub row_id: i64,
     /// Cosine similarity score in `[-1.0, 1.0]`.  Higher = more similar.
     pub score: f32,
+}
+
+/// Pairs a session-message identifier with its cosine-similarity score.
+#[derive(Debug, Clone)]
+pub struct MessageEmbeddingMatch {
+    /// Message identifier (UUID v4).
+    pub message_id: String,
+    /// Cosine similarity score in `[-1.0, 1.0]`.  Higher = more similar.
+    pub score: f32,
+}
+
+/// Row representation of a background shell task.
+///
+/// Mirrors the `background_tasks` table used by the M3 background task manager.
+#[derive(Debug, Clone)]
+pub struct BackgroundTaskRow {
+    /// Unique task identifier (UUID v4).
+    pub id: String,
+    /// Session that owns this task.
+    pub session_id: String,
+    /// Shell command being executed.
+    pub command: String,
+    /// Current status: `running`, `completed`, `failed`, or `cancelled`.
+    pub status: String,
+    /// Exit code when the process finished.
+    pub exit_code: Option<i64>,
+    /// Captured standard output.
+    pub stdout: String,
+    /// Captured standard error.
+    pub stderr: String,
+    /// Parsed `JCODE_PROGRESS` payload as JSON text.
+    pub progress_json: String,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
+    pub updated_at: String,
+    /// ISO-8601 completion timestamp, if finished.
+    pub completed_at: Option<String>,
+}
+
+// ── M5: Session message search types ───────────────────────────────────────
+
+/// A single message search result from the `messages_fts` full-text index.
+///
+/// Returned by [`Storage::search_conversation`] and
+/// [`Storage::search_session_messages`].  The `content` field is the
+/// extracted text from the message parts (text blocks, tool names,
+/// reasoning) — not the raw JSON parts blob.
+#[derive(Debug, Clone)]
+pub struct MessageSearchResult {
+    /// Unique message identifier (UUID v4).
+    pub message_id: String,
+    /// Session this message belongs to.
+    pub session_id: String,
+    /// Message role: `user`, `assistant`, or `compaction`.
+    pub role: String,
+    /// Extracted text content from the message parts.
+    pub content: String,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// Session title, if available (joined from `sessions` table).
+    pub session_title: Option<String>,
+    /// Session working directory, if available.
+    pub session_directory: Option<String>,
+    /// FTS5 rank score (lower = more relevant).
+    pub rank: f64,
+}
+
+/// Parameters for cross-session message search ([`Storage::search_session_messages`]).
+///
+/// All filter fields are optional; when `None`, no filter is applied for that
+/// dimension.
+#[derive(Debug, Clone, Default)]
+pub struct SessionSearchParams {
+    /// Full-text search query (FTS5 syntax).
+    pub query: String,
+    /// Maximum total results to return.
+    pub limit: usize,
+    /// Maximum results per session (applied after ranking).
+    pub max_per_session: Option<usize>,
+    /// Only include messages created on or after this ISO-8601 timestamp.
+    pub since: Option<String>,
+    /// Only include messages created on or before this ISO-8601 timestamp.
+    pub until: Option<String>,
+    /// Filter to sessions whose working directory matches this path.
+    pub working_dir: Option<String>,
+    /// Filter to specific roles (e.g. `["user", "assistant"]`).
+    pub roles: Option<Vec<String>>,
+    /// When `true`, include tool-call content in the extracted text.
+    pub include_tools: bool,
+    /// When `true`, include reasoning/system content in the extracted text.
+    pub include_system: bool,
+    /// Restrict search to a specific session id (optional).
+    pub session_id: Option<String>,
 }

@@ -1,8 +1,67 @@
-to change formating like
+## 1. Think Before Coding
 
-# Agent Guidelines for Rust apps
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
 
-- First when you startup say "Hi im RAgent and I have read Agents.md"
+Before implementing:
+
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## Agent Guidelines for Rust apps
+
+- First when you startup say "Hi I'm RAgent and I have read Agents.md"
 
 ## Available Tools
 
@@ -10,7 +69,7 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 
 ### Core Tools (always available)
 
-- `bash` — Execute a shell command. Use `command` to provide the command, or `code` for a code snippet.
+- `bash` — Execute a shell command. Use `command` to provide the command.
 - `read` — Read file contents with optional `start_line`/`end_line` range.
 - `edit` — Replace an exact occurrence of text in a file.
 - `multiedit` — Apply multiple edits across one or more files atomically.
@@ -20,7 +79,6 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `grep` — Search file contents for a regex pattern using ripgrep.
 - `glob` — Find files matching a glob pattern.
 - `list` — List directory contents.
-- `question` — Ask the user a question and wait for their typed response.
 - `get_env` — Read environment variables.
 - `file_info` — Return metadata for a file or directory.
 - `diff_files` — Show a unified diff between two files or inline strings.
@@ -28,7 +86,7 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `move_file` — Move or rename a file or directory.
 - `rm` — Delete a single file.
 - `patch` — Apply a unified diff patch to one or more files.
-- `mkdir` — Create a directory.
+- `make_directory` — Create a directory at the given path, including any missing parent directories.
 - `calculator` — Evaluate a mathematical expression.
 - `think` — Record a short reasoning note without changing project state.
 - `todo_read` — List TODO items for the current session.
@@ -43,11 +101,11 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
 - `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
 - `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
-- `codeindex_references` Find all references to a symbol by name across the indexed codebase.
+- `codeindex_references` — Find all references to a symbol by name across the indexed codebase.
 - `codeindex_dependencies` — Query file-level dependencies from the code index.
 - `codeindex_status` — Show the current status and statistics of the codebase index.
 - `codeindex_reindex` — Trigger a full re-index of the codebase.
-- `Ask_user` - Ask the user a question and get feedback from user
+- `ask_user` — Ask the user a question and get feedback from user.
 
 ### Code Intelligence Decision Flow
 
@@ -76,7 +134,7 @@ There is no `search` or `search_in_repo` tool. Use `grep` for every text search 
 
 ### Shell Execution Rules
 
-- For simple commands or code snippets, use `bash` with the `command` or `code` parameter.
+- For simple commands or code snippets, use `bash` with the `command` parameter.
 - Timeout defaults to 600 seconds.
 - The `bash_reset` tool resets the persistent shell state.
 
@@ -107,19 +165,19 @@ When reading files with the `read` tool:
 
 ## Build Commands
 
-- `cargo build` - Build debug binary; allow up to 600 seconds.
-- `cargo build --release` - Build optimized release binary; allow up to 600 seconds.
-- `cargo check` - Check code without building.
+- `cargo build` — Build debug binary; allow up to 600 seconds.
+- `cargo build --release` — Build optimized release binary; allow up to 600 seconds.
+- `cargo check` — Check code without building.
 - Build only debug builds unless specifically asked to perform a `release build`.
 
 Builds can take a long time, so allow up to 600 seconds for a rebuild.
 
 ## Test Commands
 
-- `cargo test` - Run all tests
-- `cargo test <test_function_name>` - Run specific test function
-- `cargo test -- --nocapture` - Run tests with output visible
-- `cargo test --lib` - Test library only (skip integration tests)
+- `cargo test` — Run all tests
+- `cargo test <test_function_name>` — Run specific test function
+- `cargo test -- --nocapture` — Run tests with output visible
+- `cargo test --lib` — Test library only (skip integration tests)
 - **Test Timeout**: All test runs should have a 10-minute timeout to prevent hanging
   - Use `timeout 600 cargo test` on Unix/Linux
   - Use `cargo test --test-threads=1` for sequential execution if needed
@@ -141,9 +199,9 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 
 ## Lint & Format Commands
 
-- `cargo clippy` - Run linter with clippy
-- `cargo fmt` - Format code with rustfmt, always use this to fix indentation
-- `cargo fmt --check` - Check formatting without changes
+- `cargo clippy` — Run linter with clippy
+- `cargo fmt` — Format code with rustfmt, always use this to fix indentation
+- `cargo fmt --check` — Check formatting without changes
 
 ## Units
 
@@ -167,7 +225,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - **Format**: Follow Keep a Changelog format (https://keepachangelog.com/)
 - **Update Timing**: Update CHANGELOG.md before each push to remote with the latest changes, features, fixes, and improvements.
 - **Version**: Use semantic versioning (major.minor.patch-prerelease)
-- **RELEASE.md**: write the version number and the most recent CHANGELOG.md entry to the RELEASE.md file for use as a Description in the Github Releases page.
+- **RELEASE.md**: Write the version number and the most recent CHANGELOG.md entry to the RELEASE.md file for use as a Description in the Github Releases page.
 - Whenever a new feature or function is added ensure that SPEC.md and QUICKSTART.md is updated if relevant.
 
 ## Documentation Standards
@@ -208,6 +266,8 @@ team_wait                          ← REQUIRED: blocks until all idle
 team_status                        ← read what they found
 ```
 
+## General Preferences
+
 1. Don't suggest features unless asked to.
 2. When debugging problems, use Occam's razor and assume that the simplest solution is more likely to be the right one.
 3. When debugging a problem, change only one thing at a time. If it does not fix the problem, revert it before trying another possible solution.
@@ -226,10 +286,15 @@ team_status                        ← read what they found
 
 ## Priorities
 
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
+- `0` — Critical (security, data loss, broken builds)
+- `1` — High (major features, important bugs)
+- `2` — Medium (default, nice-to-have)
+- `3` — Low (polish, optimization)
+- `4` — Backlog (future ideas)
+
+## Task Tracking
+
+- Use `todo_read` and `todo_write` to track tasks
+- Always mark the task as "done" when work on a task is done.
 
 For more details, see README.md and QUICKSTART.md.

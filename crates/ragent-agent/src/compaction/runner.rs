@@ -27,11 +27,14 @@
 //! provides the runner itself.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{Result, bail};
 use futures::StreamExt;
+use tokio::time::timeout;
 use tracing::{info, warn};
 
+use ragent_config::StreamConfig;
 use ragent_config::compaction::CompactionConfig;
 use ragent_types::event::{Event, EventBus};
 use ragent_types::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
@@ -41,6 +44,18 @@ use crate::compaction::{
     SUMMARY_OUTPUT_TOKENS, build_prompt, estimate_text_tokens, publish_compaction_started,
     serialize_message,
 };
+
+/// Maximum characters for the compaction summarisation prompt.
+///
+/// The prompt consists of the instruction/template plus the serialised head
+/// transcript. Capping it prevents local/small models from being swamped with
+/// a huge summarisation request that can stall for minutes. The value leaves
+/// room for the template (~2.5 k chars), the previous summary (~16 k chars), and
+/// a large head transcript.
+const MAX_COMPACTION_PROMPT_CHARS: usize = 120_000;
+
+/// Heartbeat interval for long-running compaction summarisation.
+const SUMMARY_HEARTBEAT_SECS: u64 = 30;
 
 /// The verbatim-tail selection produced by [`select`].
 ///
@@ -158,21 +173,57 @@ pub fn select(messages: &[Message], config: &CompactionConfig) -> SelectedSplit 
 pub async fn summarize_via_client(
     client: &Arc<dyn crate::llm::LlmClient>,
     request: ChatRequest,
+    stream_config: &StreamConfig,
+    event_bus: &EventBus,
+    session_id: &str,
 ) -> Result<String> {
-    let mut stream = client.chat(request).await?;
-    let mut chunks: Vec<String> = Vec::new();
-    while let Some(event) = stream.next().await {
-        match event {
-            StreamEvent::TextDelta { text } => chunks.push(text),
-            StreamEvent::Error { message } => bail!("compaction summarisation failed: {message}"),
-            StreamEvent::Finish { .. } => break,
-            // Tool calls, reasoning deltas, usage, and rate-limit events are
-            // not expected from a no-tools summarisation request and are
-            // ignored.
-            _ => {}
+    // Bound the total wall time for a summarisation call. Local models in
+    // particular can stall on huge prompts; this prevents the UI from freezing
+    // indefinitely. Defaults: 300s initial + 120s stall budget -> 420s cap.
+    let overall_timeout_secs =
+        (stream_config.initial_response_timeout_secs + stream_config.timeout_secs).min(300);
+    let overall_timeout = std::time::Duration::from_secs(overall_timeout_secs);
+
+    let summary_fut = async {
+        let started = Instant::now();
+        let mut next_heartbeat = SUMMARY_HEARTBEAT_SECS;
+        let mut stream = client.chat(request).await?;
+        let mut chunks: Vec<String> = Vec::new();
+        while let Some(event) = stream.next().await {
+            let elapsed_secs = started.elapsed().as_secs();
+            if elapsed_secs >= next_heartbeat {
+                info!(
+                    session_id,
+                    elapsed_secs, "compaction summarisation still in progress"
+                );
+                event_bus.publish(Event::AgentNotice {
+                    session_id: session_id.to_string(),
+                    message: format!("Context compression still running after {elapsed_secs}s..."),
+                });
+                next_heartbeat = elapsed_secs + SUMMARY_HEARTBEAT_SECS;
+            }
+            match event {
+                StreamEvent::TextDelta { text } => chunks.push(text),
+                StreamEvent::Error { message } => {
+                    bail!("compaction summarisation failed: {message}")
+                }
+                StreamEvent::Finish { .. } => break,
+                // Tool calls, reasoning deltas, usage, and rate-limit events are
+                // not expected from a no-tools summarisation request and are
+                // ignored.
+                _ => {}
+            }
         }
+        Ok(chunks.join(""))
+    };
+
+    match timeout(overall_timeout, summary_fut).await {
+        Ok(result) => result,
+        Err(_) => bail!(
+            "compaction summarisation timed out after {overall_timeout_secs}s; \
+             the model may be overloaded or the compaction prompt is too large"
+        ),
     }
-    Ok(chunks.join(""))
 }
 
 /// Build the summarisation [`ChatRequest`] for a given prompt.
@@ -180,7 +231,12 @@ pub async fn summarize_via_client(
 /// The request carries a single user message (the summary prompt), no tools,
 /// and a `max_tokens` cap of `summary_output`.
 #[must_use]
-pub fn build_summary_request(model: &str, prompt: &str, summary_output: u32) -> ChatRequest {
+pub fn build_summary_request(
+    model: &str,
+    prompt: &str,
+    summary_output: u32,
+    stream_timeout_secs: Option<u64>,
+) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         messages: Arc::new(vec![ChatMessage {
@@ -196,7 +252,7 @@ pub fn build_summary_request(model: &str, prompt: &str, summary_output: u32) -> 
         thinking: None,
         session_id: None,
         request_id: None,
-        stream_timeout_secs: None,
+        stream_timeout_secs,
     }
 }
 
@@ -264,6 +320,7 @@ pub async fn compact(
     client: &Arc<dyn crate::llm::LlmClient>,
     event_bus: &EventBus,
     reason: &str,
+    stream_config: &StreamConfig,
 ) -> Result<CompactionOutcome> {
     let original_message_count = messages.len();
     let tool_max = config.tool_output_max_chars();
@@ -287,6 +344,12 @@ pub async fn compact(
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
+
+    // Cap the prompt length so the summarisation request stays tractable for
+    // the configured model. If the head transcript is too long, keep the most
+    // recent portion and note the truncation.
+    let head_transcript = cap_head_transcript(&head_transcript);
+
     let prompt = build_prompt(previous_summary, &[head_transcript.as_str()]);
 
     // 4. Overflow guard: bail if the prompt alone would not leave room for the
@@ -313,8 +376,14 @@ pub async fn compact(
 
     // 5. Emit compaction-started and call the LLM.
     publish_compaction_started(event_bus, session_id, reason);
-    let request = build_summary_request(model, &prompt, summary_output_cap as u32);
-    let summary = summarize_via_client(client, request).await?;
+    let request = build_summary_request(
+        model,
+        &prompt,
+        summary_output_cap as u32,
+        Some(stream_config.initial_response_timeout_secs),
+    );
+    let summary =
+        summarize_via_client(client, request, stream_config, event_bus, session_id).await?;
     let summary = summary.trim();
     if summary.is_empty() {
         event_bus.publish(Event::CompressionFinished {
@@ -417,6 +486,7 @@ pub async fn emergency_compact(
     config: &CompactionConfig,
     client: &Arc<dyn crate::llm::LlmClient>,
     event_bus: &EventBus,
+    stream_config: &StreamConfig,
 ) -> Result<CompactionOutcome> {
     // Convert the provider-facing chat messages into the internal `Message`
     // form the compaction runner expects.
@@ -437,6 +507,7 @@ pub async fn emergency_compact(
         client,
         event_bus,
         "overflow",
+        stream_config,
     )
     .await?;
     // Replace the in-memory history in place so the caller's retry attempt
@@ -444,6 +515,25 @@ pub async fn emergency_compact(
     let new_chat = crate::compaction::convert::messages_to_chat_messages(&outcome.new_messages);
     *chat_messages = new_chat;
     Ok(outcome)
+}
+
+/// Truncate the serialised head transcript so the final compaction prompt does
+/// not exceed [`MAX_COMPACTION_PROMPT_CHARS`].
+///
+/// Keeps the most recent conversation content (the end of the string) and
+/// prepends a truncation marker when content is dropped.
+#[must_use]
+fn cap_head_transcript(head_transcript: &str) -> String {
+    if head_transcript.len() <= MAX_COMPACTION_PROMPT_CHARS {
+        return head_transcript.to_string();
+    }
+    let marker = "[Earlier conversation omitted due to length]\n\n";
+    let keep_len = MAX_COMPACTION_PROMPT_CHARS.saturating_sub(marker.len());
+    let truncated = &head_transcript[head_transcript.len() - keep_len..];
+    // Try to start at a message boundary so we don't cut mid-message.
+    let boundary = truncated.find("\n\n").unwrap_or(0);
+    let truncated = &truncated[boundary..];
+    format!("{marker}{truncated}")
 }
 
 #[cfg(test)]

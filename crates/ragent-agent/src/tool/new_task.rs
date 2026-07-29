@@ -225,6 +225,7 @@ mod tests {
             team_context: None,
             team_manager: None,
             code_index: None,
+            bg_service: None,
             spec_manager: None,
             active_spec_id: None,
             config: None,

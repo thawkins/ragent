@@ -37,25 +37,25 @@ specs, MCP) or building UI-only features that are out of scope.
 
 ## Capability Gap Matrix
 
-| jcode capability | jcode tool(s) | ragent status | relevance |
-|---|---|---|---|
-| Structure-aware search | `agentgrep` | Not present. Core `grep` exists, but does not return symbols/outline/displacement info. | High — reduces context use. |
-| Codex-style patches | `apply_patch` | Not present. `patch` + `multi_edit` exist. | Medium — model often emits Codex patches. |
-| Parallel batched calls | `batch` | Not present. Sub-agents/teams exist, but no in-turn batch wrapper. | Medium — throughput for independent reads. |
-| Background task manager | `bg` | Partial. `new_task`/`wait_tasks`/`cancel_task` exist for sub-agents, but no generic background bash task introspection. | High — long-running builds/tests. |
-| Browser automation | `browser` | Not present. | High — web actions beyond fetch. |
-| Conversation search | `conversation_search` | Not present. | Medium — self-recall within session. |
-| Cross-session RAG | `session_search` | Not present. Sessions are stored but not searchable. | High — long-term memory. |
-| Ambient scheduling | `schedule`, `schedule_ambient`, `end_ambient_cycle` | Not present. | Medium — background agent cycles. |
-| Structured permission requests | `request_permission` | Partial. Permission system exists, but no tool that lets the agent itself request approval with review context. | Medium — safer ambient/agent workflows. |
-| Gmail integration | `gmail` | Not present. | Medium — email as I/O channel. |
-| Channel messaging | `send_channel_message` | Not present. | Low — depends on external chat config. |
-| Durable initiatives/goals | `initiative` | Not present. `todo_read`/`todo_write` exist but are lightweight. | Medium — long-lived project goals. |
-| Skill management tool | `skill_manage` | Not present. Skills are auto-loaded/bundled but not dynamically managed. | Medium — hot-load skill packs. |
-| Open/reveal files | `open` | Not present. | Low — desktop convenience. |
-| Swarm plan orchestration | `communicate` | Partial. `team_*` tools provide coordination, but no single plan-graph tool. | Low — teams already cover most use. |
-| Discoverable tool directory | `discover_tools` | Not present. | Low — depends on hosted directory + partnerships. |
-| Debug socket introspection | `debug_socket` | Not present. | Low — internal tooling. |
+| jcode capability               | jcode tool(s)                                             | ragent status                                                                                                                | relevance                                          |
+| ------------------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Structure-aware search         | `agentgrep`                                             | Not present. Core`grep` exists, but does not return symbols/outline/displacement info.                                     | High — reduces context use.                       |
+| Codex-style patches            | `apply_patch`                                           | Not present.`patch` + `multi_edit` exist.                                                                                | Medium — model often emits Codex patches.         |
+| Parallel batched calls         | `batch`                                                 | Not present. Sub-agents/teams exist, but no in-turn batch wrapper.                                                           | Medium — throughput for independent reads.        |
+| Background task manager        | `bg`                                                    | Partial.`new_task`/`wait_tasks`/`cancel_task` exist for sub-agents, but no generic background bash task introspection. | High — long-running builds/tests.                 |
+| Browser automation             | `browser`                                               | Not present.                                                                                                                 | High — web actions beyond fetch.                  |
+| Conversation search            | `conversation_search`                                   | Not present.                                                                                                                 | Medium — self-recall within session.              |
+| Cross-session RAG              | `session_search`                                        | Not present. Sessions are stored but not searchable.                                                                         | High — long-term memory.                          |
+| Ambient scheduling             | `schedule`, `schedule_ambient`, `end_ambient_cycle` | Not present.                                                                                                                 | Medium — background agent cycles.                 |
+| Structured permission requests | `request_permission`                                    | Partial. Permission system exists, but no tool that lets the agent itself request approval with review context.              | Medium — safer ambient/agent workflows.           |
+| Gmail integration              | `gmail`                                                 | Not present.                                                                                                                 | Medium — email as I/O channel.                    |
+| Channel messaging              | `send_channel_message`                                  | Not present.                                                                                                                 | Low — depends on external chat config.            |
+| Durable initiatives/goals      | `initiative`                                            | Not present.`todo_read`/`todo_write` exist but are lightweight.                                                          | Medium — long-lived project goals.                |
+| Skill management tool          | `skill_manage`                                          | Not present. Skills are auto-loaded/bundled but not dynamically managed.                                                     | Medium — hot-load skill packs.                    |
+| Open/reveal files              | `open`                                                  | Not present.                                                                                                                 | Low — desktop convenience.                        |
+| Swarm plan orchestration       | `communicate`                                           | Partial.`team_*` tools provide coordination, but no single plan-graph tool.                                                | Low — teams already cover most use.               |
+| Discoverable tool directory    | `discover_tools`                                        | Not present.                                                                                                                 | Low — depends on hosted directory + partnerships. |
+| Debug socket introspection     | `debug_socket`                                          | Not present.                                                                                                                 | Low — internal tooling.                           |
 
 ## Milestones
 
@@ -68,6 +68,7 @@ truncate results based on what the session has already read.
 **Where:** `crates/ragent-tools-extended/src/agentgrep.rs`
 
 **Tasks:**
+
 - T-001 Design `agentgrep` JSON schema (`mode`: `grep`/`outline`/`smart`/`find`,
   `query`, `path`, `glob`, `max_regions`, `max_files`, `full_region`, etc.).
 - T-002 Integrate the existing `ragent-codeindex` index as a symbol source, or
@@ -90,6 +91,7 @@ and `batch` (parallel subcalls up to 10).
 `ragent-agent` for `batch`.
 
 **Tasks:**
+
 - T-010 Implement `apply_patch` parser supporting add/delete/update with moves.
 - T-011 Hook into `ragent-tools-core::replace` fuzzy matching for update hunks.
 - T-012 Add `batch` tool that accepts an array of `{tool, parameters}` and runs
@@ -111,6 +113,7 @@ lets the agent list, tail, wait on, cancel, and inspect them.
 service in `ragent-agent/src/background/`.
 
 **Tasks:**
+
 - T-020 Design `bg` actions: `spawn` (alias run via `bash`), `list`, `status`,
   `output`, `tail`, `cancel`, `wait`, `cleanup`.
 - T-021 Persist background tasks to SQLite via `ragent-storage`.
@@ -132,12 +135,13 @@ provider protocol design (Firefox Agent Bridge or CDP).
 **Where:** `crates/ragent-tools-extended/src/browser.rs`
 
 **Tasks:**
+
 - T-030 Define `browser` action schema (`open`, `snapshot`, `click`, `type`,
   `fill_form`, `select`, `wait`, `eval`, `scroll`, `upload`, `press`,
   `screenshot`, `status`, `setup`).
 - T-031 Implement a CDP (Chrome DevTools Protocol) backend as the most portable
   starting point; gate macOS-specific computer-use separately.
-- T-032 Add setup/status commands and configuration in `ragent.json`.
+- T-032 Add setup/status slash commands and configuration in `ragent.json`.
 - T-033 Add tests using a local test HTTP server + headless Chrome if available.
 - T-034 Register as `browser`.
 
@@ -153,6 +157,7 @@ page text as markdown.
 `ragent-agent/src/tool/session_search.rs`; indexing in `ragent-storage`.
 
 **Tasks:**
+
 - T-040 Add full-text + embedding index over session messages in SQLite.
 - T-041 Implement `conversation_search` with keyword, turn-range, and stats
   modes; integrate with the compaction manager.
@@ -173,6 +178,7 @@ messages from prior sessions with surrounding context.
 **Where:** `ragent-agent/src/ambient/` and `ragent-agent/src/tool/ambient.rs`.
 
 **Tasks:**
+
 - T-050 Implement a persistent scheduled queue in `ragent-storage`.
 - T-051 Build an ambient runner that wakes sessions/ambient agents based on
   schedule entries, with nudge/backoff logic.
@@ -195,12 +201,13 @@ future resume; `request_permission` surfaces an actionable prompt in the TUI.
 `ragent-tools-extended/src/channels.rs`.
 
 **Tasks:**
-- T-060 Implement Gmail search/read/draft/send via OAuth2 or a managed backend
+
+- ✅ T-060 Implement Gmail search/read/draft/send via OAuth2 or a managed backend
   (e.g. Composio-style). Store tokens in `ragent-storage` encrypted table.
-- T-061 Implement channel registry for Telegram/Discord webhooks; add config
+- ✅ T-061 Implement channel registry for Telegram/Discord webhooks; add config
   block in `ragent.json`.
-- T-062 Add tests with mocked backends.
-- T-063 Register tools.
+- ✅ T-062 Add tests with mocked backends.
+- ✅ T-063 Register tools.
 
 **Acceptance:** `gmail action="search" query="from:ci@example.com"` returns
 messages; `send_channel_message message="deployed"` sends to configured
@@ -215,18 +222,18 @@ channels.
 `ragent-agent/src/tool/skill_manage.rs`; storage in `ragent-storage`.
 
 **Tasks:**
-- T-070 Store durable goals in SQLite with milestones, progress, and
+
+- ✅ T-070 Store durable goals in SQLite with milestones, progress, and
   status; surface them in system prompt or via tool.
-- T-070 Implement `initiative` actions (`create`, `update`, `checkpoint`,
+- ✅ T-070 Implement `initiative` actions (`create`, `update`, `checkpoint`,
   `list`, `close`).
-- T-071 Extend the existing skills system with a `skill_manage` tool that can
+- ✅ T-071 Extend the existing skills system with a `skill_manage` tool that can
   load/list/reload skills on demand and read a skill's prompt.
-- T-072 Add tests.
-- T-073 Register tools.
+- ✅ T-072 Add tests.
+- ✅ T-073 Register tools.
 
 **Acceptance:** `initiative action="checkpoint" id="api-v2"` updates progress;
 `skill_manage action="load" name="rust-error-handling"` injects the skill.
-
 
 ### M10 — Open/reveal and remaining UX tools
 
@@ -236,14 +243,22 @@ low-effort aliases.
 **Where:** `ragent-tools-core/src/open.rs`.
 
 **Tasks:**
-- T-090 Cross-platform `xdg-open` / `open` / `start` wrapper.
-- T-091 `reveal` action that opens the parent directory.
-- T-092 URL scheme validation.
-- T-093 Add tests.
-- T-094 Register tool.
+
+- ✅ T-090 Cross-platform `xdg-open` / `open` / `start` wrapper.
+- ✅ T-091 `reveal` action that opens the parent directory.
+- ✅ T-092 URL scheme validation.
+- ✅ T-093 Add tests.
+- ✅ T-094 Register tool.
 
 **Acceptance:** `open target="target/release/ragent" action="reveal"` opens
-  the file manager.
+   the file manager.
+
+**Status:** Implemented. The `OpenTool` lives in `crates/ragent-tools-core/src/open.rs`,
+is registered via `create_core_registry()` (and therefore surfaced automatically in the
+agent default registry), and has integration tests in
+`crates/ragent-tools-core/tests/test_open.rs`. URL schemes are allowlisted to
+`http`, `https`, `mailto`, and `file`; unknown schemes are rejected with a clear
+error.
 
 ## Out of Scope
 

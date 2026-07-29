@@ -416,6 +416,9 @@ pub struct ResearchSession {
     analysis: Arc<dyn AnalysisEngine>,
     planner: Option<Arc<dyn Planner>>,
     critic: Option<Arc<dyn Critic>>,
+    /// Model used for the analysis, persisted into the `RESEARCH.md`
+    /// frontmatter as `Model:` (e.g. `anthropic/claude-sonnet-4`).
+    model: Option<String>,
 }
 
 impl std::fmt::Debug for ResearchSession {
@@ -463,7 +466,16 @@ impl ResearchSession {
             analysis,
             planner: None,
             critic: None,
+            model: None,
         }
+    }
+
+    /// Record the model used for the analysis so it can be written into the
+    /// `RESEARCH.md` frontmatter as `Model:`.
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
     }
 
     /// Attach a planner for the iterative research branch.
@@ -1289,6 +1301,9 @@ impl ResearchSession {
         });
         let mut item_with_sources = ResearchItem::new(name.clone(), &item_title, &topic);
         item_with_sources.set_queries(web_queries.clone());
+        if let Some(model) = &self.model {
+            item_with_sources.model = Some(model.clone());
+        }
         // Only set output_format when it is not the default report so the
         // frontmatter stays minimal for the common case.
         if config.output_format != OutputFormat::Report {
@@ -1346,12 +1361,16 @@ impl ResearchSession {
         };
         // The frontmatter `title` should be a reduced-length version of the
         // final summary (max 80 chars) so the displayed headline reflects the
-        // synthesis rather than the original prompt.
-        let final_title = if doc.summary.trim().is_empty() {
-            item_title
-        } else {
-            truncate_title(&doc.summary)
-        };
+        // synthesis rather than the original prompt.  When the synthesis fell
+        // back to the mechanical path (malformed model output, engine error, or
+        // no LLM engine), the summary is a diagnostic placeholder — not a
+        // meaningful headline — so we keep the topic-derived title instead.
+        let final_title =
+            if synth_outcome == SynthesizeOutcome::Llm && !doc.summary.trim().is_empty() {
+                truncate_title(&doc.summary)
+            } else {
+                item_title
+            };
         doc.item.set_title(&final_title);
         let assembled = self.manager.write_document(&doc).await?;
         // ── Finalize ──────────────────────────────────────────────────────
@@ -2036,16 +2055,16 @@ mod tests {
         let p = research_root.join("rust-async/RESEARCH.md");
         assert!(p.is_file());
         let body = tokio::fs::read_to_string(&p).await.unwrap();
-        // The final title is derived from the summary, not the original
-        // prompt, so the heading no longer contains the literal title.
-        // Assert the topic and summary-derived title are present instead.
+        // The final title is the topic-derived title ("Rust Async") because
+        // this test uses NoopAnalysisEngine (no LLM), so the title is NOT
+        // derived from the mechanical fallback summary.
         assert!(
             body.contains("Rust async"),
             "RESEARCH.md should contain the topic; got:\n{body}"
         );
         assert!(
-            body.contains("# Title: Gathered"),
-            "RESEARCH.md title should be derived from the summary; got:\n{body}"
+            body.contains("# Title: Rust Async"),
+            "RESEARCH.md title should be the topic-derived title when no LLM engine is used; got:\n{body}"
         );
         // INDEX.md should exist.
         assert!(research_root.join("INDEX.md").is_file());
@@ -3132,6 +3151,57 @@ mod tests {
             })
             .expect("SynthesizeResult event should be emitted");
         assert_eq!(synth, SynthesizeOutcome::NoLlm);
+    }
+
+    #[tokio::test]
+    async fn run_persists_model_in_frontmatter_when_set() {
+        use crate::analysis::NoopAnalysisEngine;
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+        let manager = ResearchManager::new(&research_root);
+        let session = ResearchSession::new(manager, None, None, Arc::new(NoopAnalysisEngine))
+            .with_model("anthropic/claude-sonnet-4");
+        let observer = Arc::new(CollectObserver::default());
+        let cfg = SessionConfig {
+            topic: "topic".into(),
+            ..SessionConfig::default()
+        };
+        session
+            .run("rust-async", "Rust Async", &cfg, observer)
+            .await
+            .unwrap();
+        let path = research_root.join("rust-async").join("RESEARCH.md");
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(
+            content.contains("Model: \"anthropic/claude-sonnet-4\""),
+            "RESEARCH.md frontmatter should record the analysis model; got:\n{content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_omits_model_line_when_not_set() {
+        use crate::analysis::NoopAnalysisEngine;
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+        let manager = ResearchManager::new(&research_root);
+        let session = ResearchSession::new(manager, None, None, Arc::new(NoopAnalysisEngine));
+        let observer = Arc::new(CollectObserver::default());
+        let cfg = SessionConfig {
+            topic: "topic".into(),
+            ..SessionConfig::default()
+        };
+        session
+            .run("rust-async", "Rust Async", &cfg, observer)
+            .await
+            .unwrap();
+        let path = research_root.join("rust-async").join("RESEARCH.md");
+        let content = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(
+            !content.contains("Model:"),
+            "RESEARCH.md frontmatter must omit Model: when no model is set; got:\n{content}"
+        );
     }
 
     #[test]

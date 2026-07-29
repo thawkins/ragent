@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-beta.14"
+version = "0.1.0-beta.17"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -154,6 +154,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # ── HTTP client ──────────────────────────────────────────────────────────
 # default-features = false avoids native-tls; rustls-tls is pure-Rust and auditable.
 reqwest = { version = "0.12", features = ["blocking", "json", "stream", "rustls-tls"], default-features = false }
+
+# ── WebSocket client (CDP browser automation) ─────────────────────────────
+# rustls-tls: pure-Rust TLS, no native OpenSSL dependency.
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 # ── Database ─────────────────────────────────────────────────────────────
 # "bundled" compiles SQLite from source — no system libsqlite3 dependency.

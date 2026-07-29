@@ -54,6 +54,7 @@ fn make_app() -> App {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
+        bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),

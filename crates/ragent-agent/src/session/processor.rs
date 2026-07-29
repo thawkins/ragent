@@ -87,6 +87,9 @@ pub struct SessionProcessor {
     /// Optional code index for codebase search and symbol lookup.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
+    /// Optional background task service for the `bg` tool (M3).
+    /// Uses `OnceLock` so it can be set after storage is created.
+    pub bg_service: std::sync::OnceLock<Arc<crate::background::BackgroundTaskService>>,
     /// Active spec ID for context injection into agent prompts.
     /// Set via `/spec activate` in the TUI or via programmatic API.
     pub active_spec: tokio::sync::RwLock<Option<String>>,
@@ -535,10 +538,9 @@ impl SessionProcessor {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clone();
-                let model_static: &'static str = Box::leak(model_id.clone().into_boxed_str());
                 let summary = compute_run_cost(
                     vec![UsageRecord {
-                        model_id: model_static,
+                        model_id: model_id.clone(),
                         input_tokens,
                         output_tokens,
                     }],
@@ -787,6 +789,7 @@ impl SessionProcessor {
                         &turn.client,
                         &self.event_bus,
                         "auto",
+                        &self.stream_config,
                     )
                     .await;
                     match compact_result {
@@ -965,6 +968,7 @@ impl SessionProcessor {
                         .cloned()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
                     code_index: self.code_index.get().cloned(),
+                    bg_service: self.bg_service.get().cloned(),
                     spec_manager: self.spec_manager.get().cloned(),
                     active_spec_id: active_spec_id.clone(),
                     config: Some(std::sync::Arc::clone(&turn.session_config)),
@@ -1524,7 +1528,7 @@ impl SessionProcessor {
                 });
             }
 
-            // Background task injection
+            // Background task injection (sub-agents)
             {
                 let _scope = profiler.scope("loop.background.total");
                 if let Some(tm) = self.task_manager.get() {
@@ -1567,6 +1571,41 @@ impl SessionProcessor {
                 }
             }
 
+            // Background shell task injection (M3 / T-023)
+            {
+                let _scope = profiler.scope("loop.background.bg_shell");
+                if let Some(bg) = self.bg_service.get() {
+                    if bg.has_pending_completions() {
+                        let completed = bg.drain_completed(session_id).await;
+                        if !completed.is_empty() {
+                            bg_parts.clear();
+                            for task in &completed {
+                                let exit_str = task
+                                    .exit_code
+                                    .map(|c| format!("exit={c}"))
+                                    .unwrap_or_else(|| "exit=?".to_string());
+                                let text = format!(
+                                    "[Background Shell Task {}: {} — {} ({})]\n\n{}",
+                                    task.status,
+                                    task.command,
+                                    &task.task_id[..8.min(task.task_id.len())],
+                                    exit_str,
+                                    if task.tail.is_empty() {
+                                        "(no output)"
+                                    } else {
+                                        &task.tail
+                                    }
+                                );
+                                bg_parts.push(ContentPart::Text { text });
+                            }
+                            Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                                role: "user".to_string(),
+                                content: ChatContent::Parts(std::mem::take(&mut bg_parts)),
+                            });
+                        }
+                    }
+                }
+            }
             // Interim save
             {
                 let _scope = profiler.scope("storage.assistant_interim.update");

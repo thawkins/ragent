@@ -334,6 +334,8 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::MemoryRecalled { .. } => "memory_recalled",
         Event::MemoryForgotten { .. } => "memory_forgotten",
         Event::MemorySearched { .. } => "memory_searched",
+        Event::ConversationSearched { .. } => "conversation_searched",
+        Event::SessionSearched { .. } => "session_searched",
         Event::MemoryCandidateExtracted { .. } => "memory_candidate_extracted",
         Event::GitLabSetupComplete { .. } => "gitlab_setup_complete",
         Event::ServiceStartError { .. } => "service_start_error",
@@ -348,9 +350,11 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::RouterClassification { .. } => "router_classification",
         Event::HookWarning { .. } => "hook_warning",
         Event::ToolResultFlagged { .. } => "tool_result_flagged",
+        Event::BackgroundTaskSpawned { .. } => "background_task_spawned",
+        Event::BackgroundTaskUpdated { .. } => "background_task_updated",
+        Event::BackgroundTaskCompleted { .. } => "background_task_completed",
     }
 } // ── Public API ───────────────────────────────────────────────────────────
-
 /// Return the SSE event-type name and serialized JSON payload for an [`Event`].
 ///
 /// This is the testable core of [`event_to_sse`]. The returned tuple is
@@ -830,6 +834,24 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "mode": mode,
         })),
 
+        Event::ConversationSearched {
+            session_id,
+            query,
+            result_count,
+            mode,
+        }
+        | Event::SessionSearched {
+            session_id,
+            query,
+            result_count,
+            mode,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "query": query,
+            "result_count": result_count,
+            "mode": mode,
+        })),
+
         Event::MemoryCandidateExtracted {
             session_id,
             content,
@@ -1012,6 +1034,40 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "tool": tool,
             "hook_command": hook_command,
             "reason": reason,
+        })),
+        Event::BackgroundTaskSpawned {
+            session_id,
+            task_id,
+            command,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "command": command,
+            "event": "spawned",
+        })),
+        Event::BackgroundTaskUpdated {
+            session_id,
+            task_id,
+            status,
+            progress,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "status": status,
+            "progress": progress,
+            "event": "updated",
+        })),
+        Event::BackgroundTaskCompleted {
+            session_id,
+            task_id,
+            status,
+            exit_code,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "status": status,
+            "exit_code": exit_code,
+            "event": "completed",
         })),
     };
     (name, data)

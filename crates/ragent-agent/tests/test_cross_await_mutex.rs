@@ -57,6 +57,7 @@ fn test_processor() -> SessionProcessor {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     }
 }
 

@@ -25,6 +25,7 @@ mod app_tests {
             permission_checker,
             event_bus: event_bus.clone(),
             task_manager: std::sync::OnceLock::new(),
+            bg_service: std::sync::OnceLock::new(),
             team_manager: std::sync::OnceLock::new(),
             // M8-T1: team-context cache (unused in tests, but required by the
             // struct literal). Mirrors the wiring in `src/main.rs`.
@@ -482,5 +483,114 @@ mod app_tests {
             !rendered.contains("/about            Show info about ragent /quit"),
             "help output should not collapse into a single paragraph; got:\n{rendered}",
         );
+    }
+
+    #[test]
+    fn test_tool_call_batch_applies_pending_args_when_start_dropped() {
+        use ragent_agent::event::Event;
+        use ragent_agent::message::MessagePart;
+        use ragent_types::event::ToolCallBatchEntry;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "s1".to_string(),
+        });
+
+        // Args arrive, but the matching ToolCallStart is dropped by the bus.
+        app.handle_event(Event::ToolCallArgs {
+            session_id: "s1".to_string(),
+            call_id: "c1".to_string(),
+            tool: "read".to_string(),
+            args: r#"{"path":"src/main.rs"}"#.to_string(),
+        });
+
+        // Batch fallback creates the missing part.
+        app.handle_event(Event::ToolCallBatch {
+            session_id: "s1".to_string(),
+            step: 1,
+            calls: vec![ToolCallBatchEntry {
+                call_id: "c1".to_string(),
+                tool: "read".to_string(),
+                error: None,
+                duration_ms: 10,
+                content: "42 lines".to_string(),
+                content_line_count: 42,
+                metadata: None,
+                success: true,
+            }],
+        });
+
+        let part = app
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .find(|p| matches!(p, MessagePart::ToolCall { call_id, .. } if call_id == "c1"))
+            .expect("batch should create the missing tool call part");
+        if let MessagePart::ToolCall { state, .. } = part {
+            assert_eq!(
+                state.input.get("path").and_then(|v| v.as_str()),
+                Some("src/main.rs"),
+                "pending args should be applied so the read path is visible in the header"
+            );
+        } else {
+            panic!("expected a ToolCall part");
+        }
+    }
+
+    #[test]
+    fn test_tool_call_batch_does_not_overwrite_existing_input() {
+        use ragent_agent::event::Event;
+        use ragent_agent::message::MessagePart;
+        use ragent_types::event::ToolCallBatchEntry;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "s1".to_string(),
+        });
+
+        // Normal flow: start then args.
+        app.handle_event(Event::ToolCallStart {
+            session_id: "s1".to_string(),
+            call_id: "c1".to_string(),
+            tool: "read".to_string(),
+        });
+        app.handle_event(Event::ToolCallArgs {
+            session_id: "s1".to_string(),
+            call_id: "c1".to_string(),
+            tool: "read".to_string(),
+            args: r#"{"path":"src/lib.rs"}"#.to_string(),
+        });
+
+        // Batch should keep the already-applied input.
+        app.handle_event(Event::ToolCallBatch {
+            session_id: "s1".to_string(),
+            step: 1,
+            calls: vec![ToolCallBatchEntry {
+                call_id: "c1".to_string(),
+                tool: "read".to_string(),
+                error: None,
+                duration_ms: 10,
+                content: "42 lines".to_string(),
+                content_line_count: 42,
+                metadata: None,
+                success: true,
+            }],
+        });
+
+        let part = app
+            .messages
+            .iter()
+            .flat_map(|m| &m.parts)
+            .find(|p| matches!(p, MessagePart::ToolCall { call_id, .. } if call_id == "c1"))
+            .expect("tool call part exists");
+        if let MessagePart::ToolCall { state, .. } = part {
+            assert_eq!(
+                state.input.get("path").and_then(|v| v.as_str()),
+                Some("src/lib.rs"),
+                "existing input should be preserved when batch is processed"
+            );
+        } else {
+            panic!("expected a ToolCall part");
+        }
     }
 }

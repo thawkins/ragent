@@ -136,7 +136,10 @@ pub enum ResearchCommands {
 /// crate. Emits a `ragent-research:` JSON line for each event so the
 /// output is machine-parseable even when the session produces many
 /// sources (T-035).
-pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
+pub async fn handle_research_command(
+    command: ResearchCommands,
+    active_model: Option<ragent_agent::agent::ModelRef>,
+) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{
         Depth, OutputFormat, ResearchManager, SessionConfig, SessionEvent, SessionObserver,
@@ -325,7 +328,7 @@ pub async fn handle_research_command(command: ResearchCommands) -> Result<()> {
                 Some(storage),
                 config_arc,
                 Some(Arc::new(ragent_agent::provider::create_default_registry())),
-                None,
+                active_model,
             );
             match session
                 .run(&name, &title, &config, Arc::new(CliObserver))

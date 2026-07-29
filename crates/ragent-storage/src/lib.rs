@@ -12,8 +12,10 @@ pub mod storage;
 // Re-export commonly used types
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
-    EmbeddingMatch, KgEntityRow, KgRelationshipRow, MemoryRow, RunCostSummaryRow, SessionRow,
-    Storage, TodoRow, decrypt_key, deobfuscate_key, encrypt_key, obfuscate_key,
+    BackgroundTaskRow, ConversationStats, EmbeddingMatch, InitiativeMilestone, InitiativeRow,
+    KgEntityRow, KgRelationshipRow, MemoryRow, MessageEmbeddingMatch, MessageSearchResult,
+    RunCostSummaryRow, SessionRow, SessionSearchParams, Storage, TodoRow, decrypt_key,
+    deobfuscate_key, encrypt_key, obfuscate_key,
 };
 
 // Re-export sanitize module from ragent_types

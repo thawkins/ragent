@@ -30,6 +30,7 @@ use ragent_agent::compaction::{
 use ragent_agent::event::EventBus;
 use ragent_agent::llm::{ChatContent, ChatMessage, LlmClient, StreamEvent};
 use ragent_agent::message::{Message, Role};
+use ragent_config::StreamConfig;
 use ragent_config::compaction::{CompactionConfig, KeepConfig};
 use ragent_llm::providers::mock_llm_client::{MockLlmClient, MockScenario};
 
@@ -86,6 +87,7 @@ async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await;
 
@@ -100,11 +102,6 @@ async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
     );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// 2. `emergency_compact` function level
-// ────────────────────────────────────────────────────────────────────────────
-
-/// A mock `LlmClient` that returns a fixed summary for any request.
 struct SummaryClient;
 /// A mock `LlmClient` that captures the prompt of the first request and then
 /// returns a fixed summary. Used to assert the prompt built by `compact`
@@ -182,6 +179,7 @@ async fn test_emergency_compact_replaces_chat_messages_in_place() {
         &config,
         &client,
         &bus,
+        &StreamConfig::default(),
     )
     .await
     .expect("emergency_compact should succeed");
@@ -238,6 +236,7 @@ async fn test_emergency_compact_leaves_chat_messages_unchanged_on_error() {
         &config,
         &client,
         &bus,
+        &StreamConfig::default(),
     )
     .await;
     assert!(result.is_err(), "expected nothing-to-summarise error");
@@ -295,7 +294,7 @@ fn test_select_single_long_turn_with_zero_budget() {
     assert_eq!(split.recent_messages.len(), 1);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
+// ───────────────────────────────────────────────��────────────────────────────
 // 4. Prompt construction with / without previous summary (FR-010)
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -351,6 +350,7 @@ async fn test_compact_passes_previous_summary_into_prompt() {
         &client,
         &bus,
         "auto",
+        &StreamConfig::default(),
     )
     .await
     .expect("compact should succeed");

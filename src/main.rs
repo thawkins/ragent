@@ -360,6 +360,14 @@ async fn main() -> Result<()> {
     let storage = Arc::new(Storage::open(&db_path)?);
     tracing::info!("Storage initialized successfully");
 
+    // M5: Warm the session message FTS index in the background so the
+    // conversation/session search tools return up-to-date results after
+    // startup or schema changes.
+    let storage_warm = Arc::clone(&storage);
+    tokio::task::spawn_blocking(move || match storage_warm.warm_message_search_index() {
+        Ok(count) => tracing::info!(indexed_messages = count, "Warmed message search index"),
+        Err(e) => tracing::warn!(error = %e, "Failed to warm message search index"),
+    });
     // Seed the secret registry from stored provider credentials so that
     // redact_secrets() can mask them by exact match in all log output.
     if let Err(e) = storage.seed_secret_registry() {
@@ -497,6 +505,7 @@ async fn main() -> Result<()> {
         )),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        bg_service: std::sync::OnceLock::new(),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -531,6 +540,14 @@ async fn main() -> Result<()> {
     ));
     let _ = session_processor.task_manager.set(task_manager);
     tracing::debug!(max_background_agents, "Task manager initialized");
+
+    // Wire the background task service into the processor (M3).
+    let bg_service = Arc::new(ragent_agent::background::BackgroundTaskService::new(
+        Arc::clone(&storage),
+        event_bus.clone(),
+    ));
+    let _ = session_processor.bg_service.set(bg_service);
+    tracing::debug!("Background task service initialized");
 
     // Connect MCP servers from config and register their tools into the tool registry.
     let mcp_server_count = config.read().await.mcp.len();
@@ -1045,9 +1062,8 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Research { command }) => {
-            cli::handle_research_command(command).await?;
+            cli::handle_research_command(command, resolved_agent.model.clone()).await?;
         }
     }
-
     Ok(())
 }

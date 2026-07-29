@@ -15,10 +15,11 @@ pub use mcp_tool::McpToolWrapper;
 pub mod aliases;
 /// Task cancellation tool.
 pub mod cancel_task;
+/// Structured memory store, recall, and forget tools.
+pub mod conversation_search;
 pub mod list_tasks;
 pub mod new_task;
 pub mod plan;
-/// Structured memory store, recall, and forget tools.
 pub mod structured_memory;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 ///
@@ -49,6 +50,18 @@ pub mod team_task_create;
 pub mod team_task_list;
 pub mod team_wait;
 pub mod wait_tasks;
+
+/// Session search tools (M5).
+pub mod session_search;
+
+/// Background shell task manager (M3).
+pub mod bg;
+
+/// Durable initiatives — cross-session goals with milestones (M8, T-070).
+pub mod initiative;
+
+/// Runtime skill management — load/list/reload/read skill prompts (M8, T-071).
+pub mod skill_manage;
 
 /// Spec management tools.
 pub mod spec_coverage;
@@ -115,6 +128,8 @@ pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+pub use crate::background::BackgroundTaskService;
 
 use crate::event::{Event, EventBus};
 use crate::llm::ToolDefinition;
@@ -227,6 +242,7 @@ impl Default for ToolOutput {
 ///     team_context: None,
 ///     team_manager: None,
 ///     code_index: None,
+///     bg_service: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -255,6 +271,9 @@ pub struct ToolContext {
     /// Optional code index for codebase search and symbol lookup.
     /// `None` when code indexing is disabled or not yet initialised.
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
+    /// Optional background task service for the `bg` tool (M3).
+    /// `None` when the service has not been wired into the session processor.
+    pub bg_service: Option<Arc<BackgroundTaskService>>,
     /// Optional spec manager for reading and updating specifications.
     /// `None` when no specs/ directory is configured.
     pub spec_manager: Option<Arc<ragent_specs::SpecManager>>,
@@ -1313,6 +1332,9 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(structured_memory::MemoryStoreTool));
     registry.register(Arc::new(structured_memory::MemoryRecallTool));
     registry.register(Arc::new(structured_memory::MemoryForgetTool));
+    // M5 - session/conversation search tools.
+    registry.register(Arc::new(conversation_search::ConversationSearchTool));
+    registry.register(Arc::new(session_search::SessionSearchTool));
     // Team coordination tools
     registry.register(Arc::new(team_approve_plan::TeamApprovePlanTool));
     registry.register(Arc::new(team_assign_task::TeamAssignTaskTool));
@@ -1340,6 +1362,11 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(spec_search::SpecSearchTool));
     registry.register(Arc::new(spec_task_update::SpecTaskUpdateTool));
     registry.register(Arc::new(spec_coverage::SpecCoverageTool));
+    // Background task manager (M3)
+    registry.register(Arc::new(bg::BgTool));
+    // M8 — durable initiatives and skill management
+    registry.register(Arc::new(initiative::InitiativeTool));
+    registry.register(Arc::new(skill_manage::SkillManageTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));

@@ -88,6 +88,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        bg_service: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),

@@ -3,6 +3,9 @@
 //! This crate owns the Milestone 5 extracted tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
+pub mod agentgrep;
+pub mod browser;
+pub mod channels;
 pub mod codeindex_dependencies;
 pub mod codeindex_references;
 pub mod codeindex_reindex;
@@ -10,6 +13,7 @@ pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
+pub mod gmail;
 pub mod http_request;
 pub mod libreoffice_common;
 pub mod libreoffice_info;
@@ -327,6 +331,11 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
     registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
     registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
+    registry.register(Arc::new(agentgrep::AgentGrepTool));
+    registry.register(Arc::new(browser::BrowserTool));
+    // JCODEPLAN M7 — external integrations.
+    registry.register(Arc::new(gmail::GmailTool::new()));
+    registry.register(Arc::new(channels::SendChannelMessageTool));
 
     // MasterFetch tools (FR-020)
     registry.register(Arc::new(masterfetch::tools::fetch::MfFetchTool));

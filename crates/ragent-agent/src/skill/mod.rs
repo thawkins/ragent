@@ -285,6 +285,15 @@ impl SkillInfo {
     pub fn is_forked(&self) -> bool {
         self.context.as_ref() == Some(&SkillContext::Fork)
     }
+
+    /// Drops the cached skill body, forcing the next [`body_or_load`] call to
+    /// re-read the `SKILL.md` file from disk.
+    ///
+    /// Used by the `skill_manage reload` action (JCODEPLAN M8) so skills
+    /// edited on disk pick up their new content without a session restart.
+    pub async fn clear_body_cache(&self) {
+        *self.body_cache.lock().await = None;
+    }
 }
 
 impl Default for SkillInfo {

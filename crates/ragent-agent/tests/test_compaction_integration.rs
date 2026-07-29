@@ -181,6 +181,7 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -309,6 +310,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -531,6 +533,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
@@ -664,6 +667,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

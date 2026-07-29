@@ -40,6 +40,9 @@ pub mod telemetry;
 pub mod tool;
 pub mod updater;
 
+/// Background shell task service (M3).
+pub mod background;
+
 /// Shared adapter that wires the agent tool registry into the research
 /// system's web/local gatherers.
 pub mod research_adapter;

@@ -108,9 +108,17 @@ pub fn build_research_session(
     };
     let critic: Arc<dyn Critic> = Arc::new(SimpleCritic);
 
-    ResearchSession::new(manager, web, local, analysis)
+    let model_label = active_model
+        .as_ref()
+        .map(|m| format!("{}/{}", m.provider_id, m.model_id));
+
+    let session = ResearchSession::new(manager, web, local, analysis)
         .with_planner(planner)
-        .with_critic(critic)
+        .with_critic(critic);
+    match model_label {
+        Some(label) => session.with_model(label),
+        None => session,
+    }
 }
 
 /// Resolve a provider-specific base URL from storage/config/env, mirroring the
@@ -172,6 +180,7 @@ fn build_tool_context(
         team_context: None,
         team_manager: None,
         code_index: None,
+        bg_service: None,
         spec_manager: None,
         active_spec_id: None,
         config,

@@ -869,21 +869,22 @@ impl WebGatherer {
         let media_type = classify_web_source(url, page.content_type.as_deref())
             .as_str()
             .to_string();
-                  let source = Source::Web {
-                      url: page.url.clone(),
-                      title,
-                      captured_at: chrono::Utc::now(),
-                      published_at: page.published_at,
-                      body_path: web_body_path(0),
-                      body,
-                      relevance: "User-supplied seed URL".into(),
-                      search_tool: String::new(),
-                      search_engine: String::new(),
-                      content_type: page.content_type.clone(),
-                      page_type: page.page_type.clone(),
-                      media_type,
-                      language: page.language.clone(),
-                  };        Ok((source, page))
+        let source = Source::Web {
+            url: page.url.clone(),
+            title,
+            captured_at: chrono::Utc::now(),
+            published_at: page.published_at,
+            body_path: web_body_path(0),
+            body,
+            relevance: "User-supplied seed URL".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: page.content_type.clone(),
+            page_type: page.page_type.clone(),
+            media_type,
+            language: page.language.clone(),
+        };
+        Ok((source, page))
     }
 
     /// Gather up to `max_results` web sources for `topic`.
@@ -1090,29 +1091,30 @@ impl WebGatherer {
                             search_engine: hit.search_engine.clone(),
                         });
                     }
-                                          collected.push((
-                                              index,
-                                              Some(Source::Web {
-                                                  url: page.url.clone(),
-                                                  title,
-                                                  captured_at: Utc::now(),
-                                                  published_at: page.published_at,
-                                                  body_path,
-                                                  body,
-                                                  relevance,
-                                                  search_tool: hit.search_tool,
-                                                  search_engine: hit.search_engine,
-                                                  content_type: page.content_type.clone(),
-                                                  page_type: page.page_type.clone(),
-                                                  media_type: classify_web_source(
-                                                      &page.url,
-                                                      page.content_type.as_deref(),
-                                                  )
-                                                  .as_str()
-                                                  .to_string(),
-                                                  language: page.language.clone(),
-                                              }),
-                                          ));                }
+                    collected.push((
+                        index,
+                        Some(Source::Web {
+                            url: page.url.clone(),
+                            title,
+                            captured_at: Utc::now(),
+                            published_at: page.published_at,
+                            body_path,
+                            body,
+                            relevance,
+                            search_tool: hit.search_tool,
+                            search_engine: hit.search_engine,
+                            content_type: page.content_type.clone(),
+                            page_type: page.page_type.clone(),
+                            media_type: classify_web_source(
+                                &page.url,
+                                page.content_type.as_deref(),
+                            )
+                            .as_str()
+                            .to_string(),
+                            language: page.language.clone(),
+                        }),
+                    ));
+                }
                 Err(e) => {
                     if let Some(obs) = observer {
                         obs.on_event(GatherEvent::FetchFailed {

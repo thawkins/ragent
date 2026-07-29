@@ -907,6 +907,139 @@ fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
     )
 }
 
+/// Validate a shell command against all background-task security layers.
+///
+/// This is a stripped-down version of [`BashTool::execute`] that performs
+/// the same banned/denied/directory-escape/syntax/obfuscation checks without
+/// executing the command. It is used by the `bg` background task manager
+/// before spawning a long-running process.
+pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path) -> Result<()> {
+    let shell = get_shell();
+
+    if is_windows() && matches!(shell, ShellType::Bash) {
+        bail!(
+            "No suitable shell found on Windows.              Please install Git for Windows or PowerShell 7+."
+        );
+    }
+
+    if is_safe_command(command) {
+        tracing::info!("Safe bash command auto-approved");
+    }
+
+    if contains_banned_command(command) {
+        if ragent_config::yolo::is_enabled() {
+            tracing::warn!("YOLO mode: allowing banned command tool");
+        } else if ragent_config::bash_lists::is_allowlisted(command) {
+            tracing::info!("Banned command allowed by user allowlist");
+        } else {
+            bail!(
+                "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m).                  These tools could exfiltrate data or connect to external systems."
+            );
+        }
+    }
+
+    if is_directory_escape_attempt(command, working_dir) {
+        bail!(
+            "Command rejected: attempts to escape working directory {}.              Use only relative paths (cd ./subdir, cd subdir).",
+            working_dir.display()
+        );
+    }
+
+    validate_bash_syntax(command).await?;
+
+    if contains_denied_command(command) {
+        if ragent_config::yolo::is_enabled() {
+            tracing::warn!("YOLO mode: allowing denied command name");
+        } else {
+            bail!(
+                "Command rejected: uses dangerous command (mkfs, insmod, useradd, etc.).                  These commands could cause irreversible damage to the system."
+            );
+        }
+    }
+
+    for pattern in DENIED_PATTERNS {
+        if command.contains(pattern) {
+            if ragent_config::yolo::is_enabled() {
+                tracing::warn!(pattern, "YOLO mode: allowing denied pattern");
+            } else {
+                bail!(
+                    "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
+                );
+            }
+        }
+    }
+
+    if !ragent_config::yolo::is_enabled()
+        && let Some(pattern) = ragent_config::bash_lists::matches_denylist(command)
+    {
+        bail!(
+            "Command rejected: matches user-defined deny pattern '{pattern}'.                 Use `/bash remove deny \"{pattern}\"` to remove this restriction."
+        );
+    }
+
+    if !ragent_config::yolo::is_enabled() {
+        validate_no_obfuscation(command)?;
+    }
+
+    Ok(())
+}
+
+/// Spawn a long-running shell command for background execution.
+///
+/// The returned [`tokio::process::Child`] has stdin closed, stdout/stderr
+/// piped, and `kill_on_drop(true)` so dropping the handle terminates the
+/// process. The command is validated through [`validate_shell_command`] before
+/// spawning.
+pub async fn spawn_background_shell(
+    command: &str,
+    working_dir: &std::path::Path,
+) -> Result<tokio::process::Child> {
+    validate_shell_command(command, working_dir).await?;
+    let _permit = crate::resource::acquire_process_permit().await?;
+    let shell = get_shell();
+
+    let mut child = match shell {
+        ShellType::Bash => {
+            let mut cmd = Command::new("bash");
+            cmd.arg("-c")
+                .arg(command)
+                .current_dir(working_dir)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            cmd
+        }
+        ShellType::GitBash(path) => {
+            let mut cmd = Command::new(path);
+            cmd.arg("-c")
+                .arg(command)
+                .current_dir(working_dir)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            cmd
+        }
+        ShellType::PowerShell(path) => {
+            let mut cmd = Command::new(path);
+            cmd.arg("-NoLogo")
+                .arg("-NoProfile")
+                .arg("-NonInteractive")
+                .arg("-Command")
+                .arg(command)
+                .current_dir(working_dir)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            cmd
+        }
+    };
+
+    Ok(child.spawn()?)
+}
+
 #[async_trait::async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &'static str {

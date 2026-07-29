@@ -363,6 +363,13 @@ impl App {
                     if !self.find_tool_call_part(&entry.call_id) {
                         self.add_tool_call_part(&entry.tool, &entry.call_id);
                     }
+                    // If the start event was dropped we never consumed the
+                    // pending ToolCallArgs, so the newly-created part would
+                    // render with a missing input summary. Apply any pending
+                    // args now so the header shows the path/command/etc.
+                    if let Some(args_json) = self.pending_tool_args.remove(&entry.call_id) {
+                        let _ = self.update_tool_call_input(&entry.call_id, &args_json);
+                    }
                     self.update_tool_call_status(
                         &entry.call_id,
                         entry.success,

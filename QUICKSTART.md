@@ -17,8 +17,17 @@ configuration, and common workflows.
   to restore a backup over the active global config, Esc to cancel.
 - **Image attachment support (Alt+V)**: paste images from clipboard or file URIs; pending attachments are displayed before sending.
 - Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
-- New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
-- Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
+  - New `multiedit`, `patch`, and `apply_patch` tools for atomic multi-file edits,
+    unified diff patching, and Codex-style patch blocks.
+  - New `open` tool to open/reveal files, folders, and URLs in the desktop
+    environment.
+  - New `browser` tool for Chrome DevTools Protocol (CDP) browser automation
+    with 14 actions (open, snapshot, click, type, fill_form, select, wait,
+    eval, scroll, upload, press, screenshot, status, setup). Use
+    `browser action="setup"` to launch a headless Chrome instance, or
+    configure the CDP endpoint in `ragent.json` under the `browser` key.
+    Toggle visibility with `/tools browser on|off`.
+  - Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
 
 ## Prerequisites
 
@@ -513,6 +522,31 @@ before processing your first message. Example `AGENTS.md` content:
 - Tests go in `tests/` directories, not inline
 - Use `tracing` for logging, never `println!`
 ```
+
+#### Modular instruction files with `@<path>`
+
+To keep large `AGENTS.md` files manageable, split them into smaller files and
+pull them in with an `@<path>` directive on its own line. The `@` must appear
+in the **first column** (no leading whitespace):
+
+```markdown
+# Agent Guidelines
+
+@docs/coding-style.md
+@docs/testing.md
+@"docs/commit conventions.md"
+```
+
+The directive is replaced in-place by the contents of the referenced file
+before the guidelines are loaded into the system prompt. Paths resolve
+relative to the directory of the file containing the directive, includes are
+transitive (included files can themselves include other files), and cycles are
+detected and skipped. Paths must stay under the project root or the global
+ragent data dir — `../` escapes and absolute paths are rejected.
+
+A leading `@@` is an escape sequence: the line is emitted verbatim with the
+`@@` collapsed to a single literal `@` character (use this to write a line
+that starts with `@` without triggering an include).
 
 ---
 

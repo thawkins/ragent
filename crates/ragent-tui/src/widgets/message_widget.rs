@@ -174,9 +174,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // 📄 FILE OPERATIONS
         // ═══════════════════════════════════════════════════════════════════
         "read" => {
-            let path = get_relative_path(&["path"]);
+            // The read tool accepts `path` as the canonical parameter name, but some
+            // providers/models emit `file_path` instead. Check both so the file name
+            // always appears in the message header.
+            let path = get_relative_path(&["path", "file_path"]);
             if path.is_empty() {
-                "📄 missing path".to_string()
+                String::new()
             } else {
                 format!("📄 {}", path)
             }
@@ -222,6 +225,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 String::new()
             } else {
                 format!("📄 {}", path)
+            }
+        }
+        "apply_patch" => {
+            let target = get_str(&["path"]).unwrap_or_default();
+            if target.is_empty() {
+                "📄 apply patch".to_string()
+            } else {
+                format!("📄 {}", trunc120(&target))
             }
         }
         "diff_files" => {
@@ -388,6 +399,31 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .unwrap_or_else(|| "🌐 search".to_string()),
 
         // ═══════════════════════════════════════════════════════════════════
+        // 🔎 EXTENDED SEARCH / INTELLIGENCE
+        // ═══════════════════════════════════════════════════════════════════
+        "agentgrep" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            let mode = get_str(&["mode"]).unwrap_or_else(|| "grep".to_string());
+            let scope = get_str(&["path"])
+                .map(|p| make_relative_path(&p, cwd))
+                .filter(|p| !p.is_empty());
+            match scope {
+                Some(p) if !p.is_empty() => {
+                    format!("🔎 {} \"{}\" in {}", mode, trunc120(&query), p)
+                }
+                _ => format!("🔎 {} \"{}\"", mode, trunc120(&query)),
+            }
+        }
+        "conversation_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("🔎 session: \"{}\"", trunc120(&query))
+        }
+        "session_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("🔎 all sessions: \"{}\"", trunc120(&query))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // 🔧 ENVIRONMENT
         // ═══════════════════════════════════════════════════════════════════
         "get_env" => {
@@ -399,6 +435,112 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "bash_reset" => "🔧 reset shell".to_string(),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🗂️ BACKGROUND PROCESS MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════════
+        "bg" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "spawn" => {
+                    let cmd = get_str(&["command"]).unwrap_or_default();
+                    let first = cmd.lines().next().unwrap_or("");
+                    format!("🗂️ spawn: {}", trunc120(first))
+                }
+                other => {
+                    let task = get_str(&["task_id"]).unwrap_or_default();
+                    if task.is_empty() {
+                        format!("🗂️ {}", other)
+                    } else {
+                        format!("🗂️ {} {}", other, &task[..8.min(task.len())])
+                    }
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🌐 BROWSER / EMAIL / CHANNELS
+        // ═══════════════════════════════════════════════════════════════════
+        "browser" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
+            match action.as_str() {
+                "open" => {
+                    let url = get_str(&["url"]).unwrap_or_default();
+                    format!("🖥️ open {}", trunc120(&url))
+                }
+                "type" | "fill_form" => {
+                    let selector = get_str(&["selector"]).unwrap_or_default();
+                    format!("🖥️ {} {}", action, trunc120(&selector))
+                }
+                "eval" => {
+                    let expr = get_str(&["expression"]).unwrap_or_default();
+                    format!("🖥️ eval {}", trunc120(&expr))
+                }
+                "screenshot" => "🖥️ screenshot".to_string(),
+                other => format!("🖥️ {}", other),
+            }
+        }
+        "gmail" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "search".to_string());
+            match action.as_str() {
+                "search" => {
+                    let q = get_str(&["query"]).unwrap_or_default();
+                    format!("📧 search \"{}\"", trunc120(&q))
+                }
+                "read" => {
+                    let id = get_str(&["id"]).unwrap_or_default();
+                    format!("📧 read {}", trunc120(&id))
+                }
+                "send" | "draft" => {
+                    let to = get_str(&["to"]).unwrap_or_default();
+                    let subject = get_str(&["subject"]).unwrap_or_default();
+                    if subject.is_empty() {
+                        format!("📧 {} to {}", action, to)
+                    } else {
+                        format!("📧 {} to {}: {}", action, to, trunc120(&subject))
+                    }
+                }
+                other => format!("📧 {}", other),
+            }
+        }
+        "send_channel_message" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "send".to_string());
+            let channel = get_str(&["channel"]).unwrap_or_else(|| "all".to_string());
+            if action == "send" {
+                format!("📨 send [{}]", channel)
+            } else {
+                format!("📨 {} [{}]", action, channel)
+            }
+        }
+        "open" => {
+            let target = get_str(&["target"]).unwrap_or_default();
+            let action = get_str(&["action"]).unwrap_or_else(|| "open".to_string());
+            format!("📂 {} {}", action, trunc120(&target))
+        }
+        "initiative" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "create" => {
+                    let title = get_str(&["title"]).unwrap_or_default();
+                    format!("🎯 create \"{}\"", trunc120(&title))
+                }
+                "update" | "read" | "close" | "checkpoint" => {
+                    let id = get_str(&["id"]).unwrap_or_default();
+                    format!("🎯 {} {}", action, trunc120(&id))
+                }
+                other => format!("🎯 {}", other),
+            }
+        }
+        "skill_manage" => {
+            let action = get_str(&["action"]).unwrap_or_else(|| "list".to_string());
+            match action.as_str() {
+                "list" | "reload" => format!("🧩 {}", action),
+                other => {
+                    let name = get_str(&["name"]).unwrap_or_default();
+                    format!("🧩 {} {}", other, trunc120(&name))
+                }
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // ❓ USER INTERACTION
@@ -2704,19 +2846,176 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_tool_summary_truncates_long_strings() {
+    fn test_read_tool_summary_uses_path_or_file_path() {
+        // Canonical `path` parameter works.
+        let input = json!({ "path": "/tmp/project/src/main.rs" });
+        let summary = tool_input_summary("read", &input, "/tmp/project");
+        assert!(summary.contains("📄 src/main.rs"), "got: {summary}");
+
+        // Legacy/alias `file_path` parameter also works.
+        let input = json!({ "file_path": "/tmp/project/Cargo.toml" });
+        let summary = tool_input_summary("read", &input, "/tmp/project");
+        assert!(summary.contains("📄 Cargo.toml"), "got: {summary}");
+
+        // Neither parameter present.
+        let input = json!({});
+        let summary = tool_input_summary("read", &input, "/tmp/project");
+        assert!(summary.is_empty(), "got: {summary}");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Widgets for extended tools (M6+): verify they are registered in
+    // `tool_input_summary` and render with a category icon + formatted args
+    // rather than falling through to the `summarize_tool_args` fallback,
+    // which dumps raw parameters without an icon.
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_agentgrep_input_summary_shows_icon_and_query() {
         let input = json!({
-            "note": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "mode": "grep",
+            "query": "struct AgentGrep",
+            "path": "/tmp/proj/crates"
         });
-        let summary = tool_input_summary("some_new_tool", &input, "/tmp");
-        assert!(summary.contains("note=\""));
+        let summary = tool_input_summary("agentgrep", &input, "/tmp/proj");
         assert!(
-            summary.contains("...\""),
-            "summary should truncate with three dots: {summary}"
+            summary.starts_with("🔎"),
+            "expected 🔎 icon, got: {summary}"
         );
+        assert!(summary.contains("AgentGrep"));
+        assert!(summary.contains("crates"));
+    }
+
+    #[test]
+    fn test_agentgrep_input_summary_without_path() {
+        let input = json!({"mode": "outline", "query": "tool"});
+        let summary = tool_input_summary("agentgrep", &input, "/tmp");
+        assert!(summary.starts_with("🔎"));
+        assert!(summary.contains("outline"));
+        assert!(summary.contains("tool"));
+    }
+
+    #[test]
+    fn test_apply_patch_input_summary_shows_icon() {
+        let input =
+            json!({"patch": "*** Begin Patch\n*** Update File: src/x.rs\n@@\n*** End Patch"});
+        let summary = tool_input_summary("apply_patch", &input, "/tmp");
+        assert!(summary.starts_with("📄"), "got: {summary}");
+    }
+
+    #[test]
+    fn test_bg_input_summary_spawn() {
+        let input = json!({"action": "spawn", "command": "cargo build 2>&1"});
+        let summary = tool_input_summary("bg", &input, "/tmp");
+        assert!(summary.starts_with("🗂️"), "got: {summary}");
+        assert!(summary.contains("spawn"));
+        assert!(summary.contains("cargo build"));
+    }
+
+    #[test]
+    fn test_bg_input_summary_output_by_task() {
+        let input = json!({"action": "output", "task_id": "abcdef0123456789"});
+        let summary = tool_input_summary("bg", &input, "/tmp");
+        assert!(summary.starts_with("🗂️"));
+        assert!(summary.contains("output"));
+        assert!(summary.contains("abcdef01"));
+    }
+
+    #[test]
+    fn test_browser_input_summary_open() {
+        let input = json!({"action": "open", "url": "https://example.com"});
+        let summary = tool_input_summary("browser", &input, "/tmp");
+        assert!(summary.starts_with("🖥️"), "got: {summary}");
+        assert!(summary.contains("example.com"));
+    }
+
+    #[test]
+    fn test_browser_input_summary_default_action() {
+        let input = json!({"expression": "document.title"});
+        let summary = tool_input_summary("browser", &input, "/tmp");
+        assert!(summary.starts_with("🖥️"));
+    }
+
+    #[test]
+    fn test_gmail_input_summary_search() {
+        let input = json!({"action": "search", "query": "from:ci is:unread"});
+        let summary = tool_input_summary("gmail", &input, "/tmp");
+        assert!(summary.starts_with("📧"), "got: {summary}");
+        assert!(summary.contains("ci"));
+    }
+
+    #[test]
+    fn test_gmail_input_summary_send() {
+        let input = json!({"action": "send", "to": "a@b.c", "subject": "hello"});
+        let summary = tool_input_summary("gmail", &input, "/tmp");
+        assert!(summary.starts_with("📧"));
+        assert!(summary.contains("send"));
+        assert!(summary.contains("a@b.c"));
+    }
+
+    #[test]
+    fn test_send_channel_message_input_summary() {
+        let input = json!({"action": "send", "channel": "telegram", "message": "hi"});
+        let summary = tool_input_summary("send_channel_message", &input, "/tmp");
+        assert!(summary.starts_with("📨"), "got: {summary}");
+        assert!(summary.contains("telegram"));
+    }
+
+    #[test]
+    fn test_open_input_summary() {
+        let input = json!({"action": "url", "target": "https://github.com/"});
+        let summary = tool_input_summary("open", &input, "/tmp");
+        assert!(summary.starts_with("📂"), "got: {summary}");
+        assert!(summary.contains("github.com"));
+    }
+
+    #[test]
+    fn test_conversation_search_input_summary() {
+        let input = json!({"query": "memory store"});
+        let summary = tool_input_summary("conversation_search", &input, "/tmp");
+        assert!(summary.starts_with("🔎"), "got: {summary}");
+        assert!(summary.contains("memory store"));
+    }
+
+    #[test]
+    fn test_session_search_input_summary() {
+        let input = json!({"query": "tool window bug"});
+        let summary = tool_input_summary("session_search", &input, "/tmp");
+        assert!(summary.starts_with("🔎"), "got: {summary}");
+        assert!(summary.contains("tool window bug"));
+    }
+
+    #[test]
+    fn test_initiative_input_summary_create() {
+        let input = json!({"action": "create", "id": "x", "title": "Ship M7"});
+        let summary = tool_input_summary("initiative", &input, "/tmp");
+        assert!(summary.starts_with("🎯"), "got: {summary}");
+        assert!(summary.contains("Ship M7"));
+    }
+
+    #[test]
+    fn test_initiative_input_summary_checkpoint() {
+        let input = json!({"action": "checkpoint", "id": "api-v2", "progress": 75});
+        let summary = tool_input_summary("initiative", &input, "/tmp");
+        assert!(summary.starts_with("🎯"));
+        assert!(summary.contains("checkpoint"));
+    }
+
+    #[test]
+    fn test_skill_manage_input_summary_list() {
+        let input = json!({"action": "list"});
+        let summary = tool_input_summary("skill_manage", &input, "/tmp");
+        assert!(summary.starts_with("🧩"), "got: {summary}");
+    }
+
+    #[test]
+    fn test_skill_manage_input_summary_load() {
+        let input = json!({"action": "load", "name": "simplify"});
+        let summary = tool_input_summary("skill_manage", &input, "/tmp");
+        assert!(summary.starts_with("🧩"));
+        assert!(summary.contains("simplify"));
     }
 }
-
 #[cfg(test)]
 mod duration_tests {
     use super::*;

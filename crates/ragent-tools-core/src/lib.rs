@@ -12,6 +12,7 @@ pub mod path_util;
 
 // File operation tools
 pub mod append_file;
+pub mod apply_patch;
 pub mod copy_file;
 pub mod create;
 pub mod diff;
@@ -36,6 +37,8 @@ pub mod list;
 mod askpass;
 pub mod bash;
 pub mod bash_reset;
+pub mod bg;
+pub mod open;
 
 // Interaction tools
 pub mod task_complete;
@@ -287,6 +290,7 @@ pub fn create_core_registry() -> ToolRegistry {
     let registry = ToolRegistry::new();
 
     // File operations
+    registry.register(Arc::new(apply_patch::ApplyPatchTool));
     registry.register(Arc::new(read::ReadTool));
     registry.register(Arc::new(write::WriteTool));
     registry.register(Arc::new(create::CreateTool));
@@ -308,7 +312,7 @@ pub fn create_core_registry() -> ToolRegistry {
     // Shell tools
     registry.register(Arc::new(bash::BashTool));
     registry.register(Arc::new(bash_reset::BashResetTool));
-
+    registry.register(Arc::new(open::OpenTool));
     // Interaction tools
     registry.register(Arc::new(task_complete::TaskCompleteTool));
     registry.register(Arc::new(think::ThinkTool));

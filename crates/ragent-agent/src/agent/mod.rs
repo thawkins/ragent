@@ -1736,6 +1736,14 @@ pub fn collect_agents_md_content_with_discovery(
         return (String::new(), discovery);
     }
 
+    // Roots that included files are allowed to live under (working dir +
+    // global ragent data dir). Prevents `../` escapes to arbitrary paths.
+    let mut include_roots: Vec<std::path::PathBuf> = Vec::with_capacity(2);
+    include_roots.push(working_dir.to_path_buf());
+    if let Some(ref gd) = global_dir {
+        include_roots.push(gd.clone());
+    }
+
     // Build result content from the SINGLE loaded file only
     let mut result = String::new();
 
@@ -1762,8 +1770,12 @@ pub fn collect_agents_md_content_with_discovery(
         }
         result.push('\n');
 
-        // Only load content from the single selected file
-        if let Ok(content) = std::fs::read_to_string(path) {
+        // Only load content from the single selected file, then expand
+        // any `@<path>` directives it contains (transitively, with cycle
+        // and path-escape guards).
+        if let Ok(raw) = std::fs::read_to_string(path) {
+            let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+            let content = expand_includes(&raw, base_dir, &include_roots, &mut Vec::new(), 0);
             let content = content.trim();
             if !content.is_empty() {
                 result.push_str(&format!("### From: {rel}\n\n"));
@@ -1774,6 +1786,269 @@ pub fn collect_agents_md_content_with_discovery(
     }
 
     (result, discovery)
+}
+
+/// Maximum nesting depth for `@<path>` include directives.
+///
+/// Acts as a belt-and-braces guard alongside the cycle-detection visited
+/// set so that pathological (but non-cyclic) include chains cannot exhaust
+/// the stack.
+const MAX_INCLUDE_DEPTH: usize = 16;
+
+/// Expand `@<path>` include directives in instruction-file content.
+///
+/// This provides a C/C++ `#include`-style mechanism for making `AGENTS.md`,
+/// `CLAUDE.md`, `.ragent.md`, and `INSTRUCTIONS.md` modular. A line of the
+/// form:
+///
+/// ```text
+/// @docs/conventions.md
+/// @"coding-style.md"
+/// ```
+///
+/// is replaced in-place by the contents of the referenced file. The `@`
+/// must appear in the **first column** of the line (no leading whitespace);
+/// any other use of `@` is left untouched. A leading `@@` is an escape
+/// sequence and is emitted as a single literal `@` character.
+///
+/// # Semantics
+///
+/// - **Path resolution**: relative paths resolve against `base_dir` (the
+///   directory of the file currently being expanded). Absolute paths are
+///   rejected (see Security boundary).
+/// - **Recursion**: included files are themselves expanded transitively.
+/// - **Cycle guard**: a `visited` set of canonicalised paths prevents
+///   infinite loops. A re-encountered file is skipped with a marker
+///   comment.
+/// - **Depth limit**: [`MAX_INCLUDE_DEPTH`] caps recursion as a secondary
+///   guard.
+/// - **Security boundary**: a resolved include path must canonicalise to a
+///   path under one of `allowed_roots` (the working directory or the global
+///   ragent data dir). Escapes via `..` are rejected with a marker.
+/// - **Missing file / read error**: a marker comment is emitted inline and
+///   the failure is logged via `tracing`; loading never panics.
+///
+/// # Arguments
+///
+/// - `content`  — the raw text of the file being expanded.
+/// - `base_dir` — directory used to resolve relative include paths.
+/// - `allowed_roots` — canonicalised prefixes that included files must
+///   live under.
+/// - `visited`  — canonicalised paths already on the current include
+///   chain (cycle detection).
+/// - `depth`    — current nesting depth (0 for the root file).
+pub(crate) fn expand_includes(
+    content: &str,
+    base_dir: &Path,
+    allowed_roots: &[std::path::PathBuf],
+    visited: &mut Vec<std::path::PathBuf>,
+    depth: usize,
+) -> String {
+    let mut out = String::with_capacity(content.len());
+
+    for line in content.lines() {
+        match parse_include_directive(line) {
+            IncludeLine::Include(target) => {
+                out.push_str(&resolve_include(
+                    &target,
+                    base_dir,
+                    allowed_roots,
+                    visited,
+                    depth,
+                ));
+                out.push('\n');
+            }
+            IncludeLine::Escape => {
+                // `@@` at column 0 collapses to a single literal `@`.
+                out.push('@');
+                out.push_str(&line[2..]);
+                out.push('\n');
+            }
+            IncludeLine::Literal => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+
+    // `content.lines()` drops a trailing newline; preserve the original
+    // trailing newline (if any) so we don't accidentally strip blank lines
+    // that carry meaning in the source file.
+    if content.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+/// Classification of a single line during include expansion.
+enum IncludeLine {
+    /// An `@<path>` include directive; carry the parsed target.
+    Include(String),
+    /// A leading `@@` escape sequence (collapse to a single literal `@`).
+    Escape,
+    /// Ordinary line — emit verbatim.
+    Literal,
+}
+
+/// Parse a single line as an `@<path>` include directive.
+///
+/// The `@` must appear in the **first column** of the line (no leading
+/// whitespace). Recognised forms (the path occupies the rest of the line,
+/// ignoring trailing whitespace and an optional trailing comment):
+///
+/// ```text
+/// @path/to/file.md
+/// @"path/with spaces.md"
+/// @'path/with spaces.md'
+/// @path/to/file.md  <!-- optional trailing note -->
+/// ```
+///
+/// A leading `@@` is an escape sequence and is reported as
+/// [`IncludeLine::Escape`]; the line is emitted verbatim with the leading
+/// `@@` collapsed to a single literal `@`. Any line that does not start with
+/// `@` (or where the `@` is not in column 0) is [`IncludeLine::Literal`].
+fn parse_include_directive(line: &str) -> IncludeLine {
+    // `@` must be in the first column — no leading whitespace allowed.
+    let Some(rest) = line.strip_prefix('@') else {
+        return IncludeLine::Literal;
+    };
+
+    // `@@` at column 0 is an escape sequence: collapse to a single literal
+    // `@` and emit the remainder of the line verbatim.
+    if let Some(after_escape) = rest.strip_prefix('@') {
+        let _ = after_escape; // remainder emitted by the caller
+        return IncludeLine::Escape;
+    }
+
+    let rest = rest.trim_end();
+
+    // Strip an optional trailing HTML comment used as a note, e.g.
+    // `@foo.md <!-- legacy -->`.
+    let rest = strip_trailing_html_comment(rest);
+
+    let target = if (rest.starts_with('"') && rest.ends_with('"'))
+        || (rest.starts_with('\'') && rest.ends_with('\''))
+    {
+        // Quoted form — allow spaces inside, take everything between quotes.
+        &rest[1..rest.len() - 1]
+    } else {
+        // Unquoted form — a trailing `<!-- ... -->` was already stripped;
+        // what remains is the path.
+        rest
+    };
+
+    let target = target.trim();
+    if target.is_empty() {
+        // `@` alone (or `@` + only whitespace/comment) is not a valid
+        // include; emit it literally so the source is preserved.
+        IncludeLine::Literal
+    } else {
+        IncludeLine::Include(target.to_string())
+    }
+}
+
+/// Strip a trailing `<!-- ... -->` HTML comment from a line, if present.
+fn strip_trailing_html_comment(s: &str) -> &str {
+    if let Some(idx) = s.rfind("<!--") {
+        // Only treat as a trailing comment if nothing but whitespace
+        // precedes it on the remainder of the line.
+        let before = &s[..idx];
+        if before.is_empty() || before.ends_with(char::is_whitespace) {
+            return before.trim_end();
+        }
+    }
+    s
+}
+
+/// Resolve a single `@<path>` include target into expanded content (or a
+/// marker comment on failure).
+fn resolve_include(
+    target: &str,
+    base_dir: &Path,
+    allowed_roots: &[std::path::PathBuf],
+    visited: &mut Vec<std::path::PathBuf>,
+    depth: usize,
+) -> String {
+    // Reject absolute paths outright — they can never be under a project
+    // root and would let an instruction file read arbitrary files.
+    if Path::new(target).is_absolute() {
+        tracing::warn!(
+            include_target = target,
+            "instruction @<path> rejected: absolute paths are not allowed"
+        );
+        return format!("<!-- include rejected (absolute path): {target} -->");
+    }
+
+    if depth >= MAX_INCLUDE_DEPTH {
+        tracing::warn!(
+            include_target = target,
+            depth,
+            "instruction @<path> rejected: maximum nesting depth ({MAX_INCLUDE_DEPTH}) exceeded"
+        );
+        return format!(
+            "<!-- include rejected (max depth {MAX_INCLUDE_DEPTH} exceeded): {target} -->"
+        );
+    }
+
+    // Resolve relative to the current file's directory, then canonicalise.
+    let candidate = base_dir.join(target);
+    let canonical = match candidate.canonicalize() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                include_target = target,
+                error = %e,
+                "instruction @<path> not found"
+            );
+            return format!("<!-- include missing: {target} -->");
+        }
+    };
+
+    // Security boundary: the canonical path must live under one of the
+    // allowed roots (working dir or global ragent data dir).
+    let inside_root = allowed_roots.iter().any(|root| {
+        let root_canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
+        canonical.starts_with(&root_canonical)
+    });
+    if !inside_root {
+        tracing::warn!(
+            include_target = target,
+            resolved = %canonical.display(),
+            "instruction @<path> rejected: path escapes allowed roots"
+        );
+        return format!("<!-- include rejected (outside project): {target} -->");
+    }
+
+    // Cycle detection.
+    if visited.iter().any(|v| v == &canonical) {
+        tracing::warn!(
+            include_target = target,
+            resolved = %canonical.display(),
+            "instruction @<path> skipped: cycle detected"
+        );
+        return format!("<!-- include cycle skipped: {target} -->");
+    }
+
+    let raw = match std::fs::read_to_string(&canonical) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(
+                include_target = target,
+                resolved = %canonical.display(),
+                error = %e,
+                "instruction @<path> unreadable"
+            );
+            return format!("<!-- include unreadable: {target} -->");
+        }
+    };
+
+    // Recurse into the included file, recording it on the visited chain.
+    visited.push(canonical.clone());
+    let child_base = canonical.parent().unwrap_or_else(|| Path::new("."));
+    let expanded = expand_includes(&raw, child_base, allowed_roots, visited, depth + 1);
+    visited.pop();
+
+    expanded
 }
 
 /// Discover and load all AGENTS.md-style instruction files from the project tree

@@ -133,6 +133,22 @@ pub struct Config {
     /// Prices are in USD per 1,000,000 tokens.
     #[serde(default)]
     pub prices: Vec<PriceEntry>,
+    /// Browser automation configuration (CDP endpoint, headless launch).
+    #[serde(default)]
+    pub browser: BrowserConfig,
+    /// External messaging channel configuration (JCODEPLAN M7).
+    ///
+    /// Used by the `send_channel_message` tool to post notifications to
+    /// Telegram chats and Discord webhooks.
+    #[serde(default, skip_serializing_if = "ChannelsConfig::is_empty")]
+    pub channels: ChannelsConfig,
+    /// Gmail tool configuration (JCODEPLAN M7).
+    ///
+    /// Optional OAuth2 client credentials for the `gmail` tool. The OAuth
+    /// access/refresh tokens themselves are stored encrypted in `ragent-storage`
+    /// (never in this file).
+    #[serde(default, skip_serializing_if = "GmailConfig::is_empty")]
+    pub gmail: GmailConfig,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -166,6 +182,8 @@ pub struct ToolVisibilitySpecified {
     pub codeindex: bool,
     /// `true` when `masterfetch` was explicitly set in the source JSON or via a setter.
     pub masterfetch: bool,
+    /// `true` when `browser` was explicitly set in the source JSON or via a setter.
+    pub browser: bool,
 }
 
 /// Tool-family visibility configuration.
@@ -204,6 +222,11 @@ pub struct ToolVisibilityConfig {
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::masterfetch`]).
     pub masterfetch: bool,
+    /// Browser automation tool (`browser`).
+    /// Default `true` — the browser tool is visible by default.
+    /// When serialised, this field is only written if the user explicitly set it
+    /// (tracked by [`ToolVisibilitySpecified::browser`]).
+    pub browser: bool,
     /// Tracks which switches were explicitly set, so merge/serialise can
     /// distinguish "user set this" from "this is just the default".
     pub specified: ToolVisibilitySpecified,
@@ -221,6 +244,7 @@ impl ToolVisibilityConfig {
             ("plan", self.plan),
             ("codeindex", self.codeindex),
             ("masterfetch", self.masterfetch),
+            ("browser", self.browser),
         ]
         .into_iter()
     }
@@ -252,6 +276,9 @@ impl Serialize for ToolVisibilityConfig {
         if self.specified.masterfetch {
             count += 1;
         }
+        if self.specified.browser {
+            count += 1;
+        }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
         s.serialize_field("office", &self.office)?;
         s.serialize_field("github", &self.github)?;
@@ -264,6 +291,9 @@ impl Serialize for ToolVisibilityConfig {
         }
         if self.specified.masterfetch {
             s.serialize_field("masterfetch", &self.masterfetch)?;
+        }
+        if self.specified.browser {
+            s.serialize_field("browser", &self.browser)?;
         }
         s.end()
     }
@@ -385,6 +415,7 @@ impl Default for ToolVisibilityConfig {
             plan: false,
             codeindex: true,
             masterfetch: true,
+            browser: true,
             specified: ToolVisibilitySpecified::default(),
         }
     }
@@ -405,6 +436,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             plan: Option<bool>,
             codeindex: Option<bool>,
             masterfetch: Option<bool>,
+            browser: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
@@ -417,6 +449,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             plan: raw.plan.unwrap_or_else(default_false),
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             masterfetch: raw.masterfetch.unwrap_or_else(default_true),
+            browser: raw.browser.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
                 github: raw.github.is_some(),
@@ -426,6 +459,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 plan: raw.plan.is_some(),
                 codeindex: raw.codeindex.is_some(),
                 masterfetch: raw.masterfetch.is_some(),
+                browser: raw.browser.is_some(),
             },
         })
     }
@@ -527,6 +561,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "mf_cache_clear",
             "mf_version",
         ]),
+        "browser" => Some(&["browser"]),
         _ => None,
     }
 }
@@ -1653,6 +1688,28 @@ impl Config {
             base.tavily_api_key = overlay.tavily_api_key;
         }
 
+        // channels: overlay fields override base (M7)
+        if overlay.channels.enabled {
+            base.channels.enabled = true;
+        }
+        if overlay.channels.telegram.is_some() {
+            base.channels.telegram = overlay.channels.telegram;
+        }
+        if overlay.channels.discord.is_some() {
+            base.channels.discord = overlay.channels.discord;
+        }
+
+        // gmail: overlay fields override base (M7)
+        if overlay.gmail.client_id.is_some() {
+            base.gmail.client_id = overlay.gmail.client_id;
+        }
+        if overlay.gmail.client_secret.is_some() {
+            base.gmail.client_secret = overlay.gmail.client_secret;
+        }
+        if overlay.gmail.base_url.is_some() {
+            base.gmail.base_url = overlay.gmail.base_url;
+        }
+
         // langsearch_api_key: overlay overrides base
         if overlay.langsearch_api_key.is_some() {
             base.langsearch_api_key = overlay.langsearch_api_key;
@@ -1720,6 +1777,10 @@ impl Config {
         if overlay.tool_visibility.specified.masterfetch {
             base.tool_visibility.masterfetch = overlay.tool_visibility.masterfetch;
             base.tool_visibility.specified.masterfetch = true;
+        }
+        if overlay.tool_visibility.specified.browser {
+            base.tool_visibility.browser = overlay.tool_visibility.browser;
+            base.tool_visibility.specified.browser = true;
         }
 
         // Compaction: overlay takes precedence.        base.compaction = overlay.compaction;
@@ -2189,4 +2250,151 @@ pub struct GitLabIntegrationConfig {
     pub token: Option<String>,
     /// GitLab username / identity.
     pub username: Option<String>,
+}
+
+/// Browser automation configuration (JCODEPLAN M4).
+///
+/// Controls the CDP (Chrome DevTools Protocol) endpoint used by the `browser`
+/// tool. When `cdp_endpoint` is `None` or empty, the tool defaults to
+/// `http://127.0.0.1:9222`.
+///
+/// ```json
+/// {
+///   "browser": {
+///     "cdp_endpoint": "http://127.0.0.1:9222",
+///     "default_headless": true
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BrowserConfig {
+    /// CDP HTTP endpoint URL (e.g. `"http://127.0.0.1:9222"`).
+    ///
+    /// When `None` or empty, the `browser` tool defaults to
+    /// `http://127.0.0.1:9222`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cdp_endpoint: Option<String>,
+    /// Default headless mode for the `setup` action (default: `true`).
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub default_headless: bool,
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            cdp_endpoint: None,
+            default_headless: true,
+        }
+    }
+}
+
+/// Return `true` if the value is `true` — used for `skip_serializing_if`.
+fn is_true(v: &bool) -> bool {
+    *v
+}
+
+/// External messaging channel configuration for the `send_channel_message` tool
+/// (JCODEPLAN M7, T-061).
+///
+/// Configured under the `channels` key in `ragent.json`:
+///
+/// ```json
+/// {
+///   "channels": {
+///     "enabled": true,
+///     "telegram": { "bot_token": "123:abc", "chat_id": "-100123" },
+///     "discord": { "webhook_url": "https://discord.com/api/webhooks/..." }
+///   }
+/// }
+/// ```
+///
+/// Token values support a `env:VAR_NAME` prefix — the value is then read from
+/// the named environment variable at use time, so secrets do not need to live
+/// in the config file (e.g. `"bot_token": "env:TELEGRAM_BOT_TOKEN"`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChannelsConfig {
+    /// Master switch for the channel messaging tool (default: `false`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enabled: bool,
+    /// Telegram bot channel configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<TelegramChannelConfig>,
+    /// Discord webhook channel configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discord: Option<DiscordChannelConfig>,
+}
+
+impl ChannelsConfig {
+    /// Returns `true` when no channels settings are present.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.enabled && self.telegram.is_none() && self.discord.is_none()
+    }
+}
+
+/// Telegram channel settings for `send_channel_message`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TelegramChannelConfig {
+    /// Bot token from BotFather. Supports the `env:VAR_NAME` indirection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_token: Option<String>,
+    /// Chat identifier (`chat_id`) that messages are sent to. Supports the
+    /// `env:VAR_NAME` indirection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    /// Optional HTTP(S) endpoint override (used by tests; defaults to
+    /// `https://api.telegram.org`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+/// Discord channel settings for `send_channel_message`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscordChannelConfig {
+    /// Full webhook URL (`https://discord.com/api/webhooks/<id>/<token>`).
+    /// Supports the `env:VAR_NAME` indirection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+}
+
+/// Gmail tool configuration (JCODEPLAN M7, T-060).
+///
+/// Configured under the `gmail` key in `ragent.json`:
+///
+/// ```json
+/// {
+///   "gmail": {
+///     "client_id": "...apps.googleusercontent.com",
+///     "client_secret": "env:GMAIL_CLIENT_SECRET"
+///   }
+/// }
+/// ```
+///
+/// The OAuth2 access/refresh tokens used to call the Gmail API are managed by
+/// the `gmail` tool itself (`auth`/`status`/`logout` actions) and are stored
+/// encrypted in `ragent-storage` — never in this file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GmailConfig {
+    /// OAuth2 client ID used for refresh-token exchange. Supports the
+    /// `env:VAR_NAME` indirection, and falls back to the
+    /// `GMAIL_CLIENT_ID` environment variable when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+    /// OAuth2 client secret used for refresh-token exchange. Supports the
+    /// `env:VAR_NAME` indirection, and falls back to the
+    /// `GMAIL_CLIENT_SECRET` environment variable when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+    /// Optional HTTP(S) endpoint override (used by tests; defaults to
+    /// `https://gmail.googleapis.com`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+impl GmailConfig {
+    /// Returns `true` when no gmail settings are present.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.client_id.is_none() && self.client_secret.is_none() && self.base_url.is_none()
+    }
 }

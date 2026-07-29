@@ -44,12 +44,12 @@ fn make_ctx(
         spec_manager: None,
         active_spec_id: None,
         config: None,
+        bg_service: None,
         cached_team_dir: std::sync::Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
-    };
-    // Mark this session as the lead so tool permission checks pass.
+    }; // Mark this session as the lead so tool permission checks pass.
     ctx.team_context = Some(Arc::new(ragent_agent::tool::TeamContext {
         team_name: String::new(),
         agent_id: "lead".to_string(),

@@ -20,9 +20,10 @@ pub use compaction::{
     CompactionConfig, KeepConfig, LegacyCompressionConfig, apply_legacy_compression_alias,
 };
 pub use config::{
-    AgentConfig, AgentPerfConfig, AutoExtractConfig, Capabilities, Config, Cost,
-    CrossProjectConfig, GitLabIntegrationConfig, McpServerConfig, McpTransport, MemoryConfig,
-    ModelConfig, PriceEntry, ProviderConfig, ToolVisibilityConfig, tool_family_names,
+    AgentConfig, AgentPerfConfig, AutoExtractConfig, BrowserConfig, Capabilities, ChannelsConfig,
+    Config, Cost, CrossProjectConfig, DiscordChannelConfig, GitLabIntegrationConfig, GmailConfig,
+    McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PriceEntry, ProviderConfig,
+    StreamConfig, TelegramChannelConfig, ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,

@@ -60,6 +60,7 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
     };
     (processor, storage)
 }

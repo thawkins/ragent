@@ -2222,7 +2222,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                     ["help"] | ["usage"] => {
                         self.append_assistant_text(
-                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
+                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                               );
                         self.status = "tools help".to_string();
                     }
@@ -2235,7 +2235,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             self.status = "tools".to_string();
                         } else {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                                       );
                             self.status = "tools error".to_string();
                         }
@@ -2255,7 +2255,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                         if !self.set_tool_visibility_state(switch, enabled) {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`, `masterfetch`, `browser`.",
                                                       );
                             self.status = "tools error".to_string();
                             return;
@@ -2693,12 +2693,14 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           team_context: None,
                                                                                                                                                                                                                           team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
                                                                                                                                                                                                                           code_index: None,
+                                                                                                                                                                                                                          bg_service: None,
                                                                                                                                                                                                                           spec_manager: session_processor.spec_manager.get().cloned(),
                                                                                                                                                                                                                           active_spec_id: session_processor.active_spec.read().await.clone(),
                                                                                                                                                                                                                           config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
-                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
-                                                                                                                                                                                                                      };                                                    let _ = tool.execute(input, &ctx).await;                                                }
+                                                                                                                                                                                                                          cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                                                                                                                                                                                          read_timestamps: session_processor.read_timestamps.clone(),
+                                                                                                                                                                                                                      };
+                                                                                                                                                                                                                      let _ = tool.execute(input, &ctx).await;                                                }
                                             });
                                     });
                                 }

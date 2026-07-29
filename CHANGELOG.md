@@ -1,6 +1,215 @@
 # Changelog
 
+## Version: 0.1.0-beta.17
+
+### Added — `@<path>` directive for modular instruction files
+
+- Instruction files (`AGENTS.md`, `CLAUDE.md`, `.ragent.md`, `INSTRUCTIONS.md`)
+  now support a C/C++ `#include`-style mechanism for modularity. A line of
+  the form `@docs/conventions.md` (or `@"path with spaces.md"`) — with the `@`
+  in the first column — is replaced in-place by the contents of the referenced
+  file before the content is loaded into the system prompt.
+- A leading `@@` is an escape sequence that collapses to a single literal `@`
+  character, so lines that start with `@` can be written verbatim without
+  triggering an include.
+- Paths resolve relative to the directory of the file containing the
+  directive; includes are transitive (included files are themselves
+  expanded). Cycle detection (visited-path set) and a depth cap
+  (`MAX_INCLUDE_DEPTH = 16`) prevent infinite loops. Absolute paths and
+  `../` escapes outside the working dir / global ragent data dir are
+  rejected with an inline marker comment; missing or unreadable files emit
+  a marker comment rather than failing. Implemented in
+  `crates/ragent-agent/src/agent/mod.rs` (`expand_includes`), wired into
+  `collect_agents_md_content_with_discovery`. Tests in
+  `crates/ragent-agent/tests/test_instruction_includes.rs`.
+
+### Changed — `@include <path>` → `@<path>` include syntax
+
+- The instruction-file include directive now uses `@<path>` (the `@` sigil
+  followed directly by the path) instead of `@include <path>`. The `@` must
+  appear in the first column of the line. The `@@` escape sequence is new.
+  Existing instruction files using `@include path/to/file.md` must be updated
+  to `@path/to/file.md`.
+
+### Completed — Open/reveal and remaining UX tools — JCODEPLAN M10
+
+- Confirmed `open` tool implementation in `crates/ragent-tools-core/src/open.rs`
+  (T-090 through T-094): cross-platform `xdg-open`/`open`/`start` wrapper,
+  `reveal` action for opening a target's parent directory, URL scheme
+  allowlist validation (`http`, `https`, `mailto`, `file`), and integration
+  tests in `crates/ragent-tools-core/tests/test_open.rs`.
+- `open` is registered via `create_core_registry()` and surfaced automatically
+  in the agent default registry under the `shell:execute` permission category.
+- `docs/JCODEPLAN.md` updated to mark M10 tasks complete and added
+  `docs/reports/jcodeplan-m10-completion.md`.
+
+### Added — Durable initiatives and skill management — JCODEPLAN M8
+
+- New `initiative` tool in `crates/ragent-agent/src/tool/initiative.rs`
+  (T-070) managing durable, project-scoped goals with milestones. Actions:
+  `create`, `read`, `update`, `checkpoint`, `list`, `close`. `checkpoint`
+  marks a milestone complete (recording `completed_at`), bumps overall
+  progress, and appends a timestamped `Checkpoint:` note to the description.
+  `close` supports `completed` (auto-fills progress to 100) and `abandoned`
+  (keeps recorded progress). Registered in `create_default_registry()` under
+  the `storage:write` permission category (T-073).
+- New `initiatives` SQLite table + CRUD (`create_initiative`,
+  `get_initiative`, `list_initiatives`, `update_initiative`,
+  `delete_initiative`) in `ragent-storage`, with `InitiativeMilestone` /
+  `InitiativeRow` types re-exported via `crate::storage` (T-070).
+- `## Active Initiatives` system-prompt section injected on every turn in
+  `session/loop_steps.rs`, listing active initiatives with progress and the
+  next pending milestones so the agent stays aware of long-term goals across
+  sessions and compaction (T-070 "surface in system prompt").
+- New `skill_manage` tool in `crates/ragent-agent/src/tool/skill_manage.rs`
+  (T-071). Actions: `list` (with `scope` filter + optional `include_bodies`),
+  `read` (processed prompt with `$ARGUMENTS` substitution), `load` (discover
+  + return prompt — injects skills added/edited after session start),
+  `reload` (clear caches, re-discover, report added/removed skills).
+- New `SkillInfo::clear_body_cache()` async helper used by the `reload`
+  action to drop on-disk `SKILL.md` caches without a session restart.
+- Migration SQL block in `ragent-storage` re-indented consistently to prevent
+  future edit collisions.
+- Tests (T-072): 26 tests in `crates/ragent-agent/tests/test_initiative.rs`
+  (tool identity, schema, create/read/update/checkpoint/list/close, duplicate
+  and invalid-slug rejection, cross-session visibility, per-project
+  isolation, empty-storage graceful error, storage round-trip, prompt
+  section), 12 tests in `crates/ragent-agent/tests/test_skill_manage.rs`
+  (bundled + project discovery, scope filter, arg substitution, unknown-skill
+  listing, load injects prompt, reload picks up added skills + edited
+  bodies), 7 tests in `crates/ragent-storage/tests/test_initiatives.rs`
+  (table creation, field round-trip, status filter, closed_at lifecycle,
+  malformed-JSON fallback).
+- Documented both tools in `SPEC.md` §19B.
+
+### Added — Gmail and messaging channel tools — JCODEPLAN M7
+
+- New `gmail` tool in `crates/ragent-tools-extended/src/gmail.rs` (T-060)
+  providing Gmail search/read/draft/send via the Gmail REST API with OAuth2
+  tokens stored encrypted in the SQLite credential store (`SqliteTokenStore`),
+  plus `auth`/`status`/`logout` management actions and automatic
+  refresh-token exchange + retry on HTTP 401.
+- New `send_channel_message` tool in
+  `crates/ragent-tools-extended/src/channels.rs` (T-061) sending short
+  messages to Telegram (bot API) and Discord (incoming webhook), with
+  `send` (target `telegram`/`discord`/`all`) and `status` actions.
+- New config schema: `gmail` block (`client_id`, `client_secret` with `env:`
+  indirection) and `channels` block (`enabled`, `telegram`, `discord`) in
+  `ragent-config`. Client credential precedence: auth args → stored tokens →
+  config → `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET` env vars.
+- Both tools use the `network:send` permission category and degrade
+  gracefully with honest errors and `next_action` hints when unconfigured.
+- Registered both tools in `create_extended_registry()` (T-063), surfaced in
+  the agent automatically via `register_extracted_extended_tools`.
+- Mocked-backend integration tests (T-062):
+  `crates/ragent-tools-extended/tests/test_gmail.rs` (19 tests, axum mock
+  server, encrypted store round-trip, refresh exchange, RFC 2822 wire check)
+  and `crates/ragent-tools-extended/tests/test_channels.rs` (20 tests, mock
+  Telegram/Discord fanout, config merge, env indirection).
+- Documented both tools in `SPEC.md` §19A.
+
+## Version: 0.1.0-beta.16
+
+### Added — Conversation and cross-session search tools — JCODEPLAN M5
+
+- New `conversation_search` tool in `crates/ragent-agent/src/tool/conversation_search.rs`
+  provides keyword search, turn-range retrieval, and statistics for the current
+  session. Modes: `keyword` (default), `turn_range`, `stats`.
+- New `session_search` tool in `crates/ragent-agent/src/tool/session_search.rs`
+  performs ranked full-text search across all stored sessions with filters for
+  date range, working directory, role, per-session limits, and optional
+  surrounding context.
+- Session message FTS5 index (`messages_fts`) and optional embedding cache
+  (`messages_embedding`) in `ragent-storage`, with `store_message_embedding`,
+  `get_message_embedding`, and `search_messages_by_embedding` helpers.
+- `warm_message_search_index()` is called on startup to rebuild the FTS index
+  in a background blocking task.
+- New `ConversationSearched` and `SessionSearched` event variants, with SSE
+  serialization in `crates/ragent-server/src/sse.rs`.
+- Added integration tests in `crates/ragent-agent/tests/test_conversation_search.rs`,
+  `crates/ragent-agent/tests/test_session_search.rs`, and
+  `crates/ragent-storage/tests/test_message_embeddings.rs`.
+- Registered both tools in `create_default_registry()` under the Memory category.
+
+## Version: 0.1.0-beta.15
+
+### Added — Browser automation tool (`browser`) — JCODEPLAN M4
+
+- New `browser` tool in `crates/ragent-tools-extended/src/browser/` providing
+  Chrome DevTools Protocol (CDP) browser automation with 14 actions: `open`,
+  `snapshot`, `click`, `type`, `fill_form`, `select`, `wait`, `eval`,
+  `scroll`, `upload`, `press`, `screenshot`, `status`, `setup`.
+- CDP WebSocket client (`browser/cdp.rs`) with JSON-RPC command/response
+  correlation, event fan-out via broadcast channel, and graceful degradation
+  when no browser is available.
+- Browser launcher (`browser/launch.rs`) with platform-specific Chrome/
+  Chromium binary detection (Linux, macOS, Windows) and headless launch
+  via `--remote-debugging-port`.
+- Action handlers (`browser/actions.rs`) implementing each action using CDP
+  domains (Page, DOM, Runtime, Input, Network).
+- `BrowserConfig` in `ragent-config` with `cdp_endpoint` and
+  `default_headless` fields, configurable in `ragent.json` under the
+  `browser` key.
+- `browser` tool-visibility switch added to `ToolVisibilityConfig` —
+  toggle via `/tools browser on|off`.
+- TUI `/tools` slash command updated to include `browser` and `masterfetch`
+  in the valid switches list.
+- Added `tokio-tungstenite` workspace dependency for WebSocket support.
+- Added integration tests in
+  `crates/ragent-tools-extended/tests/test_browser.rs` (37 tests covering
+  tool identity, schema, graceful degradation, config, visibility, CDP types,
+  and conditional live CDP tests).
+- Registered as `browser` in `create_extended_registry()`.
+
 ## Version: 0.1.0-beta.14
+
+### Added — Codex-style patch tool (`apply_patch`)
+
+- New `apply_patch` tool in `crates/ragent-tools-core/src/apply_patch.rs` parses
+  `*** Begin Patch` / `*** End Patch` envelopes with `*** Add File:`,
+  `*** Delete File:`, and `*** Update File:` operations. Update hunks use `@@`
+  headers with context (` `), add (`+`), and remove (`-`) lines.
+- Supports file moves via `*** Move to:` inside an update block, including
+  rename-and-edit in a single patch.
+- All operations are validated before any file is written; paths are resolved
+  relative to the working directory and canonical containment is enforced.
+- Includes `dry_run` parameter to preview changes without writing files.
+- Added integration tests in `crates/ragent-tools-core/tests/test_apply_patch.rs`.
+- Registered in `create_core_registry()`.
+
+### Added — Open/reveal tool (`open`)
+
+- New `open` tool in `crates/ragent-tools-core/src/open.rs` opens files, folders,
+  and URLs using the platform default handler (`xdg-open` on Linux, `open` on
+  macOS, `start` on Windows).
+- Supports `open`, `reveal` (parent directory), and `url` actions. URL schemes
+  are validated against an allowlist (`http`, `https`, `mailto`, `file`).
+- Paths are resolved relative to the working directory and checked for root
+  containment.
+- Added integration tests in `crates/ragent-tools-core/tests/test_open.rs`.
+- Registered in `create_core_registry()`.
+
+### Fixed — `agentgrep` clippy warnings
+
+- Cleaned up `agentgrep.rs` to satisfy `-D warnings`:
+  replaced `map_or(false, ...)` with `is_some_and`, iterated map keys directly,
+  simplified sorts, and flattened a glob loop.
+
+### Fixed — TUI read tool header uses pending args when `ToolCallStart` is dropped
+
+- In `crates/ragent-tui/src/app/event_handler.rs`, the `Event::ToolCallBatch`
+  fallback now applies any previously-stored `pending_tool_args` to a missing
+  tool-call part after creating it. This fixes the case where the broadcast
+  bridge drops `ToolCallStart` but `ToolCallArgs` was already queued: the TUI
+  widget header was showing `📄 missing path` even though the args JSON
+  contained a valid `path`.
+- `update_tool_call_input` is reused to merge the pending JSON into the newly
+  created part's `state.input`, so `tool_input_summary` can render the correct
+  read path in the header.
+- Added regression tests
+  `test_tool_call_batch_applies_pending_args_when_start_dropped` and
+  `test_tool_call_batch_does_not_overwrite_existing_input` in
+  `crates/ragent-tui/src/app/tests.rs`.
 
 ### Fixed — TUI read tool header always shows icon, and missing path surfaces in UI
 

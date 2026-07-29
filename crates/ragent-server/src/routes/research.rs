@@ -177,6 +177,11 @@ async fn create_research(
         .unwrap_or_else(|| StdPath::new("."))
         .to_path_buf();
     let cfg = state.config.read().await.clone();
+    let provider_registry = state.session_processor.provider_registry.clone();
+    let active_model =
+        ragent_agent::agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
+            .ok()
+            .and_then(|agent| agent.model);
     let session = build_research_session(
         &state.session_processor.tool_registry,
         manager.clone(),
@@ -185,8 +190,8 @@ async fn create_research(
         state.event_bus.clone(),
         Some(state.storage.clone()),
         Some(Arc::new(cfg)),
-        Some(state.session_processor.provider_registry.clone()),
-        None,
+        Some(provider_registry),
+        active_model,
     );
     match session
         .run(&req.name, &title, &config, Arc::new(observer))

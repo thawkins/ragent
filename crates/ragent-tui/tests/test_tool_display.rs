@@ -22,10 +22,9 @@ fn test_input_summary_read_tool() {
 fn test_input_summary_read_tool_missing_path_shows_placeholder() {
     let input = json!({});
     let summary = tool_input_summary("read", &input, "/home/user/project");
-    assert!(summary.contains("📄"), "Should still have file emoji");
     assert!(
-        summary.contains("missing path"),
-        "Should indicate missing path; got: {summary}"
+        summary.is_empty(),
+        "Missing path should produce an empty summary; got: {summary}"
     );
 }
 
