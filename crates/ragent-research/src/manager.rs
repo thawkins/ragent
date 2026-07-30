@@ -74,6 +74,21 @@ pub enum ResearchError {
         /// URL that produced an empty or chrome-only body.
         url: String,
     },
+    /// The `--from-file` document could not be read or parsed.
+    #[error("failed to extract --from-file '{path}': {message}")]
+    FromFileExtractFailed {
+        /// File path that could not be extracted.
+        path: String,
+        /// Underlying error message.
+        message: String,
+    },
+    /// The `--from-file` document was extracted, but its body did not contain
+    /// enough usable text to derive a research topic.
+    #[error("--from-file '{path}' contained no usable text to derive a topic")]
+    FromFileNoUsableBody {
+        /// File path that produced an empty body.
+        path: String,
+    },
     /// The iterative research engine failed during a multi-iteration pass.
     #[error("iterative research engine failed: {0}")]
     EngineRunFailed(String),

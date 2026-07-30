@@ -10,18 +10,25 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
-        /// Free-form topic description. Optional when `--from-url` is supplied;
-        /// in that case the fetched page content becomes the research subject.
+        /// Free-form topic description. Optional when `--from-url` or
+        /// `--from-file` is supplied; in that case the fetched/extracted
+        /// content becomes the research subject.
         topic: String,
         /// `--from-url <URL>`: fetch the URL and use its content as the research
         /// subject in place of (or alongside) an explicit topic. The fetched
         /// page is captured as the primary web source; the normal web-search
         /// phase still runs using the derived topic.
         from_url: Option<String>,
+        /// `--from-file <PATH>`: extract the local document and use its content
+        /// as the research subject in place of (or alongside) an explicit
+        /// topic. The extracted content is captured as the primary
+        /// `Source::Other`; the normal web-search phase still runs using the
+        /// derived topic.
+        from_file: Option<String>,
         /// Optional FR-010 `--iterations N` override.
         iterations: Option<u32>,
         /// Optional FR-011 `--depth shallow|standard|deep`.
@@ -129,6 +136,7 @@ impl ResearchCliCommand {
                         name,
                         topic,
                         from_url: None,
+                        from_file: None,
                         iterations: None,
                         depth: None,
                         format: None,
@@ -145,13 +153,14 @@ impl ResearchCliCommand {
 
     fn parse_create(rest: &[&str]) -> Self {
         // Parse: ragent research create <name> <topic> [--from-url <URL>]
-        //        [--iterations N] [--depth shallow|standard|deep] [--format <artifact>]
-        //        [--sources-dir <path>] [--template <name>] [--fetch-concurrently N]
-        //        [--use-local] [--use-specs]
+        //        [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep]
+        //        [--format <artifact>] [--sources-dir <path>] [--template <name>]
+        //        [--fetch-concurrently N] [--use-local] [--use-specs]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
         let mut from_url: Option<String> = None;
+        let mut from_file: Option<String> = None;
         let mut iterations: Option<u32> = None;
         let mut depth: Option<String> = None;
         let mut format: Option<String> = None;
@@ -166,6 +175,14 @@ impl ResearchCliCommand {
                 "--from-url" => {
                     if let Some(v) = rest.get(i + 1) {
                         from_url = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--from-file" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        from_file = Some((*v).to_string());
                         i += 2;
                     } else {
                         i += 1;
@@ -245,6 +262,7 @@ impl ResearchCliCommand {
             name,
             topic,
             from_url,
+            from_file,
             iterations,
             depth,
             format,
@@ -384,6 +402,10 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             "from_url_body_preview",
             serde_json::json!({ "url": url, "body_preview": body_preview }),
         ),
+        SessionEvent::FromFileBodyPreview { path, body_preview } => (
+            "from_file_body_preview",
+            serde_json::json!({ "path": path, "body_preview": body_preview }),
+        ),
         SessionEvent::LocalCaptured { path, score } => {
             ("local", serde_json::json!({ "path": path, "score": score }))
         }
@@ -463,6 +485,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             depth,
             iterations,
             from_url,
+            from_file,
         } => (
             "config",
             serde_json::json!({
@@ -470,6 +493,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "depth": depth,
                 "iterations": iterations,
                 "from_url": from_url,
+                "from_file": from_file,
             }),
         ),
     };

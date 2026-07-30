@@ -189,16 +189,22 @@ impl ResearchItem {
         out.push_str(&format!("name: {}\n", self.name.as_str()));
         out.push_str(&format!(
             "title: \"{}\"\n",
-            self.title.replace(['\n', '\r'], " ").replace('\"', "\\\"")
+            strip_control_chars(&self.title)
+                .replace(['\n', '\r'], " ")
+                .replace('\"', "\\\"")
         ));
         out.push_str(&format!(
             "topic: \"{}\"\n",
-            self.topic.replace(['\n', '\r'], " ").replace('\"', "\\\"")
+            strip_control_chars(&self.topic)
+                .replace(['\n', '\r'], " ")
+                .replace('\"', "\\\"")
         ));
         if let Some(model) = &self.model {
             out.push_str(&format!(
                 "Model: \"{}\"\n",
-                model.replace(['\n', '\r'], " ").replace('\"', "\\\"")
+                strip_control_chars(model)
+                    .replace(['\n', '\r'], " ")
+                    .replace('\"', "\\\"")
             ));
         }
         out.push_str(&format!("status: {}\n", self.status));
@@ -212,7 +218,9 @@ impl ResearchItem {
             for q in &self.queries {
                 out.push_str(&format!(
                     "  - \"{}\"\n",
-                    q.replace(['\n', '\r'], " ").replace('\"', "\\\"")
+                    strip_control_chars(q)
+                        .replace(['\n', '\r'], " ")
+                        .replace('\"', "\\\"")
                 ));
             }
         }
@@ -460,6 +468,31 @@ fn sources_count(sources: &[Source]) -> String {
     format!("{} # see sources/ subdirectory", sources.len())
 }
 
+/// Strip non-printable control characters that would corrupt `RESEARCH.md`.
+///
+/// LLM text streams and PDF/Office extraction can emit C0 control codes
+/// (0x00–0x1F), DEL (0x7F), and C1 control codes (0x80–0x9F). These make
+/// markdown editors detect the file as binary. Newlines (`\n`) and tabs
+/// (`\t`) are preserved so multi-line findings render correctly; carriage
+/// returns are collapsed to spaces.
+///
+/// Defence-in-depth: the analysis parser and document assembler both call
+/// this so binary never reaches disk even when a provider returns garbage
+/// tokens or a PDF extractor emits raw font-encoding bytes.
+#[must_use]
+pub(crate) fn strip_control_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\n' | '\t' => out.push(ch),
+            '\r' => out.push(' '),
+            c if c.is_control() => continue,
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Maximum length of a derived research item title, in characters.
 ///
 /// Topics can be long free-form descriptions; using the whole string verbatim
@@ -487,12 +520,25 @@ pub const RESEARCH_TITLE_MAX_CHARS: usize = 80;
 /// This is the single source of truth used by the CLI, TUI, and HTTP server
 /// entry points so all three produce identical titles for the same inputs.
 pub fn derive_title(topic: &str, from_url: Option<&str>) -> String {
+    derive_title_full(topic, from_url, None)
+}
+
+/// Derive a research item title with an optional `--from-file` path fallback.
+///
+/// Same as [`derive_title`] but also accepts a `from_file` path that is used
+/// when neither `topic` nor `from_url` is available, so the title reflects the
+/// seed document rather than defaulting to `"Research"`.
+#[must_use]
+pub fn derive_title_full(topic: &str, from_url: Option<&str>, from_file: Option<&str>) -> String {
     let trimmed = topic.trim();
     if !trimmed.is_empty() {
         return cap_title(trimmed, DERIVED_TITLE_MAX_CHARS);
     }
     if let Some(url) = from_url.map(str::trim).filter(|s| !s.is_empty()) {
         return url.to_string();
+    }
+    if let Some(path) = from_file.map(str::trim).filter(|s| !s.is_empty()) {
+        return path.to_string();
     }
     "Research".to_string()
 }
@@ -856,5 +902,68 @@ mod tests {
         };
         assert!(err.to_string().contains("created"));
         assert!(err.to_string().contains("parse error"));
+    }
+
+    // ── strip_control_chars / frontmatter sanitization ────────────────────
+
+    #[test]
+    fn strip_control_chars_preserves_newlines_and_tabs() {
+        let input = "line1\nline2\ttabbed";
+        assert_eq!(strip_control_chars(input), input);
+    }
+
+    #[test]
+    fn strip_control_chars_replaces_cr_with_space() {
+        let input = "line1\r\nline2";
+        assert_eq!(strip_control_chars(input), "line1 \nline2");
+    }
+
+    #[test]
+    fn strip_control_chars_drops_c0_control_chars() {
+        // 0x00 NUL, 0x01 SOH, 0x07 BEL, 0x08 BS, 0x0B VT, 0x0C FF, 0x0E SO, 0x1F US
+        let input = "a\x00b\x01c\x07d\x08e\x0Bf\x0Cg\x0Eh\x1Fi";
+        assert_eq!(strip_control_chars(input), "abcdefghi");
+    }
+
+    #[test]
+    fn strip_control_chars_drops_c1_control_chars() {
+        // 0x7F DEL, 0x80, 0x9F — use char literals since \x80/\x9F exceed
+        // the \x00-\x7F range allowed in byte/string escapes.
+        let input = format!("a{}b{}c{}d", '\u{7F}', '\u{80}', '\u{9F}');
+        assert_eq!(strip_control_chars(&input), "abcd");
+    }
+
+    #[test]
+    fn render_frontmatter_strips_control_chars_from_title() {
+        let item = ResearchItem::new(sample_name(), "Title\x01with\x02ctrl", "topic");
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains('\x01') && !fm.contains('\x02'),
+            "frontmatter must not contain control chars, got: {fm:?}"
+        );
+        assert!(fm.contains("Titlewithctrl"));
+    }
+
+    #[test]
+    fn render_frontmatter_strips_control_chars_from_topic() {
+        let item = ResearchItem::new(sample_name(), "title", "topic\x07with\x08ctrl");
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains('\x07') && !fm.contains('\x08'),
+            "frontmatter must not contain control chars, got: {fm:?}"
+        );
+        assert!(fm.contains("topicwithctrl"));
+    }
+
+    #[test]
+    fn render_frontmatter_strips_control_chars_from_queries() {
+        let mut item = ResearchItem::new(sample_name(), "title", "topic");
+        item.set_queries(vec!["query\x01with\x02ctrl".into()]);
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains('\x01') && !fm.contains('\x02'),
+            "frontmatter must not contain control chars in queries, got: {fm:?}"
+        );
+        assert!(fm.contains("querywithctrl"));
     }
 }

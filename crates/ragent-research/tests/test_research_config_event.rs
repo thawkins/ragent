@@ -14,6 +14,7 @@ fn config_snapshot_json_includes_output_format() {
         depth: Some(Depth::Deep.as_str().to_string()),
         iterations: Some(3),
         from_url: None,
+        from_file: None,
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.starts_with("ragent-research: "));
@@ -31,6 +32,7 @@ fn config_snapshot_json_omits_optional_fields() {
         depth: None,
         iterations: None,
         from_url: None,
+        from_file: None,
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.contains("\"output_format\":\"report\""));
@@ -46,6 +48,7 @@ fn config_snapshot_json_includes_from_url() {
         depth: None,
         iterations: None,
         from_url: Some("https://example.com/page".to_string()),
+        from_file: None,
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.contains("\"output_format\":\"executive-summary\""));

@@ -69,6 +69,13 @@ pub enum ResearchCommands {
         /// source; web search still runs.
         #[arg(long, value_name = "URL")]
         from_url: Option<String>,
+        /// Extract a local document file and use its content as the research
+        /// subject in place of an explicit topic. Supported formats: PDF,
+        /// DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, and MD. The extracted
+        /// content is captured as the primary source; web search still
+        /// runs using the derived topic.
+        #[arg(long, value_name = "PATH")]
+        from_file: Option<String>,
         /// Number of gathering iterations
         #[arg(long)]
         iterations: Option<u32>,
@@ -154,6 +161,7 @@ pub async fn handle_research_command(
             name,
             topic,
             from_url,
+            from_file,
             iterations,
             depth,
             format,
@@ -164,9 +172,9 @@ pub async fn handle_research_command(
             use_specs,
         } => {
             let topic = topic.join(" ");
-            if topic.is_empty() && from_url.is_none() {
+            if topic.is_empty() && from_url.is_none() && from_file.is_none() {
                 eprintln!(
-                    "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>]"
+                    "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
                 );
                 std::process::exit(2);
             }
@@ -174,6 +182,7 @@ pub async fn handle_research_command(
                 name,
                 topic,
                 from_url,
+                from_file,
                 iterations,
                 depth,
                 format,
@@ -274,6 +283,7 @@ pub async fn handle_research_command(
             name,
             topic,
             from_url,
+            from_file,
             iterations,
             depth,
             format,
@@ -293,11 +303,17 @@ pub async fn handle_research_command(
             }
             // Derive a human-readable item title that summarises the topic
             // (rather than truncating to its first word). Falls back to the
-            // URL when only `--from-url` was supplied, then to "Research".
-            let title = ragent_research::derive_title(&topic, from_url.as_deref());
+            // URL when only `--from-url` was supplied, then the file path
+            // when only `--from-file` was supplied, then to "Research".
+            let title = ragent_research::derive_title_full(
+                &topic,
+                from_url.as_deref(),
+                from_file.as_deref(),
+            );
             let config = SessionConfig {
                 topic: topic.clone(),
                 from_url,
+                from_file: from_file.map(std::path::PathBuf::from),
                 sources_dir: sources_dir.map(std::path::PathBuf::from),
                 template,
                 disable_local: !use_local,
@@ -311,7 +327,6 @@ pub async fn handle_research_command(
                 }),
                 ..SessionConfig::default()
             };
-
             // Build a full research session backed by the default tool
             // registry so the CLI can capture web sources when a search API
             // key is available, as well as local in-project sources.

@@ -29,7 +29,7 @@
 //! downstream tool that reads `RESEARCH.md` can rely on a stable structure.
 
 use crate::io::ResearchIo;
-use crate::item::ResearchItem;
+use crate::item::{ResearchItem, strip_control_chars};
 use crate::research_name::ResearchName;
 use crate::source::{LocalSourceKind, Source};
 use crate::status::ResearchStatus;
@@ -200,8 +200,8 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 #[must_use]
 pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     let frontmatter = doc.item.render_frontmatter();
-    let title = doc.item.title.clone();
-    let topic = doc.item.topic.clone();
+    let title = strip_control_chars(&doc.item.title);
+    let topic = strip_control_chars(&doc.item.topic);
 
     let mut body = String::new();
 
@@ -212,7 +212,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
         body.push_str("\n\n");
     }
 
-    // ── Title ──────────────────────��─────────────────────────────────────
+    // -- Title -----------------------------------------------------------
     body.push_str(&format!("# Title: {title}\n\n"));
 
     // FR-004 / specs/imradreport: choose between the legacy report layout and
@@ -246,7 +246,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
-    // ── Topic ────────────────────────────────────────────���───────────────
+    // -- Topic -----------------------------------------------------------
     body.push_str("## Topic\n\n");
     body.push_str(topic.trim());
     body.push_str("\n\n");
@@ -259,7 +259,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         );
     } else {
         for q in &doc.decomposed_queries {
-            body.push_str(&format!("- {}\n", q.trim()));
+            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
         }
         body.push('\n');
     }
@@ -269,19 +269,19 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     if doc.summary.trim().is_empty() {
         body.push_str("(no summary recorded yet — run a gathering pass to populate)\n");
     } else {
-        body.push_str(doc.summary.trim());
+        body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push('\n');
     }
     body.push('\n');
 
-    // ── Findings ───────────────────────────────────���─────────────────────
+    // -- Findings ---------------------------------------------------------
     body.push_str("## Findings\n\n");
     if doc.findings.is_empty() {
         body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
             let n = idx + 1;
-            let normalized = normalize_finding_labels(finding.trim());
+            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
             let (headline, mut remainder) = extract_headline(&normalized, n);
             if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
                 remainder.push_str("\n\n");
@@ -304,8 +304,8 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         for cr in &doc.cross_references {
             body.push_str(&format!(
                 "| `{}` | {} |\n",
-                escape_pipe(&cr.path),
-                escape_pipe(&cr.relevance),
+                escape_pipe(&strip_control_chars(&cr.path)),
+                escape_pipe(&strip_control_chars(&cr.relevance)),
             ));
         }
         body.push('\n');
@@ -317,7 +317,7 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("_(none)_\n\n");
     } else {
         for q in &doc.open_questions {
-            body.push_str(&format!("- {}\n", q.trim()));
+            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
         }
         body.push('\n');
     }
@@ -346,7 +346,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
             "_(no abstract recorded yet — run a gathering pass to populate this section)_\n\n",
         );
     } else {
-        body.push_str(doc.summary.trim());
+        body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push_str("\n\n");
     }
 
@@ -355,7 +355,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     if topic.trim().is_empty() {
         body.push_str("_(no research topic specified)_\n\n");
     } else {
-        body.push_str(topic.trim());
+        body.push_str(strip_control_chars(topic).trim());
         body.push_str("\n\n");
         body.push_str(
             "This research item investigates the topic above by gathering and synthesizing \
@@ -374,7 +374,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         );
     } else {
         for q in &doc.decomposed_queries {
-            body.push_str(&format!("- {}\n", q.trim()));
+            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
         }
         body.push('\n');
     }
@@ -386,13 +386,13 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                  produced by the gathering pass.\n\n",
     );
 
-    // ── Results (FR-008) ───────────────────────────────────────────────────
+    // -- Results (FR-008) -----------------------------------------------
     body.push_str("## Results\n\n");
     body.push_str("### Summary\n\n");
     if doc.summary.trim().is_empty() {
         body.push_str("_(no summary recorded yet — run a gathering pass to populate)_\n\n");
     } else {
-        body.push_str(doc.summary.trim());
+        body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push_str("\n\n");
     }
     body.push_str("### Findings\n\n");
@@ -401,7 +401,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     } else {
         for (idx, finding) in doc.findings.iter().enumerate() {
             let n = idx + 1;
-            let normalized = normalize_finding_labels(finding.trim());
+            let normalized = normalize_finding_labels(strip_control_chars(finding).trim());
             let (headline, mut remainder) = extract_headline(&normalized, n);
             if let Some(sources_list) = render_finding_sources(&remainder, &doc.item.sources) {
                 remainder.push_str("\n\n");
@@ -428,8 +428,8 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         for cr in &doc.cross_references {
             body.push_str(&format!(
                 "| `{}` | {} |\n",
-                escape_pipe(&cr.path),
-                escape_pipe(&cr.relevance),
+                escape_pipe(&strip_control_chars(&cr.path)),
+                escape_pipe(&strip_control_chars(&cr.relevance)),
             ));
         }
         body.push('\n');
@@ -439,7 +439,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("_(none)_\n\n");
     } else {
         for q in &doc.open_questions {
-            body.push_str(&format!("- {}\n", q.trim()));
+            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
         }
         body.push('\n');
     }

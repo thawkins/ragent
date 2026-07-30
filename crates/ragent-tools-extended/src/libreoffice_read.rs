@@ -109,7 +109,20 @@ impl Tool for LibreReadTool {
 
 // ── ODT ──────────────────────────────────────────────────────────────────────
 
-fn read_odt(path: &Path, fmt: &str) -> Result<String> {
+/// Read an `OpenDocument` Text file and return its content.
+///
+/// Public so downstream crates (e.g. `ragent-research`) can reuse the
+/// single source-of-truth implementation instead of duplicating it.
+///
+/// # Arguments
+///
+/// * `path` - Path to the `.odt` file.
+/// * `fmt` - Output format: `"text"`, `"markdown"`, or `"json"`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or parsed.
+pub fn read_odt(path: &Path, fmt: &str) -> Result<String> {
     let xml = read_zip_entry(path, "content.xml")?;
     let text = xml_to_text(&xml);
     match fmt {
@@ -120,7 +133,27 @@ fn read_odt(path: &Path, fmt: &str) -> Result<String> {
 
 // ── ODS ──────────────────────────────────────────────────────────────────────
 
-fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) -> Result<String> {
+/// Read an `OpenDocument` Spreadsheet and return its content.
+///
+/// Public so downstream crates (e.g. `ragent-research`) can reuse the
+/// single source-of-truth implementation instead of duplicating it.
+///
+/// # Arguments
+///
+/// * `path` - Path to the `.ods` file.
+/// * `sheet` - Optional sheet name or index.
+/// * `range` - Optional cell range (e.g. `"A1:D10"`).
+/// * `fmt` - Output format: `"text"`, `"markdown"`, or `"json"`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or parsed.
+pub fn read_ods(
+    path: &Path,
+    sheet: Option<&str>,
+    range: Option<&str>,
+    fmt: &str,
+) -> Result<String> {
     let mut wb: Sheets<_> = open_workbook_auto(path)
         .with_context(|| format!("calamine failed to open ODS: {}", path.display()))?;
 
@@ -221,7 +254,21 @@ fn cell_ref(s: &str) -> Result<(usize, usize)> {
 
 // ── ODP ──────────────────────────────────────────────────────────────────────
 
-fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> {
+/// Read an `OpenDocument` Presentation and return its content.
+///
+/// Public so downstream crates (e.g. `ragent-research`) can reuse the
+/// single source-of-truth implementation instead of duplicating it.
+///
+/// # Arguments
+///
+/// * `path` - Path to the `.odp` file.
+/// * `slide_num` - Optional 1-based slide number.
+/// * `fmt` - Output format: `"text"`, `"markdown"`, or `"json"`.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or parsed.
+pub fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> {
     use quick_xml::events::Event;
     use quick_xml::reader::Reader;
 

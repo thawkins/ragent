@@ -322,6 +322,19 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
+            SessionEvent::FromFileBodyPreview { path, body_preview } => (
+                SessionPhase::Setup,
+                "preview",
+                format!(
+                    "--from-file body preview for {}:\n{}",
+                    sanitize_for_display(path),
+                    sanitize_for_display(body_preview)
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
             SessionEvent::LocalCaptured { path, score } => (
                 SessionPhase::Local,
                 "captured",
@@ -377,6 +390,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 depth,
                 iterations,
                 from_url,
+                from_file,
             } => {
                 let mut parts = vec![format!("output format: {output_format}")];
                 if let Some(d) = depth {
@@ -387,6 +401,9 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 }
                 if let Some(url) = from_url {
                     parts.push(format!("from-url: {}", sanitize_for_display(url)));
+                }
+                if let Some(path) = from_file {
+                    parts.push(format!("from-file: {}", sanitize_for_display(path)));
                 }
                 (
                     SessionPhase::Setup,

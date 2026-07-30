@@ -52,6 +52,7 @@ impl App {
                 name,
                 topic,
                 from_url,
+                from_file,
                 iterations,
                 depth,
                 format,
@@ -90,11 +91,17 @@ impl App {
                 // Use the shared `derive_title` so the TUI produces the same
                 // full-topic title as the CLI and HTTP server (not just the
                 // first word). The session derives the real topic from the
-                // fetched page when `--from-url` is used without a topic.
-                let title = ragent_research::derive_title(&topic, from_url.as_deref());
+                // fetched page when `--from-url` is used without a topic, or
+                // from the extracted document when `--from-file` is used.
+                let title = ragent_research::derive_title_full(
+                    &topic,
+                    from_url.as_deref(),
+                    from_file.as_deref(),
+                );
                 let config = SessionConfig {
                     topic: topic.clone(),
                     from_url,
+                    from_file: from_file.map(std::path::PathBuf::from),
                     sources_dir: sources_dir.map(std::path::PathBuf::from),
                     template,
                     disable_local: !use_local,

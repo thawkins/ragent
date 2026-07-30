@@ -112,9 +112,34 @@ pub fn build_research_session(
         .as_ref()
         .map(|m| format!("{}/{}", m.provider_id, m.model_id));
 
+    // Build an optional LLM summarizer used by the `--from-url` and
+    // `--from-file` pre-steps to derive a concise topic + clean title from the
+    // fetched/extracted body. We reuse the same provider/model wiring as the
+    // analysis engine so it works for every configured provider (including
+    // local Ollama); when no model is configured the session falls back to
+    // the local heuristics.
+    let summarizer = match (provider_registry.clone(), active_model.clone()) {
+        (Some(reg), Some(m)) => {
+            let api_key = storage
+                .as_deref()
+                .and_then(|s| s.get_provider_auth(&m.provider_id).ok().flatten());
+            let base_url = resolve_base_url(&m.provider_id, storage.as_deref(), config.as_deref());
+            Some(Arc::new(
+                LlmAnalysisEngine::new(reg, &m.provider_id, &m.model_id)
+                    .with_api_key(api_key)
+                    .with_base_url(base_url),
+            ))
+        }
+        _ => None,
+    };
+
     let session = ResearchSession::new(manager, web, local, analysis)
         .with_planner(planner)
         .with_critic(critic);
+    let session = match summarizer {
+        Some(sum) => session.with_summarizer(sum),
+        None => session,
+    };
     match model_label {
         Some(label) => session.with_model(label),
         None => session,

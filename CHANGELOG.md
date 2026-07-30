@@ -1,5 +1,41 @@
 # Changelog
 
+## Version: 0.1.0-beta.20
+
+### Added — Research support for local file topics (`--from-file`)
+
+- `ragent research create <name> --from-file <PATH>` (and `/research create
+  --from-file` in the TUI) extracts a local document and uses its content as
+  the research subject in place of an explicit topic. Supported formats: PDF,
+  DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, and MD. The extracted content becomes
+  the primary source; web search still runs using the derived topic.
+- When no explicit topic is given, a concise topic and clean title are derived
+  from the extracted document body via the optional LLM summarizer
+  (`summarize_subject`), falling back to the heuristic
+  `derive_topic_from_url_body` scraper when no LLM is configured.
+- New `document_extract` module in `ragent-tools-extended` performs the text
+  extraction (including a direct PDF fast path extended in `libreoffice_read`).
+- New `SessionEvent::FromFileBodyPreview` surfaces a ~200-char preview of the
+  extracted text so the TUI and HTTP clients can show what content was used
+  to derive the topic; `/research` TUI progress panel shows the `from-file`
+  path in the header.
+- `derive_title_full` picks the file path as the item-title fallback after
+  topic and URL.
+- `SessionConfig::from_file` plumbed through the research adapter, manager,
+  server routes, and CLI; `--from-url`, `--from-file`, and explicit topics
+  are mutually combinable.
+
+### Fixed — Control-character sanitisation in research documents
+
+- `strip_control_chars` (new public helper in `ragent-research::item`)
+  removes C0/C1 control characters and BOM from all research document fields
+  (summary, findings, cross-references, open questions, queries) before
+  rendering into `RESEARCH.md`, so model output or raw PDF extraction can no
+  longer corrupt the document with binary garbage.
+- Analysis parsing (`parse_subject_summary`, fallback findings rescue) now
+  sanitises model JSON before extraction.
+- New `test_control_char_sanitization` test suite covers the rendering path.
+
 ## Version: 0.1.0-beta.19
 
 ### Fixed — Startup messages

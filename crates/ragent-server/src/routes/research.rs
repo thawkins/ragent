@@ -104,6 +104,11 @@ struct CreateResearchRequest {
     /// subject in place of an explicit topic. The page is captured as the
     /// primary source; web search still runs.
     from_url: Option<String>,
+    /// `--from-file <PATH>`: extract a local document and use its content as
+    /// the research subject in place of an explicit topic. The extracted
+    /// content is captured as the primary `Source::Other`; web search still
+    /// runs.
+    from_file: Option<String>,
     #[serde(default)]
     use_local: bool,
     #[serde(default)]
@@ -132,6 +137,7 @@ async fn create_research(
     let config = SessionConfig {
         topic: req.topic.clone(),
         from_url: req.from_url.clone(),
+        from_file: req.from_file.clone().map(PathBuf::from),
         sources_dir: req.sources_dir.map(PathBuf::from),
         template: req.template,
         disable_local: !req.use_local,
@@ -146,11 +152,13 @@ async fn create_research(
         }),
         ..SessionConfig::default()
     };
-    let title = req
-        .title
-        .clone()
-        .unwrap_or_else(|| ragent_research::derive_title(&req.topic, req.from_url.as_deref()));
-
+    let title = req.title.clone().unwrap_or_else(|| {
+        ragent_research::derive_title_full(
+            &req.topic,
+            req.from_url.as_deref(),
+            req.from_file.as_deref(),
+        )
+    });
     // Stream every gathering event as a server-sent response. The HTTP
     // layer doesn't currently expose SSE for research, so we collect the
     // events into a single JSON response instead. Future iterations can

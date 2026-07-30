@@ -13,6 +13,7 @@ pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
+pub mod document_extract;
 pub mod gmail;
 pub mod http_request;
 pub mod libreoffice_common;

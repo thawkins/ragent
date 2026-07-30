@@ -9,7 +9,9 @@
 //! `ragent research create` sub-command, and the `POST /research` HTTP
 //! endpoint all call (T-019, T-027, T-034, T-036).
 
-use crate::analysis::{AnalysisEngine, AnalysisOutcome, AnalysisResult, build_source_bodies};
+use crate::analysis::{
+    AnalysisEngine, AnalysisOutcome, AnalysisResult, LlmAnalysisEngine, build_source_bodies,
+};
 use crate::document::{ResearchDocument, mark_in_progress};
 use crate::engine::{Critic, EngineConfig, IterativeEngine, SimpleCritic};
 use crate::io::ResearchIo;
@@ -110,6 +112,15 @@ pub struct SessionConfig {
     /// normal web-search phase still runs, using that derived topic, so
     /// additional related sources are gathered as usual.
     pub from_url: Option<String>,
+    /// `--from-file <PATH>`: extract the local document's content before
+    /// gathering and use it as the research subject in place of an explicit
+    /// topic. Supported formats include PDF, Microsoft Office (`.docx`,
+    /// `.xlsx`, `.pptx`), LibreOffice/ODF (`.odt`, `.ods`, `.odp`), and plain
+    /// text/markdown. When `topic` is empty, a concise topic is derived from
+    /// the extracted text. The extracted content is captured as the first
+    /// `Source::Other` source; the normal web-search phase still runs using
+    /// the derived topic.
+    pub from_file: Option<PathBuf>,
     /// Maximum number of candidate pages to fetch concurrently during the
     /// web-gathering phase. Defaults to [`DEFAULT_FETCH_CONCURRENCY`] (10).
     /// Larger values reduce wall-clock latency when a search returns many
@@ -164,6 +175,7 @@ impl Default for SessionConfig {
             disable_local: true,
             disable_specs: true,
             from_url: None,
+            from_file: None,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
             depth: None,
             iterations: None,
@@ -245,6 +257,17 @@ pub enum SessionEvent {
         /// URL that was fetched.
         url: String,
         /// First ~200 characters of the cleaned page body used to derive the
+        /// research topic.
+        body_preview: String,
+    },
+    /// The `--from-file` primary document was extracted. Carries a short
+    /// preview of the extracted text so the UI can show what topic was
+    /// derived from the file. Emitted once, immediately after extraction
+    /// succeeds, before the normal web-gathering phase runs.
+    FromFileBodyPreview {
+        /// File path that was extracted.
+        path: String,
+        /// First ~200 characters of the extracted body used to derive the
         /// research topic.
         body_preview: String,
     },
@@ -353,6 +376,8 @@ pub enum SessionEvent {
         iterations: Option<u32>,
         /// `--from-url` primary source, if any.
         from_url: Option<String>,
+        /// `--from-file` primary source path, if any.
+        from_file: Option<String>,
     },
 }
 
@@ -419,6 +444,12 @@ pub struct ResearchSession {
     /// Model used for the analysis, persisted into the `RESEARCH.md`
     /// frontmatter as `Model:` (e.g. `anthropic/claude-sonnet-4`).
     model: Option<String>,
+    /// Optional LLM summarizer used to derive a concise topic and clean title
+    /// from a `--from-url` page body or `--from-file` document body. When
+    /// absent, the session falls back to the local heuristics
+    /// (`derive_topic_from_url_body`) that scrapes the first substantive
+    /// sentence of the cleaned body.
+    summarizer: Option<Arc<LlmAnalysisEngine>>,
 }
 
 impl std::fmt::Debug for ResearchSession {
@@ -467,6 +498,7 @@ impl ResearchSession {
             planner: None,
             critic: None,
             model: None,
+            summarizer: None,
         }
     }
 
@@ -475,6 +507,16 @@ impl ResearchSession {
     #[must_use]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    /// Attach an LLM summarizer used by the `--from-url` / `--from-file`
+    /// pre-steps to derive a concise topic and clean title from the fetched
+    /// or extracted body. When unset, those steps fall back to the local
+    /// heuristic (`derive_topic_from_url_body`) so behaviour degrades
+    /// gracefully without an LLM.
+    pub fn with_summarizer(mut self, summarizer: Arc<LlmAnalysisEngine>) -> Self {
+        self.summarizer = Some(summarizer);
         self
     }
 
@@ -973,8 +1015,8 @@ impl ResearchSession {
             depth: config.depth.map(|d| d.as_str().to_string()),
             iterations: config.iterations,
             from_url: config.from_url.clone(),
+            from_file: config.from_file.as_ref().map(|p| p.display().to_string()),
         });
-
         // ── --from-url pre-step ──────────────────────────────────────────
         //
         // Fetch the primary page up front and capture it as the first web
@@ -1041,24 +1083,63 @@ impl ResearchSession {
                         search_engine: String::new(),
                     });
                     if topic.trim().is_empty() {
-                        if let Some(derived) =
-                            derive_topic_from_url_body(&src_body, &src_title, &src_url)
+                        // Prefer the LLM summarizer when available: it reads
+                        // the full cleaned body and returns a concise topic
+                        // and clean title in one pass, which is dramatically
+                        // better than the first-sentence heuristic. When the
+                        // summarizer is absent or returns None we fall back
+                        // to the local body/title heuristic so the feature
+                        // degrades gracefully without an LLM.
+                        let mut llm_title: Option<String> = None;
+                        if let Some(sum) = &self.summarizer {
+                            if let Some((t, ttl)) = sum.summarize_subject(&src_body).await {
+                                topic = t;
+                                llm_title = Some(ttl);
+                                tracing::info!(
+                                    url = %src_url,
+                                    derived_topic = %topic,
+                                    "research: --from-url derived topic/title via LLM summarizer"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    url = %src_url,
+                                    "research: --from-url LLM summarizer unavailable; falling back to heuristic topic"
+                                );
+                            }
+                        }
+                        if topic.trim().is_empty() {
+                            if let Some(derived) =
+                                derive_topic_from_url_body(&src_body, &src_title, &src_url)
+                            {
+                                topic = derived;
+                                tracing::info!(
+                                    url = %src_url,
+                                    derived_topic = %topic,
+                                    "research: --from-url derived topic from fetched page body"
+                                );
+                            } else {
+                                let message = format!(
+                                    "fetched page body for '{src_url}' contained no usable article text to derive a topic"
+                                );
+                                observer.on_event(SessionEvent::WebFetchFailed {
+                                    url: src_url.clone(),
+                                    error: message,
+                                });
+                                return Err(ResearchError::FromUrlNoUsableBody { url: src_url });
+                            }
+                        }
+                        // Apply the LLM-provided title when the caller did not
+                        // supply an explicit title. This replaces the raw URL
+                        // (or cleaned `<title>` fallback) with a clean
+                        // human-readable headline for the RESEARCH.md header
+                        // and frontmatter.
+                        if let Some(new_title) = llm_title
+                            && (item_title.is_empty()
+                                || item_title == src_url
+                                || item_title.starts_with("http://")
+                                || item_title.starts_with("https://"))
                         {
-                            topic = derived;
-                            tracing::info!(
-                                url = %src_url,
-                                derived_topic = %topic,
-                                "research: --from-url derived topic from fetched page body"
-                            );
-                        } else {
-                            let message = format!(
-                                "fetched page body for '{src_url}' contained no usable article text to derive a topic"
-                            );
-                            observer.on_event(SessionEvent::WebFetchFailed {
-                                url: src_url.clone(),
-                                error: message,
-                            });
-                            return Err(ResearchError::FromUrlNoUsableBody { url: src_url });
+                            item_title = crate::item::truncate_title(&new_title);
                         }
                     }
                     // Use the cleaned page title as the item title when the
@@ -1087,6 +1168,125 @@ impl ResearchSession {
             }
         }
 
+        // ── --from-file pre-step ────────────────────────────────────────
+        //
+        // Extract the local document up front and capture it as the first
+        // `Source::Other`. If no explicit topic was provided, derive the topic
+        // from the extracted text content using the same topic-derivation
+        // logic as `--from-url` (title from the file stem, description from
+        // the first substantive sentence). A extraction failure here aborts
+        // the session without leaving an empty research folder behind.
+        //
+        // When the caller supplied no explicit title, the file stem replaces
+        // the default "Research" title in the rendered `RESEARCH.md` header
+        // and frontmatter.
+        if let Some(file_path) = config.from_file.as_ref() {
+            let path_str = file_path.display().to_string();
+            // Run the synchronous extraction on a blocking thread so the async
+            // executor is not held up by potentially slow PDF/Office parsing.
+            let extracted = tokio::task::spawn_blocking({
+                let path = file_path.clone();
+                move || ragent_tools_extended::document_extract::extract_file_as_markdown(&path)
+            })
+            .await
+            .map_err(|e| ResearchError::FromFileExtractFailed {
+                path: path_str.clone(),
+                message: format!("blocking task failed: {e}"),
+            })
+            .and_then(|res| {
+                res.map_err(|e| ResearchError::FromFileExtractFailed {
+                    path: path_str.clone(),
+                    message: e.to_string(),
+                })
+            })?;
+            let src_body = extracted.content;
+            let src_title = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("document")
+                .to_string();
+
+            // Emit a short preview of the extracted body so the UI can show
+            // what content was used to derive the topic. Take the first ~200
+            // characters, stripping fenced-codeblock markers.
+            let preview_src: String = src_body
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("```"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let body_preview: String = preview_src.chars().take(200).collect();
+            observer.on_event(SessionEvent::FromFileBodyPreview {
+                path: path_str.clone(),
+                body_preview,
+            });
+
+            if topic.trim().is_empty() {
+                // Prefer the LLM summarizer when available (same rationale as
+                // the `--from-url` path above). Fall back to the local
+                // file-stem + first-sentence heuristic when the summarizer
+                // is absent or fails.
+                let mut llm_title: Option<String> = None;
+                if let Some(sum) = &self.summarizer {
+                    if let Some((t, ttl)) = sum.summarize_subject(&src_body).await {
+                        topic = t;
+                        llm_title = Some(ttl);
+                        tracing::info!(
+                            path = %path_str,
+                            derived_topic = %topic,
+                            "research: --from-file derived topic/title via LLM summarizer"
+                        );
+                    } else {
+                        tracing::warn!(
+                            path = %path_str,
+                            "research: --from-file LLM summarizer unavailable; falling back to heuristic topic"
+                        );
+                    }
+                }
+                if topic.trim().is_empty() {
+                    if let Some(derived) =
+                        derive_topic_from_url_body(&src_body, &src_title, &path_str)
+                    {
+                        topic = derived;
+                        tracing::info!(
+                            path = %path_str,
+                            derived_topic = %topic,
+                            "research: --from-file derived topic from extracted document body"
+                        );
+                    } else {
+                        let message = format!(
+                            "extracted document '{path_str}' contained no usable text to derive a topic"
+                        );
+                        observer.on_event(SessionEvent::WebFetchFailed {
+                            url: path_str.clone(),
+                            error: message,
+                        });
+                        return Err(ResearchError::FromFileNoUsableBody { path: path_str });
+                    }
+                }
+                // Apply the LLM-provided title when the caller did not supply
+                // an explicit title, replacing the file-stem fallback.
+                if let Some(new_title) = llm_title
+                    && (item_title.is_empty() || item_title == path_str)
+                {
+                    item_title = crate::item::truncate_title(&new_title);
+                }
+            }
+
+            // Use the file stem as the item title when the caller only
+            // supplied the raw file path (or no title at all).
+            if item_title.is_empty() || item_title == path_str {
+                item_title = src_title;
+            }
+
+            sources.push(Source::Other {
+                label: path_str.clone(),
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::new(),
+                body: src_body,
+            });
+            web_queries.push(path_str);
+        }
+
         // ── Create / load the on-disk item ──────────────────────────────
         let item_exists = ResearchIo::item_exists(self.manager.root(), &name).await;
         let mut item = if item_exists {
@@ -1100,12 +1300,12 @@ impl ResearchSession {
         self.manager.start_gathering(name_str).await?;
         let template_body = load_template(self.manager.root(), config.template.as_deref()).await;
 
-        // If we didn't have an explicit topic and no from-url was supplied, fall
-        // back to whatever topic is stored on the pre-existing item.
-        if topic.trim().is_empty() && config.from_url.is_none() {
+        // If we didn't have an explicit topic and no from-url/from-file was
+        // supplied, fall back to whatever topic is stored on the pre-existing
+        // item.
+        if topic.trim().is_empty() && config.from_url.is_none() && config.from_file.is_none() {
             topic = item.topic.clone();
         }
-
         // ── Decide single-pass vs. iterative engine ─────────────────────
         let engine_cfg = config.engine_config();
         let use_iterative = config.iterations.is_some() || config.depth == Some(Depth::Deep);

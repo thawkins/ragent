@@ -14,6 +14,7 @@
 //! the legacy mechanical fallback.
 
 use crate::document::CrossReference;
+use crate::item::strip_control_chars;
 use crate::run_config::OutputFormat;
 use crate::source::Source;
 use chrono::{DateTime, Utc};
@@ -246,6 +247,67 @@ impl AnalysisEngine for LlmAnalysisEngine {
 }
 
 impl LlmAnalysisEngine {
+    /// Ask the LLM to summarise a document body so a caller can derive a
+    /// concise research topic and a clean human-readable title from it.
+    ///
+    /// This is used by the `--from-url` / `--from-file` pre-steps to replace
+    /// brittle heuristic topic extraction (first-sentence scraping of a
+    /// readability-stripped page) with a model-generated summary that
+    /// understands the full document.
+    ///
+    /// Returns `Some((topic, title))` on success; `None` when the provider
+    /// is unavailable, the request fails, or the model output cannot be
+    /// parsed. Callers should fall back to their local heuristics when
+    /// `None` is returned so the feature degrades gracefully without an LLM.
+    pub async fn summarize_subject(&self, body: &str) -> Option<(String, String)> {
+        let provider = self.provider_registry.get(&self.provider_id)?;
+        let api_key = self.api_key.clone().unwrap_or_default();
+        let client = provider
+            .create_client(&api_key, self.base_url.as_deref(), &HashMap::new())
+            .await
+            .ok()?;
+
+        const MAX_INPUT_CHARS: usize = 12_000;
+        let truncated: String = body.chars().take(MAX_INPUT_CHARS).collect();
+        let prompt = format!(
+            "Summarize the following document into:\n\
+             1. a concise research topic (1-2 sentences, <= 160 chars)\n\
+             2. a clean human-readable title (<= 80 chars)\n\
+             Return ONLY a JSON object with keys \"topic\" and \"title\".\n\n\
+             Document:\n{truncated}"
+        );
+        let request = ChatRequest {
+            model: self.model_id.clone(),
+            messages: Arc::new(vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text(prompt),
+            }]),
+            tools: Arc::new(vec![]),
+            temperature: Some(0.2),
+            top_p: Some(1.0),
+            max_tokens: Some(512),
+            system: Some(std::sync::Arc::from(
+                "Return only valid JSON. No prose, no markdown fences.",
+            )),
+            options: HashMap::new(),
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: Some(60),
+            thinking: None,
+        };
+
+        let mut stream = client.chat(request).await.ok()?;
+        let mut text = String::new();
+        while let Some(event) = stream.next().await {
+            match event {
+                StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
+                StreamEvent::Error { .. } | StreamEvent::Finish { .. } => break,
+                _ => {}
+            }
+        }
+        parse_subject_summary(&text)
+    }
+
     /// Issue the synthesis request to the provider and return the raw model
     /// text. Shared by [`AnalysisEngine::analyze`] (which parses strictly)
     /// and [`AnalysisEngine::analyze_with_outcome`] (which parses with
@@ -318,6 +380,44 @@ impl LlmAnalysisEngine {
         }
         Ok(text)
     }
+}
+
+/// Parse the LLM JSON response from [`LlmAnalysisEngine::summarize_subject`]
+/// into a `(topic, title)` pair.
+///
+/// The model is asked to return only a JSON object, but in practice providers
+/// wrap output in markdown fences, prepend whitespace, or emit BOM/control
+/// characters. This helper strips that noise before parsing and returns
+/// `None` when no usable JSON object can be recovered, so callers can fall
+/// back to their local heuristics.
+fn parse_subject_summary(text: &str) -> Option<(String, String)> {
+    #[derive(serde::Deserialize)]
+    struct SubjectSummary {
+        topic: String,
+        title: String,
+    }
+
+    // Strip control chars (except whitespace we rely on) and BOM so JSON
+    // parsing isn't tripped up by provider quirks.
+    let sanitized = strip_control_chars(text);
+    let trimmed = sanitized.trim().trim_start_matches('\u{feff}').trim();
+
+    // Fast path: the whole response is a JSON object.
+    let parsed: Option<SubjectSummary> = serde_json::from_str(trimmed).ok();
+    // Slow path: locate the outermost `{...}` span (handles ```json fences
+    // and any surrounding prose).
+    let parsed = parsed.or_else(|| {
+        let start = trimmed.find('{')?;
+        let end = trimmed.rfind('}')?;
+        serde_json::from_str::<SubjectSummary>(&trimmed[start..=end]).ok()
+    })?;
+
+    let topic = parsed.topic.trim().to_string();
+    let title = parsed.title.trim().to_string();
+    if topic.is_empty() || title.is_empty() {
+        return None;
+    }
+    Some((topic, title))
 }
 
 /// Configuration knobs for the synthesis prompt builder.
@@ -727,9 +827,18 @@ fn parse_analysis_response_with_outcome(
 ) -> (AnalysisResult, AnalysisOutcome) {
     let parsed = parse_analysis_response(text);
     if is_malformed_analysis_result(&parsed) {
+        // Sanitize the raw model text before mechanical extraction so control
+        // characters (C0/C1) from model output don't corrupt the findings.
+        let sanitized = strip_control_chars(text);
         let mut rescued = AnalysisResult::default();
-        rescued.findings = mechanical_fallback_findings(text);
-        rescued.summary = if rescued.findings.is_empty() {
+        rescued.findings = mechanical_fallback_findings(&sanitized);
+        // Preserve the model's own summary when it parsed successfully —
+        // discarding a valid summary along with malformed findings loses
+        // useful context. Only fall back to a diagnostic placeholder when
+        // the summary is also empty.
+        rescued.summary = if !parsed.summary.trim().is_empty() {
+            parsed.summary
+        } else if rescued.findings.is_empty() {
             "(the model response could not be parsed into structured findings; \
              see the raw response below)"
                 .to_string()
@@ -751,6 +860,26 @@ fn parse_analysis_response_with_outcome(
                 tracing::warn!(warning = %w, "research: citation/date validation");
             }
         }
+        // Sanitize control characters from the clean parse too — the model
+        // output may contain C0/C1 control chars that would corrupt the
+        // rendered RESEARCH.md if left in place.
+        for finding in &mut validated.findings {
+            *finding = strip_control_chars(finding);
+        }
+        validated.summary = strip_control_chars(&validated.summary);
+        validated.open_questions = validated
+            .open_questions
+            .iter()
+            .map(|q| strip_control_chars(q))
+            .collect();
+        validated.cross_references = validated
+            .cross_references
+            .iter()
+            .map(|cr| CrossReference {
+                path: strip_control_chars(&cr.path),
+                relevance: strip_control_chars(&cr.relevance),
+            })
+            .collect();
         (validated, AnalysisOutcome::Llm)
     }
 }
@@ -1761,5 +1890,66 @@ mod tests {
             "no warnings expected, got {warnings:?}"
         );
         assert_eq!(findings[0], original, "valid finding must be unchanged");
+    }
+
+    #[test]
+    fn parse_with_outcome_preserves_valid_summary_on_fallback() {
+        // A response with a valid ## Summary but malformed findings (no
+        // required bold labels) must preserve the parsed summary rather
+        // than discarding it for a diagnostic placeholder.
+        let text = "## Summary\n\nThis is a valid summary that must be preserved.\n\n\
+             ## Findings\n\n1. Just a plain finding with no labels and no citation.\n";
+        let sources = vec![src_body(1, None)];
+        let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
+        assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
+        assert!(
+            result
+                .summary
+                .contains("This is a valid summary that must be preserved."),
+            "valid summary must be preserved on fallback, got: {}",
+            result.summary
+        );
+    }
+
+    #[test]
+    fn parse_with_outcome_strips_control_chars_from_clean_parse() {
+        // A clean response that contains C0 control characters (e.g. 0x01)
+        // must have them stripped from findings and summary.
+        let text = "## Summary\n\nSummary with \x01 control char.\n\n\
+             ## Findings\n\n\
+             1. **Headline:** Obs\x02summary\n\n**Observation:** obs [#1].\x03\n\n\
+             **Analysis:** a.\n\n\
+             **Cross-reference / Dependencies:** No direct dependencies.\n\n\
+             **Implication:** i.\n";
+        let sources = vec![src_body(1, None)];
+        let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
+        assert_eq!(outcome, AnalysisOutcome::Llm);
+        assert!(
+            !result.summary.contains('\x01'),
+            "control chars must be stripped from summary, got: {:?}",
+            result.summary
+        );
+        assert!(
+            !result.findings[0].contains('\x02') && !result.findings[0].contains('\x03'),
+            "control chars must be stripped from findings, got: {:?}",
+            result.findings[0]
+        );
+    }
+
+    #[test]
+    fn parse_with_outcome_strips_control_chars_from_fallback() {
+        // A malformed response with control chars must sanitize them before
+        // mechanical extraction so the placeholder finding is clean.
+        let text = "## Summary\n\n\x01Bad summary\x02\n\nNo findings here.\n";
+        let sources = vec![src_body(1, None)];
+        let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
+        assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
+        for finding in &result.findings {
+            assert!(
+                !finding.contains('\x01') && !finding.contains('\x02'),
+                "control chars must be stripped from fallback findings, got: {:?}",
+                finding
+            );
+        }
     }
 }
