@@ -446,7 +446,7 @@ pub async fn run_tui(
                                 index: Some(arc_idx),
                                 watch_session,
                                 fallback_thread,
-                                message: "\n✔ Code index: enabled".to_string(),
+                                message: "\n✔ Code index: enabled\n".to_string(),
                                 elapsed: ci_inner_start.elapsed(),
                             }
                         }
@@ -456,7 +456,7 @@ pub async fn run_tui(
                                 index: None,
                                 watch_session: None,
                                 fallback_thread: None,
-                                message: "\n✘ Code index: failed to open".to_string(),
+                                message: "\n✘ Code index: failed to open\n".to_string(),
                                 elapsed: ci_inner_start.elapsed(),
                             }
                         }
@@ -467,7 +467,7 @@ pub async fn run_tui(
                         index: None,
                         watch_session: None,
                         fallback_thread: None,
-                        message: "\n✔ Code index: disabled".to_string(),
+                        message: "\n✔ Code index: disabled\n".to_string(),
                         elapsed: ci_inner_start.elapsed(),
                     }
                 }
@@ -513,7 +513,7 @@ pub async fn run_tui(
 
     // -- Startup complete --
     app.startup_timings = Some(startup);
-    app.append_assistant_text("\n✅ **Ready**");
+    app.append_assistant_text("\n✅ **Ready**\n");
     app.status = "ready".to_string();
     // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;

@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.19
+
+### Fixed — Startup messages
+
+- Added trailing newlines to TUI startup status messages (code index
+  enabled/disabled/failed and the "Ready" banner) so subsequent output starts
+  on a clean line instead of being appended to the same line.
+
 ## Version: 0.1.0-beta.18
 
 ### Fixed — Startup blocking issues
