@@ -92,7 +92,8 @@ fn test_run_cost_summary_other_session_is_ignored() {
     );
 }
 
-/// A keypress should dismiss the transient run-cost banner.
+/// A non-character keypress (Esc) should dismiss the transient run-cost banner
+/// and be consumed.
 #[test]
 fn test_run_cost_banner_dismissed_on_keypress() {
     let mut app = support::make_app();
@@ -108,6 +109,34 @@ fn test_run_cost_banner_dismissed_on_keypress() {
     assert!(
         app.run_cost_banner.is_none(),
         "banner should be cleared after a keypress"
+    );
+}
+
+/// A plain printable character should dismiss the banner AND be added to the
+/// input buffer so the first typed character is not lost (fix for first-char
+/// loss after run completion).
+#[test]
+fn test_run_cost_banner_printable_char_not_consumed() {
+    let mut app = support::make_app();
+    app.session_id = Some("s1".to_string());
+    app.run_cost_banner = Some("⟡ run complete · 1+2 tokens · $0.01 · 1.0s".to_string());
+
+    // A plain printable character — no control/alt modifiers.
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('h'),
+        crossterm::event::KeyModifiers::NONE,
+    );
+    app.handle_key_event(key);
+
+    // Banner should be cleared.
+    assert!(
+        app.run_cost_banner.is_none(),
+        "banner should be cleared after a printable keypress"
+    );
+    // The character should have been inserted into the input buffer.
+    assert_eq!(
+        app.input, "h",
+        "the first printable character should be added to the input, not consumed"
     );
 }
 

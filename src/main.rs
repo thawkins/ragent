@@ -9,13 +9,14 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use ragent_agent::{
-    Config, agent,
+    Config, StartupTimings, agent,
     event::EventBus,
     memory::BlockStorage,
     permission::PermissionChecker,
@@ -229,7 +230,11 @@ fn print_banner() {
 /// Returns an error on configuration, storage, network, or I/O failures.
 #[tokio::main]
 async fn main() -> Result<()> {
+    let mut startup = StartupTimings::new();
+
+    let t0 = Instant::now();
     let cli = Cli::parse();
+    startup.record("CLI parse", t0.elapsed());
 
     if cli.no_git_context {
         ragent_agent::agent::disable_git_prompt_context();
@@ -246,6 +251,7 @@ async fn main() -> Result<()> {
     //
     // For non-TUI modes (--no-tui, headless run, server, etc.): fall back to
     // the normal fmt subscriber so logs appear in the terminal as usual.
+    let t0 = Instant::now();
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("warn"));
     let tui_will_run = !cli.no_tui
         && matches!(
@@ -269,6 +275,7 @@ async fn main() -> Result<()> {
             .init();
         None
     };
+    startup.record("Tracing init", t0.elapsed());
     tracing::info!(log_level = %cli.log_level, tui_mode = tui_will_run, "Tracing initialized");
 
     /// Run the dry-run readiness check and exit the process.
@@ -315,6 +322,7 @@ async fn main() -> Result<()> {
     }
 
     // Load config
+    let t0 = Instant::now();
     let config = if let Some(ref path_str) = cli.config {
         let path = PathBuf::from(path_str);
         tracing::info!(config_path = %path.display(), "Loading config from file");
@@ -350,6 +358,7 @@ async fn main() -> Result<()> {
     } else {
         Config::load()?
     };
+    startup.record("Config load", t0.elapsed());
     tracing::info!("Configuration loaded successfully");
 
     let auto_extract_config = config.memory.auto_extract.clone();
@@ -357,19 +366,30 @@ async fn main() -> Result<()> {
     // Initialize storage
     let db_path = data_dir().join("ragent.db");
     tracing::info!(db_path = %db_path.display(), "Opening database");
+    let t0 = Instant::now();
     let storage = Arc::new(Storage::open(&db_path)?);
+    startup.record("Storage open", t0.elapsed());
     tracing::info!("Storage initialized successfully");
 
     // M5: Warm the session message FTS index in the background so the
     // conversation/session search tools return up-to-date results after
     // startup or schema changes.
-    let storage_warm = Arc::clone(&storage);
-    tokio::task::spawn_blocking(move || match storage_warm.warm_message_search_index() {
-        Ok(count) => tracing::info!(indexed_messages = count, "Warmed message search index"),
-        Err(e) => tracing::warn!(error = %e, "Failed to warm message search index"),
+    //
+    // Open a *separate* Storage connection for the warmup so the background
+    // FTS rebuild does not hold the main thread's `Mutex<Connection>` —
+    // which would block `get_setting` and other startup queries for the
+    // entire duration of the rebuild (10+ seconds on large histories).
+    let db_path_warm = db_path.clone();
+    tokio::task::spawn_blocking(move || match Storage::open(&db_path_warm) {
+        Ok(warm_storage) => match warm_storage.warm_message_search_index() {
+            Ok(count) => tracing::info!(indexed_messages = count, "Warmed message search index"),
+            Err(e) => tracing::warn!(error = %e, "Failed to warm message search index"),
+        },
+        Err(e) => tracing::warn!(error = %e, "Failed to open storage for FTS warmup"),
     });
     // Seed the secret registry from stored provider credentials so that
     // redact_secrets() can mask them by exact match in all log output.
+    let t0 = Instant::now();
     if let Err(e) = storage.seed_secret_registry() {
         tracing::warn!(error = %e, "Failed to seed secret registry from database");
     }
@@ -385,7 +405,10 @@ async fn main() -> Result<()> {
             ragent_agent::sanitize::register_secret(&val);
         }
     }
+    startup.record("Secret registry seed", t0.elapsed());
+
     // Create event bus
+    let t0 = Instant::now();
     let event_bus = Arc::new(EventBus::new(2048));
     tracing::debug!(capacity = 2048, "Event bus created");
 
@@ -403,12 +426,14 @@ async fn main() -> Result<()> {
     let tool_registry = Arc::new(tool::create_default_registry());
     let provider_count = provider_registry.list().len();
     let tool_count = tool_registry.list().len();
+    startup.record("Provider & tool registries", t0.elapsed());
     tracing::info!(
         providers = provider_count,
         tools = tool_count,
         "Registries created"
     );
 
+    let t0 = Instant::now();
     let hidden_tools = config.effective_hidden_tools();
     if !hidden_tools.is_empty() {
         tracing::debug!(hidden_tools = ?hidden_tools, "Hiding tools from registry");
@@ -417,12 +442,15 @@ async fn main() -> Result<()> {
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(
         config.permission.clone(),
     )));
+    startup.record("Permission checker", t0.elapsed());
 
     // Resolve the active agent
     let agent_name = &cli.agent;
     tracing::info!(agent = %agent_name, "Resolving agent");
+    let t0 = Instant::now();
     let mut resolved_agent =
         agent::resolve_agent_with_model(agent_name, &config, provider_registry.as_ref())?;
+    startup.record("Agent resolve", t0.elapsed());
     tracing::info!(agent = %resolved_agent.name, model = ?resolved_agent.model, "Agent resolved");
 
     // Apply CLI --maxsteps override if provided
@@ -437,6 +465,7 @@ async fn main() -> Result<()> {
     //
     // Skip override when the agent has model_pinned=true (custom agents that
     // explicitly fix a model should not be overridden by global selection).
+    let t0 = Instant::now();
     if let Some(ref model_str) = cli.model {
         if let Some((provider, model)) = model_str.split_once('/') {
             resolved_agent.model = Some(agent::ModelRef {
@@ -460,6 +489,7 @@ async fn main() -> Result<()> {
             });
         }
     }
+    startup.record("Model selection", t0.elapsed());
 
     let max_background_agents = config.experimental.max_background_agents;
     let stream_config = config.stream.clone();
@@ -469,6 +499,7 @@ async fn main() -> Result<()> {
     // Initialise telemetry subsystem from configuration.
     // A ShutdownGuard keeps the provider alive for the process lifetime and
     // flushes pending metrics on normal or panic exit paths.
+    let t0 = Instant::now();
     let telemetry_config = config.read().await.telemetry.otel.clone();
     let telemetry = match TelemetrySubsystem::new(telemetry_config) {
         Ok(sub) => {
@@ -488,8 +519,10 @@ async fn main() -> Result<()> {
     let _telemetry_guard = ShutdownGuard::new(
         Arc::try_unwrap(telemetry_guard_holder).unwrap_or_else(|arc| (*arc).clone_disabled()),
     );
+    startup.record("Telemetry init", t0.elapsed());
 
     // Create session manager and processor
+    let t0 = Instant::now();
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     tracing::debug!("Session manager created");
     let session_processor = Arc::new(SessionProcessor {
@@ -525,7 +558,9 @@ async fn main() -> Result<()> {
         telemetry,
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
+    startup.record("Session manager & processor", t0.elapsed());
 
+    let t0 = Instant::now();
     if auto_extract_config.enabled {
         let extraction_engine = Arc::new(ragent_agent::memory::ExtractionEngine::new(
             auto_extract_config,
@@ -548,11 +583,19 @@ async fn main() -> Result<()> {
     ));
     let _ = session_processor.bg_service.set(bg_service);
     tracing::debug!("Background task service initialized");
+    startup.record("Task mgr & bg service", t0.elapsed());
 
-    // Connect MCP servers from config and register their tools into the tool registry.
+    // Connect MCP servers from config in the background so the TUI (or
+    // headless run) appears immediately.  Each MCP connection spawns a child
+    // process and performs a handshake + tool-list round-trip; doing this
+    // sequentially on the main task can add 5-15 seconds to startup when one
+    // or more servers are slow to start.
     let mcp_server_count = config.read().await.mcp.len();
     if mcp_server_count > 0 {
-        tracing::info!(mcp_servers = mcp_server_count, "Connecting MCP servers");
+        tracing::info!(
+            mcp_servers = mcp_server_count,
+            "Connecting MCP servers (background)"
+        );
         let mcp_configs: Vec<(String, ragent_agent::McpServerConfig)> = config
             .read()
             .await
@@ -561,29 +604,34 @@ async fn main() -> Result<()> {
             .map(|(id, cfg)| (id.clone(), cfg.clone()))
             .collect();
 
-        let mut mcp_client = ragent_agent::mcp::McpClient::new();
-        let mut mcp_connected = 0u32;
-        for (id, cfg) in mcp_configs {
-            if let Err(e) = mcp_client.connect(&id, cfg).await {
-                tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
-            } else {
-                mcp_connected += 1;
+        let sp = Arc::clone(&session_processor);
+        tokio::spawn(async move {
+            let mut mcp_client = ragent_agent::mcp::McpClient::new();
+            let mut mcp_connected = 0u32;
+            for (id, cfg) in mcp_configs {
+                if let Err(e) = mcp_client.connect(&id, cfg).await {
+                    tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
+                } else {
+                    mcp_connected += 1;
+                }
             }
-        }
-        let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
-        session_processor.set_mcp_client(shared_client).await;
-        tracing::info!(
-            connected = mcp_connected,
-            total = mcp_server_count,
-            "MCP servers initialized"
-        );
+            let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
+            sp.set_mcp_client(shared_client).await;
+            tracing::info!(
+                connected = mcp_connected,
+                total = mcp_server_count,
+                "MCP servers initialized (background)"
+            );
+        });
     }
 
     // Initialize spec manager for all modes (TUI, serve, run, etc.)
+    let t0 = Instant::now();
     let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
     let _ = session_processor
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
+    startup.record("Spec manager init", t0.elapsed());
 
     if cli.dry_run {
         run_dry_run_and_exit(
@@ -651,6 +699,7 @@ async fn main() -> Result<()> {
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                     db_path.clone(),
                     config.read().await.config_paths.clone(),
+                    startup,
                 )
                 .await?;
             }
@@ -742,6 +791,7 @@ async fn main() -> Result<()> {
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                     db_path.clone(),
                     config.read().await.config_paths.clone(),
+                    startup,
                 )
                 .await?;
             }

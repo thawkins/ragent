@@ -95,6 +95,8 @@ pub(crate) struct LoopState {
     pub cumulative_model_wait_ms: u64,
     /// Hysteresis flag: compression already ran this turn.
     pub compressed_this_turn: bool,
+    /// Set once after a post-compaction continuation nudge fires.
+    pub compaction_nudged: bool,
     /// Last LLM-reported input token count (0 if provider omits usage).
     pub last_reported_input_tokens: u64,
 }
@@ -1330,6 +1332,36 @@ impl SessionProcessor {
             });
             return true; // continue
         }
+
+        // Post-compaction continuation nudge: when context compaction ran
+        // this turn and the LLM responds without tool calls, it may have
+        // lost track of the in-progress task. Inject a one-time nudge to
+        // resume work rather than letting the loop stop prematurely.
+        if loop_state.compressed_this_turn && !loop_state.compaction_nudged {
+            loop_state.compaction_nudged = true;
+            tracing::info!(
+                session_id = %session_id,
+                step,
+                "No tool calls after compaction — injecting continuation nudge"
+            );
+            if !text_buffer.is_empty() {
+                Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
+                    role: "assistant".to_string(),
+                    content: ChatContent::Text(text_buffer.to_string()),
+                });
+            }
+            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text(
+                    "Context was compacted to fit the token limit. \
+                     Please continue with your task using the appropriate \
+                     tool calls."
+                        .to_string(),
+                ),
+            });
+            return true; // continue
+        }
+
         false // break
     }
 

@@ -30,11 +30,7 @@ fn test_simple_include_expansion() {
         "Be excellent to each other.\n",
     )
     .unwrap();
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        "# Rules\n\n@conventions.md\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), "# Rules\n\n@conventions.md\n").unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("Be excellent to each other."));
@@ -60,11 +56,7 @@ fn test_nested_transitive_include() {
 #[test]
 fn test_cycle_direct_self_include() {
     let dir = TempDir::new().unwrap();
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        "start\n@AGENTS.md\nend\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), "start\n@AGENTS.md\nend\n").unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("start"));
@@ -119,11 +111,7 @@ fn test_path_escape_rejected() {
         .to_string();
     let relative = format!("../{outside_name}/secret.md");
 
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        format!("@{relative}\n"),
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), format!("@{relative}\n")).unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("include rejected (outside project)"));
@@ -148,11 +136,7 @@ fn test_diamond_include_is_not_a_cycle() {
     fs::write(dir.path().join("shared.md"), "SHARED\n").unwrap();
     fs::write(dir.path().join("left.md"), "LEFT\n@shared.md\n").unwrap();
     fs::write(dir.path().join("right.md"), "RIGHT\n@shared.md\n").unwrap();
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        "@left.md\n@right.md\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), "@left.md\n@right.md\n").unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("LEFT"));
@@ -207,11 +191,7 @@ fn test_leading_double_at_escapes_to_literal() {
 fn test_indented_at_is_not_a_directive() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("conventions.md"), "SHOULD NOT APPEAR\n").unwrap();
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        "  @conventions.md\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), "  @conventions.md\n").unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("@conventions.md"));
@@ -223,11 +203,7 @@ fn test_indented_at_is_not_a_directive() {
 fn test_quoted_include_with_spaces() {
     let dir = TempDir::new().unwrap();
     fs::write(dir.path().join("with spaces.md"), "QUOTED CONTENT\n").unwrap();
-    fs::write(
-        dir.path().join("AGENTS.md"),
-        "@\"with spaces.md\"\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("AGENTS.md"), "@\"with spaces.md\"\n").unwrap();
 
     let content = load(dir.path());
     assert!(content.contains("QUOTED CONTENT"));
@@ -245,11 +221,7 @@ fn test_relative_path_resolves_from_included_file_dir() {
         "LEAF\n",
     )
     .unwrap();
-    fs::write(
-        dir.path().join("docs").join("index.md"),
-        "@sub/leaf.md\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("docs").join("index.md"), "@sub/leaf.md\n").unwrap();
     fs::write(dir.path().join("AGENTS.md"), "@docs/index.md\n").unwrap();
 
     let content = load(dir.path());

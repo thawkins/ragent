@@ -47,9 +47,17 @@ impl IndexStore {
     }
 
     /// Create or migrate the database schema.
+    ///
+    /// Sets performance-oriented pragmas:
+    /// - `WAL` journal mode — dramatically faster writes than rollback journal.
+    /// - `synchronous = NORMAL` — safe with WAL, avoids fsync on every commit.
+    /// - `temp_store = MEMORY` — keeps temp tables/indexes in RAM.
     fn init_schema(&self) -> Result<()> {
         self.conn.execute_batch(
             "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA temp_store = MEMORY;
             PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS schema_version (
@@ -553,12 +561,43 @@ impl IndexStore {
     }
 
     /// Get all symbols for a specific file.
+    ///
+    /// Queries directly by `file_id` for efficiency — this avoids loading
+    /// all symbols into memory and filtering in Rust (O(N) per call).
     pub fn get_file_symbols(&self, file_id: i64) -> Result<Vec<Symbol>> {
-        self.query_symbols(&SymbolFilter {
-            file_path: None,
-            ..Default::default()
-        })
-        .map(|syms| syms.into_iter().filter(|s| s.file_id == file_id).collect())
+        let mut stmt = self.conn.prepare(
+            "SELECT s.id, s.file_id, s.name, s.qualified_name, s.kind, s.visibility,
+                    s.start_line, s.end_line, s.start_col, s.end_col,
+                    s.parent_id, s.signature, s.doc_comment, s.body_hash
+             FROM symbols s
+             WHERE s.file_id = ?1
+             ORDER BY s.start_line",
+        )?;
+
+        let rows = stmt.query_map([file_id], |row| {
+            Ok(RawSymbolRow {
+                id: row.get(0)?,
+                file_id: row.get(1)?,
+                name: row.get(2)?,
+                qualified_name: row.get(3)?,
+                kind: row.get(4)?,
+                visibility: row.get(5)?,
+                start_line: row.get(6)?,
+                end_line: row.get(7)?,
+                start_col: row.get(8)?,
+                end_col: row.get(9)?,
+                parent_id: row.get(10)?,
+                signature: row.get(11)?,
+                doc_comment: row.get(12)?,
+                body_hash: row.get(13)?,
+            })
+        })?;
+
+        let mut symbols = Vec::new();
+        for r in rows {
+            symbols.push(raw_to_symbol(r?)?);
+        }
+        Ok(symbols)
     }
 
     /// Count total symbols in the index.

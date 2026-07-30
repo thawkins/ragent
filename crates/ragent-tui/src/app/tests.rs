@@ -469,6 +469,43 @@ mod app_tests {
     }
 
     #[test]
+    pub fn test_render_markdown_to_ascii_preserves_startup_table_lines() {
+        use ragent_agent::StartupTimings;
+        let mut app = test_app();
+        let mut timings = StartupTimings::new();
+        timings.record("CLI parse", std::time::Duration::from_millis(5));
+        timings.record("Config load", std::time::Duration::from_millis(12));
+        let text = timings.format_report();
+        let rendered = app.render_markdown_to_ascii(&text);
+        // The table header and each stage row must survive on their own lines.
+        assert!(
+            rendered.contains("Stage"),
+            "header missing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("CLI parse"),
+            "CLI parse row missing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Config load"),
+            "Config load row missing; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("Total"),
+            "Total row missing; got:\n{rendered}"
+        );
+        // Rows must NOT have been merged into a single paragraph.
+        assert!(
+            !rendered.contains("CLI parse Config load"),
+            "startup output collapsed rows into one line; got:\n{rendered}",
+        );
+        assert!(
+            !rendered.contains("```\n```"),
+            "fence markers should be stripped by the code-block bypass; got:\n{rendered}",
+        );
+    }
+
+    #[test]
     pub fn test_render_markdown_to_ascii_preserves_help_command_lines() {
         let mut app = test_app();
         let text = "From: /help\nAvailable commands:\n\n```\n  /about            Show info about ragent\n  /quit             Exit the TUI\n\nSkills:\n  /simplify         Reviews recently changed files\n  /debug            Troubleshoots current session\n```\n";

@@ -753,11 +753,19 @@ impl SessionProcessor {
             let llm_request_start = std::time::Instant::now();
 
             if turn.session_config.compaction.auto && !compressed_this_turn {
-                let estimate = crate::compaction::estimate_request_tokens(
-                    Some(system_prompt.as_ref()),
-                    &chat_messages,
-                    &tool_definitions[..],
-                );
+                // Skip the local estimate when the provider already reported
+                // input tokens for the previous turn — `evaluate_trigger`
+                // prefers the provider value, so the local estimate is pure
+                // wasted work (it serialises every message + tool definition).
+                let estimate = if last_reported_input_tokens > 0 {
+                    0
+                } else {
+                    crate::compaction::estimate_request_tokens(
+                        Some(system_prompt.as_ref()),
+                        &chat_messages,
+                        &tool_definitions[..],
+                    )
+                };
                 let decision = crate::compaction::evaluate_trigger(
                     &turn.session_config.compaction,
                     estimate,
@@ -838,6 +846,7 @@ impl SessionProcessor {
                 last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
+                compaction_nudged: false,
                 last_reported_input_tokens,
             };
             let llm_result = self
@@ -911,6 +920,7 @@ impl SessionProcessor {
                     last_interim_hash,
                     cumulative_model_wait_ms,
                     compressed_this_turn,
+                    compaction_nudged: false,
                     last_reported_input_tokens,
                 };
                 let should_continue = self.handle_no_tool_decision(
@@ -925,6 +935,7 @@ impl SessionProcessor {
                 // Read back the mutations the helper performed.
                 chat_messages = std::mem::take(&mut loop_state.chat_messages);
                 task_completeness_nudged = loop_state.task_completeness_nudged;
+                compressed_this_turn = loop_state.compressed_this_turn;
                 if should_continue {
                     continue;
                 }

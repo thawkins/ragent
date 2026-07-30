@@ -577,14 +577,25 @@ impl CodeIndex {
         let start = Instant::now();
 
         // Scan the project directory.
+        let scan_start = Instant::now();
         let scanned = scanner::scan_directory(&self.project_root, &self.config.scan_config)?;
-        debug!("scanned {} files", scanned.len());
+        let scan_ms = scan_start.elapsed().as_millis();
+        debug!("scanned {} files ({}ms)", scanned.len(), scan_ms);
 
         // Compute diff against current index.
+        let diff_start = Instant::now();
         let diff = {
             let store = self.store.lock().unwrap();
             store.get_stale_files(&scanned)?
         };
+        let diff_ms = diff_start.elapsed().as_millis();
+        debug!(
+            "stale diff: {} add, {} update, {} remove ({}ms)",
+            diff.to_add.len(),
+            diff.to_update.len(),
+            diff.to_remove.len(),
+            diff_ms
+        );
 
         // Set progress counters early so the TUI can show the percentage
         // even while apply_diff holds the store lock.
@@ -600,10 +611,13 @@ impl CodeIndex {
         };
 
         // Apply the diff to the SQLite store.
+        let apply_start = Instant::now();
         {
             let store = self.store.lock().unwrap();
             store.apply_diff(&diff)?;
         }
+        let apply_ms = apply_start.elapsed().as_millis();
+        debug!("apply_diff done ({}ms)", apply_ms);
 
         // Parse and store symbols for new/updated files.
         // Process in chunks: parse all files in each chunk outside locks
@@ -614,7 +628,7 @@ impl CodeIndex {
         //   - Lock acquisitions from 2N to 2*(N/CHUNK_SIZE)
         // Brief yields between chunks let the TUI event loop acquire locks.
         const CHUNK_SIZE: usize = 20;
-        const YIELD_MS: u64 = 5;
+        const YIELD_MS: u64 = 1;
 
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
 
@@ -701,12 +715,17 @@ impl CodeIndex {
         }
 
         // After incremental update, ensure FTS is in sync with SQLite.
+        let fts_sync_start = Instant::now();
         if let Err(e) = self.ensure_fts_sync() {
             warn!("FTS sync check failed after reindex: {e}");
         }
+        let fts_sync_ms = fts_sync_start.elapsed().as_millis();
 
         result.elapsed_ms = start.elapsed().as_millis() as u64;
-        debug!("{result}");
+        debug!(
+            "full_reindex: scan={}ms, diff={}ms, apply={}ms, fts_sync={}ms, total={}ms",
+            scan_ms, diff_ms, apply_ms, fts_sync_ms, result.elapsed_ms
+        );
 
         // Clear progress counters.
         self.reindex_total.store(0, Ordering::Relaxed);

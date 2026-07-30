@@ -505,8 +505,13 @@ impl App {
     }
 
     /// Backfill `selected_model_ctx_window` from cached/default provider model
-    /// metadata so the UI does not block on provider discovery at startup.
-    /// Only fires an async discovery when no cached metadata is available.
+    /// metadata so the UI does not block on provider discovery.
+    ///
+    /// During startup this intentionally avoids synchronous model discovery
+    /// (`sync_discover_models`), which can block for 5+ seconds when a
+    /// provider endpoint is slow or unreachable.  Only cached or default
+    /// model metadata is consulted; the context window is refreshed later
+    /// when the user opens the model picker or sends a message.
     pub fn backfill_model_ctx_window(&mut self) {
         let model = match self.selected_model.as_deref() {
             Some(m) => m.to_string(),
@@ -517,8 +522,17 @@ impl App {
         };
         let previous_context_window = self.selected_model_ctx_window;
 
-        // Use cached/default metadata so startup does not block on provider discovery.
-        let models = self.resolved_model_entries_for_provider(provider_id);
+        // Use only cached/default metadata — never block on network discovery.
+        let cached = self.cached_model_entries(provider_id);
+        let models = if !cached.is_empty() {
+            cached
+        } else {
+            // Fall back to the provider's static default model list.
+            self.provider_registry
+                .get(provider_id)
+                .map(|provider| self.picker_entries_from_models(provider.default_models()))
+                .unwrap_or_default()
+        };
         if let Some(entry) = models.iter().find(|e| e.id == model_id) {
             if entry.context_window > 0 && previous_context_window != Some(entry.context_window) {
                 self.selected_model_ctx_window = Some(entry.context_window);
@@ -1927,6 +1941,10 @@ impl App {
     /// Spawn an async provider health check (pinging the configured endpoint)
     /// and store the result in `provider_health` (`0` = unknown, `1` = up,
     /// `2` = down). Resolves the Copilot token via env/IDE/`gh`/DB first.
+    ///
+    /// The Copilot token resolution (which may spawn `gh auth token` as a
+    /// subprocess) is performed **inside** the spawned async task so it does
+    /// not block the TUI render loop during startup.
     pub fn check_provider_health(&mut self) {
         let provider = match &self.configured_provider {
             Some(p) => p.clone(),
@@ -1937,24 +1955,25 @@ impl App {
         };
         self.provider_health.store(0, Ordering::Relaxed);
         let health = self.provider_health.clone();
-
-        // Pre-resolve the copilot token using the centralized resolver:
-        // env var → IDE auto-discover → gh CLI → database.
-        let copilot_token = if provider.id == "copilot" {
-            let storage = self.storage.clone();
-            let db_lookup = move || {
-                storage
-                    .get_provider_auth("copilot")
-                    .ok()
-                    .flatten()
-                    .filter(|k| !k.is_empty())
-            };
-            ragent_agent::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
-        } else {
-            None
-        };
+        let storage = self.storage.clone();
 
         tokio::spawn(async move {
+            // Resolve the copilot token inside the async task so the `gh`
+            // CLI subprocess call does not block the TUI startup.
+            let copilot_token = if provider.id == "copilot" {
+                let storage = storage.clone();
+                let db_lookup = move || {
+                    storage
+                        .get_provider_auth("copilot")
+                        .ok()
+                        .flatten()
+                        .filter(|k| !k.is_empty())
+                };
+                ragent_agent::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
+            } else {
+                None
+            };
+
             let available = match provider.id.as_str() {
                 "ollama" => ragent_agent::provider::ollama::list_ollama_models(None)
                     .await

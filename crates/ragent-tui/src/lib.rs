@@ -147,6 +147,7 @@ const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
 /// # use ragent_agent::session::processor::SessionProcessor;
 /// # use ragent_agent::storage::Storage;
 /// # use ragent_agent::agent::AgentInfo;
+/// # use ragent_agent::StartupTimings;
 /// # async fn example(
 /// #     bus: Arc<EventBus>,
 /// #     storage: Arc<Storage>,
@@ -159,6 +160,7 @@ const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
 ///     bus, storage, registry, processor, agent, false, None, rx,
 ///     std::path::PathBuf::new(),
 ///     vec![],
+///     StartupTimings::new(),
 /// ).await?;
 /// # Ok(())
 /// # }
@@ -174,7 +176,9 @@ pub async fn run_tui(
     log_rx: TuiLogReceiver,
     db_path: std::path::PathBuf,
     config_paths: Vec<std::path::PathBuf>,
+    mut startup: ragent_agent::StartupTimings,
 ) -> Result<()> {
+    use std::time::Instant;
     // Set up panic handler to ensure terminal state is restored on crashes
     // This handles panics, OOM, and segfaults by restoring the terminal before
     // the default panic handler prints the backtrace
@@ -192,12 +196,15 @@ pub async fn run_tui(
 
     // Create the terminal guard - it will automatically restore terminal state on drop
     // We don't need to reference it after creation - Drop handles cleanup
+    let t0 = Instant::now();
     let terminal_guard = TerminalGuard::new()?;
     // Now create the ratatui terminal
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    startup.record("Terminal setup", t0.elapsed());
 
+    let t0 = Instant::now();
     let mut app = App::new(
         event_bus.clone(),
         Arc::clone(&storage),
@@ -207,6 +214,13 @@ pub async fn run_tui(
         show_log,
         db_path,
     );
+    let app_new_elapsed = t0.elapsed();
+
+    // Merge sub-stages recorded inside App::new() into the main timings.
+    if let Some(ref mut app_sub) = app.startup_timings {
+        startup.merge_stages(app_sub);
+    }
+    startup.record("App::new() (total)", app_new_elapsed);
 
     // Attach the event bus to providers that publish lifecycle events
     // (e.g. local model download progress).
@@ -231,10 +245,12 @@ pub async fn run_tui(
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // -- Provider health check --
+    let t0 = Instant::now();
     app.check_provider_health();
     app.append_assistant_text("\n✔ Provider health check");
     app.status = "checking provider…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
+    startup.record("Provider health check", t0.elapsed());
 
     // Subscribe to the event bus before starting background services.
     //
@@ -268,6 +284,7 @@ pub async fn run_tui(
     }
 
     // -- Auto-initialize a session at startup if not resuming --
+    let t0 = Instant::now();
     if resume_session_id.is_none() {
         let dir = std::env::current_dir().unwrap_or_default();
         match app.session_processor.session_manager.create_session(dir) {
@@ -341,6 +358,8 @@ pub async fn run_tui(
     }
 
     // -- Input history --
+    startup.record("Session create", t0.elapsed());
+    let t0 = Instant::now();
     let history_path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("ragent")
@@ -351,17 +370,38 @@ pub async fn run_tui(
     }
     app.append_assistant_text("\n✔ Input history loaded");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
+    startup.record("Input history load", t0.elapsed());
 
-    // -- Code index startup --
+    // -- Code index startup (non-blocking) --
+    // The code index open + watcher setup can take several seconds on large
+    // projects.  We spawn it in a background task so the TUI event loop starts
+    // immediately and the index becomes available when ready.
     app.status = "starting code index…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // Track the fallback reindex thread so we can join it on shutdown
-    let mut code_index_fallback_thread: Option<std::thread::JoinHandle<()>> = None;
+    /// Result of the background code-index startup, delivered to the main
+    /// event loop via an mpsc channel so `&mut App` updates happen on the
+    /// main thread.
+    struct CodeIndexStartupResult {
+        /// The opened code index, if any.
+        index: Option<Arc<ragent_codeindex::CodeIndex>>,
+        /// The watch session, if the watcher started successfully.
+        watch_session: Option<ragent_codeindex::WatchSession>,
+        /// Fallback one-shot reindex thread (when watcher failed to start).
+        fallback_thread: Option<std::thread::JoinHandle<()>>,
+        /// Human-readable message to append to the chat panel.
+        message: String,
+        /// Wall-clock duration of the background code-index startup.
+        elapsed: std::time::Duration,
+    }
 
-    let _code_index: Option<Arc<ragent_codeindex::CodeIndex>> = {
+    let (ci_tx, mut ci_rx) = tokio::sync::mpsc::unbounded_channel::<CodeIndexStartupResult>();
+
+    let sp = Arc::clone(&session_processor);
+    tokio::spawn(async move {
         let cwd = std::env::current_dir().unwrap_or_default();
-        match ragent_agent::Config::load() {
+        let ci_inner_start = Instant::now();
+        let result = match ragent_agent::Config::load() {
             Ok(config) => {
                 if config.code_index.enabled {
                     let index_config = ragent_codeindex::types::CodeIndexConfig {
@@ -374,57 +414,84 @@ pub async fn run_tui(
                         Ok(idx) => {
                             let arc_idx = Arc::new(idx);
                             // Start the file watcher + background worker.
-                            // start_watching() performs an initial full_reindex() and then
-                            // watches for filesystem changes to keep the index up to date.
-                            match ragent_codeindex::start_watching(
-                                arc_idx.clone(),
-                                ragent_codeindex::worker::WorkerConfig::default(),
-                            ) {
-                                Ok(session) => {
-                                    app.code_index_watch_session = Some(session);
-                                    tracing::info!("Code index watcher started");
-                                }
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "Failed to start code index watcher, falling back to one-shot reindex");
-                                    // Fall back to one-shot background reindex without watcher
-                                    let bg = arc_idx.clone();
-                                    let handle = std::thread::spawn(move || {
-                                        if let Err(e) = bg.full_reindex() {
-                                            tracing::warn!(error = %e, "Background code index reindex failed");
-                                        }
-                                    });
-                                    code_index_fallback_thread = Some(handle);
-                                }
-                            }
-                            app.set_code_index(Some(arc_idx.clone()));
-                            let _ = session_processor.code_index.set(arc_idx.clone());
-                            app.append_assistant_text("\n✔ Code index: enabled");
+                            // start_watching() performs an initial full_reindex() in a
+                            // background thread and then watches for filesystem changes.
+                            let (watch_session, fallback_thread) =
+                                match ragent_codeindex::start_watching(
+                                    arc_idx.clone(),
+                                    ragent_codeindex::worker::WorkerConfig::default(),
+                                ) {
+                                    Ok(session) => {
+                                        tracing::info!("Code index watcher started");
+                                        (Some(session), None)
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Failed to start code index watcher, falling back to one-shot reindex");
+                                        let bg = arc_idx.clone();
+                                        let handle = std::thread::spawn(move || {
+                                            if let Err(e) = bg.full_reindex() {
+                                                tracing::warn!(error = %e, "Background code index reindex failed");
+                                            }
+                                        });
+                                        (None, Some(handle))
+                                    }
+                                };
+                            // Thread-safe: OnceLock can be set from any thread.
+                            let _ = sp.code_index.set(arc_idx.clone());
                             tracing::info!(
                                 "Code index initialized at {:?}",
                                 index_config.index_dir
                             );
-                            Some(arc_idx)
+                            CodeIndexStartupResult {
+                                index: Some(arc_idx),
+                                watch_session,
+                                fallback_thread,
+                                message: "\n✔ Code index: enabled".to_string(),
+                                elapsed: ci_inner_start.elapsed(),
+                            }
                         }
                         Err(e) => {
-                            app.append_assistant_text("\n✘ Code index: failed to open");
                             tracing::warn!(error = %e, "Failed to initialize code index");
-                            None
+                            CodeIndexStartupResult {
+                                index: None,
+                                watch_session: None,
+                                fallback_thread: None,
+                                message: "\n✘ Code index: failed to open".to_string(),
+                                elapsed: ci_inner_start.elapsed(),
+                            }
                         }
                     }
                 } else {
-                    app.append_assistant_text("\n✔ Code index: disabled");
                     tracing::debug!("Code index is disabled in config");
-                    None
+                    CodeIndexStartupResult {
+                        index: None,
+                        watch_session: None,
+                        fallback_thread: None,
+                        message: "\n✔ Code index: disabled".to_string(),
+                        elapsed: ci_inner_start.elapsed(),
+                    }
                 }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to load config for code index check");
-                None
+                CodeIndexStartupResult {
+                    index: None,
+                    watch_session: None,
+                    fallback_thread: None,
+                    message: String::new(),
+                    elapsed: ci_inner_start.elapsed(),
+                }
             }
-        }
-    };
+        };
+        let _ = ci_tx.send(result);
+    });
+
+    // Track the fallback reindex thread so we can join it on shutdown.
+    // Populated when the background code-index startup result arrives.
+    let mut code_index_fallback_thread: Option<std::thread::JoinHandle<()>> = None;
 
     // -- Spec manager startup --
+    let t0 = Instant::now();
     let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
     let _ = session_processor
         .spec_manager
@@ -442,13 +509,19 @@ pub async fn run_tui(
 
     // -- Backfill context window cache for models selected before this feature --
     app.backfill_model_ctx_window();
+    startup.record("Spec mgr & resume & backfill", t0.elapsed());
 
     // -- Startup complete --
+    app.startup_timings = Some(startup);
     app.append_assistant_text("\n✅ **Ready**");
     app.status = "ready".to_string();
     // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    // Record code-index background startup time when it arrives (stored for
+    // the event loop to merge into startup_timings).
+    let mut ci_startup_recorded = false;
 
     // Set up signal handlers for graceful shutdown via a channel
     // This works cross-platform without needing #[cfg] inside tokio::select!
@@ -485,6 +558,33 @@ pub async fn run_tui(
         // always reflects the latest state.
         while let Ok(event) = event_rx.try_recv() {
             app.handle_event(event);
+        }
+
+        // Poll the background code-index startup result (non-blocking).
+        // When it arrives, wire the index into App state and update the UI.
+        if let Ok(result) = ci_rx.try_recv() {
+            if let Some(idx) = result.index {
+                app.set_code_index(Some(idx));
+            }
+            if let Some(session) = result.watch_session {
+                app.code_index_watch_session = Some(session);
+            }
+            code_index_fallback_thread = result.fallback_thread;
+            if !result.message.is_empty() {
+                app.append_assistant_text(&result.message);
+            }
+            // Record the background code-index startup duration once.
+            if !ci_startup_recorded {
+                if let Some(ref mut st) = app.startup_timings {
+                    st.record("Code index (background)", result.elapsed);
+                }
+                ci_startup_recorded = true;
+            }
+            // Clear the "starting code index…" status now that setup is done.
+            if app.status == "starting code index…" {
+                app.status = "ready".to_string();
+            }
+            app.needs_redraw = true;
         }
 
         // Drain tracing records captured by TuiTracingLayer into the log panel.

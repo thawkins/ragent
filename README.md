@@ -355,12 +355,18 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-beta.17** — The core architecture, tool system (~114 tools), TUI, HTTP
+**v0.1.0-beta.18** — The core architecture, tool system (~114 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
+- Startup timing instrumentation with `/startup` slash command
+- Post-compaction continuation nudge so the agent resumes its task after context compaction
+- Copilot `gh auth token` cached process-wide via `OnceLock`
+- Code-index SQLite WAL mode and direct `file_id` symbol queries
+- First printable keystroke after run-cost banner no longer swallowed
 - Conversation search (`conversation_search`) and cross-session search (`session_search`) tools — search current and past sessions by keyword with filters and context
 - Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions including open, snapshot, click, type, eval, screenshot, and setup
 - TODO side panel added (Alt+T) with `/todo` slash alias

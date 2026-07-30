@@ -734,11 +734,19 @@ impl App {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
         // Dismiss the transient run-cost banner on any keypress (FR-012).
-        // The first key simply clears the banner and is consumed; subsequent
-        // keys are processed normally.
+        // Non-character keys (Esc, arrows, Enter, modifier-only, etc.) are
+        // consumed solely to clear the banner.  A plain printable character,
+        // however, is the user starting to type their next message — we clear
+        // the banner but let the character fall through to normal input
+        // processing so the first keystroke is not lost.
         if self.run_cost_banner.take().is_some() {
             self.needs_redraw = true;
-            return;
+            let is_plain_char = matches!(key.code, KeyCode::Char(_))
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT);
+            if !is_plain_char {
+                return;
+            }
         }
         // Config-save picker intercepts all keys while it is open.
         if self.config_save_picker.is_some() {

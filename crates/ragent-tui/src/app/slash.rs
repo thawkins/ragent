@@ -1550,6 +1550,18 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                 self.status = "cost summary".to_string();
             }
+            "startup" => match &self.startup_timings {
+                Some(timings) => {
+                    self.append_assistant_text(&timings.format_report());
+                    self.status = "startup: timings shown".to_string();
+                }
+                None => {
+                    self.append_assistant_text(
+                        "From: /startup\n⚠ No startup timings recorded for this session.",
+                    );
+                    self.status = "startup: unavailable".to_string();
+                }
+            },
             "help" => {
                 let mut help_lines = String::from("From: /help\nAvailable commands:\n\n```\n");
                 for cmd_def in SLASH_COMMANDS {
@@ -6712,8 +6724,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     _ => {
                         self.append_assistant_text(
-                                                                      "From: /router\n⚠ Unknown subcommand. Use `/router help` for available commands.",
-                                                                  );
+                                                                                                  "From: /router\n⚠ Unknown subcommand. Use `/router help` for available commands.",
+                                                                                              );
                         self.status = "router: unknown".to_string();
                     }
                 }

@@ -11,6 +11,7 @@ pub mod error;
 pub mod event;
 
 pub use ragent_types::event::{Event, EventBus, FinishReason};
+pub use ragent_types::startup::StartupTimings;
 pub mod file_ops;
 pub mod hooks;
 pub mod id;

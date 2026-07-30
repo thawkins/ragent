@@ -806,6 +806,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "router",
         description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|stats|reload|help",
     },
+    SlashCommandDef {
+        trigger: "startup",
+        description: "Show startup timing breakdown for the current session",
+    },
 ];
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
@@ -1173,6 +1177,8 @@ pub struct App {
     /// Optional spec manager for reading and updating specifications.
     /// Set when the user activates a spec via /spec activate.
     pub spec_manager: Option<Arc<ragent_specs::SpecManager>>,
+    /// Startup timing measurements collected during main() and run_tui().
+    pub startup_timings: Option<ragent_agent::StartupTimings>,
     /// Currently active spec ID for context injection.
     pub active_spec: Option<String>,
     /// Whether to show hidden files in the file menu.

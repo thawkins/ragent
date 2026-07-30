@@ -664,11 +664,19 @@ pub fn find_copilot_token() -> Option<String> {
     None
 }
 
+/// Process-wide cache for the `gh auth token` result so we don't spawn a
+/// subprocess on every call to [`find_gh_cli_token`].  The token does not
+/// change during a single ragent session.
+static GH_CLI_TOKEN_CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
 /// Attempts to get a GitHub OAuth token from the `gh` CLI.
 ///
 /// Runs `gh auth token` and returns the token if available. Only returns
 /// OAuth tokens (`gho_` / `ghu_`); fine-grained PATs are filtered out
 /// since they cannot be used with the Copilot internal API.
+///
+/// The result is cached process-wide via a `OnceLock` so the `gh`
+/// subprocess is spawned at most once per session.
 ///
 /// # Examples
 ///
@@ -681,23 +689,27 @@ pub fn find_copilot_token() -> Option<String> {
 /// ```
 #[must_use]
 pub fn find_gh_cli_token() -> Option<String> {
-    let output = std::process::Command::new("gh")
-        .args(["auth", "token"])
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if token.is_empty() {
-        return None;
-    }
-    // Only accept OAuth tokens; PATs can't use copilot_internal
-    if token.starts_with("github_pat_") || token.starts_with("ghp_") {
-        return None;
-    }
-    Some(token)
+    GH_CLI_TOKEN_CACHE
+        .get_or_init(|| {
+            let output = std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .stderr(std::process::Stdio::null())
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if token.is_empty() {
+                return None;
+            }
+            // Only accept OAuth tokens; PATs can't use copilot_internal
+            if token.starts_with("github_pat_") || token.starts_with("ghp_") {
+                return None;
+            }
+            Some(token)
+        })
+        .clone()
 }
 
 /// Returns `true` if the token looks like a fine-grained or classic PAT

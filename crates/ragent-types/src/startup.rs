@@ -1,0 +1,158 @@
+//! Startup timing instrumentation.
+//!
+//! [`StartupTimings`] records the duration of each stage in the ragent startup
+//! pipeline (CLI parse → config load → storage open → provider/tool registries
+//! → TUI init → session create → code index, etc.).
+//!
+//! The collected data is displayed via the `/startup` TUI slash command so
+//! users can identify which stages contribute most to the perceived startup
+//! latency.
+
+use std::time::{Duration, Instant};
+
+/// A single named stage with its measured wall-clock duration.
+#[derive(Debug, Clone)]
+pub struct StartupStage {
+    /// Human-readable stage label (e.g. "Config load").
+    pub name: String,
+    /// Duration of the stage in milliseconds.
+    pub duration_ms: u128,
+}
+
+/// Collected timings for every instrumented startup stage.
+#[derive(Debug, Clone)]
+pub struct StartupTimings {
+    /// Ordered list of completed stages.
+    stages: Vec<StartupStage>,
+    /// Wall-clock instant when timing started (set in [`StartupTimings::new`]).
+    global_start: Instant,
+}
+
+impl Default for StartupTimings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StartupTimings {
+    /// Create a new timings collector, recording the global start instant.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            stages: Vec::new(),
+            global_start: Instant::now(),
+        }
+    }
+
+    /// Record a completed stage.
+    ///
+    /// Call this after measuring a stage with `Instant::now()` / `elapsed()`:
+    ///
+    /// ```ignore
+    /// let t0 = Instant::now();
+    /// // ... do work ...
+    /// timings.record("Config load", t0.elapsed());
+    /// ```
+    pub fn record(&mut self, name: impl Into<String>, duration: Duration) {
+        self.stages.push(StartupStage {
+            name: name.into(),
+            duration_ms: duration.as_millis(),
+        });
+    }
+
+    /// Total wall-clock elapsed time from [`StartupTimings::new`] to now.
+    #[must_use]
+    pub fn total_elapsed_ms(&self) -> u128 {
+        self.global_start.elapsed().as_millis()
+    }
+
+    /// Return a reference to the recorded stages.
+    #[must_use]
+    pub fn stages(&self) -> &[StartupStage] {
+        &self.stages
+    }
+
+    /// Drain all recorded stages, leaving `self` empty.
+    ///
+    /// This is used by `run_tui()` to extract sub-stages recorded inside
+    /// `App::new()` and merge them into the main timings collector.
+    pub fn drain_stages(&mut self) -> Vec<StartupStage> {
+        std::mem::take(&mut self.stages)
+    }
+
+    /// Append stages from another `StartupTimings` into `self`.
+    ///
+    /// The stages are moved (not copied) from `other`, leaving `other` empty.
+    /// The global start of `self` is preserved; `other`'s start is discarded.
+    pub fn merge_stages(&mut self, other: &mut StartupTimings) {
+        self.stages.append(&mut other.stages);
+    }
+
+    /// Format the timings as a human-readable report string.
+    ///
+    /// The output is a compact aligned table (no box-drawing borders) sized to
+    /// fit within a 100-character-wide terminal display.
+    #[must_use]
+    pub fn format_report(&self) -> String {
+        // Name column: width of the longest stage name, but at least 5 ("Stage").
+        let name_w = self
+            .stages
+            .iter()
+            .map(|s| s.name.len())
+            .chain([5usize]) // "Stage" header
+            .max()
+            .unwrap_or(5)
+            .max(5);
+
+        // Time column: width of the longest formatted time ("NNN ms"), but at
+        // least 4 ("Time").
+        let time_w = self
+            .stages
+            .iter()
+            .map(|s| format!("{} ms", s.duration_ms).len())
+            .chain([4usize]) // "Time" header
+            .chain([format!("{} ms", self.total_elapsed_ms()).len()])
+            .max()
+            .unwrap_or(4)
+            .max(4);
+
+        // Total visible width: name_w + 2 spaces + time_w.
+        let rule = "─".repeat(name_w + 2 + time_w);
+
+        let mut out = String::new();
+        out.push_str("From: /startup\n\n");
+        // Wrap the table in a fenced code block so the TUI markdown renderer
+        // (`try_extract_research_code_block`) preserves the preformatted layout
+        // verbatim instead of collapsing soft-wrapped lines into one paragraph.
+        out.push_str("```\n");
+        out.push_str(&format!(
+            "{:<name_w$}  {:>time_w$}\n",
+            "Stage",
+            "Time",
+            name_w = name_w,
+            time_w = time_w
+        ));
+        out.push_str(&rule);
+        out.push('\n');
+        for stage in &self.stages {
+            out.push_str(&format!(
+                "{:<name_w$}  {:>time_w$}\n",
+                stage.name,
+                format!("{} ms", stage.duration_ms),
+                name_w = name_w,
+                time_w = time_w
+            ));
+        }
+        out.push_str(&rule);
+        out.push('\n');
+        out.push_str(&format!(
+            "{:<name_w$}  {:>time_w$}\n",
+            "Total",
+            format!("{} ms", self.total_elapsed_ms()),
+            name_w = name_w,
+            time_w = time_w
+        ));
+        out.push_str("```\n");
+        out
+    }
+}

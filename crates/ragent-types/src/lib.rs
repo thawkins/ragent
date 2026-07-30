@@ -18,6 +18,7 @@ pub mod message;
 pub mod permission;
 pub mod resource;
 pub mod sanitize;
+pub mod startup;
 pub mod strutil;
 pub mod thinking;
 
@@ -31,6 +32,7 @@ pub use llm::{
 };
 pub use message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 pub use permission::PermissionDecision;
+pub use startup::StartupTimings;
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 // Re-export string utilities for convenient access
 pub use strutil::{truncate_bytes, truncate_chars};

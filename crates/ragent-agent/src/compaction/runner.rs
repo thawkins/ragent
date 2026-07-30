@@ -49,10 +49,11 @@ use crate::compaction::{
 ///
 /// The prompt consists of the instruction/template plus the serialised head
 /// transcript. Capping it prevents local/small models from being swamped with
-/// a huge summarisation request that can stall for minutes. The value leaves
-/// room for the template (~2.5 k chars), the previous summary (~16 k chars), and
-/// a large head transcript.
-const MAX_COMPACTION_PROMPT_CHARS: usize = 120_000;
+/// a huge summarisation request that can stall for minutes. Kept at 60 k chars
+/// (~15 k tokens) to keep the LLM summarisation call tractable while still
+/// giving the model enough context for a useful summary. The verbatim recent
+/// tail (`keep_tokens`) is preserved regardless of this cap.
+const MAX_COMPACTION_PROMPT_CHARS: usize = 60_000;
 
 /// Heartbeat interval for long-running compaction summarisation.
 const SUMMARY_HEARTBEAT_SECS: u64 = 30;
@@ -70,6 +71,13 @@ pub struct SelectedSplit {
     pub recent_messages: Vec<Message>,
     /// Estimated token cost of the serialised recent tail.
     pub recent_tokens: usize,
+    /// Pre-serialised transcript of the head messages, joined with blank lines.
+    /// Reused by [`compact`] to avoid re-serialising the head.
+    pub head_transcript: String,
+    /// Estimated token cost of the entire original message list (all
+    /// non-compaction messages). Reused by [`compact`] for the compression-ratio
+    /// stats so it does not re-serialise every message a second time.
+    pub original_tokens: usize,
 }
 
 /// Result of a successful [`compact`] run.
@@ -124,11 +132,17 @@ pub fn select(messages: &[Message], config: &CompactionConfig) -> SelectedSplit 
         .filter(|(_, s, _)| !s.is_empty())
         .collect();
 
+    // Total token cost of all non-compaction messages (used for compression
+    // stats in `compact` without re-serialising).
+    let original_tokens: usize = conv.iter().map(|(_, _, cost)| *cost).sum();
+
     if conv.is_empty() {
         return SelectedSplit {
             head_messages: Vec::new(),
             recent_messages: Vec::new(),
             recent_tokens: 0,
+            head_transcript: String::new(),
+            original_tokens: 0,
         };
     }
 
@@ -152,10 +166,21 @@ pub fn select(messages: &[Message], config: &CompactionConfig) -> SelectedSplit 
         .map(|(i, _, _)| messages[*i].clone())
         .collect();
 
+    // Reuse the already-serialised head strings instead of re-serialising in
+    // `compact`.
+    let head_transcript: String = conv[..split_idx]
+        .iter()
+        .filter(|(_, s, _)| !s.is_empty())
+        .map(|(_, s, _)| s.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
     SelectedSplit {
         head_messages,
         recent_messages,
         recent_tokens: total,
+        head_transcript,
+        original_tokens,
     }
 }
 
@@ -335,20 +360,9 @@ pub async fn compact(
         bail!("compaction has nothing to summarise: empty head and no previous summary");
     }
 
-    // 3. Build the summarisation prompt. Context = [previous recent (if any),
-    //    head transcript].
-    let head_transcript = split
-        .head_messages
-        .iter()
-        .map(|m| serialize_message(m, tool_max))
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    // Cap the prompt length so the summarisation request stays tractable for
-    // the configured model. If the head transcript is too long, keep the most
-    // recent portion and note the truncation.
-    let head_transcript = cap_head_transcript(&head_transcript);
+    // 3. Build the summarisation prompt. The head transcript was already
+    //    serialised by `select` — reuse it to avoid duplicate work.
+    let head_transcript = cap_head_transcript(&split.head_transcript);
 
     let prompt = build_prompt(previous_summary, &[head_transcript.as_str()]);
 
@@ -404,11 +418,9 @@ pub async fn compact(
     new_messages.push(compaction_message.clone());
     new_messages.extend(split.recent_messages.iter().cloned());
 
-    // 7. Token estimates for the finished event.
-    let original_tokens: usize = messages
-        .iter()
-        .map(|m| estimate_text_tokens(&serialize_message(m, tool_max)))
-        .sum();
+    // 7. Token estimates for the finished event. Reuse the original_tokens
+    //    already computed by `select` to avoid re-serialising every message.
+    let original_tokens = split.original_tokens;
     let compressed_tokens: usize = new_messages
         .iter()
         .map(|m| estimate_text_tokens(&serialize_message(m, tool_max)))

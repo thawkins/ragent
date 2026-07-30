@@ -3,13 +3,14 @@ use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
+use std::time::Instant;
 
 use lru::LruCache;
 
 use ratatui::layout::Rect;
 
 use ragent_agent::{
-    agent::AgentInfo, event::EventBus, provider::ProviderRegistry,
+    StartupTimings, agent::AgentInfo, event::EventBus, provider::ProviderRegistry,
     session::processor::SessionProcessor, storage::Storage,
 };
 
@@ -40,6 +41,8 @@ impl App {
         show_log: bool,
         db_path: std::path::PathBuf,
     ) -> Self {
+        let mut sub = StartupTimings::new();
+
         let cwd = std::env::current_dir()
             .map(|p| {
                 let path = p.display().to_string();
@@ -53,12 +56,17 @@ impl App {
             })
             .unwrap_or_default();
 
+        let t0 = Instant::now();
         let git_branch = Self::detect_git_branch();
+        sub.record("App: git branch detect", t0.elapsed());
 
+        let t0 = Instant::now();
         let configured_provider = Self::detect_provider(&storage);
         let _ = storage.delete_discovered_models("huggingface");
+        sub.record("App: provider detect", t0.elapsed());
 
         // Ensure the initial agent_info has a model if none was provided.
+        let t0 = Instant::now();
         if agent_info.model.is_none() {
             if let Some(model_ref) =
                 ragent_agent::agent::resolve_default_model(&agent_info, &provider_registry)
@@ -72,16 +80,22 @@ impl App {
                 agent_info.model = Some(model_ref);
             }
         }
+        sub.record("App: model resolution", t0.elapsed());
 
         let agent_name = agent_info.name.clone();
 
         let cwd_path = std::env::current_dir().unwrap_or_default();
+        let t0 = Instant::now();
         let builtin_agents = ragent_agent::agent::create_builtin_agents();
+        sub.record("App: builtin agents", t0.elapsed());
+
+        let t0 = Instant::now();
         let builtin_names: std::collections::HashSet<String> =
             builtin_agents.iter().map(|a| a.name.clone()).collect();
 
         let (custom_defs, mut all_diagnostics) =
             ragent_agent::agent::custom::load_custom_agents(&cwd_path);
+        sub.record("App: custom agent loading", t0.elapsed());
 
         let cycleable_agents: Vec<AgentInfo> = builtin_agents
             .into_iter()
@@ -110,7 +124,11 @@ impl App {
             .unwrap_or(0);
 
         // Load persisted model selection
+        let t0 = Instant::now();
         let app_config = ragent_agent::Config::load().unwrap_or_default();
+        sub.record("App: config reload", t0.elapsed());
+
+        let t0 = Instant::now();
         let selected_model = storage.get_setting("selected_model").ok().flatten();
         let selected_model_ctx_window = storage
             .get_setting("selected_model_ctx_window")
@@ -118,7 +136,7 @@ impl App {
             .flatten()
             .and_then(|s| s.parse::<usize>().ok());
         let selected_thinking_level = Self::load_persisted_thinking_level(storage.as_ref());
-
+        sub.record("App: settings load", t0.elapsed());
         let mut app = Self {
             messages: Vec::new(),
             input: String::new(),
@@ -317,6 +335,7 @@ impl App {
             code_index_busy: false,
             code_index_watch_session: None,
             spec_manager: None,
+            startup_timings: Some(sub),
             active_spec: None,
             config_paths: app_config.config_paths.clone(),
             router_enabled: false,
@@ -336,6 +355,7 @@ impl App {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
 
+        let t0 = Instant::now();
         // Initialise the bash allowlist/denylist from config
         ragent_agent::bash_lists::load_from_config();
 
@@ -348,6 +368,13 @@ impl App {
         // Restore the Model Router as the active provider if it was the
         // persisted current model when the previous session exited.
         app.restore_router_state();
+
+        if let Some(ref mut st) = app.startup_timings {
+            st.record(
+                "App: post-init (bash/dir lists, gitlab, router)",
+                t0.elapsed(),
+            );
+        }
 
         app
     }

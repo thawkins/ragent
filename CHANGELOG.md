@@ -1,5 +1,66 @@
 # Changelog
 
+## Version: 0.1.0-beta.18
+
+### Fixed — Startup blocking issues
+
+- MCP server connections now happen in a background `tokio::spawn` task instead
+  of sequentially on the main task, eliminating the 5–15 s startup stall when one
+  or more MCP servers are slow to start.
+- Code-index startup (open + watcher + initial `full_reindex`) now runs in a
+  background task and wires into `App` state via an mpsc channel, so the TUI
+  event loop starts immediately and the index becomes available when ready.
+- Provider health check (including Copilot token resolution via `gh auth token`)
+  now runs entirely inside its spawned async task instead of blocking the TUI
+  render loop during startup.
+- `App::backfill_model_ctx_window` no longer calls synchronous model discovery
+  (`sync_discover_models`) at startup; only cached/default metadata is consulted.
+- The first printable keystroke after the run-cost banner is no longer
+  swallowed — non-character keys still just dismiss the banner, but a plain
+  character clears the banner and falls through to normal input so the first
+  typed character is not lost.
+
+### Added — Startup timing instrumentation
+
+- New `StartupTimings` type (`crates/ragent-types/src/startup.rs`) records the
+  wall-clock duration of every instrumented startup stage (CLI parse, config
+  load, storage open, provider/tool registries, TUI init, session create, code
+  index, MCP, etc.).
+- New `/startup` TUI slash command renders an aligned stage/time table so users
+  can identify which stages contribute most to perceived startup latency.
+- Stages recorded inside `App::new()` are merged into the main timings
+  collector via `StartupTimings::merge_stages`.
+
+### Changed — Compaction prompt cap and reuse
+
+- `MAX_COMPACTION_PROMPT_CHARS` reduced from 120 000 to 60 000 chars (~15 k
+  tokens) to keep the LLM summarisation call tractable while still giving the
+  model enough context for a useful summary. The verbatim recent tail
+  (`keep_tokens`) is preserved regardless of this cap.
+- `select()` now pre-serialises the head transcript and computes the original
+  token cost, so `compact()` reuses them instead of re-serialising every message
+  a second time.
+
+### Added — Post-compaction continuation nudge
+
+- When context compaction runs and the LLM responds without tool calls, a
+  one-time user nudge is injected so the agent resumes its in-progress task
+  rather than letting the loop stop prematurely.
+
+### Added — Copilot `gh` CLI token cache
+
+- `find_gh_cli_token` caches its result in a process-wide `OnceLock` so the
+  `gh auth token` subprocess is spawned at most once per session.
+
+### Changed — Code-index performance
+
+- SQLite store now sets `WAL` journal mode, `synchronous = NORMAL`, and
+  `temp_store = MEMORY` pragmas for dramatically faster writes.
+- `get_file_symbols` queries directly by `file_id` instead of loading all
+  symbols and filtering in Rust.
+- Reindex chunk yield reduced from 5 ms to 1 ms for tighter throughput.
+- Reindex now logs per-phase timing (scan, diff, apply, fts_sync, total).
+
 ## Version: 0.1.0-beta.17
 
 ### Added — `@<path>` directive for modular instruction files
