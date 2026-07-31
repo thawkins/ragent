@@ -357,7 +357,13 @@ pub async fn compact(
     //    `if (!selected || (selected.head.length === 0 && previousSummary?.
     //    type !== "compaction")) return false`).
     if split.head_messages.is_empty() && previous_summary.is_none() {
-        bail!("compaction has nothing to summarise: empty head and no previous summary");
+        let msg = "compaction has nothing to summarise: empty head and no previous summary";
+        warn!(session_id, reason, "compaction bail: {msg}");
+        event_bus.publish(Event::AgentNotice {
+            session_id: session_id.to_string(),
+            message: format!("Context compression skipped: {msg}"),
+        });
+        bail!("{msg}");
     }
 
     // 3. Build the summarisation prompt. The head transcript was already
@@ -377,15 +383,18 @@ pub async fn compact(
     let prompt_tokens = estimate_text_tokens(&prompt);
     let prompt_budget = context_window.saturating_sub(summary_output_cap);
     if context_window > 0 && prompt_tokens > prompt_budget {
-        warn!(
-            prompt_tokens,
-            context_window,
-            summary_output_cap,
-            "compaction summary prompt would overflow context window"
-        );
-        bail!(
+        let msg = format!(
             "compaction summary prompt ({prompt_tokens} tokens) exceeds context budget ({prompt_budget})"
         );
+        warn!(
+            prompt_tokens,
+            context_window, summary_output_cap, "compaction bail: {msg}"
+        );
+        event_bus.publish(Event::AgentNotice {
+            session_id: session_id.to_string(),
+            message: format!("Context compression skipped: {msg}"),
+        });
+        bail!("{msg}");
     }
 
     // 5. Emit compaction-started and call the LLM.
@@ -397,9 +406,22 @@ pub async fn compact(
         Some(stream_config.initial_response_timeout_secs),
     );
     let summary =
-        summarize_via_client(client, request, stream_config, event_bus, session_id).await?;
+        match summarize_via_client(client, request, stream_config, event_bus, session_id).await {
+            Ok(s) => s,
+            Err(e) => {
+                let msg = format!("LLM summarisation call failed: {e}");
+                warn!(session_id, reason, "compaction bail: {msg}");
+                event_bus.publish(Event::AgentNotice {
+                    session_id: session_id.to_string(),
+                    message: format!("Context compression failed: {msg}"),
+                });
+                return Err(e);
+            }
+        };
     let summary = summary.trim();
     if summary.is_empty() {
+        let msg = "compaction summarisation produced an empty summary";
+        warn!(session_id, reason, "compaction bail: {msg}");
         event_bus.publish(Event::CompressionFinished {
             session_id: session_id.to_string(),
             original_tokens: 0,
@@ -408,7 +430,11 @@ pub async fn compact(
             did_compress: false,
             reason: reason.to_string(),
         });
-        bail!("compaction summarisation produced an empty summary");
+        event_bus.publish(Event::AgentNotice {
+            session_id: session_id.to_string(),
+            message: format!("Context compression failed: {msg}"),
+        });
+        bail!("{msg}");
     }
 
     // 6. Build the replacement message list: [compaction_msg, ...recent].

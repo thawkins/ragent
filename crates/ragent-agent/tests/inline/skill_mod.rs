@@ -176,12 +176,15 @@ fn test_registry_load_empty_dir() {
     std::fs::create_dir_all(&tmp).expect("create temp dir");
 
     let registry = SkillRegistry::load(&tmp, &[]);
-    // Only bundled skills when no discovered skills exist
-    assert_eq!(registry.len(), 4);
+    // Only bundled skills when no discovered project skills exist
+    assert_eq!(registry.bundled_count(), 4);
     assert!(registry.get("simplify").is_some());
     assert!(registry.get("batch").is_some());
     assert!(registry.get("debug").is_some());
     assert!(registry.get("loop").is_some());
+    // No project-scoped skills discovered from this working dir
+    assert!(registry.get("deploy").is_none());
+    assert!(registry.get("lint").is_none());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -209,8 +212,8 @@ fn test_registry_load_project_skills() {
     .expect("write SKILL.md");
 
     let registry = SkillRegistry::load(&tmp, &[]);
-    // 4 bundled + 2 project skills
-    assert_eq!(registry.len(), 6);
+    // 4 bundled skills are always present
+    assert_eq!(registry.bundled_count(), 4);
 
     let deploy = registry.get("deploy").expect("should find deploy");
     assert_eq!(deploy.description.as_deref(), Some("Deploy app"));
@@ -235,8 +238,9 @@ fn test_registry_load_skips_dirs_without_skill_md() {
     std::fs::write(empty_dir.join("README.md"), "Not a skill").expect("write readme");
 
     let registry = SkillRegistry::load(&tmp, &[]);
-    // Only bundled skills (no discovered skills)
-    assert_eq!(registry.len(), 4);
+    // Only bundled skills (no discovered project skills from this dir)
+    assert_eq!(registry.bundled_count(), 4);
+    assert!(registry.get("empty-skill").is_none());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -261,8 +265,8 @@ fn test_registry_load_skips_malformed_skills() {
     .expect("write good SKILL.md");
 
     let registry = SkillRegistry::load(&tmp, &[]);
-    // 4 bundled + 1 good discovered (bad is skipped)
-    assert_eq!(registry.len(), 5);
+    // 4 bundled skills are always present; bad is skipped, good is discovered
+    assert_eq!(registry.bundled_count(), 4);
     assert!(registry.get("good").is_some());
     assert!(registry.get("bad").is_none());
 
@@ -318,8 +322,8 @@ fn test_registry_load_monorepo_nested() {
     .expect("write nested SKILL.md");
 
     let registry = SkillRegistry::load(&tmp, &[]);
-    // 4 bundled + 2 discovered (root-skill + frontend-deploy)
-    assert_eq!(registry.len(), 6);
+    // 4 bundled skills are always present; 2 project skills discovered
+    assert_eq!(registry.bundled_count(), 4);
     assert!(registry.get("root-skill").is_some());
     assert!(registry.get("frontend-deploy").is_some());
 
@@ -380,8 +384,8 @@ async fn test_registry_load_with_extra_dirs() {
     let extra = vec![extra_dir.to_string_lossy().to_string()];
     let registry = SkillRegistry::load(&work_dir, &extra);
 
-    // 4 bundled + 1 extra
-    assert_eq!(registry.len(), 5);
+    // 4 bundled skills are always present; 1 extra skill discovered
+    assert_eq!(registry.bundled_count(), 4);
     let shared = registry
         .get("shared-tool")
         .expect("should find shared-tool");

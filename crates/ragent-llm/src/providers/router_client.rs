@@ -382,10 +382,38 @@ impl RouterClient {
 
         // Route the request to the downstream model.
         request.model = entry.model.clone();
-        downstream.chat(request).await
+        let downstream_model = entry.model.clone();
+        let downstream_stream = downstream.chat(request).await?;
+
+        // Guarantee terminal-signal delivery: if the downstream provider's
+        // stream ends without yielding `StreamEvent::Finish` (provider bug,
+        // protocol drift, or malformed terminal frame), synthesise a
+        // `Finish { reason: Stop }` so the session loop always observes a
+        // terminal event per call.
+        let stream = futures::stream::unfold(
+            (downstream_stream, false),
+            |(mut stream, mut saw_finish)| async move {
+                match futures::StreamExt::next(&mut stream).await {
+                    Some(event) => {
+                        if matches!(event, StreamEvent::Finish { .. }) {
+                            saw_finish = true;
+                        }
+                        Some((event, (stream, saw_finish)))
+                    }
+                    None if !saw_finish => Some((
+                        StreamEvent::Finish {
+                            reason: crate::llm::LlmFinishReason::Stop,
+                        },
+                        (stream, true),
+                    )),
+                    None => None,
+                }
+            },
+        );
+        tracing::debug!(model = %downstream_model, "router delegated stream");
+        Ok(Box::pin(stream))
     }
 }
-
 /// Returns `true` when the last user-role message consists entirely of tool
 /// results (i.e. the agent loop appended tool output, not a fresh user prompt).
 ///

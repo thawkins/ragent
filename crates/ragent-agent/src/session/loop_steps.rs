@@ -1303,11 +1303,16 @@ impl SessionProcessor {
                 loop_state.task_completeness_nudged = true;
                 "task incomplete — file output requested but not created"
             };
-            tracing::info!(
+            tracing::warn!(
                 session_id = %session_id,
                 step,
-                "Model produced {reason} — injecting nudge to continue"
+                %reason,
+                "No-tool nudge injected — agent loop will re-prompt the model"
             );
+            self.event_bus.publish(Event::AgentNotice {
+                session_id: session_id.to_string(),
+                message: format!("Loop nudge (step {step}): {reason} — re-prompting"),
+            });
             // P-6: `Arc::make_mut` clones the history only when another `Arc`
             // reference is live (e.g. a still-owned `ChatRequest`). On the
             // no-tool path the retry request has already been dropped, so

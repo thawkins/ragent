@@ -212,11 +212,14 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
     assert!(reply.text_content().contains("proceed"));
 
     let captured = captured_requests.lock().expect("captured requests lock");
-    // Two requests: the summarisation call, then the real conversation call.
+    // Three requests, in order:
+    //   (1) the summarisation call (no tools),
+    //   (2) the real conversation call (has tools),
+    //   (3) the post-compaction continuation nudge (has tools).
     assert_eq!(
         captured.len(),
-        2,
-        "expected summarisation + real request, got {}",
+        3,
+        "expected summarisation + real request + post-compaction nudge, got {}",
         captured.len()
     );
 
@@ -568,14 +571,15 @@ async fn test_emergency_overflow_compaction_retries_once() {
     );
 
     let captured = captured_requests.lock().expect("captured requests lock");
-    // Three requests, in order:
+    // Four requests, in order:
     //   (1) the first real conversation attempt that overflowed (has tools),
     //   (2) the emergency summarisation call (no tools),
-    //   (3) the retry that succeeded (has tools).
+    //   (3) the retry that succeeded (has tools),
+    //   (4) the post-compaction continuation nudge (has tools).
     assert_eq!(
         captured.len(),
-        3,
-        "expected overflow + summarisation + retry, got {}",
+        4,
+        "expected overflow + summarisation + retry + post-compaction nudge, got {}",
         captured.len()
     );
 
@@ -603,11 +607,12 @@ async fn test_emergency_overflow_compaction_retries_once() {
         "summarisation request should carry the compaction prompt"
     );
 
-    // Exactly two real conversation calls: the overflow and the retry.
+    // Exactly three real conversation calls: the overflow, the retry, and the
+    // post-compaction continuation nudge.
     assert_eq!(
         real_call_count.load(Ordering::SeqCst),
-        2,
-        "emergency compaction must retry the turn exactly once"
+        3,
+        "emergency compaction must retry the turn, then nudge once after compaction"
     );
 }
 

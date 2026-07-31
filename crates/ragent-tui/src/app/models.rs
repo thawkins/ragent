@@ -1416,30 +1416,18 @@ impl App {
     /// shown in the status bar, or `None` when no provider/model is configured.
     ///
     /// When the active model belongs to the router virtual provider, the label
-    /// reads `"Model Router / router"` so the status bar matches the active
-    /// provider (FR-020). If the router is enabled but a concrete model is
-    /// still selected, the label falls back to that provider so the displayed
-    /// name matches the provider actually handling the request.
+    /// reads `"Model Router ({downstream}) / {tier}"` once a request has been
+    /// routed, showing the actual downstream model and the selected bucket.
+    /// Before the first routing decision (or when the router is not active)
+    /// it falls back to `"Model Router / router"`.
+    /// If the router is enabled but a concrete model is still selected, the
+    /// label falls back to that provider so the displayed name matches the
+    /// provider actually handling the request.
     pub fn provider_model_label(&self) -> Option<String> {
         let model_ref = self.active_model_ref_string()?;
         let (provider_id, model_id) = model_ref
             .split_once('/')
             .unwrap_or((&model_ref, &model_ref));
-
-        let provider_name = if provider_id == "router" {
-            "Model Router".to_string()
-        } else {
-            self.configured_provider
-                .as_ref()
-                .filter(|p| p.id == provider_id)
-                .map(|p| p.name.clone())
-                .or_else(|| {
-                    self.provider_registry
-                        .get(provider_id)
-                        .map(|p| p.name().to_string())
-                })
-                .unwrap_or_else(|| provider_id.to_string())
-        };
 
         let thinking = self
             .active_model_entry()
@@ -1447,6 +1435,28 @@ impl App {
             .and(self.effective_thinking_level_for_agent(&self.agent_info))
             .map(|level| format!(" [thinking: {}]", Self::thinking_level_display(level)))
             .unwrap_or_default();
+
+        if provider_id == "router" {
+            let label = match (&self.router_current_model, &self.router_current_tier) {
+                (Some(model), Some(tier)) => {
+                    format!("Model Router ({}) / {}", model, tier)
+                }
+                _ => "Model Router / router".to_string(),
+            };
+            return Some(format!("{}{}", label, thinking));
+        }
+
+        let provider_name = self
+            .configured_provider
+            .as_ref()
+            .filter(|p| p.id == provider_id)
+            .map(|p| p.name.clone())
+            .or_else(|| {
+                self.provider_registry
+                    .get(provider_id)
+                    .map(|p| p.name().to_string())
+            })
+            .unwrap_or_else(|| provider_id.to_string());
         Some(format!("{} / {}{}", provider_name, model_id, thinking))
     }
 

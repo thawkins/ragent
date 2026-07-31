@@ -603,6 +603,19 @@ fn build_line2_right(
         ));
     }
 
+    // Autopilot status
+    {
+        let (icon, color) = if app.autopilot_enabled {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        spans.push(Span::styled(
+            format!("AutoPilot:{icon} "),
+            Style::default().fg(color),
+        ));
+    }
+
     // Telemetry (OpenTelemetry metrics export) status
     {
         let (icon, color) = if app.session_processor.telemetry.is_enabled() {

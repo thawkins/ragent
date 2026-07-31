@@ -47,8 +47,9 @@ pub(crate) fn extract_resource_from_input(input: &Value, tool_name: &str) -> Str
 ///
 /// # Examples
 ///
-/// ```
-/// # use ragent_agent::session::permissions::strip_timeout_prefix;
+/// ```ignore
+/// // `strip_timeout_prefix` is `pub(crate)`: see the crate's integration tests
+/// // for direct invocation.
 /// assert_eq!(strip_timeout_prefix("timeout 600 cargo build"), "cargo build");
 /// assert_eq!(strip_timeout_prefix("timeout 10 ls -la"), "ls -la");
 /// assert_eq!(strip_timeout_prefix("ls -la"), "ls -la");

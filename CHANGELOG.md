@@ -1,5 +1,73 @@
 # Changelog
 
+## Version: 0.1.0-beta.21
+
+### Fixed — Compaction user feedback & resilience
+
+- Compaction bail paths (empty head, prompt-overflow, LLM summarisation failure,
+  empty summary) now publish an `Event::AgentNotice` so the TUI and HTTP clients
+  show "Context compression skipped/failed: …" instead of silently bailing.
+- Compaction warning logs now use `warn!` with the bail reason and carry the
+  session id, making skipped compressions visible in diagnostics.
+
+### Fixed — Post-compaction continuation nudge
+
+- After a successful compaction the session loop injects a continuation nudge
+  so the agent resumes its task instead of stopping. The `compaction_nudged`
+  flag is now threaded across loop iterations (no longer reset to `false`
+  each turn), preventing repeated nudges. Integration tests updated to expect
+  the extra post-compaction continuation request.
+
+### Fixed — Autopilot auto-continue after task completion
+
+- Added `App::last_task_completed_at` timestamp set when a `TaskCompleted`
+  event arrives. `poll_autopilot_continue` now suppresses the auto-continue
+  and disables autopilot when the agent already signalled completion, so
+  autopilot no longer keeps re-prompting after `task_complete`.
+- The `FinishReason` handler also guards against re-entering autopilot
+  continue when a `TaskCompleted` was already consumed this turn.
+
+### Added — Router downstream-model status bar
+
+- The TUI status bar now shows the actual downstream model and tier for the
+  router virtual provider: `Model Router ({provider}:{model}) / {tier}`
+  instead of the static `Model Router / router` label. New
+  `router_current_model` field captures the last routed downstream model,
+  surfaced via `Event::RouterTierSelected`. New test
+  `test_router_status_bar_label_shows_downstream_model_and_tier`.
+
+### Added — Autopilot status indicator in status bar
+
+- Status bar line 2 now shows `AutoPilot:✓` (green) when autopilot is active
+  and `AutoPilot:✗` (red) when disabled, giving immediate visual feedback.
+
+### Fixed — Router terminal-signal guarantee
+
+- `RouterClient::chat` now wraps the downstream stream so that if the
+  provider ends without emitting a `StreamEvent::Finish`, a synthetic
+  `Finish { reason: Stop }` is injected. This guarantees the session loop
+  always observes a terminal event per LLM call, preventing infinite loops
+  on provider protocol drift.
+
+### Fixed — Skill discovery test isolation
+
+- Skill discovery/registry tests now filter by `SkillScope` (Project vs
+  Personal) and assert against `bundled_count()` rather than the total
+  registry length, so the tests no longer break when bundled or personal
+  skills are present alongside project skills.
+
+### Fixed — Doctest build breakages
+
+- Updated doctests in `session::permissions` (marked `ignore` since the
+  helper is `pub(crate)`) and `tool::ToolRegistry` (switched example from
+  `ReadTool` to `PlanEnterTool` and added the missing fields to the
+  `ToolContext` doc example) so the crate's doctests compile again.
+
+### Fixed — Research progress config `from_file` field in tests
+
+- `test_research_progress_config` now sets the new `from_file: None` field
+  introduced by the `--from-file` research feature.
+
 ## Version: 0.1.0-beta.20
 
 ### Added — Research support for local file topics (`--from-file`)

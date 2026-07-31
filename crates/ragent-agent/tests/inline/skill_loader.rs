@@ -325,12 +325,16 @@ fn test_discover_skills_from_project_dir() {
     .expect("write deploy SKILL.md");
 
     let skills = discover_skills(&tmp, &[]);
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "deploy");
-    assert_eq!(skills[0].scope, SkillScope::Project);
-    assert_eq!(skills[0].description.as_deref(), Some("Deploy app"));
-    assert!(skills[0].is_forked());
-    assert_eq!(skills[0].agent.as_deref(), Some("general-purpose"));
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert_eq!(project_skills.len(), 1);
+    assert_eq!(project_skills[0].name, "deploy");
+    assert_eq!(project_skills[0].scope, SkillScope::Project);
+    assert_eq!(project_skills[0].description.as_deref(), Some("Deploy app"));
+    assert!(project_skills[0].is_forked());
+    assert_eq!(project_skills[0].agent.as_deref(), Some("general-purpose"));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -342,7 +346,11 @@ fn test_discover_skills_empty_working_dir() {
     std::fs::create_dir_all(&tmp).expect("create temp dir");
 
     let skills = discover_skills(&tmp, &[]);
-    assert!(skills.is_empty());
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert!(project_skills.is_empty());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -350,7 +358,11 @@ fn test_discover_skills_empty_working_dir() {
 #[test]
 fn test_discover_skills_nonexistent_dir() {
     let skills = discover_skills(Path::new("/nonexistent/path/that/should/not/exist"), &[]);
-    assert!(skills.is_empty());
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert!(project_skills.is_empty());
 }
 
 #[test]
@@ -372,9 +384,13 @@ fn test_discover_skills_monorepo_nested() {
     .expect("write nested SKILL.md");
 
     let skills = discover_skills(&tmp, &[]);
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "api-test");
-    assert_eq!(skills[0].scope, SkillScope::Project);
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert_eq!(project_skills.len(), 1);
+    assert_eq!(project_skills[0].name, "api-test");
+    assert_eq!(project_skills[0].scope, SkillScope::Project);
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -396,9 +412,13 @@ fn test_discover_skills_multiple() {
     }
 
     let skills = discover_skills(&tmp, &[]);
-    assert_eq!(skills.len(), 3);
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert_eq!(project_skills.len(), 3);
 
-    let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = project_skills.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"deploy"));
     assert!(names.contains(&"lint"));
     assert!(names.contains(&"test-all"));
@@ -423,8 +443,12 @@ fn test_discover_skills_skips_non_directories() {
     std::fs::write(valid_dir.join("SKILL.md"), "---\n---\nBody\n").expect("write SKILL.md");
 
     let skills = discover_skills(&tmp, &[]);
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "valid");
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert_eq!(project_skills.len(), 1);
+    assert_eq!(project_skills[0].name, "valid");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -451,10 +475,14 @@ fn test_discover_skills_with_extra_files() {
         .expect("write template");
 
     let skills = discover_skills(&tmp, &[]);
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "deploy");
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert_eq!(project_skills.len(), 1);
+    assert_eq!(project_skills[0].name, "deploy");
     // Verify the skill_dir points to the skill directory (containing scripts/, templates/)
-    assert!(skills[0].skill_dir.ends_with("deploy"));
+    assert!(project_skills[0].skill_dir.ends_with("deploy"));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -480,11 +508,18 @@ fn test_discover_skills_extra_dirs() {
 
     let extra = vec![extra_dir.to_string_lossy().to_string()];
     let skills = discover_skills(&work_dir, &extra);
+    let personal_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Personal)
+        .collect();
 
-    assert_eq!(skills.len(), 1);
-    assert_eq!(skills[0].name, "custom-lint");
-    assert_eq!(skills[0].description.as_deref(), Some("Custom linter"));
-    assert_eq!(skills[0].scope, SkillScope::Personal);
+    assert_eq!(personal_skills.len(), 1);
+    assert_eq!(personal_skills[0].name, "custom-lint");
+    assert_eq!(
+        personal_skills[0].description.as_deref(),
+        Some("Custom linter")
+    );
+    assert_eq!(personal_skills[0].scope, SkillScope::Personal);
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -535,7 +570,11 @@ fn test_discover_skills_extra_dirs_nonexistent() {
 
     let extra = vec!["/nonexistent/skill/dir/12345".to_string()];
     let skills = discover_skills(&tmp, &extra);
-    assert!(skills.is_empty());
+    let project_skills: Vec<_> = skills
+        .into_iter()
+        .filter(|s| s.scope == SkillScope::Project)
+        .collect();
+    assert!(project_skills.is_empty());
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -355,12 +355,20 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-beta.20** — The core architecture, tool system (~114 tools), TUI, HTTP
+**v0.1.0-beta.21** — The core architecture, tool system (~114 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- Compaction bail paths now publish user-visible `AgentNotice` events instead of silently failing
+- Post-compaction continuation nudge threaded across loop iterations (no repeated nudges)
+- Autopilot auto-continue suppressed after `task_complete` (new `last_task_completed_at` guard)
+- Router status bar shows the actual downstream model and tier: `Model Router ({model}) / {tier}`
+- Autopilot status indicator (`AutoPilot:✓/✗`) in the TUI status bar
+- Router terminal-signal guarantee: synthetic `Finish { Stop }` injected on stream end without `Finish`
+- Skill discovery tests isolated by `SkillScope` and `bundled_count()`
+- Doctest build breakages fixed in `session::permissions` and `tool::ToolRegistry`
 - Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
 - Startup timing instrumentation with `/startup` slash command
 - Post-compaction continuation nudge so the agent resumes its task after context compaction

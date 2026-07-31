@@ -1466,6 +1466,10 @@ pub struct App {
     /// Pending autopilot continuation: when Some, the next render tick will
     /// auto-send this text to the agent to continue processing.
     pub autopilot_pending_continue: Option<String>,
+    /// Timestamp of the last `TaskCompleted` event received for this session.
+    /// Used to suppress the autopilot auto-continue when the agent already
+    /// signalled completion during the current turn.
+    pub last_task_completed_at: Option<std::time::Instant>,
 
     // ── /spec impl sequential driver ────────────────────────────────────────
     /// Active `/spec impl` run, if any. Drives tasks one at a time: after each
@@ -1532,6 +1536,10 @@ pub struct App {
     /// The last tier selected by the router for the most recent request.
     /// `None` when no request has been routed yet or the router is not active.
     pub router_current_tier: Option<String>,
+    /// The last downstream model selected by the router (format "provider:model"),
+    /// for the most recent request.
+    /// `None` when no request has been routed yet or the router is not active.
+    pub router_current_model: Option<String>,
     /// Stashed router draft configuration used to preserve cluster edits while
     /// a sub-dialog (e.g. the model picker) is open.
     pub router_draft_config: Option<ragent_llm::providers::router_config::RouterConfig>,

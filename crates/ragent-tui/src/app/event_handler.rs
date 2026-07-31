@@ -384,6 +384,7 @@ impl App {
                 ref message_id,
             } if self.is_current_session(session_id) => {
                 self.is_processing = true;
+                self.last_task_completed_at = None;
                 self.agent_halted = false;
                 self.set_status_working("processing");
                 telemetry_counters::increment_messages_user(1);
@@ -462,7 +463,12 @@ impl App {
                 // Autopilot auto-continue: after agent completes a turn without calling
                 // task_complete, automatically send a continuation prompt so the agent
                 // keeps working towards its goal.
-                if self.autopilot_enabled && *reason != FinishReason::Cancelled {
+                // If TaskCompleted was consumed before us, autopilot_enabled will already
+                // be false and this block is unreachable — this is just a defensive fallback.
+                if self.autopilot_enabled
+                    && *reason != FinishReason::Cancelled
+                    && self.last_task_completed_at.is_none()
+                {
                     // Check time limit
                     let time_exceeded = self
                         .autopilot_time_limit_secs
@@ -668,6 +674,7 @@ impl App {
                 ref summary,
             } if self.is_current_session(session_id) => {
                 self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
+                self.last_task_completed_at = Some(std::time::Instant::now());
                 // Exit autopilot mode on task completion
                 if self.autopilot_enabled {
                     self.autopilot_enabled = false;
@@ -1475,6 +1482,8 @@ impl App {
                 ref prompt,
                 ref dimensions,
             } if self.is_current_session(session_id) => {
+                self.router_current_tier = Some(tier.clone());
+                self.router_current_model = Some(model.clone());
                 let dims = dimensions
                     .iter()
                     .map(|(name, score)| format!("{}={:.2}", name, score))
@@ -1495,12 +1504,12 @@ impl App {
                     .map(|rt| format!(" (requested {})", rt))
                     .unwrap_or_default();
                 self.push_log_no_agent(
-                                      LogLevel::Info,
-                                      format!(
-                                          "Router: bucket={} model={} composite={:.4} prompt=\"{}\" dimensions=[{}]{}",
-                                          tier, model, composite_score, prompt_display, dims, fallback_note
-                                      ),
-                                  );
+                    LogLevel::Info,
+                    format!(
+                        "Router: bucket={} model={} composite={:.4} prompt=\"{}\" dimensions=[{}]{}",
+                        tier, model, composite_score, prompt_display, dims, fallback_note
+                    ),
+                );
             } // ── Model download progress (progress bar popup) ───────────────
             Event::ModelDownloadStarted {
                 ref provider_id,
@@ -2151,8 +2160,20 @@ impl App {
 
     /// If autopilot is enabled and a continue message is pending, dispatch it
     /// as the next user turn. Clears the pending continue when the agent is
-    /// busy or autopilot is disabled.
+    /// busy, when autopilot is disabled, or when the task was already marked
+    /// as completed by the agent (TaskCompleted consumed before or after us).
     pub fn poll_autopilot_continue(&mut self) {
+        if self.last_task_completed_at.is_some() {
+            self.autopilot_pending_continue = None;
+            self.autopilot_enabled = false;
+            self.autopilot_started_at = None;
+            self.status = "task complete".to_string();
+            self.push_log_no_agent(
+                LogLevel::Info,
+                "autopilot stopped: task complete (suppressed continuation)".to_string(),
+            );
+            return;
+        }
         if !self.autopilot_enabled || self.is_processing {
             self.autopilot_pending_continue = None;
             return;

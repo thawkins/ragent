@@ -649,6 +649,7 @@ impl SessionProcessor {
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compressed_this_turn = compressed_this_turn;
         let mut last_reported_input_tokens = last_reported_input_tokens;
+        let mut compaction_nudged = false;
         // P-17: reuse the per-step ContentPart buffers across loop iterations
         // to avoid reallocating two `Vec<ContentPart>`s on every step. They
         // are emptied via `std::mem::take` when pushed into `chat_messages`,
@@ -846,7 +847,7 @@ impl SessionProcessor {
                 last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
-                compaction_nudged: false,
+                compaction_nudged,
                 last_reported_input_tokens,
             };
             let llm_result = self
@@ -920,7 +921,7 @@ impl SessionProcessor {
                     last_interim_hash,
                     cumulative_model_wait_ms,
                     compressed_this_turn,
-                    compaction_nudged: false,
+                    compaction_nudged,
                     last_reported_input_tokens,
                 };
                 let should_continue = self.handle_no_tool_decision(
@@ -936,6 +937,7 @@ impl SessionProcessor {
                 chat_messages = std::mem::take(&mut loop_state.chat_messages);
                 task_completeness_nudged = loop_state.task_completeness_nudged;
                 compressed_this_turn = loop_state.compressed_this_turn;
+                compaction_nudged = loop_state.compaction_nudged;
                 if should_continue {
                     continue;
                 }

@@ -830,6 +830,20 @@ fn test_router_status_bar_label_when_enabled() {
 }
 
 #[test]
+fn test_router_status_bar_label_shows_downstream_model_and_tier() {
+    let mut app = make_app();
+    app.router_enabled = true;
+    app.selected_model = Some("router/router".to_string());
+    app.router_current_model = Some("anthropic:claude-sonnet-4-20250514".to_string());
+    app.router_current_tier = Some("COMPLEX".to_string());
+    let label = app.provider_model_label().expect("label should exist");
+    assert!(
+        label.starts_with("Model Router (anthropic:claude-sonnet-4-20250514) / COMPLEX"),
+        "label should show downstream model and tier: {label}"
+    );
+}
+
+#[test]
 fn test_router_setup_provider_list_excludes_router() {
     let storage = mem_storage();
     storage

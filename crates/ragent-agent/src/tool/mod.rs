@@ -243,6 +243,11 @@ impl Default for ToolOutput {
 ///     team_manager: None,
 ///     code_index: None,
 ///     bg_service: None,
+///     spec_manager: None,
+///     active_spec_id: None,
+///     config: None,
+///     read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+///     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -1194,11 +1199,11 @@ impl ToolRegistry {
     /// # Examples
     ///
     /// ```
-    /// use ragent_agent::tool::{ToolRegistry, read::ReadTool};
+    /// use ragent_agent::tool::{ToolRegistry, plan::PlanEnterTool};
     /// use std::sync::Arc;
     ///
     /// let registry = ToolRegistry::new();
-    /// registry.register(Arc::new(ReadTool));
+    /// registry.register(Arc::new(PlanEnterTool));
     /// assert_eq!(registry.list().len(), 1);
     /// ```
     pub fn register(&self, tool: Arc<dyn Tool>) {
