@@ -134,6 +134,7 @@ impl Tool for MemoryStoreTool {
                 },
             ),
             metadata: Some(json!({
+                "stored": true,
                 "id": id,
                 "category": category,
                 "confidence": confidence,

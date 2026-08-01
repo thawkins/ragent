@@ -530,6 +530,41 @@ fn test_result_summary_task_complete_empty_summary() {
 }
 
 #[test]
+fn test_result_summary_memory_store_stored() {
+    let output = Some(json!({
+        "stored": true,
+        "id": 42,
+        "category": "pattern",
+        "tags": ["rust"]
+    }));
+    let input = json!({"content": "use Result", "category": "pattern"});
+    let result = tool_result_summary("memory_store", &output, &input, "/project");
+    assert_eq!(result, Some("memory stored".to_string()));
+}
+
+#[test]
+fn test_result_summary_memory_store_id_fallback() {
+    // Older or alternate metadata may only contain `id`; summary should still
+    // report "memory stored".
+    let output = Some(json!({
+        "id": 7,
+        "category": "fact",
+        "tags": []
+    }));
+    let input = json!({"content": "x", "category": "fact"});
+    let result = tool_result_summary("memory_store", &output, &input, "/project");
+    assert_eq!(result, Some("memory stored".to_string()));
+}
+
+#[test]
+fn test_result_summary_memory_store_not_stored() {
+    let output = Some(json!({"stored": false}));
+    let input = json!({"content": "x", "category": "fact"});
+    let result = tool_result_summary("memory_store", &output, &input, "/project");
+    assert_eq!(result, Some("memory not stored".to_string()));
+}
+
+#[test]
 fn test_input_summary_mf_search_tool() {
     let input = json!({"query": "rust documentation"});
     let summary = tool_input_summary("mf_search", &input, "/home/user/project");

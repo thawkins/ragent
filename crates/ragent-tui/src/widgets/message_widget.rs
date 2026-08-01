@@ -2347,7 +2347,11 @@ pub fn tool_result_summary(
         "memory_write" => Some("memory written".to_string()),
         "memory_replace" => Some("memory replaced".to_string()),
         "memory_store" => {
-            let stored = out.get("stored").and_then(|v| v.as_bool()).unwrap_or(false);
+            let stored = out
+                .get("stored")
+                .and_then(|v| v.as_bool())
+                .or_else(|| out.get("id").map(|_| true))
+                .unwrap_or(false);
             if stored {
                 Some("memory stored".to_string())
             } else {
