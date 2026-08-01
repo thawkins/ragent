@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.24
+
+### Changed — CI package builds
+
+- Disabled `.deb` package builds in the release workflow; the `.rpm` package and
+  plain binary remain published. Debian packaging is temporarily disabled while
+  the `cargo-deb` build path is reviewed.
+
 ## Version: 0.1.0-beta.23
 
 ### Added — CI package builds
