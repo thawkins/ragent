@@ -2,6 +2,11 @@
 
 A hands-on guide to using **ragent** through its full-screen terminal UI.
 
+This guide reflects **v0.1.0-beta.28** behaviour. Recent highlights include the
+Model Router status bar, editable provider keys, configuration snapshots,
+`/autopilot`, `/startup` timings, browser tool visibility, structured-memory
+fixes, and research seeded from URLs or local files.
+
 ---
 
 ## 1. Starting the TUI in your project workspace
@@ -105,12 +110,18 @@ files can consume context window.
 ### Provider setup dialog
 
 1. Start ragent.
-2. Type
-   `/provider` in the input box.
+2. Type `/provider` in the input box.
 3. Select a provider from the list.
-4. Enter the API key when asked (or skip if not required, e.g. local Ollama).
+4. The API-key field is pre-filled with any existing stored key, shown unmasked
+   in a wide dialog so you can edit or replace it. Press `Enter` to keep the
+   current key, or type a new one. (Skip this step for providers that do not
+   require a key, such as local Ollama.)
 5. Choose a model from the provider's discovered model list.
 6. Press `Enter` to confirm.
+
+If a provider is already configured, `/model` jumps straight to that provider's
+model list instead of asking you to pick a provider again. Use `/model show` to
+print metadata for the active model.
 
 The status bar at the top shows the selected provider, model, and a health
 indicator:
@@ -118,6 +129,9 @@ indicator:
 - **● green** — provider reachable
 - **● yellow** — health check in progress
 - **✗ red** — provider unreachable or key missing
+
+When the Model Router is active the status bar shows the actual downstream
+model and tier, e.g. `Model Router (claude-sonnet-4-20250514) / complex`.
 
 ### Example: Ollama Cloud with `kimi-k2.7-code`
 
@@ -155,6 +169,75 @@ ragent supports these providers out of the box:
 | Generic OpenAI          | `GENERIC_OPENAI_API_KEY`   | Any OpenAI-compatible endpoint       |
 | Microsoft Foundry Local | local endpoint               | Local Windows AI backend             |
 | XAI                     | `XAI_API_KEY`              | xAI / Grok models                    |
+| Model Router            | cluster of providers         | Virtual provider that routes prompts |
+
+Use `/provider show` to inspect currently configured providers and their
+settings, and `/provider router` (or `/router help`) to set up the Model Router.
+
+---
+
+## 3.1 Configuration snapshots
+
+The `/config` slash command family lets you inspect and back up your global
+`ragent.json` without leaving the TUI.
+
+```text
+/config show          # show working dir, data/config dirs, storage, code index, memory, agents
+/config save          # snapshot the current global ragent.json under ~/.config/ragent/saves/
+/config list          # browse saved snapshots and restore one with Enter
+```
+
+`/config show` is useful when checking which config file is active or whether
+the code index and memory directories exist.
+
+---
+
+## 3.2 Tool visibility toggles
+
+Some large tool families are hidden from the model by default to keep prompts
+small. Use `/tools` to list switches and `/tools <switch> on|off` to enable or
+disable them persistently.
+
+```text
+/tools show
+/tools browser on
+/tools office on
+/tools github off
+```
+
+Valid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`,
+`codeindex`, `masterfetch`, `browser`. Changes are saved to `ragent.json`.
+
+---
+
+## 3.3 Autopilot
+
+Autopilot lets the agent continue iterating autonomously after each turn until
+it calls `task_complete`, hits a user-defined limit, or you run `/autopilot off`.
+
+```text
+/autopilot on
+/autopilot on --max-tokens 16000 --max-time 300
+/autopilot status
+/autopilot off
+```
+
+The status bar shows `AutoPilot:✓` when enabled and `AutoPilot:✗` when
+disabled.
+
+---
+
+## 3.4 Startup timings and run-cost banner
+
+After launch, ragent records how long each startup stage took. Run `/startup`
+at any time to see a breakdown such as config load, provider health check,
+code-index startup, and session creation.
+
+When an agent run completes, a transient banner appears at the top showing
+`run complete · input+output tokens · $cost · duration`. The full details are
+always written to the log panel. The banner is dismissed by any keypress; if
+you start typing the next prompt, the first character is preserved rather than
+being swallowed.
 
 ---
 
@@ -225,13 +308,33 @@ ragent will:
 /research <topic>                # general research
 /research compare tokio vs async-std
 /research best practices for headless browser testing
+/research create rust-patterns "Rust design patterns" --use-local
+/research create rust-patterns --from-url https://example.com/article
+/research create rust-patterns --from-file ./path/to/document.pdf
+/research list
+/research open rust-patterns
+/research search "async runtime"
 ```
 
-The report is saved in your working directory and can be read back with
-`memory_read` or by opening the resulting file directly.
+The `create` form supports a number of optional flags:
 
-> Note: web research requires a `TAVILY_API_KEY` environment variable or the
-> corresponding key in `ragent.json`.
+- `--from-url <URL>` — fetch the URL and use its content as the research subject.
+- `--from-file <PATH>` — extract text from a local document (PDF, DOCX, XLSX,
+  PPTX, ODT, ODS, ODP, TXT, MD) and use it as the subject.
+- `--use-local` — include local files and prior specs in the analysis.
+- `--use-specs` — cross-reference existing `specs/`.
+- `--use-low-relevance` — keep low-relevance web sources instead of filtering
+  them out.
+- `--depth shallow|standard|deep` — control how broadly ragent searches.
+- `--format report|executive-summary|comparison-table|source-bibliography|imrad`
+  — choose the output artifact.
+
+Reports are saved under `research/<name>/RESEARCH.md`. Open the report in the
+TUI with `/research open <name>`.
+
+> Note: web research uses keyless search by default; a `TAVILY_API_KEY` or
+> `LANGSEARCH_API_KEY` can be configured in `ragent.json` for higher-quality
+> results.
 
 ---
 
@@ -447,6 +550,10 @@ Structured memories: 42
 Memory files are plain Markdown. ragent reads them automatically on startup
 and can update them with `memory_write` / `memory_replace` during a session.
 
+In addition, the `memory_store` tool writes **structured memories** to the
+SQLite store with a category, tags, and confidence score. Successful writes now
+report `stored: true`, and the TUI summary and Memory panel reflect the update.
+
 ### Typical uses
 
 - Store project conventions that should persist across sessions.
@@ -477,12 +584,16 @@ The scrollbar gutter runs along the right edge of the panel.
 
 ## Side panel quick reference
 
-| Key       | Panel   | Purpose                                           |
-| --------- | ------- | ------------------------------------------------- |
-| `Alt+L` | Log     | Runtime events, tool calls, warnings, errors      |
-| `Alt+P` | Profile | Live agent-loop profiler output                   |
-| `Alt+T` | TODO    | Session TODO items and status                     |
-| `Alt+M` | Memory  | Project/user memory and structured-memory summary |
+| Key       | Panel     | Purpose                                           |
+| --------- | --------- | ------------------------------------------------- |
+| `Alt+L` | Log       | Runtime events, tool calls, warnings, errors      |
+| `Alt+P` | Profile   | Live agent-loop profiler output                   |
+| `Alt+T` | TODO      | Session TODO items and status                     |
+| `Alt+M` | Memory    | Project/user memory and structured-memory summary |
+| `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
+
+Log and Profile can be shown together (Log above, Profile below). The other
+panels are mutually exclusive: opening one closes the others.
 
 All side panels support mouse scrolling and scrollbar dragging. Press the same
 shortcut again to close the panel.
@@ -502,6 +613,7 @@ shortcut again to close the panel.
 | `Alt+P`                       | Toggle Profile panel                        |
 | `Alt+T`                       | Toggle TODO panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
+| `Alt+O`                       | Toggle Telemetry panel                      |
 | `Alt+V`                       | Paste image from clipboard                  |
 | `Alt+Y`                       | Toggle YOLO mode on/off                     |
 | `@`                           | Open file mention picker                    |
