@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-beta.28
+
+### Changed
+
+- Fixed Build and Release workflow by granting `contents: write` permission so
+  `softprops/action-gh-release@v2` can create GitHub releases.
+
 ## Version: 0.1.0-beta.27
 
 ### Changed
