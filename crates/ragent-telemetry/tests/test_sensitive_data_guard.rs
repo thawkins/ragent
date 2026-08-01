@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
-use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+
+use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::InstrumentRegistry;
 use ragent_telemetry::recorder::{
     CompressionRecorder, CoordinatorRecorder, LlmRecorder, PermissionRecorder, SessionRecorder,
@@ -48,7 +48,7 @@ fn build_in_memory_provider() -> (
     let exporter_clone = exporter.clone();
 
     let provider = rt.block_on(async {
-        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone)
             .with_interval(Duration::from_hours(1))
             .build();
         SdkMeterProvider::builder().with_reader(reader).build()

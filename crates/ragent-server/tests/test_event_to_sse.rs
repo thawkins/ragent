@@ -335,6 +335,28 @@ fn test_copilot_device_flow_complete_empty_token() {
     assert_eq!(v["token_present"], false);
 }
 
+#[test]
+fn test_github_device_flow_complete_success() {
+    let (name, v) = parse_data(&Event::GithubDeviceFlowComplete {
+        success: true,
+        error: None,
+    });
+    assert_eq!(name, "github_device_flow_complete");
+    assert_eq!(v["success"], true);
+    assert!(v["error"].is_null());
+}
+
+#[test]
+fn test_github_device_flow_complete_failure() {
+    let (name, v) = parse_data(&Event::GithubDeviceFlowComplete {
+        success: false,
+        error: Some("Device code expired.".into()),
+    });
+    assert_eq!(name, "github_device_flow_complete");
+    assert_eq!(v["success"], false);
+    assert_eq!(v["error"], "Device code expired.");
+}
+
 // ── Quota / usage events ─────────────────────────────────────────────────
 
 #[test]

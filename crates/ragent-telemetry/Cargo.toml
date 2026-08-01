@@ -33,12 +33,12 @@ parking_lot = { workspace = true }
 # Optional OTEL dependencies — only pulled in when the `telemetry` feature is
 # enabled, satisfying NFR-006 (users who do not need OTEL can build without
 # these crates).
-opentelemetry = { version = "0.27", optional = true }
-opentelemetry_sdk = { version = "0.27", optional = true, features = [
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", optional = true, features = [
     "metrics",
     "rt-tokio",
 ] }
-opentelemetry-otlp = { version = "0.27", optional = true, features = [
+opentelemetry-otlp = { version = "0.28", optional = true, default-features = false, features = [
     "metrics",
     "http-proto",
     "reqwest-client",
@@ -47,7 +47,7 @@ opentelemetry-otlp = { version = "0.27", optional = true, features = [
 
 [dev-dependencies]
 tokio = { workspace = true }
-opentelemetry_sdk = { version = "0.27", features = ["metrics", "rt-tokio", "testing"] }
+opentelemetry_sdk = { version = "0.28", features = ["metrics", "rt-tokio", "testing"] }
 
 [lints]
 workspace = true

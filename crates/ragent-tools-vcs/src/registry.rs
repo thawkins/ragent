@@ -10,8 +10,8 @@ use crate::git::{
 };
 use crate::github::{
     GithubCloseIssueTool, GithubCommentIssueTool, GithubCreateIssueTool, GithubCreatePrTool,
-    GithubGetIssueTool, GithubGetPrTool, GithubListIssuesTool, GithubListPrsTool,
-    GithubMergePrTool, GithubReviewPrTool,
+    GithubGetActionsTool, GithubGetIssueTool, GithubGetPrTool, GithubListIssuesTool,
+    GithubListPrsTool, GithubMergePrTool, GithubReviewPrTool,
 };
 use crate::gitlab::{
     GitlabApproveMrTool, GitlabCancelJobTool, GitlabCancelPipelineTool, GitlabCloseIssueTool,
@@ -36,6 +36,7 @@ pub fn create_vcs_registry() -> ToolRegistry {
     registry.register(Arc::new(GithubCreatePrTool));
     registry.register(Arc::new(GithubMergePrTool));
     registry.register(Arc::new(GithubReviewPrTool));
+    registry.register(Arc::new(GithubGetActionsTool));
 
     // --- Git local workspace tools (Milestone 1) ---
     registry.register(Arc::new(GitStatusTool));

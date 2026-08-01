@@ -43,6 +43,7 @@
 use std::sync::Arc;
 
 use opentelemetry::Value;
+use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::Pipeline;
 use opentelemetry_sdk::metrics::data::{
     Gauge, Histogram, HistogramDataPoint, ResourceMetrics, Sum,
@@ -100,11 +101,11 @@ impl MetricReader for SharedManualReader {
         self.0.collect(rm)
     }
 
-    fn force_flush(&self) -> MetricResult<()> {
+    fn force_flush(&self) -> OTelSdkResult {
         self.0.force_flush()
     }
 
-    fn shutdown(&self) -> MetricResult<()> {
+    fn shutdown(&self) -> OTelSdkResult {
         self.0.shutdown()
     }
 
@@ -132,7 +133,7 @@ impl MetricReader for SharedManualReader {
 #[must_use]
 pub fn render_prometheus_text(reader: &ManualReader) -> String {
     let mut rm = ResourceMetrics {
-        resource: opentelemetry_sdk::Resource::default(),
+        resource: opentelemetry_sdk::Resource::builder_empty().build(),
         scope_metrics: Vec::new(),
     };
     if reader.collect(&mut rm).is_err() {
@@ -443,10 +444,9 @@ mod tests {
     #[test]
     fn test_format_resource_metrics_with_resource() {
         let rm = ResourceMetrics {
-            resource: Resource::new(vec![opentelemetry::KeyValue::new(
-                "service.name",
-                "test-ragent",
-            )]),
+            resource: Resource::builder_empty()
+                .with_attribute(opentelemetry::KeyValue::new("service.name", "test-ragent"))
+                .build(),
             scope_metrics: vec![],
         };
         let text = format_resource_metrics(&rm);
@@ -465,7 +465,7 @@ mod tests {
         // Use an explicitly-empty Resource (not Resource::default(), which
         // includes SDK defaults like telemetry.sdk.* and unknown_service).
         let rm = ResourceMetrics {
-            resource: Resource::empty(),
+            resource: Resource::builder_empty().build(),
             scope_metrics: vec![],
         };
         let text = format_resource_metrics(&rm);
@@ -486,10 +486,11 @@ mod tests {
         let handle = shared.handle();
 
         let provider = SdkMeterProvider::builder()
-            .with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-                "service.name",
-                "ragent",
-            )]))
+            .with_resource(
+                Resource::builder_empty()
+                    .with_attribute(opentelemetry::KeyValue::new("service.name", "ragent"))
+                    .build(),
+            )
             .with_reader(shared) // ownership moves to the provider
             .build();
 
@@ -500,7 +501,7 @@ mod tests {
 
         // Collect via the handle (the Arc<ManualReader> we kept).
         let mut rm = ResourceMetrics {
-            resource: Resource::empty(),
+            resource: Resource::builder_empty().build(),
             scope_metrics: vec![],
         };
         assert!(
@@ -509,7 +510,9 @@ mod tests {
         );
         // The resource must be present (proving the reader is wired).
         assert!(
-            rm.resource.get("service.name".into()).is_some(),
+            rm.resource
+                .get(&opentelemetry::Key::from("service.name"))
+                .is_some(),
             "resource attributes must be collected via the handle"
         );
         // The counter must appear in the scope_metrics.

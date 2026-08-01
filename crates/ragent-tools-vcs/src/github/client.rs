@@ -147,6 +147,39 @@ impl GitHubClient {
         Ok(json)
     }
 
+    /// GET request returning raw bytes (follows redirects). Used for
+    /// endpoints that serve binary blobs such as the Actions logs zip.
+    pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>> {
+        let url = if path.starts_with("https://") {
+            path.to_string()
+        } else {
+            format!("https://api.github.com{path}")
+        };
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github.v3+json")
+            .header("User-Agent", "ragent/0.1")
+            .send()
+            .await
+            .with_context(|| format!("GitHub GET (bytes) {path} failed"))?;
+
+        let status = resp.status();
+        if status.as_u16() == 401 {
+            bail!("GitHub authentication failed. Run /github login to re-authenticate.");
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            bail!("GitHub API error {status} for {path}: {body}");
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .with_context(|| format!("Failed to read GitHub bytes for {path}"))?;
+        Ok(bytes.to_vec())
+    }
+
     /// Get the authenticated user's profile.
     pub async fn current_user(&self) -> Result<Value> {
         self.get("/user").await

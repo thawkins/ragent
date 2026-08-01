@@ -33,8 +33,8 @@
 use std::time::Duration;
 
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+
+use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::{InstrumentRegistry, OtelConfig, TelemetryState, TelemetrySubsystem};
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -54,7 +54,7 @@ fn build_in_memory_provider() -> (
 
     let provider = rt.block_on(async {
         // Use a 1-hour interval so no background export fires during tests.
-        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone)
             .with_interval(Duration::from_hours(1))
             .build();
         SdkMeterProvider::builder().with_reader(reader).build()

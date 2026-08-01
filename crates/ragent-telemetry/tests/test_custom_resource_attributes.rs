@@ -32,8 +32,8 @@ use std::collections::HashMap;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
-use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+
+use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetryState, TelemetrySubsystem};
 
 // ── Helpers ──────────────────���────────────────────────────────────────────
@@ -97,11 +97,10 @@ fn export_with_resource_from_config(config: &OtelConfig) -> Vec<ResourceMetrics>
             ragent_telemetry::sensitive::sanitize_attr_value(value),
         ));
     }
-    let resource = Resource::new(kvs);
+    let resource = Resource::builder_empty().with_attributes(kvs).build();
 
     let provider = rt.block_on(async {
-        let reader =
-            opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio).build();
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone).build();
         SdkMeterProvider::builder()
             .with_resource(resource)
             .with_reader(reader)
@@ -131,7 +130,7 @@ fn resource_attr(metrics: &[ResourceMetrics], key: &str) -> Option<String> {
     let owned_key: opentelemetry::Key = key.to_string().into();
     metrics
         .first()
-        .and_then(|rm| rm.resource.get(owned_key))
+        .and_then(|rm| rm.resource.get(&owned_key))
         .map(|v| v.as_str().to_string())
 }
 

@@ -520,12 +520,20 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::DeviceFlowPending {
+            flow,
             user_code,
             verification_uri,
         } => {
+            let (title, header) = match flow {
+                crate::app::DeviceFlowKind::Copilot => {
+                    (" Copilot Sign In ", "GitHub Copilot Authorisation")
+                }
+                crate::app::DeviceFlowKind::GitHub => (" GitHub Sign In ", "GitHub Authorisation"),
+            };
+
             let lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
-                    "GitHub Copilot Authorisation",
+                    header,
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -563,7 +571,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(" Copilot Sign In ")
+                .title(title)
                 .border_style(Style::default().fg(Color::Cyan));
 
             let paragraph = Paragraph::new(lines)

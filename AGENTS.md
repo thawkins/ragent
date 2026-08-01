@@ -212,7 +212,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 ## GitHub Access
 
 - Use "gh" to access all GitHub repositories.
-- When asked to "push to remote", update the SPEC.md, README.md, STATS.md, RELEASE.md, QUICKSTART.md and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
+- When asked to "push to remote", update the SPEC.md, README.md, STATS.md, QUICKSTART.md and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
 - When asked to "push release to remote", update the release number, and then follow the "push to remote" process. **Commit Message Rule**: Do not use "chore: bump version to ...", instead use "Version: <version_number>".
 - When initializing a new repo, add BUG, FEATURE, TASK and CHANGE issue templates only do this once.
 - **CRITICAL — NEVER push without explicit instruction**: Do not push changes to remote unless the user explicitly says words like "push to remote", "push to github", "push these changes", or "commit and push". This is a strict, non-negotiable rule. Even if you have modified files and the user says "looks good" or "that works", you still MUST NOT push until the user gives an explicit push command.
@@ -225,14 +225,13 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - **Format**: Follow Keep a Changelog format (https://keepachangelog.com/)
 - **Update Timing**: Update CHANGELOG.md before each push to remote with the latest changes, features, fixes, and improvements.
 - **Version**: Use semantic versioning (major.minor.patch-prerelease)
-- **RELEASE.md**: Write the version number and the most recent CHANGELOG.md entry to the RELEASE.md file for use as a Description in the Github Releases page.
 - Whenever a new feature or function is added ensure that SPEC.md and QUICKSTART.md is updated if relevant.
 
 ## Documentation Standards
 
 - For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
+- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`,`STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
 - Do not create explainer documents or other `.md` files unless specifically asked to.
 
 ## Code Style Guidelines

@@ -2,11 +2,13 @@
 
 pub mod auth;
 pub mod client;
+pub mod github_actions;
 pub mod github_issues;
 pub mod github_prs;
 
 pub use auth::{delete_token, device_flow_login, load_token, save_token};
 pub use client::GitHubClient;
+pub use github_actions::GithubGetActionsTool;
 pub use github_issues::{
     GithubCloseIssueTool, GithubCommentIssueTool, GithubCreateIssueTool, GithubGetIssueTool,
     GithubListIssuesTool,

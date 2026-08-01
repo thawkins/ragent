@@ -458,6 +458,17 @@ pub enum Event {
         /// The plan-specific API base URL discovered during setup.
         api_base: String,
     },
+    /// The GitHub VCS device flow completed (success or failure).
+    ///
+    /// Published when `/github login` finishes. The actual token is saved by
+    /// the background task; this event only carries the outcome so the UI can
+    /// dismiss the pending dialog and display a confirmation or error.
+    GithubDeviceFlowComplete {
+        /// `true` when a token was obtained and persisted.
+        success: bool,
+        /// Human-readable error message on failure.
+        error: Option<String>,
+    },
     /// Result of an async GitLab token validation started by `/gitlab setup`.
     GitLabSetupComplete {
         /// Whether validation and credential save succeeded.
@@ -881,6 +892,7 @@ impl Event {
             Self::ToolResult { .. } => "ToolResult",
             Self::ToolCallBatch { .. } => "ToolCallBatch",
             Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
+            Self::GithubDeviceFlowComplete { .. } => "GithubDeviceFlowComplete",
             Self::GitLabSetupComplete { .. } => "GitLabSetupComplete",
             Self::SessionAborted { .. } => "SessionAborted",
             Self::QuotaUpdate { .. } => "QuotaUpdate",
@@ -929,7 +941,7 @@ impl Event {
     /// Returns the session ID carried by this event, if any.
     ///
     /// Infrastructure events (`McpStatusChanged`, `CopilotDeviceFlowComplete`,
-    /// `GitLabSetupComplete`) are not scoped to a session and return `None`.
+    /// `GithubDeviceFlowComplete`, `GitLabSetupComplete`) are not scoped to a session and return `None`.
     #[must_use]
     pub const fn session_id(&self) -> Option<&str> {
         match self {
@@ -983,6 +995,7 @@ impl Event {
             | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
+            | Self::GithubDeviceFlowComplete { .. }
             | Self::GitLabSetupComplete { .. } => None,
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())

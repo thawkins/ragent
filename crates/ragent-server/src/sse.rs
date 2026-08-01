@@ -309,6 +309,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::ToolResult { .. } => "tool_result",
         Event::ToolCallBatch { .. } => "tool_call_batch",
         Event::CopilotDeviceFlowComplete { .. } => "copilot_device_flow_complete",
+        Event::GithubDeviceFlowComplete { .. } => "github_device_flow_complete",
         Event::SessionAborted { .. } => "session_aborted",
         Event::QuotaUpdate { .. } => "quota_update",
         Event::SubagentStart { .. } => "subagent_start",
@@ -612,6 +613,11 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             token_present: !token.is_empty(),
             api_base,
         }),
+
+        Event::GithubDeviceFlowComplete { success, error } => to_data(&serde_json::json!({
+            "success": success,
+            "error": error,
+        })),
 
         Event::SessionAborted { session_id, reason } => {
             to_data(&SessionReasonP { session_id, reason })

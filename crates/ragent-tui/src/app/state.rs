@@ -340,6 +340,15 @@ pub struct ModelDownloadState {
     pub started_at: std::time::Instant,
 }
 
+/// Which product is running a GitHub OAuth device flow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceFlowKind {
+    /// GitHub Copilot provider setup.
+    Copilot,
+    /// GitHub VCS tools setup (`/github login`).
+    GitHub,
+}
+
 /// State of the interactive provider-setup dialog.
 #[derive(Debug, Clone)]
 pub enum ProviderSetupStep {
@@ -369,8 +378,10 @@ pub enum ProviderSetupStep {
         /// Optional error message from a previous attempt.
         error: Option<String>,
     },
-    /// Waiting for the user to complete Copilot device flow authorisation.
+    /// Waiting for the user to complete GitHub OAuth device flow authorisation.
     DeviceFlowPending {
+        /// Which product flow this dialog represents.
+        flow: DeviceFlowKind,
         /// Short code the user enters at the verification URL.
         user_code: String,
         /// URL the user must visit (e.g. `https://github.com/login/device`).

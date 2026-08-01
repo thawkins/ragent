@@ -509,8 +509,6 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 #[cfg(feature = "telemetry")]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-#[cfg(feature = "telemetry")]
-use opentelemetry_sdk::runtime::Tokio;
 
 /// Build the live `SdkMeterProvider` from the config (FR-021).
 ///
@@ -538,7 +536,7 @@ fn build_provider(config: &OtelConfig) -> Result<SdkMeterProvider> {
 
     // Build a periodic reader with the configured export interval (FR-006).
     let interval = Duration::from_secs(config.export_interval_seconds.max(1));
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter, Tokio)
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(interval)
         .build();
 
@@ -582,7 +580,7 @@ fn build_provider_with_prometheus(
 
     let exporter = build_metric_exporter(config)?;
     let interval = Duration::from_secs(config.export_interval_seconds.max(1));
-    let periodic = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter, Tokio)
+    let periodic = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(interval)
         .build();
 
@@ -737,7 +735,7 @@ fn build_resource(config: &OtelConfig) -> Resource {
         kvs.push(KeyValue::new(key.clone(), sanitize_attr_value(value)));
     }
 
-    Resource::new(kvs)
+    Resource::builder_empty().with_attributes(kvs).build()
 }
 
 /// Best-effort system hostname lookup.

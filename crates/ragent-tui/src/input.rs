@@ -6,6 +6,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ragent_types::ThinkingLevel;
 
+use crate::app::DeviceFlowKind;
 use crate::app::{
     App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
 };
@@ -1195,6 +1196,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
         },
         ProviderSetupStep::DeviceFlowPending {
+            flow,
             user_code,
             verification_uri,
         } => match key.code {
@@ -1220,14 +1222,17 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
                 app.status = "✔ Device code copied to clipboard".to_string();
                 app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
+                    flow,
                     user_code,
                     verification_uri,
                 });
             }
             _ => {
                 // Keep showing the device flow pending UI — polling happens
-                // in a background task and completes via CopilotDeviceFlowComplete event.
+                // in a background task and completes via the appropriate
+                // device-flow completion event.
                 app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
+                    flow,
                     user_code,
                     verification_uri,
                 });
@@ -2078,10 +2083,10 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     );
 
     app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
+        flow: DeviceFlowKind::Copilot,
         user_code,
         verification_uri,
     });
-
     // Background task: poll until authorised or expired
     tokio::spawn(async move {
         loop {

@@ -1617,6 +1617,28 @@ impl App {
             });
         }
 
+        // ── GitHub device-flow complete ──────────────────────────────────
+        if let Event::GithubDeviceFlowComplete { success, ref error } = event {
+            self.provider_setup = None;
+            if success {
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    "GitHub authentication successful".to_string(),
+                );
+                self.append_assistant_text(
+                    "From: /github login\n✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.",
+                );
+                self.status = "GitHub authenticated".to_string();
+            } else {
+                let msg = error
+                    .clone()
+                    .unwrap_or_else(|| "GitHub login failed.".to_string());
+                self.push_log_no_agent(LogLevel::Warn, format!("GitHub login failed: {msg}"));
+                self.append_assistant_text(&format!("From: /github login\n❌ {msg}"));
+                self.status = "GitHub login failed".to_string();
+            }
+        }
+
         // ── GitLab setup complete ────────────────────────────────────────
         if let Event::GitLabSetupComplete { success, ref error } = event {
             if success {

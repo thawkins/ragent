@@ -18,7 +18,7 @@ use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ConfigSavePickerState, ConfiguredProvider, LogLevel, McpDiscoverState,
+    App, ConfigSavePickerState, ConfiguredProvider, DeviceFlowKind, LogLevel, McpDiscoverState,
     PendingForceCleanup, ProviderSetupStep, ProviderSource, RoleMode, SLASH_COMMANDS,
     SlashMenuEntry, SlashMenuState,
 };
@@ -5537,48 +5537,104 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
             "github" => match args.trim() {
                 "login" => {
-                    self.append_assistant_text(
-                            "From: /github login\n🔐 Starting GitHub OAuth device flow…\n\nPlease wait for the authorization URL…",
-                        );
-                    let event_bus = self.event_bus.clone();
-                    let sid = self.session_id.clone().unwrap_or_default();
-                    tokio::spawn(async move {
-                        let client_id = ragent_agent::github::GitHubClient::client_id();
-                        let result = ragent_agent::github::auth::device_flow_login(
-                                &client_id,
-                                |user_code, verification_uri| {
-                                    event_bus.publish(ragent_agent::event::Event::AgentError {
-                                        session_id: sid.clone(),
-                                        error: format!(
-                                            "GitHub Login — visit: {verification_uri}\nEnter code: {user_code}\n\nWaiting for authorization…"
-                                        ),
-                                    });
-                                },
-                            )
-                            .await;
+                    // Start the device flow synchronously so we can show the
+                    // same OAuth pending dialog that Copilot uses.
+                    let handle = match tokio::runtime::Handle::try_current() {
+                        Ok(h) => h,
+                        Err(_) => {
+                            self.append_assistant_text(
+                                "From: /github login\n❌ Async runtime not available.",
+                            );
+                            return;
+                        }
+                    };
 
-                        match result {
-                            Ok(token) => match ragent_agent::github::auth::save_token(&token) {
-                                Ok(_) => {
-                                    event_bus.publish(
-                                                ragent_agent::event::Event::AgentError {
-                                                    session_id: sid,
-                                                    error: "✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.".to_string(),
-                                                },
-                                            );
-                                }
-                                Err(e) => {
-                                    event_bus.publish(ragent_agent::event::Event::AgentError {
-                                        session_id: sid,
-                                        error: format!("Failed to save GitHub token: {e}"),
-                                    });
-                                }
-                            },
-                            Err(e) => {
-                                event_bus.publish(ragent_agent::event::Event::AgentError {
-                                    session_id: sid,
-                                    error: format!("GitHub login failed: {e}"),
+                    let start = tokio::task::block_in_place(|| {
+                        handle.block_on(ragent_agent::github::auth::start_device_flow(
+                            &ragent_agent::github::GitHubClient::client_id(),
+                        ))
+                    });
+
+                    let flow = match start {
+                        Ok(f) => f,
+                        Err(e) => {
+                            self.append_assistant_text(&format!(
+                                "From: /github login\n❌ Device flow failed: {e}"
+                            ));
+                            return;
+                        }
+                    };
+
+                    let user_code = flow.user_code.clone();
+                    let verification_uri = flow.verification_uri.clone();
+                    let interval = std::time::Duration::from_secs(flow.interval.max(5));
+                    let client_id = ragent_agent::github::GitHubClient::client_id();
+                    let event_bus = self.event_bus.clone();
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "GitHub login started — enter code {user_code} at {verification_uri}"
+                        ),
+                        None,
+                    );
+
+                    self.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
+                        flow: DeviceFlowKind::GitHub,
+                        user_code,
+                        verification_uri,
+                    });
+
+                    // Background task: poll until authorised or expired.
+                    tokio::spawn(async move {
+                        let deadline = std::time::Instant::now()
+                            + std::time::Duration::from_secs(flow.expires_in);
+                        let mut poll_interval = interval;
+                        loop {
+                            if std::time::Instant::now() > deadline {
+                                event_bus.publish(Event::GithubDeviceFlowComplete {
+                                    success: false,
+                                    error: Some(
+                                        "Device flow timed out — please try /github login again."
+                                            .to_string(),
+                                    ),
                                 });
+                                break;
+                            }
+                            tokio::time::sleep(poll_interval).await;
+
+                            match ragent_agent::github::auth::poll_device_flow(&client_id, &flow)
+                                .await
+                            {
+                                Ok(Some(token)) => {
+                                    let outcome =
+                                        match ragent_agent::github::auth::save_token(&token) {
+                                            Ok(_) => Event::GithubDeviceFlowComplete {
+                                                success: true,
+                                                error: None,
+                                            },
+                                            Err(e) => Event::GithubDeviceFlowComplete {
+                                                success: false,
+                                                error: Some(format!(
+                                                    "Failed to save GitHub token: {e}"
+                                                )),
+                                            },
+                                        };
+                                    event_bus.publish(outcome);
+                                    break;
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    let msg = e.to_string();
+                                    if msg.contains("slow_down") {
+                                        poll_interval += std::time::Duration::from_secs(5);
+                                    } else {
+                                        event_bus.publish(Event::GithubDeviceFlowComplete {
+                                            success: false,
+                                            error: Some(msg),
+                                        });
+                                        break;
+                                    }
+                                }
                             }
                         }
                     });
@@ -5592,22 +5648,21 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 "status" | "" => match ragent_agent::github::auth::load_token() {
                     Some(_) => {
                         self.append_assistant_text(
-                                    "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
-                                );
+                                                  "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
+                                              );
                     }
                     None => {
                         self.append_assistant_text(
-                                    "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
-                                );
+                                                  "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
+                                              );
                     }
                 },
                 _ => {
                     self.append_assistant_text(
-                            "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
-                        );
+                                          "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
+                                      );
                 }
             },
-
             "gitlab" => match args.trim() {
                 "setup" => {
                     // Pre-fill from existing config if available

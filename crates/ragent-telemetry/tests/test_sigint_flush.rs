@@ -21,8 +21,8 @@
 use std::time::Duration;
 
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+
+use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::{OtelConfig, TelemetryState, TelemetrySubsystem, shutdown::ShutdownGuard};
 
 fn build_subsystem() -> (
@@ -39,7 +39,7 @@ fn build_subsystem() -> (
     let exporter_clone = exporter.clone();
 
     let provider = rt.block_on(async {
-        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio)
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone)
             .with_interval(Duration::from_hours(1))
             .build();
         SdkMeterProvider::builder().with_reader(reader).build()

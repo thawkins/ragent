@@ -317,10 +317,12 @@ fn test_flush_on_signal_arc_disabled_installs_cleanly() {
 
     rt.block_on(async {
         let sub = Arc::new(TelemetrySubsystem::disabled());
-        ragent_telemetry::shutdown::flush_on_signal_arc(sub)
-            .expect("signal handler should install")
-            .await
-            .expect("signal handler task completed")
+        let handle = ragent_telemetry::shutdown::flush_on_signal_arc(sub)
+            .expect("signal handler should install");
+        // The signal-listener task runs until a signal is received. Abort it
+        // so the test terminates; installation success is the property under
+        // test (FR-022).
+        handle.abort();
     });
 
     drop(rt);

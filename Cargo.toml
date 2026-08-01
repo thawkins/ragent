@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-beta.22"
+version = "0.1.0-beta.23"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -11,9 +11,31 @@ authors = ["Tim Hawkins <tim.thawkins@gmail.com>"]
 
 [package]
 name = "ragent"
+description = "An AI coding agent for the terminal, built in Rust."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[package.metadata.deb]
+maintainer = "Tim Hawkins <tim.thawkins@gmail.com>"
+copyright = "2025, Tim Hawkins"
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/ragent", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ragent/README.md", "644"],
+    ["LICENSE", "usr/share/doc/ragent/LICENSE", "644"],
+    ["CHANGELOG.md", "usr/share/doc/ragent/CHANGELOG.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/ragent", dest = "/usr/bin/ragent", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/ragent/README.md", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/doc/ragent/LICENSE", mode = "644" },
+    { source = "CHANGELOG.md", dest = "/usr/share/doc/ragent/CHANGELOG.md", mode = "644" },
+]
 
 [workspace.lints.clippy]
 # Groups must have higher priority than individual overrides

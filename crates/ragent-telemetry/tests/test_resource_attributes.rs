@@ -16,8 +16,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
-use opentelemetry_sdk::runtime::Tokio;
-use opentelemetry_sdk::testing::metrics::InMemoryMetricExporter;
+
+use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use ragent_telemetry::InstrumentRegistry;
 
 /// Build a provider with an `InMemoryMetricExporter` and ragent resource
@@ -36,9 +36,8 @@ fn build_provider(
 
     // Build the provider inside the runtime context (PeriodicReader needs it).
     let provider = rt.block_on(async {
-        let reader =
-            opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone, Tokio).build();
-        let resource = Resource::new(kvs);
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter_clone).build();
+        let resource = Resource::builder_empty().with_attributes(kvs).build();
         SdkMeterProvider::builder()
             .with_resource(resource)
             .with_reader(reader)
@@ -86,7 +85,7 @@ fn test_resource_has_service_name() {
     );
     let service_name = metrics[0]
         .resource
-        .get("service.name".into())
+        .get(&opentelemetry::Key::from("service.name"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
         service_name,
@@ -114,7 +113,7 @@ fn test_resource_has_service_version() {
     assert!(!metrics.is_empty());
     let version = metrics[0]
         .resource
-        .get("service.version".into())
+        .get(&opentelemetry::Key::from("service.version"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
         version,
@@ -147,7 +146,7 @@ fn test_resource_has_host_name() {
     if let Some(expected) = hostname_str() {
         let host = metrics[0]
             .resource
-            .get("host.name".into())
+            .get(&opentelemetry::Key::from("host.name"))
             .map(|v| v.as_str().to_string());
         assert_eq!(host, Some(expected), "host.name must match (FR-004)");
     }
@@ -172,7 +171,7 @@ fn test_resource_has_custom_attributes() {
     assert!(!metrics.is_empty());
     let env = metrics[0]
         .resource
-        .get("deployment.environment".into())
+        .get(&opentelemetry::Key::from("deployment.environment"))
         .map(|v| v.as_str().to_string());
     assert_eq!(
         env,
@@ -207,7 +206,9 @@ fn test_session_id_is_metric_attribute_not_resource() {
     assert!(!metrics.is_empty(), "should have collected metrics");
 
     // The resource should NOT contain session.id — it's dynamic.
-    let session_in_resource = metrics[0].resource.get("session.id".into());
+    let session_in_resource = metrics[0]
+        .resource
+        .get(&opentelemetry::Key::from("session.id"));
     assert!(
         session_in_resource.is_none(),
         "session.id must not be a static resource attribute (FR-025)"
@@ -256,7 +257,7 @@ fn test_resource_default_service_name() {
     assert!(!metrics.is_empty());
     let name = metrics[0]
         .resource
-        .get("service.name".into())
+        .get(&opentelemetry::Key::from("service.name"))
         .map(|v| v.as_str().to_string());
     assert_eq!(name, Some("ragent".to_string()));
 }
