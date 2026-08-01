@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 0.1.0-beta.26
+
+### Changed
+
+- Incremented workspace version to `0.1.0-beta.26`.
+
 ## Version: 0.1.0-beta.25
 
 ### Changed — CI package builds
