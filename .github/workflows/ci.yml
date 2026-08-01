@@ -14,6 +14,7 @@ jobs:
   check-and-test:
     name: Check & Test (default features)
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # Disable debuginfo in test builds to reduce disk usage on large workspaces.
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -29,14 +30,21 @@ jobs:
           large-packages: true
           docker-images: true
           swap-storage: true
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo swapon --show
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - name: Check
-        run: cargo check --workspace --release
+        run: cargo check --workspace
       - name: Test
-        run: cargo test --workspace --release
+        run: cargo test --workspace
 
   clippy:
     name: Clippy

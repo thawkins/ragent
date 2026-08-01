@@ -7,6 +7,14 @@
 - Fixed Build and Release workflow by granting `contents: write` permission so
   `softprops/action-gh-release@v2` can create GitHub releases.
 
+### Fixed — CI Check & Test
+
+- Reverted the `check-and-test` job to debug builds (`cargo check/test
+  --workspace`) and removed the accidental `--release` flags that caused the
+  runner to run out of memory while linking the release test binary.
+- Added an 8 GiB swapfile step and a 45-minute job timeout to give the debug
+  build more headroom and prevent runaway jobs.
+
 ## Version: 0.1.0-beta.27
 
 ### Changed
