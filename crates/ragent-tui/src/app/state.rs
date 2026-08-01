@@ -347,6 +347,12 @@ pub enum ProviderSetupStep {
     SelectProvider {
         /// Index of the highlighted provider in [`PROVIDER_LIST`].
         selected: usize,
+        /// When `true` (invoked by `/provider`) the API-key prompt is always
+        /// shown after selecting a provider, even when a key is already
+        /// registered, so the user can edit it. When `false` (invoked by
+        /// `/model`) selecting an already-configured provider skips straight
+        /// to the model list.
+        force_key_entry: bool,
     },
     /// Entering an API key for the chosen provider.
     EnterKey {

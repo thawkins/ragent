@@ -355,12 +355,16 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-beta.21** — The core architecture, tool system (~114 tools), TUI, HTTP
+**v0.1.0-beta.22** — The core architecture, tool system (~114 tools), TUI, HTTP
 server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- `/provider` now always prompts for the API key (pre-filled with the existing key) so keys can be edited without removing the provider
+- `/model` jumps straight to the model list when a provider is already configured
+- API-key and GitLab token fields shown unmasked with a wider dialog for full visibility
+- Research `--use-low-relevance` flag retains low-relevance web sources instead of filtering them out
 - Compaction bail paths now publish user-visible `AgentNotice` events instead of silently failing
 - Post-compaction continuation nudge threaded across loop iterations (no repeated nudges)
 - Autopilot auto-continue suppressed after `task_complete` (new `last_task_completed_at` guard)

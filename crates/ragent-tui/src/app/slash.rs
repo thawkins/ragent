@@ -1871,9 +1871,71 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "model" => match args.trim() {
                 "" => {
-                    // Show all providers (not just configured ones) so users can
-                    // see every option and either switch models or set up a new provider.
-                    self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
+                    // If a provider is already configured, jump straight to
+                    // its model list; otherwise show the provider picker.
+                    if let Some(cp) = self.configured_provider.clone() {
+                        if cp.id == "azure_resource" {
+                            self.refresh_provider();
+                            let provider =
+                                ragent_agent::provider::azure_resource::AzureResourceProvider::new(
+                                );
+                            let entries = provider.entries();
+                            if entries.is_empty() {
+                                self.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                                    selected: 0,
+                                    force_key_entry: false,
+                                });
+                                return;
+                            }
+                            let mut selected = 0usize;
+                            if let Ok(Some(last)) =
+                                self.storage.get_setting("azure_resource_last_selection")
+                            {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last)
+                                {
+                                    if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str())
+                                    {
+                                        if let Some(idx) =
+                                            entries.iter().position(|e| e.id == last_id)
+                                        {
+                                            selected = idx;
+                                        }
+                                    }
+                                }
+                            }
+                            self.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                                entries,
+                                selected,
+                                error: None,
+                            });
+                            return;
+                        }
+                        if cp.id == "router" {
+                            let providers =
+                                Self::get_configured_providers_for_router(&self.storage);
+                            if providers.is_empty() {
+                                self.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                                    selected: 0,
+                                    force_key_entry: false,
+                                });
+                            } else {
+                                self.provider_setup =
+                                    Some(self.seeded_router_setup_step(providers));
+                            }
+                            return;
+                        }
+                        self.refresh_provider();
+                        self.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                            provider_id: cp.id.clone(),
+                            provider_name: cp.name.clone(),
+                        });
+                        self.start_model_discovery(cp.id, cp.name);
+                    } else {
+                        self.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                            selected: 0,
+                            force_key_entry: false,
+                        });
+                    }
                 }
                 "show" => {
                     if !self.ensure_session() {
@@ -1970,7 +2032,10 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                 }
                 "" => {
-                    self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
+                    self.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                        selected: 0,
+                        force_key_entry: true,
+                    });
                 }
                 _ => {
                     self.append_assistant_text(

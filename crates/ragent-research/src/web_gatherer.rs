@@ -802,6 +802,10 @@ pub struct WebGatherer {
     /// capture phase of [`gather_with_observer`]. Defaults to
     /// [`DEFAULT_FETCH_CONCURRENCY`]; override via [`with_fetch_concurrency`].
     fetch_concurrency: usize,
+    /// When `true`, every fetched page is retained regardless of its
+    /// relevance score, disabling the default filter that discards
+    /// "Low"/"Very low" sources. Defaults to `false`.
+    keep_low_relevance: bool,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -809,6 +813,7 @@ impl std::fmt::Debug for WebGatherer {
         f.debug_struct("WebGatherer")
             .field("has_decomposer", &self.decomposer.is_some())
             .field("fetch_concurrency", &self.fetch_concurrency)
+            .field("keep_low_relevance", &self.keep_low_relevance)
             .finish_non_exhaustive()
     }
 }
@@ -824,6 +829,7 @@ impl WebGatherer {
             fetch,
             decomposer: None,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
+            keep_low_relevance: false,
         }
     }
 
@@ -846,6 +852,17 @@ impl WebGatherer {
     #[must_use]
     pub fn with_fetch_concurrency(mut self, n: usize) -> Self {
         self.fetch_concurrency = n.max(1);
+        self
+    }
+
+    /// Keep low-relevance web sources instead of filtering them out.
+    ///
+    /// When enabled, [`gather_with_observer`] retains every fetched page
+    /// regardless of its query-match relevance score, disabling the default
+    /// filter that discards "Low"/"Very low" sources.
+    #[must_use]
+    pub fn with_keep_low_relevance(mut self, keep: bool) -> Self {
+        self.keep_low_relevance = keep;
         self
     }
 
@@ -1057,7 +1074,7 @@ impl WebGatherer {
                     let body = fence_captured_body(&page.body);
                     let (relevance, retained) =
                         compute_relevance_label(&query, &title, &hit.snippet, &page.url);
-                    if !retained {
+                    if !retained && !self.keep_low_relevance {
                         excluded_count += 1;
                         tracing::info!(
                             query = %query,

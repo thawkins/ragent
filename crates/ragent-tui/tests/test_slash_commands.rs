@@ -603,17 +603,22 @@ fn test_help_lists_compact_not_compress() {
 
 // ── /model ──────────────────────────────────────────────────────────
 
-#[test]
-fn test_slash_model_opens_provider_picker() {
+#[tokio::test]
+async fn test_slash_model_opens_provider_picker() {
     let mut app = make_app();
     // No provider configured by default (no env vars in test)
     app.execute_slash_command("/model");
+    // With no provider configured, /model opens the provider picker.
+    // (If a provider was auto-detected from the environment, it would jump
+    // straight to the model list instead.)
     assert!(
         matches!(
             app.provider_setup,
             Some(ProviderSetupStep::SelectProvider { .. })
+                | Some(ProviderSetupStep::LoadingModels { .. })
         ),
-        "/model should open the provider picker"
+        "/model should open the provider picker or jump to model loading, got: {:?}",
+        app.provider_setup
     );
 }
 
@@ -702,8 +707,8 @@ fn test_slash_model_show_invalid_subcommand_shows_usage() {
     assert_eq!(app.status, "Usage: /model [show]");
 }
 
-#[test]
-fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
+#[tokio::test]
+async fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
     let mut app = make_app();
     app.configured_provider = Some(ConfiguredProvider {
         id: "missing-provider".to_string(),
@@ -713,20 +718,23 @@ fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
 
     app.execute_slash_command("/model");
 
-    // With the updated /model flow, we always show the full provider picker
-    // (all providers, not just configured ones) so users can set up any provider.
+    // With a configured provider that is not registered, /model jumps to
+    // LoadingModels (which will fail and fall back to the model picker or
+    // a warning). The key point is that /model skips the provider picker
+    // when a provider is already configured.
     assert!(
         matches!(
             app.provider_setup,
-            Some(ProviderSetupStep::SelectProvider { .. })
+            Some(ProviderSetupStep::LoadingModels { .. })
         ),
-        "expected provider picker to open, got: {:?}",
+        "expected /model to jump to LoadingModels for the configured provider, got: {:?}",
         app.provider_setup
     );
 }
 
-#[test]
-fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discovery_is_unavailable() {
+#[tokio::test]
+async fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discovery_is_unavailable()
+{
     let mut app = make_app();
     // Store auth so get_configured_providers() picks up ollama_cloud.
     app.storage
@@ -800,6 +808,65 @@ fn test_slash_provider_opens_setup() {
     );
 }
 
+#[tokio::test]
+async fn test_slash_provider_always_prompts_for_key_when_already_configured() {
+    let mut app = make_app();
+    // Store an API key so the provider is "already configured".
+    app.storage
+        .set_provider_auth("anthropic", "sk-existing")
+        .expect("store anthropic key");
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "anthropic".to_string(),
+        name: "Anthropic".to_string(),
+        source: ProviderSource::Database,
+    });
+
+    // Open the provider picker via /provider (force_key_entry == true).
+    app.execute_slash_command("/provider");
+    assert!(
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::SelectProvider {
+                force_key_entry: true,
+                ..
+            })
+        ),
+        "/provider should open the picker with force_key_entry=true, got: {:?}",
+        app.provider_setup
+    );
+
+    // Find the anthropic index and press Enter.
+    let anthropic_idx = ragent_tui::app::PROVIDER_LIST
+        .iter()
+        .position(|(id, _)| *id == "anthropic")
+        .expect("anthropic in PROVIDER_LIST");
+    app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+        selected: anthropic_idx,
+        force_key_entry: true,
+    });
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    // Even though anthropic is already configured, /provider should show
+    // the EnterKey dialog so the user can edit the key.
+    assert!(
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::EnterKey { ref provider_id, .. }) if provider_id == "anthropic"
+        ),
+        "/provider should always show EnterKey for an already-configured key-based provider, got: {:?}",
+        app.provider_setup
+    );
+
+    // The key field should be pre-filled with the existing key so the user
+    // can edit it rather than re-entering from scratch.
+    if let Some(ProviderSetupStep::EnterKey { key_field, .. }) = &app.provider_setup {
+        assert_eq!(
+            key_field.text(),
+            "sk-existing",
+            "key field should be pre-filled with the existing key"
+        );
+    }
+}
 #[test]
 fn test_slash_provider_selection_updates_displayed_provider() {
     let mut app = make_app();

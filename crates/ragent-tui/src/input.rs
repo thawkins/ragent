@@ -840,28 +840,46 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
     };
 
     match step {
-        ProviderSetupStep::SelectProvider { selected } => match key.code {
+        ProviderSetupStep::SelectProvider {
+            selected,
+            force_key_entry,
+        } => match key.code {
             KeyCode::Up => {
                 let new = if selected == 0 {
                     PROVIDER_LIST.len() - 1
                 } else {
                     selected - 1
                 };
-                app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: new });
+                app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                    selected: new,
+                    force_key_entry,
+                });
             }
             KeyCode::Down => {
                 let new = (selected + 1) % PROVIDER_LIST.len();
-                app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: new });
+                app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                    selected: new,
+                    force_key_entry,
+                });
             }
             KeyCode::Enter => {
                 let (pid, pname) = PROVIDER_LIST[selected];
-                // If already configured, skip setup and go straight to model picker.
-                // The Model Router is an exception: it is a virtual provider with no
-                // API key of its own, so selecting it always opens the cluster setup UI.
+                // If the provider is already configured and the dialog was opened
+                // via `/model` (force_key_entry == false), skip straight to the
+                // model picker. When opened via `/provider` (force_key_entry ==
+                // true) the API-key prompt is always shown so the user can edit
+                // the key.
+                //
+                // The Model Router is an exception: it is a virtual provider with
+                // no API key of its own, so selecting it always opens the cluster
+                // setup UI regardless of force_key_entry.
+                //
+                // Azure Resource is also an exception: it has no API key, only a
+                // resource-file picker, so it always opens that picker.
                 let already_configured = App::get_configured_providers(&app.storage)
                     .iter()
                     .any(|p| p.id == pid);
-                if already_configured {
+                if already_configured && !force_key_entry {
                     if pid == "azure_resource" {
                         app.refresh_provider();
                         let provider =
@@ -915,8 +933,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                 crate::app::LogLevel::Warn,
                                 "provider router: no concrete providers configured".to_string(),
                             );
-                            app.provider_setup =
-                                Some(ProviderSetupStep::SelectProvider { selected });
+                            app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                                selected,
+                                force_key_entry,
+                            });
                         } else {
                             app.provider_setup = Some(app.seeded_router_setup_step(providers));
                         }
@@ -1033,15 +1053,22 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         );
                         // Keep the picker open so the user can choose a concrete
                         // provider to configure first.
-                        app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
+                        app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                            selected,
+                            force_key_entry,
+                        });
                     } else {
                         app.provider_setup = Some(app.seeded_router_setup_step(providers));
                     }
                 } else {
+                    // Pre-fill the key field with the existing stored key (if
+                    // any) so the user can edit it rather than re-entering
+                    // from scratch.
+                    let existing_key = app.provider_api_key(pid).unwrap_or_default();
                     app.provider_setup = Some(ProviderSetupStep::EnterKey {
                         provider_id: pid.to_string(),
                         provider_name: pname.to_string(),
-                        key_field: crate::input_field::InputField::new(),
+                        key_field: crate::input_field::InputField::with_text(existing_key),
                         endpoint_field: if pid == "generic_openai" {
                             crate::input_field::InputField::with_text(
                                 app.storage
@@ -1067,7 +1094,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 }
             }
             _ => {
-                app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
+                app.provider_setup = Some(ProviderSetupStep::SelectProvider {
+                    selected,
+                    force_key_entry,
+                });
             }
         },
         ProviderSetupStep::EnterKey {

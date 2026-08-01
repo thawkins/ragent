@@ -10,7 +10,7 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
@@ -50,6 +50,12 @@ pub enum ResearchCliCommand {
         use_local: bool,
         /// `--use-specs` — enable the prior-spec cross-reference phase.
         use_specs: bool,
+        /// `--use-low-relevance` — keep web sources that would otherwise be
+        /// filtered out as low-relevance. By default the web-gathering phase
+        /// discards sources whose query-match ratio falls below the "Low"
+        /// threshold; this flag disables that filter so every fetched page is
+        /// retained regardless of relevance score.
+        use_low_relevance: bool,
     },
     /// `ragent research continue <name> [message]` — resume an in-progress item (T-012).
     Continue {
@@ -145,6 +151,7 @@ impl ResearchCliCommand {
                         fetch_concurrency: None,
                         use_local: false,
                         use_specs: false,
+                        use_low_relevance: false,
                     }
                 }
             }
@@ -155,7 +162,7 @@ impl ResearchCliCommand {
         // Parse: ragent research create <name> <topic> [--from-url <URL>]
         //        [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep]
         //        [--format <artifact>] [--sources-dir <path>] [--template <name>]
-        //        [--fetch-concurrently N] [--use-local] [--use-specs]
+        //        [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
@@ -169,6 +176,7 @@ impl ResearchCliCommand {
         let mut fetch_concurrency: Option<usize> = None;
         let mut use_local = false;
         let mut use_specs = false;
+        let mut use_low_relevance = false;
         while i < rest.len() {
             let arg = rest[i];
             match arg {
@@ -244,6 +252,10 @@ impl ResearchCliCommand {
                     use_specs = true;
                     i += 1;
                 }
+                "--use-low-relevance" => {
+                    use_low_relevance = true;
+                    i += 1;
+                }
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
@@ -271,6 +283,7 @@ impl ResearchCliCommand {
             fetch_concurrency,
             use_local,
             use_specs,
+            use_low_relevance,
         }
     }
 
@@ -340,7 +353,7 @@ impl ResearchCliCommand {
                SUBCOMMANDS:\n\
                                    create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
-                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs]\n\
+                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
                                          --from-url            Fetch the URL and use its content as the research subject\n\
                                                                in place of an explicit topic. The page is captured as\n\
@@ -352,6 +365,7 @@ impl ResearchCliCommand {
                                                                in parallel during the web-gathering phase (default 10).\n\
                                          --use-local           Enable local-file scanning (in-project + extras).\n\
                                          --use-specs           Enable prior-spec cross-referencing.\n\
+                                         --use-low-relevance   Keep low-relevance web sources instead of filtering them out.\n\
                    continue <name> [message] Resume an in-progress research item.\n\
                    list [--all]                  List every research item.\n\
                  open <name>                   Print the absolute path of RESEARCH.md.\n\
@@ -844,6 +858,37 @@ mod tests {
                 assert_eq!(topic, "a topic");
                 assert!(!use_local);
                 assert!(use_specs);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_use_low_relevance_flag() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --use-low-relevance");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                use_low_relevance,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert!(use_low_relevance);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_use_low_relevance_defaults_false() {
+        let cmd = ResearchCliCommand::parse("create foo a topic");
+        match cmd {
+            ResearchCliCommand::Create {
+                use_low_relevance, ..
+            } => {
+                assert!(!use_low_relevance);
             }
             other => panic!("unexpected variant: {other:?}"),
         }

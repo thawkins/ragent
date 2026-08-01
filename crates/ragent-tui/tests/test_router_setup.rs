@@ -985,6 +985,7 @@ fn test_provider_picker_router_opens_setup_router() {
         .expect("router in PROVIDER_LIST");
     app.provider_setup = Some(ProviderSetupStep::SelectProvider {
         selected: router_idx,
+        force_key_entry: false,
     });
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
@@ -1024,6 +1025,7 @@ fn test_provider_picker_router_no_concrete_providers_keeps_picker() {
         .expect("router in PROVIDER_LIST");
     app.provider_setup = Some(ProviderSetupStep::SelectProvider {
         selected: router_idx,
+        force_key_entry: false,
     });
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
@@ -1395,6 +1397,7 @@ fn test_provider_picker_already_configured_router_opens_setup_router() {
         .expect("router in PROVIDER_LIST");
     app.provider_setup = Some(ProviderSetupStep::SelectProvider {
         selected: router_idx,
+        force_key_entry: false,
     });
 
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

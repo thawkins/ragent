@@ -286,7 +286,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-        ProviderSetupStep::SelectProvider { selected } => {
+        ProviderSetupStep::SelectProvider { selected, .. } => {
             // Split the dialog area into header, scrollable provider list, and footer.
             let block = Block::default()
                 .borders(Borders::ALL)
@@ -431,6 +431,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             error,
             ..
         } => {
+            // Wider dialog so the full API key (≥ 48 chars) is visible.
+            let area = centered_rect_max(80, 80, 100, 30, frame.area());
+            frame.render_widget(Clear, area);
+
             let mut lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
                     format!("Configure {}", provider_name),
@@ -443,31 +447,12 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 Line::from(""),
             ];
 
-            // Show masked key input
+            // Show the key unmasked so the user can verify the full value.
             let key_text = key_field.text();
-            let masked = if key_text.is_empty() {
-                String::new()
-            } else {
-                let char_count = key_text.chars().count();
-                if char_count <= 8 {
-                    "*".repeat(char_count)
-                } else {
-                    let first4: String = key_text.chars().take(4).collect();
-                    let last4: String = key_text
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect();
-                    format!("{}…{}", first4, last4)
-                }
-            };
             let key_cursor_display = if *active_field == 0 {
                 key_field.cursor()
             } else {
-                masked.chars().count()
+                key_text.chars().count()
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -475,7 +460,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
-                    with_cursor_marker(&masked, key_cursor_display),
+                    with_cursor_marker(key_text, key_cursor_display),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -1138,6 +1123,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             active_field,
             error,
         } => {
+            // Wider dialog so the full token (≥ 48 chars) is visible.
+            let area = centered_rect_max(80, 80, 100, 30, frame.area());
+            frame.render_widget(Clear, area);
+
             let mut lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
                     "Configure GitLab",
@@ -1177,30 +1166,11 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             lines.push(Line::from(""));
             lines.push(Line::from("Personal Access Token:"));
 
-            // Token field (masked)
-            let masked = if token_input.is_empty() {
-                String::new()
-            } else {
-                let char_count = token_input.chars().count();
-                if char_count <= 8 {
-                    "*".repeat(char_count)
-                } else {
-                    let first4: String = token_input.chars().take(4).collect();
-                    let last4: String = token_input
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect();
-                    format!("{}…{}", first4, last4)
-                }
-            };
+            // Token field (unmasked so the user can verify the full value)
             let tok_cursor_display = if *active_field == 1 {
                 *token_cursor
             } else {
-                masked.chars().count()
+                token_input.chars().count()
             };
             lines.push(Line::from(vec![
                 Span::styled(
@@ -1208,7 +1178,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(
-                    with_cursor_marker(&masked, tok_cursor_display),
+                    with_cursor_marker(token_input, tok_cursor_display),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -1237,7 +1207,6 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-
         ProviderSetupStep::TelemetrySetup {
             endpoint_field,
             protocol,

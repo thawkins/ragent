@@ -1,5 +1,38 @@
 # Changelog
 
+## Version: 0.1.0-beta.22
+
+### Added — `/provider` always allows editing the API key
+
+- The `/provider` slash command now opens the provider picker with
+  `force_key_entry: true`, so selecting an already-configured key-based
+  provider shows the `EnterKey` dialog instead of skipping straight to the
+  model list. This lets users update an existing API key without removing
+  and re-adding the provider.
+- The `EnterKey` dialog pre-fills the key field with the existing stored key
+  (`App::provider_api_key`) so the user can edit it rather than re-entering
+  from scratch.
+- The API-key and GitLab token fields are now displayed **unmasked** so the
+  user can verify the full value, and the dialog is widened (80×30) so the
+  full key (≥ 48 chars) is visible.
+
+### Changed — `/model` jumps straight to the model list for configured providers
+
+- When a provider is already configured, `/model` now skips the provider
+  picker and jumps directly to model discovery / the model list for that
+  provider. The provider picker is only shown when no provider is configured.
+  Special-cases: `azure_resource` opens the resource-file picker, `router`
+  opens the cluster setup UI.
+
+### Added — Research `--use-low-relevance` flag
+
+- `ragent research create <name> --use-low-relevance` (and the TUI / HTTP
+  equivalents) retains every fetched web page regardless of its
+  query-match relevance score, disabling the default filter that discards
+  "Low"/"Very low" sources. Plumbed through `SessionConfig::use_low_relevance`,
+  `WebGatherer::with_keep_low_relevance`, the CLI, TUI slash handler, and the
+  `POST /research` HTTP route.
+
 ## Version: 0.1.0-beta.21
 
 ### Fixed — Compaction user feedback & resilience

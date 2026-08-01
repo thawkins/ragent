@@ -61,6 +61,7 @@ impl App {
                 fetch_concurrency,
                 use_local,
                 use_specs,
+                use_low_relevance,
             } => {
                 // Use the `⏳` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
@@ -114,6 +115,7 @@ impl App {
                         .as_deref()
                         .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
                         .unwrap_or(OutputFormat::Report),
+                    use_low_relevance,
                     ..SessionConfig::default()
                 };
                 let session = crate::research_adapter::build_research_session(

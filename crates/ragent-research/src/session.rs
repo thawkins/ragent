@@ -136,6 +136,10 @@ pub struct SessionConfig {
     pub iterations: Option<u32>,
     /// Output artifact selected via `--format`.
     pub output_format: OutputFormat,
+    /// `--use-low-relevance`: when `true`, the web-gathering phase keeps
+    /// every fetched page regardless of its query-match relevance score,
+    /// disabling the default filter that discards "Low"/"Very low" sources.
+    pub use_low_relevance: bool,
 }
 
 impl SessionConfig {
@@ -180,6 +184,7 @@ impl Default for SessionConfig {
             depth: None,
             iterations: None,
             output_format: OutputFormat::Report,
+            use_low_relevance: false,
         }
     }
 }
@@ -1347,7 +1352,10 @@ impl ResearchSession {
                 // Apply the per-run fetch-concurrency override. `WebGatherer` is
                 // cheap to clone (Arc pair) so we rebuild a copy rather than
                 // mutating the shared instance.
-                let web = web.clone().with_fetch_concurrency(config.fetch_concurrency);
+                let web = web
+                    .clone()
+                    .with_fetch_concurrency(config.fetch_concurrency)
+                    .with_keep_low_relevance(config.use_low_relevance);
                 let forwarder = GatherEventForwarder {
                     observer: observer.clone(),
                 };

@@ -113,6 +113,10 @@ struct CreateResearchRequest {
     use_local: bool,
     #[serde(default)]
     use_specs: bool,
+    /// `--use-low-relevance`: keep low-relevance web sources instead of
+    /// filtering them out.
+    #[serde(default)]
+    use_low_relevance: bool,
     /// Override the maximum number of candidate pages fetched in parallel
     /// during the web-gathering phase. When `None` the engine default
     /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
@@ -150,6 +154,7 @@ async fn create_research(
         output_format: req.format.as_deref().map_or(OutputFormat::Report, |s| {
             OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
         }),
+        use_low_relevance: req.use_low_relevance,
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {

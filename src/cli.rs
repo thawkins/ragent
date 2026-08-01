@@ -101,6 +101,9 @@ pub enum ResearchCommands {
         /// Include the prior-spec cross-reference phase
         #[arg(long)]
         use_specs: bool,
+        /// Keep low-relevance web sources instead of filtering them out.
+        #[arg(long)]
+        use_low_relevance: bool,
     },
     /// List research items
     List {
@@ -170,6 +173,7 @@ pub async fn handle_research_command(
             fetch_concurrently,
             use_local,
             use_specs,
+            use_low_relevance,
         } => {
             let topic = topic.join(" ");
             if topic.is_empty() && from_url.is_none() && from_file.is_none() {
@@ -191,6 +195,7 @@ pub async fn handle_research_command(
                 fetch_concurrency: fetch_concurrently,
                 use_local,
                 use_specs,
+                use_low_relevance,
             }
         }
         ResearchCommands::List { all } => ResearchCliCommand::List { all },
@@ -292,6 +297,7 @@ pub async fn handle_research_command(
             fetch_concurrency,
             use_local,
             use_specs,
+            use_low_relevance,
         } => {
             // Wire the session through a streaming JSON observer so the
             // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
@@ -325,6 +331,7 @@ pub async fn handle_research_command(
                 output_format: format.as_deref().map_or(OutputFormat::Report, |s| {
                     OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
                 }),
+                use_low_relevance,
                 ..SessionConfig::default()
             };
             // Build a full research session backed by the default tool
