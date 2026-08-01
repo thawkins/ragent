@@ -47,13 +47,13 @@ jobs:
           cargo install cargo-deb
           cargo install cargo-generate-rpm
 
-#      - name: Build .deb package
-#        run: |
-#          cargo deb --target x86_64-unknown-linux-gnu --no-build --output "ragent-${{ github.ref_name }}-linux-x86_64.deb"
-
-      - name: Build .rpm package
+      - name: Build .deb package
         run: |
-          cargo generate-rpm --target x86_64-unknown-linux-gnu --output "ragent-${{ github.ref_name }}-linux-x86_64.rpm"
+          cargo deb --target x86_64-unknown-linux-gnu --no-build --output "ragent-${{ github.ref_name }}-linux-x86_64.deb"
+
+#      - name: Build .rpm package
+#        run: |
+#          cargo generate-rpm --target x86_64-unknown-linux-gnu --output "ragent-${{ github.ref_name }}-linux-x86_64.rpm"
 
       - name: Extract release notes from CHANGELOG.md
         id: changelog
@@ -81,8 +81,8 @@ jobs:
           name: ragent-${{ github.ref_name }}-linux-x86_64
           path: |
             ${{ env.ASSET_NAME }}
-            *.rpm
-#            *.deb
+            *.deb
+#            *.rpm
           if-no-files-found: error
 
       - name: Create GitHub Release
@@ -91,7 +91,7 @@ jobs:
           body_path: release_notes.md
           files: |
             ${{ env.ASSET_NAME }}
-            *.rpm
-#            *.deb
+            *.deb
+#            *.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
