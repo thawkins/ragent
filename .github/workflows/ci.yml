@@ -13,7 +13,7 @@ env:
 jobs:
   check-and-test:
     name: Check & Test (default features)
-    runs-on: ubuntu-latest-4-cores
+    runs-on: ubuntu-latest
     env:
       # Disable debuginfo in test builds to reduce disk usage on large workspaces.
       CARGO_PROFILE_TEST_DEBUG: 0
@@ -34,9 +34,9 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@v2
       - name: Check
-        run: cargo check --workspace
+        run: cargo check --workspace --release
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --release
 
   clippy:
     name: Clippy

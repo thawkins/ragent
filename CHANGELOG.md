@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.27
+
+### Changed
+
+- Optimized CI runners: moved `check-and-test` to `ubuntu-latest-4-cores`, disabled
+  debuginfo in dev/test profiles, and added `free-disk-space` cleanup to reduce
+  disk pressure during builds.
+
 ## Version: 0.1.0-beta.26
 
 ### Changed
