@@ -38,6 +38,9 @@ ignore = [
     # RUSTSEC-2026-0185: quinn-proto remote memory exhaustion from unbounded
     # out-of-order stream reassembly. Transitive via reqwest/h3; awaiting upstream fix.
     { id = "RUSTSEC-2026-0185", reason = "transitive via reqwest/h3; awaiting upstream fix" },
+    # RUSTSEC-2025-0052: async-std has been discontinued.
+    # async-std is pulled in by opentelemetry_sdk 0.28; upgrading OTEL is tracked separately.
+    { id = "RUSTSEC-2025-0052", reason = "transitive via opentelemetry_sdk 0.28; upgrade tracked separately" },
 ]
 
 [licenses]
