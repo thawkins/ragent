@@ -5,29 +5,38 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-alpha.104)
+## Highlights (0.1.0-beta.28)
 
-- **Amazon Bedrock support** — New provider for AWS-hosted models (Claude, Nova, Llama, Mistral) with AWS SigV4 authentication and dual API support.
-- **Azure AI Foundry support** — New provider for Microsoft Azure AI Foundry models with OpenAI-compatible endpoints.
-- **`/config show`** — Display current resolved configuration in the TUI.
-- **`/config save`** — Snapshot the current global `ragent.json` into a
-  timestamped backup in `~/.config/ragent/saves/` (atomic write, never
-  overwrites an existing backup).
-- **`/config list`** — Open an interactive picker of saved backups; press Enter
-  to restore a backup over the active global config, Esc to cancel.
-- **Image attachment support (Alt+V)**: paste images from clipboard or file URIs; pending attachments are displayed before sending.
-- Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
-  - New `multiedit`, `patch`, and `apply_patch` tools for atomic multi-file edits,
-    unified diff patching, and Codex-style patch blocks.
-  - New `open` tool to open/reveal files, folders, and URLs in the desktop
-    environment.
-  - New `browser` tool for Chrome DevTools Protocol (CDP) browser automation
-    with 14 actions (open, snapshot, click, type, fill_form, select, wait,
-    eval, scroll, upload, press, screenshot, status, setup). Use
-    `browser action="setup"` to launch a headless Chrome instance, or
-    configure the CDP endpoint in `ragent.json` under the `browser` key.
-    Toggle visibility with `/tools browser on|off`.
-  - Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
+- **Model Router** — route requests across a local cluster of providers; status bar
+  shows the actual downstream model and tier.
+- **Provider key editing** — `/provider` now pre-fills the existing API key so you
+  can update it without removing the provider.
+- **Configuration snapshots** — `/config show`, `/config save`, and `/config list`
+  let you inspect, back up, and restore your global `ragent.json`.
+- **`memory_store` result clarity** — successful structured-memory writes now
+  report `stored: true` and the TUI summary reflects it.
+- **MasterFetch web tools** — `mf_fetch`, `mf_search`, `mf_crawl`, and
+  `mf_cache_clear` for content extraction, keyless search, and focused crawling.
+- **`agentgrep` structure-aware code search** — symbol boundaries, file outlines,
+  and ranked results.
+- **Gmail and messaging channels** — `gmail` and `send_channel_message` tools for
+  external notifications.
+- **Browser automation** — `browser` tool with 14 CDP actions; toggle with
+  `/tools browser on|off`.
+- **Research system** — `/research create <name>` gathers web and local-file sources,
+  producing a self-contained `RESEARCH.md`.
+- **Teams and swarms** — `/team` and `/swarm` slash commands for multi-agent
+  coordination.
+- **Autopilot** — `/autopilot on` with optional token/time limits and a TUI status
+  indicator.
+- **Context compaction** — `/compact` and the `compaction` config block to keep long
+  sessions within context limits.
+- **Image attachments (Alt+V)** — paste images from clipboard or file URIs; pending
+  attachments are displayed before sending.
+- **New editing tools** — `multiedit`, `patch`, `apply_patch`, and `open` for
+  atomic multi-file edits, diff patching, and desktop opening.
+- **All compiler warnings eliminated** — build, tests, benches, and examples are
+  warning-free.
 
 ## Prerequisites
 

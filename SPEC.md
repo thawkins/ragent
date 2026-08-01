@@ -2194,7 +2194,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| v0.1.0-beta.28 | 2026-08-01 | Fixed GitHub release workflow permissions (`contents: write`) so tag-triggered releases can publish assets |
+| v0.1.0-beta.28 | 2026-08-01 | Fixed GitHub release workflow permissions (`contents: write`); reverted `check-and-test` to debug builds and added swap/timeout to avoid OOM; `memory_store` now returns a clear `stored` result |
 | v0.1.0-beta.27 | 2026-08-01 | CI runner optimisation: `ubuntu-latest-4-cores`, disabled debuginfo, free-disk-space cleanup |
 | v0.1.0-beta.26 | 2026-08-01 | Version bump |
 | v0.1.0-beta.25 | 2026-08-01 | Disabled `.rpm` package builds in release workflow |
@@ -2466,7 +2466,9 @@ callers and integrators know the intended surface.
 - Web-search stack now prefers the multi-engine `mf_search` tool (DuckDuckGo, Brave, Tavily, LangSearch) over legacy `websearch`
 - `.deb` and `.rpm` packaging temporarily disabled in CI while build paths are reviewed (beta.24–beta.25)
 
-### Fixed (beta.8–beta.22)
+### Fixed (beta.8–beta.28)
+- `memory_store` tool output now includes `"stored": true`, and the TUI result summary falls back to `id` presence so successful writes are not reported as "memory not stored"
+- CI `check-and-test` job reverted from `--release` to debug builds (`cargo check/test --workspace`) and gained an 8 GiB swapfile step plus a 45-minute timeout to avoid runner OOM kills
 - Skill discovery tests isolated by `SkillScope` and `bundled_count()` to avoid test fragility
 - Doctest build breakages in `session::permissions` and `tool::ToolRegistry`
 - TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls

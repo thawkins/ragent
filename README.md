@@ -15,12 +15,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 
 - **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
   GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
-  Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, and Microsoft Foundry Local
-  out of the box, with an extensible provider trait for adding more
+  Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, Microsoft Foundry Local,
+  and a Model Router cluster out of the box, with an extensible provider trait for adding more
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — ~114 registered tools across 15 categories:
+- **Comprehensive tool system** — ~150 registered tools across 18 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -28,33 +28,37 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     obfuscation detection, and user allowlist/denylist)
   - **Search** — grep
   - **Web** — webfetch, websearch, http_request
-  - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
-    click, type, fill_form, select, wait, eval, scroll, upload, press,
-    screenshot, status, setup)
-  - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
-    codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
-    hardwired always-allowed)
-  - **Memory** — memory_read, memory_write, memory_replace, memory_store,
-    memory_recall, memory_forget, memory_search, memory_migrate,
-    conversation_search, session_search
-  - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
-  - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
-    and repository management
-  - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
-  - **Sub-agents** — new_task, cancel_task, list_tasks, wait_tasks, task_complete
-  - **Planning** — plan_enter, plan_exit
-  - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
-  - **Interactive** — question, think, todo_read, todo_write
-  - **Utility** — calculator, get_env
-- **Terminal UI** — full-screen ratatui interface with provider setup dialog,
-  slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
-  highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
-  and a live permission countdown timer (120-second timeout with EXPIRED state)
-- **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
-- **Session management** — persistent conversation history stored in SQLite;
-  list, resume, export, and import sessions
-- **Permission system** — multi-layered defense-in-depth with hardwired rules
-  (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
+    - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
+      click, type, fill_form, select, wait, eval, scroll, upload, press,
+      screenshot, status, setup)
+    - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
+      codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
+      hardwired always-allowed)
+    - **Memory** — memory_read, memory_write, memory_replace, memory_store,
+      memory_recall, memory_forget, memory_search, memory_migrate,
+      conversation_search, session_search
+    - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
+    - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
+      and repository management
+    - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
+    - **Sub-agents** — new_task, cancel_task, list_tasks, wait_tasks, task_complete
+    - **Planning** — plan_enter, plan_exit
+    - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
+    - **Interactive** — question, think, todo_read, todo_write
+    - **Utility** — calculator, get_env
+    - **Code search & navigation** — agentgrep, codeindex_search, codeindex_symbols,
+      codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
+    - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
+      extraction, search, and crawling
+    - **Gmail & messaging** — gmail, send_channel_message for external notifications
+  - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
+    slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
+    highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
+    and a live permission countdown timer (120-second timeout with EXPIRED state)
+  - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
+  - **Session management** — persistent conversation history stored in SQLite;
+    list, resume, export, and import sessions
+  - **Permission system** — multi-layered defense-in-depth with hardwired rules  (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
   security, file-path guards, and YOLO mode for trusted environments
 - **Agent presets** — general, coder, task, architect, ask, debug, code-review, and
   orchestrator agents with tailored system prompts
@@ -355,43 +359,49 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-beta.22** — The core architecture, tool system (~114 tools), TUI, HTTP
-server, memory system, teams/swarm coordination, spec management, skills system,
+**v0.1.0-beta.28** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- `memory_store` now reports a clear `stored` result and the TUI summary correctly shows
+  successful structured-memory writes
+- `agentgrep` structure-aware code search tool (with symbol boundaries and file outlines)
+- MasterFetch web tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_cache_clear`) for content
+  extraction, keyless search, and focused crawling
+- Gmail and messaging-channel tools (`gmail`, `send_channel_message`) for external notifications
+- Model Router cluster provider with downstream-model status bar and terminal-signal guarantee
 - `/provider` now always prompts for the API key (pre-filled with the existing key) so keys can be edited without removing the provider
 - `/model` jumps straight to the model list when a provider is already configured
 - API-key and GitLab token fields shown unmasked with a wider dialog for full visibility
+- `/config show`, `/config save`, and `/config list` slash commands for inspecting and
+  snapshotting configuration
 - Research `--use-low-relevance` flag retains low-relevance web sources instead of filtering them out
 - Compaction bail paths now publish user-visible `AgentNotice` events instead of silently failing
 - Post-compaction continuation nudge threaded across loop iterations (no repeated nudges)
 - Autopilot auto-continue suppressed after `task_complete` (new `last_task_completed_at` guard)
 - Router status bar shows the actual downstream model and tier: `Model Router ({model}) / {tier}`
 - Autopilot status indicator (`AutoPilot:✓/✗`) in the TUI status bar
-- Router terminal-signal guarantee: synthetic `Finish { Stop }` injected on stream end without `Finish`
 - Skill discovery tests isolated by `SkillScope` and `bundled_count()`
 - Doctest build breakages fixed in `session::permissions` and `tool::ToolRegistry`
 - Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
 - Startup timing instrumentation with `/startup` slash command
-- Post-compaction continuation nudge so the agent resumes its task after context compaction
 - Copilot `gh auth token` cached process-wide via `OnceLock`
 - Code-index SQLite WAL mode and direct `file_id` symbol queries
 - First printable keystroke after run-cost banner no longer swallowed
-- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools — search current and past sessions by keyword with filters and context
-- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions including open, snapshot, click, type, eval, screenshot, and setup
+- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools
+- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions
 - TODO side panel added (Alt+T) with `/todo` slash alias
-- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks)
+- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F)
 - All 279 compiler warnings eliminated (build, tests, benches, examples)
 - Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
 - `read` tool instructions clarified (`end_line` is absolute line number)
 - Remote push prohibitions strengthened in `AGENTS.md`
-- SPEC.md reorganized, audited, and brought up to date with actual implementation
+- SPEC.md audited, reorganized, and updated for v0.1.0-beta.28
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery
 - Amazon Bedrock provider with AWS SigV4 signing and dual API support
-- `/config show` slash command for displaying resolved configuration
 - Startup ASCII art banner with compile timestamp
 - Instruction file discovery logging
 
