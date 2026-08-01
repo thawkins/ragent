@@ -4,9 +4,9 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-    <strong>Version:</strong> 0.1.0-alpha.116</p>
+    <strong>Version:</strong> 0.1.0-beta.28</p>
   <p style="font-size: 1.1em;">
-    <strong>Date:</strong> 2026-06-23
+    <strong>Date:</strong> 2026-08-01
   </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -25,7 +25,7 @@ Rust and distributed as a single statically-linked binary with zero external
 runtime dependencies. It orchestrates multiple LLM providers — Anthropic,
 OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama (local and cloud), xAI
 Grok, Generic OpenAI-compatible endpoints, Azure AI Foundry, Azure Resource (File),
-and Amazon Bedrock — behind a unified streaming interface,
+Amazon Bedrock, and a Model Router provider — behind a unified streaming interface,
 giving developers a powerful,
 provider-agnostic assistant that runs wherever a terminal does.
 
@@ -101,23 +101,21 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.130). The core architecture, tool system,
+Ragent is in **beta** (v0.1.0-beta.28). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
-multi-agent coordination, and security layer are functional and under active
-development. The specification below documents the current state of all
-subsystems.
+multi-agent coordination, security layer, telemetry, and release packaging are
+functional and under active development. The specification below documents the
+current state of all subsystems.
 
-**Current Release Highlights (alpha.106 → alpha.116):**
-- **Agent-loop persistence & performance** — Fixed session/cache/storage persistence issues and reduced session-processor hot-path overhead (alpha.116)
-- **COMMSPLAN team subsystem hardening** — Advisory-lock-protected stores, single-source team implementation via `ragent-team`, unified shutdown/idle signaling, and at-least-once mailbox delivery semantics (alpha.114)
-- **Unified replacement matcher** — `edit`, `multiedit`, and `memory_replace` now share a whitespace-tolerant matcher, eliminating many `old_str not found` failures (alpha.114)
-- **Research System** — `/research` slash commands and `ragent research` CLI now wire real gatherers, report completion, render tables correctly, and synthesize a structured analysis via the active LLM in the TUI; spec status corrected to `in_progress` (alpha.111–alpha.113, updated for synthesis)
-- **`ask_user` standalone** — Event-driven question tool with optional multiple-choice `options`; standalone `question` tool removed (alpha.111)
-- **Internal LLM subsystem removed** — Embedded Candle / LiteRT-LM internal LLM, `/internal-llm` slash commands, `InternalLlmConfig`, and the `internal_llm` Cargo feature have been removed (alpha.110)
-- **Microsoft Foundry Local support** — First-class provider integration plus in-process backend option, device validation, and web-service fallback (alpha.106–alpha.109)
-- **Headroom compression lifecycle** — `CompressionStarted`/`CompressionFinished` events, per-iteration threshold gating, and immediate context-window refresh (alpha.106–alpha.107)
-- **Stream timeout split** — `initial_response_timeout_secs` (300 s) decoupled from per-event `timeout_secs` to absorb cloud-provider cold-start latency (alpha.114)
-- **Task tool family guidance** — `task_complete`/`list_tasks` hardwired auto-approved; schemas distinguish autonomous `task_complete` from team `team_task_complete` (alpha.109)
+**Current Release Highlights (v0.1.0-beta.8 → v0.1.0-beta.28):**
+- **Release packaging & CI hardening** — Added tag-triggered `release.yml` workflow; disabled `.deb`/`.rpm` builds temporarily; moved to `ubuntu-latest-4-cores`; added free-disk-space cleanup; granted `contents: write` permission so `softprops/action-gh-release@v2` can publish releases (beta.23–beta.28)
+- **Provider setup UX** — `/provider` always allows editing an existing API key; `/model` jumps straight to the model list when a provider is configured; key/token fields are unmasked and shown in a wider dialog (beta.22)
+- **Research system maturation** — Wired real gatherers with completion reporting; added `--use-low-relevance` flag, `--from-file` local-document seeding, `--from-url` seeding, PDF/YouTube text extraction, excluded-source counts, search-tool/engine provenance, control-character sanitisation, and `html2text` panic recovery; web search diagnostics via `/websearch show|help|test`; added Tavily and LangSearch backends (beta.9–beta.22)
+- **Context compaction & autopilot reliability** — Compaction bail paths now publish `AgentNotice` events; post-compaction continuation nudge is threaded across loop iterations; autopilot suppresses auto-continue after `task_complete`; router status bar shows the actual downstream model and tier; synthetic `Finish` injected on router streams that end without a terminal event (beta.21)
+- **Startup responsiveness** — MCP, code-index startup, and provider health checks moved to background tasks; `/startup` slash command exposes per-stage timings; first keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
+- **Tool expansion** — Added `apply_patch`, `open`, `browser`, `conversation_search`, `session_search`, `bg`, `agentgrep`, `initiative`, `skill_manage`, `gmail`, `send_channel_message`, and the six `mf_*` MasterFetch tools; `ask_user` is now a standalone event-driven tool with multiple-choice support (beta.12–beta.17)
+- **Cost accounting** — `Event::RunCostSummary` is published at the end of each turn, persisted to SQLite, surfaced as a TUI banner, and included in `--include-cost` session exports (beta.12)
+- **Telemetry & operator features** — OpenTelemetry metrics export with `/telemetry` slash family and ALT-O panel; `sudo` askpass broker routes password prompts through the TUI question dialog; durable initiatives and runtime skill management tools; instruction-file `@<path>` includes (beta.2–beta.17)
 
 ---
 
@@ -175,6 +173,7 @@ subsystems.
 - [Appendix C: Project Contact & Repository](#appendix-c-project-contact--repository)
 - [Appendix D: Changelog (v0.1.0-alpha.104 → v0.1.0-alpha.116)](#appendix-d-changelog-v010-alpha104--v010-alpha116)
 - [Appendix E: Earlier Changelog (2025-01-16 → 2025-04-21)](#appendix-e-earlier-changelog-2025-01-16--2025-04-21)
+- [Appendix F: Changelog (v0.1.0-beta.1 → v0.1.0-beta.28)](#appendix-f-changelog-v010-beta1--v010-beta28)
 
 ### List of Diagrams
 
@@ -214,8 +213,8 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 | Characteristic | Description |
 |----------------|-------------|
 | **Single binary** | Statically linked, zero runtime dependencies beyond OS libraries |
-| **Multi-provider** | 12 first-class LLM providers with auto-discovery and health checks |
-| **Tool-rich** | ~113 registered tools across 15 categories |
+| **Multi-provider** | 13 first-class LLM provider IDs with auto-discovery and health checks |
+| **Tool-rich** | ~150 registered tools across 18 categories |
 | **Local-first** | SQLite, Tantivy, and tree-sitter compiled in; no external services required |
 | **Streaming** | Real-time token, tool, and event streaming via TUI and HTTP SSE |
 | **Extensible** | Custom agents, skills, MCP servers, and provider modules |
@@ -235,6 +234,8 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 | **Team** | A named multi-agent workspace with shared tasks and mailbox messaging |
 | **Swarm** | Parallel task decomposition across spawned agents |
 | **Autopilot** | Autonomous mode with auto-approval and iteration limits |
+| **Initiative** | Durable project-scoped goal with milestones |
+| **Telemetry** | OpenTelemetry metrics export for operator observability |
 
 ---
 
@@ -406,7 +407,10 @@ Key event types include:
 | `CompressionStarted` / `CompressionFinished` | Context compaction lifecycle (auto pre-send summarisation and emergency overflow compaction) |
 | `TeammateIdle` / `TeammateFailed` / `TeammateResumed` | Team coordination |
 | `SubagentSpawned` / `SubagentCompleted` / `SubagentKilled` | Background agents |
+| `RouterClassification` / `RouterTierSelected` | Model-router routing decisions |
 | `RunCostSummary` | Per-run token/cost summary emitted at session run end |
+| `FromFileBodyPreview` | Preview of text extracted from a `--from-file` research seed |
+| `SynthesizeResult` | Research LLM synthesis outcome (success/fallback/error) |
 
 ---
 
@@ -434,10 +438,10 @@ based on the active agent/model.
 | `azure_resource` | Cloud | File-based | Yes | Yes | Yes | Reads `azureresources.json` |
 | `xai` | Cloud | Static | Yes | Yes | Yes | xAI Grok API |
 | `bedrock` | Cloud | Dynamic | Yes | Yes | Yes | AWS Bedrock, SigV4 signing |
-| `foundry_local` | Local | Dynamic | Yes | Yes | Yes | Microsoft Foundry Local (web + in-process) |
+| `router` | Cloud | Static | Yes | Yes | Yes | Model Router with 15-dimension classifier |
 
-(The registry exposes 13 provider IDs; `foundry_local` and in-process variants
-share the same ID with different backend modes.)
+(The registry exposes 13 provider IDs; the `router` is a virtual provider that
+selects a downstream model based on request characteristics.)
 
 #### Provider Features
 
@@ -449,6 +453,7 @@ share the same ID with different backend modes.)
 | **Tool calling** | Providers that support function calling receive tool schemas |
 | **Vision** | Image inputs passed when the model reports vision capability |
 | **Reasoning levels** | Anthropic/OpenAI thinking blocks map to `low`/`medium`/`high` |
+| **Model routing** | `router` provider classifies prompts and picks a downstream provider/model/tier |
 
 #### Anthropic Models
 
@@ -509,7 +514,7 @@ share the same ID with different backend modes.)
 The tool system is the primary way agents interact with the world. Each tool
 has a JSON schema, a permission category, and an async `execute` method.
 
-#### File Operations Tools (15)
+#### File Operations Tools (16)
 
 | Tool | Purpose |
 |------|---------|
@@ -535,14 +540,17 @@ has a JSON schema, a permission category, and an async `execute` method.
 |-------|---------|
 | `read_file` | `read` |
 | `write_file` | `write` |
+| `update_file` | `write` |
 | `delete_file` | `rm` |
 | `apply_patch` | `patch` |
+| `multiedit` | `multi_edit` (legacy parameter normalisation) |
 
-#### Execution Tools (4)
+#### Execution Tools (5)
 
 | Tool | Purpose |
 |------|---------|
 | `bash` | Run a shell command with 7-layer safety |
+| `run_code` | Alias for `bash`; accepts `code`/`command` |
 | `bash_reset` | Reset persistent shell state |
 | `calculator` | Evaluate mathematical expressions |
 | `open` | Open/reveal files, folders, or URLs in the desktop environment |
@@ -556,34 +564,36 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `todo_read` | List session TODOs |
 | `todo_write` | Add/update/remove session TODOs |
 
-#### Utility Tools (3)
+#### Utility Tools (2)
 
 | Tool | Purpose |
 |------|---------|
 | `get_env` | Read non-sensitive environment variables |
-| `question` | *(legacy alias; use `ask_user`)* |
-| `execute_python` | *(deprecated; removed)* |
+| `calculator` | Evaluate mathematical expressions |
 
 ### 3.2.1 Tool System Categories Summary
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| File operations | `read`, `write`, `create`, `edit`, `multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 16 |
-| Shell / execution | `bash`, `bash_reset`, `calculator`, `open` | 4 |
-| Search | `grep`, `codeindex_*` | 6 |
-| Web | `webfetch`, `websearch`, `http_request`, `browser` | 4 |
+| File operations | `read`, `write`/`create`/`update_file`, `edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 18 |
+| Shell / execution | `bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
+| Search | `grep`, `agentgrep`, `codeindex_*` | 7 |
+| Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `browser`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` | 10 |
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
-| Teams | 20 team lifecycle/task/message tools | 20 |
+| Teams | 19 team lifecycle/task/message tools | 19 |
 | Sub-agents | `new_task`, `cancel_task`, `list_tasks`, `wait_tasks`, `task_complete` | 5 |
-| VCS | 29 GitHub/GitLab issue/PR/MR/pipeline tools | 29 |
+| VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
 | Office / PDF | `office_read/write/info`, `libre_read/write/info`, `pdf_read/write` | 8 |
+| External messaging | `gmail`, `send_channel_message` | 2 |
 | MCP | `mcp_tool` | 1 |
 | Planning | `plan_enter`, `plan_exit` | 2 |
+| Background tasks | `bg` | 1 |
+| Initiatives / skills | `initiative`, `skill_manage` | 2 |
 | Interactive | `ask_user`, `think`, `todo_read`, `todo_write` | 4 |
 | Utility | `get_env`, `calculator` | 2 |
 
-#### Team Tools (20)
+#### Team Tools (19)
 
 | Tool | Purpose |
 |------|---------|
@@ -603,7 +613,34 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `team_idle` | Signal no more work |
 | `team_shutdown_teammate` | Request teammate shutdown |
 | `team_shutdown_ack` | Acknowledge shutdown request |
+| `team_wait` | Block until teammates finish |
 | `team_cleanup` | Delete team on-disk state |
+
+#### Background Shell Task Tool (1)
+
+| Tool | Purpose |
+|------|---------|
+| `bg` | Spawn, monitor, tail, and cancel long-running shell commands in the background. Actions: `spawn`, `list`, `status`, `output`, `tail`, `cancel`, `wait`, `cleanup`. |
+
+#### Agent Search Tool (1)
+
+| Tool | Purpose |
+|------|---------|
+| `agentgrep` | Structure-aware code search that returns symbol boundaries, file outlines, and displacement from already-read regions. |
+
+#### External Messaging Tools (2)
+
+| Tool | Purpose |
+|------|---------|
+| `gmail` | Gmail search/read/draft/send via REST API with encrypted OAuth2 token storage. |
+| `send_channel_message` | Send notifications to Telegram/Discord channels. |
+
+#### Durable Initiatives & Skill Management Tools (2)
+
+| Tool | Purpose |
+|------|---------|
+| `initiative` | Create, checkpoint, list, and close durable project-scoped goals with milestones. |
+| `skill_manage` | List, read, load, and reload skill packs at runtime. |
 
 #### Browser Automation Tool (1)
 
@@ -875,10 +912,14 @@ The format is compatible with OpenCode's `opencode.json`.
         }
       }
     },
-    "foundry_local": {
-      "in_process": false,
-      "device": "auto",
-      "models_path": "..."
+    "router": {
+      "enabled": true,
+      "tiers": {
+        "SIMPLE": { "models": [{"provider": "ollama", "model": "phi4"}] },
+        "MEDIUM": { "models": [{"provider": "anthropic", "model": "claude-sonnet-4-20250514"}] },
+        "COMPLEX": { "models": [{"provider": "openai", "model": "gpt-4o"}] },
+        "REASONING": { "models": [{"provider": "anthropic", "model": "claude-opus-4-20250514"}] }
+      }
     },
     "azure_resource": {
       "env": ["AZURE_RESOURCE_API_KEY"]
@@ -916,7 +957,9 @@ The format is compatible with OpenCode's `opencode.json`.
     "teams": true,
     "agents": true,
     "plan": true,
-    "codeindex": true
+    "codeindex": true,
+    "masterfetch": true,
+    "browser": true
   },
   "yolo": false,
   "stream": {
@@ -943,6 +986,7 @@ The format is compatible with OpenCode's `opencode.json`.
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_REGION` | Amazon Bedrock |
 | `XAI_API_KEY` | xAI Grok |
 | `RAGENT_FOUNDRY_LOCAL_FORCE_WEB` | Force Foundry Local web-service path |
+| `LANGSEARCH_API_KEY` | Web search (LangSearch) |
 | `TAVILY_API_KEY` | Web search (Tavily) |
 
 ### 5.4 Compaction Configuration
@@ -1032,12 +1076,13 @@ The TUI is a ratatui full-screen interface with these panels:
 | Command | Description |
 |---------|-------------|
 | `/quit` / `/q` | Exit ragent |
-| `/provider` | Open provider setup dialog |
-| `/model` | Select model |
+| `/provider` | Open provider setup dialog (always allows editing the stored key) |
+| `/model` | Select model (jumps to model list when a provider is already configured) |
 | `/agent` | Select agent |
 | `/agents` | List loaded agents and diagnostics |
 | `/websearch show` | Show web-search engine diagnostics (enabled / in-use / failed) |
 | `/websearch help` | Show `/websearch` subcommand help |
+| `/websearch test` | Test configured web-search backends |
 | `/webapi enable\|disable\|help` | Manage the HTTP REST API |
 | `/tools` | Toggle tool visibility |
 | `/codeindex on\|off` | Enable/disable code index |
@@ -1045,6 +1090,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
+| `/todo` | Open the TODO side panel (also Alt+T) |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
@@ -1053,15 +1099,20 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/team cleanup` | Tear down current team |
 | `/team message ...` | Send team message |
 | `/swarm <prompt>` | Decompose prompt into parallel subtasks |
+| `/swarm status` | Show active swarm tasks |
+| `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
 | `/spec list\|search\|show\|impl\|implement` | Spec lifecycle commands |
-| `/research create\|list\|show\|search\|delete` | Research commands |
+| `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
 | `/config list` | Interactive picker to restore a saved backup |
 | `/init config` | Create a default `ragent.json` in the global config directory |
+| `/startup` | Show per-stage startup timing instrumentation |
+| `/telemetry help\|on\|off\|setup\|counters` | Manage OpenTelemetry metrics export |
 | `/dirs` | Show configured writable directories |
 | `/profile` / `/theme` / `/status` / `/mouse` | UI preferences |
+| `/skill` / `/skills` | Load or inspect skill packs |
 | `/mcp discover\|list\|call` | MCP server commands |
 | `/opt <method> <prompt>` | Optimize a prompt |
 | `/update` / `/update install` | Auto-update (reserved; not implemented) |
@@ -1392,7 +1443,9 @@ Every `RESEARCH.md` contains:
 |---------|---------|
   | `/research create <name> <topic>` | Gather sources and write `RESEARCH.md` |
   | `/research create <name> <topic> --iterations N --depth shallow|standard|deep --format ...` | Iterative research with controls |
-  | `/research create <name> --from-url <URL>` | Fetch the URL, use its content as the research subject (in place of a topic), and capture it as the primary source; web search still runs |
+  | `/research create <name> --from-url <URL>` | Fetch the URL, use it as the research subject and capture it as the primary source |
+  | `/research create <name> --from-file <PATH>` | Extract a local document and use it as the research subject |
+  | `/research create ... --use-low-relevance` | Retain low-relevance web sources |
   | `/research continue <name> [message]` | Resume an in-progress research item |
   | `/research list` | List research items |
   | `/research open <name>` | Show the path to `RESEARCH.md` |
@@ -2141,6 +2194,27 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.1.0-beta.28 | 2026-08-01 | Fixed GitHub release workflow permissions (`contents: write`) so tag-triggered releases can publish assets |
+| v0.1.0-beta.27 | 2026-08-01 | CI runner optimisation: `ubuntu-latest-4-cores`, disabled debuginfo, free-disk-space cleanup |
+| v0.1.0-beta.26 | 2026-08-01 | Version bump |
+| v0.1.0-beta.25 | 2026-08-01 | Disabled `.rpm` package builds in release workflow |
+| v0.1.0-beta.24 | 2026-08-01 | Disabled `.deb` package builds in release workflow |
+| v0.1.0-beta.23 | 2026-08-01 | Added `.github/workflows/release.yml` triggered on `v*` tags; packages built with `cargo-deb`/`cargo-generate-rpm` and published via `softprops/action-gh-release@v2` |
+| v0.1.0-beta.22 | 2026-07-31 | `/provider` always allows editing API keys; `/model` jumps straight to model list; key/token fields unmasked; research `--use-low-relevance` |
+| v0.1.0-beta.21 | 2026-07-30 | Compaction bail paths publish `AgentNotice`; post-compaction continuation nudge; autopilot stops after `task_complete`; router downstream model/tier status bar; synthetic `Finish`; autopilot status indicator |
+| v0.1.0-beta.20 | 2026-07-29 | Research `--from-file` local-document seeding; control-character sanitisation; `html2text` panic catch-up |
+| v0.1.0-beta.19 | 2026-07-28 | Clean trailing newlines on startup messages |
+| v0.1.0-beta.18 | 2026-07-28 | Startup blocking fixed: MCP, code-index, provider health checks run in background; `/startup` timings; first keystroke after cost banner not swallowed; code-index WAL mode and direct `file_id` queries |
+| v0.1.0-beta.17 | 2026-07-27 | `@<path>` instruction-file includes; `open` tool completion; durable `initiative` and `skill_manage` tools |
+| v0.1.0-beta.16 | 2026-07-26 | `conversation_search` and `session_search` tools; message FTS5 and optional embeddings |
+| v0.1.0-beta.15 | 2026-07-25 | `browser` tool with CDP automation (14 actions) |
+| v0.1.0-beta.14 | 2026-07-24 | `apply_patch` Codex-style patch tool; TUI read-tool header fixes |
+| v0.1.0-beta.13 | 2026-07-23 | JCode cost accounting; tool widget fixes |
+| v0.1.0-beta.12 | 2026-07-22 | `Event::RunCostSummary` per-run cost summary with persistence and `--include-cost` export; research `mf_fetch`/PDF/YouTube/excluded counts |
+| v0.1.0-beta.11 | 2026-07-21 | Tavily backend moved into `mf_search` multi-engine framework |
+| v0.1.0-beta.10 | 2026-07-20 | Version bump |
+| v0.1.0-beta.9 | 2026-07-19 | `/websearch` diagnostics; Tavily and LangSearch search backends; research source provenance |
+| v0.1.0-beta.8 | 2026-07-18 | Version bump |
 | v0.1.0-alpha.130 | 2026-07-04 | TODO side panel (Alt+T); agentic-loop performance upgrade (PERFPLAN.md milestones A–F, 26 findings + 5 measurement tasks); MockLlmClient criterion benchmarks; `/perf` TUI alias |
 | v0.1.0-alpha.129 | 2026-07-04 | Compression made permanent (removed `compression`/`compression-ml` feature flags); context-compression pipeline always compiled in |
 | v0.1.0-alpha.128 | 2026-07-04 | Eliminated all 279 compiler warnings across build, tests, benches, and examples |
@@ -2368,3 +2442,34 @@ the `ragent.json` keys through to the engine (reading the config at session
 construction and calling `with_persona` / populating `few_shot_examples`) is
 tracked as a follow-up; until that wiring lands, the keys are documented so
 callers and integrators know the intended surface.
+
+## Appendix F: Changelog (v0.1.0-beta.1 → v0.1.0-beta.28)
+
+### Added (beta.2–beta.28)
+- **Release packaging** — Tag-triggered `release.yml` workflow builds the `ragent` binary and generates `.deb`/`.rpm` packages; the release body is extracted from `CHANGELOG.md` and published via `softprops/action-gh-release@v2` (beta.23)
+- **CI hardening** — `ubuntu-latest-4-cores` runner, disabled debuginfo, `free-disk-space` cleanup, and `contents: write` permission fix for GitHub Release creation (beta.25–beta.28)
+- **Provider setup UX** — `/provider` always opens the key-entry dialog so existing API keys can be edited; `/model` skips the provider picker when a provider is already configured; API-key and GitLab-token fields shown unmasked in a wider dialog (beta.22)
+- **Research seeding & enrichment** — `--from-file` local-document seeding (PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, MD); `--from-url` URL seeding; `--use-low-relevance` flag; PDF and YouTube text extraction; excluded-source counts; `search_tool`/`search_engine` provenance; `mf_fetch` used as the preferred fetch path (beta.9–beta.22)
+- **Research resilience** — Control-character sanitisation in `RESEARCH.md`; `html2text` panic caught and degraded to raw text; source citations stripped of redundant `mf_fetch:` header (beta.12–beta.20)
+- **Context compaction reliability** — Bail paths publish `AgentNotice` instead of silently failing; post-compaction continuation nudge threaded across loop iterations; compaction prompt cap reduced to 60 k chars; pre-serialised head reused for token-cost calculation (beta.18, beta.21)
+- **Autopilot & router fixes** — Autopilot auto-continue suppressed after `task_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
+- **Startup responsiveness** — MCP server connections, code-index open/watcher/reindex, and provider health checks moved to background tasks; `/startup` slash command shows per-stage timing; first printable keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
+- **Code-index performance** — SQLite `WAL` mode, `synchronous = NORMAL`, `temp_store = MEMORY`; direct `file_id` symbol queries; reindex chunk yield reduced to 1 ms; per-phase timing logs (beta.18)
+- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `agentgrep` structure-aware search; `initiative` durable goals; `skill_manage` runtime skill control; `gmail` and `send_channel_message` external integrations; six `mf_*` MasterFetch tools (beta.12–beta.17)
+- **Cost accounting** — `Event::RunCostSummary` published per turn; persisted to SQLite `run_cost_summaries`; TUI banner overlay; `--include-cost` session export flag; HTTP SSE `run_cost_summary` event (beta.12)
+- **Telemetry & operator tools** — OpenTelemetry metrics export, `/telemetry` slash family, ALT-O telemetry panel, `sudo` askpass broker, `askpass` environment wiring (beta.2–beta.5)
+- **Instruction-file includes** — `@<path>` directive with cycle detection, depth cap, escape sequences, and path containment checks (beta.17)
+
+### Changed (beta.2–beta.28)
+- Provider registry now exposes 13 IDs including `router`; `foundry_local` is no longer a standalone registry entry (its functionality is accessed via the router/backend configuration)
+- Tool count grew to ~150 registered tools across 18 categories, including aliases for commonly hallucinated names (`update_file`, `run_code`, `ask_user`, `multiedit`)
+- Web-search stack now prefers the multi-engine `mf_search` tool (DuckDuckGo, Brave, Tavily, LangSearch) over legacy `websearch`
+- `.deb` and `.rpm` packaging temporarily disabled in CI while build paths are reviewed (beta.24–beta.25)
+
+### Fixed (beta.8–beta.22)
+- Skill discovery tests isolated by `SkillScope` and `bundled_count()` to avoid test fragility
+- Doctest build breakages in `session::permissions` and `tool::ToolRegistry`
+- TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls
+- `agentgrep` clippy warnings
+- `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
+
