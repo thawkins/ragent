@@ -13,7 +13,11 @@ env:
 jobs:
   check-and-test:
     name: Check & Test (default features)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
+    env:
+      # Disable debuginfo in test builds to reduce disk usage on large workspaces.
+      CARGO_PROFILE_TEST_DEBUG: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v4
       - uses: jlumbroso/free-disk-space@main
