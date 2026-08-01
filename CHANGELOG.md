@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.25
+
+### Changed — CI package builds
+
+- Disabled `.rpm` package builds in the release workflow; only the plain binary
+  is now published. Both Debian and RPM packaging are temporarily disabled
+  while the packaging build paths are reviewed.
+
 ## Version: 0.1.0-beta.24
 
 ### Changed — CI package builds

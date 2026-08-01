@@ -1,5 +1,13 @@
 # Release Notes
 
+## v0.1.0-beta.25 — disable rpm packages
+
+### Changed — CI package builds
+
+- Disabled `.rpm` package builds in the release workflow; only the plain binary
+  is now published. Both Debian and RPM packaging are temporarily disabled
+  while the packaging build paths are reviewed.
+
 ## v0.1.0-beta.24 — disable debian builds
 
 ### Changed — CI package builds
