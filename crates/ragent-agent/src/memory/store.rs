@@ -1,9 +1,8 @@
 //! Structured memory store with categories, tags, and confidence scoring.
 //!
-//! Unlike the file-based [`MemoryBlock`](super::block::MemoryBlock) system
-//! which stores freeform Markdown, structured memories are individual facts,
-//! patterns, preferences, insights, errors, or workflows stored in SQLite
-//! with metadata (category, confidence, tags, source).
+//! Structured memories are individual facts, patterns, preferences, insights,
+//! errors, or workflows stored in SQLite with metadata (category, confidence,
+//! tags, source).
 //!
 //! # Categories
 //!

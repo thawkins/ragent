@@ -761,7 +761,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "memory",
-        description: "Memory panel (Alt+M): /memory | /memory show | /memory read <label> | /memory search <query>",
+        description: "Memory panel (Alt+M): /memory | /memory show | /memory init | /memory read <label> | /memory search <query>",
     },
     SlashCommandDef {
         trigger: "github",
@@ -1516,17 +1516,7 @@ pub struct App {
     /// Bearer token for the HTTP API. Randomly generated on `/webapi enable`.
     pub webapi_token: Option<String>,
 
-    // ── Memory browser (M7-T1) ────────────────────────────────────────────────
-    /// Active memory browser overlay, if visible.
-    pub memory_browser: Option<crate::panels::MemoryBrowserState>,
-    /// Cached click target for memory browser close button.
-    pub memory_browser_close_area: Rect,
-    /// Render area for memory browser content.
-    pub memory_browser_area: Rect,
-
     // ── Memory status (M7-T3) ─────────────────────────────────────────────────
-    /// Cached count of memory blocks (global + project).
-    pub memory_block_count: usize,
     /// Cached count of structured memories (SQLite).
     pub memory_entry_count: u64,
     /// Timestamp of the last memory update event (for relative time display).

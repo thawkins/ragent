@@ -95,12 +95,10 @@ impl Tool for MemoryStoreTool {
 
         StructuredMemory::validate_tags(&tags).map_err(|e| anyhow::anyhow!("Invalid tags: {e}"))?;
 
-        let project = ctx
-            .working_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        // Use the full canonical working directory path as the project key so
+        // that stored memories are discoverable by UI panels and slash commands
+        // that query by `std::env::current_dir()` (e.g. the TUI memory panel).
+        let project = ctx.working_dir.to_string_lossy().to_string();
 
         let storage = ctx
             .storage

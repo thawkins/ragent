@@ -76,29 +76,6 @@ fn add_auth(req: axum::http::request::Builder, token: &str) -> axum::http::reque
 // ── Memory Block Endpoints ────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_memory_blocks_requires_auth() {
-    let app = router(test_state("secret"));
-    let req = Request::builder()
-        .uri("/memory/blocks")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn test_memory_blocks_list_empty() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .uri("/memory/blocks")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-}
-
-#[tokio::test]
 async fn test_memory_search_requires_auth() {
     let app = router(test_state("secret"));
     let req = Request::builder()
@@ -216,33 +193,6 @@ async fn test_memory_forget_not_found() {
     let req = Request::builder()
         .method("DELETE")
         .uri("/memory/9999")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-// ── Memory Block CRUD ──────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_memory_block_get_not_found() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .uri("/memory/blocks/nonexistent")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn test_memory_block_delete_not_found() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .method("DELETE")
-        .uri("/memory/blocks/nonexistent")
         .header("Authorization", "Bearer tok")
         .body(Body::empty())
         .unwrap();

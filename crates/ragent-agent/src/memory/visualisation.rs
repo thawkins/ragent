@@ -13,9 +13,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::memory::storage::BlockStorage;
 use crate::storage::Storage;
-use std::path::PathBuf;
 
 // ── Data structures ───────────────────────────────────────────────────────────
 
@@ -114,22 +112,16 @@ pub struct VisualisationData {
 
 // ── Generation functions ─────────────────────────────────────────────────────
 
-/// Generate the complete visualisation data for structured memories and blocks.
+/// Generate the complete visualisation data for structured memories.
 ///
 /// # Arguments
 ///
 /// * `storage` - SQLite storage backend.
-/// * `block_storage` - File-based block storage backend.
-/// * `working_dir` - Current project working directory.
 ///
 /// # Returns
 ///
 /// A `VisualisationData` struct containing all visualisation components.
-pub fn generate_visualisation(
-    storage: &Storage,
-    _block_storage: &dyn BlockStorage,
-    _working_dir: &PathBuf,
-) -> anyhow::Result<VisualisationData> {
+pub fn generate_visualisation(storage: &Storage) -> anyhow::Result<VisualisationData> {
     let graph = generate_graph(storage)?;
     let tag_cloud = generate_tag_cloud(storage)?;
     let heatmap = generate_heatmap(storage)?;

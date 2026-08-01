@@ -74,6 +74,19 @@ async fn test_memory_store_persists_content_and_tags() {
 
     let tags = storage.get_memory_tags(id).expect("tags");
     assert_eq!(tags, vec!["error-handling", "rust"]);
+
+    // Regression guard (TUI memory panel uses the full working directory as
+    // the project key). Storing only the directory basename would make the
+    // memory invisible in the panel and `/memory show`.
+    assert_eq!(
+        row.project, "/tmp",
+        "project should be the full working directory path"
+    );
+    let listed = storage.list_memories("/tmp", 10).expect("list");
+    assert!(
+        listed.iter().any(|r| r.id == id),
+        "memory should be listable by full project path"
+    );
 }
 
 #[tokio::test]

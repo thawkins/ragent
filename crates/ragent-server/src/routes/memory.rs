@@ -1,58 +1,31 @@
 //! Memory REST endpoints for the ragent HTTP server.
 //!
-//! Provides CRUD operations for both file-based memory blocks and
-//! SQLite-backed structured memories.
+//! Provides CRUD operations for SQLite-backed structured memories.
 //!
 //! # Endpoints
 //!
 //! | Method | Path | Description |
 //! |--------|------|-------------|
-//! | GET | `/memory/blocks` | List all memory blocks |
-//! | GET | `/memory/blocks/{label}` | Read a specific block |
-//! | PUT | `/memory/blocks/{label}` | Create or update a block |
-//! | DELETE | `/memory/blocks/{label}` | Delete a block |
 //! | GET | `/memory/search` | Search structured memories (FTS5) |
 //! | POST | `/memory/store` | Store a new structured memory |
 //! | DELETE | `/memory/{id}` | Forget (delete) a structured memory |
-
-use std::path::PathBuf;
+//! | GET | `/memory/visualisation` | Full visualisation bundle |
+//! | GET | `/memory/visualisation/graph` | Category relationship graph |
+//! | GET | `/memory/visualisation/tags` | Tag cloud |
+//! | GET | `/memory/visualisation/heatmap` | Access pattern heatmap |
 
 use axum::{
     Json,
     extract::{Path, Query, State},
     http::StatusCode,
-    routing::{delete, get},
+    routing::{delete, get, post},
 };
-use ragent_agent::{
-    event::Event,
-    memory::{BlockScope, BlockStorage, FileBlockStorage, load_all_blocks},
-};
+use ragent_agent::event::Event;
 use serde::{Deserialize, Serialize};
 
 use super::AppState;
 
 // ── Response types ───────────────────────────────────────────────────
-
-/// JSON representation of a memory block (API response).
-#[derive(Serialize)]
-pub struct BlockResponse {
-    /// Block label (filename stem).
-    pub label: String,
-    /// Human-readable description.
-    pub description: String,
-    /// Storage scope: "global" or "project".
-    pub scope: String,
-    /// Maximum content size in bytes (0 = unlimited).
-    pub limit: usize,
-    /// Whether the block is read-only.
-    pub read_only: bool,
-    /// ISO 8601 creation timestamp.
-    pub created_at: String,
-    /// ISO 8601 last-updated timestamp.
-    pub updated_at: String,
-    /// Markdown content of the block.
-    pub content: String,
-}
 
 /// JSON representation of a structured memory (API response).
 #[derive(Serialize)]
@@ -78,35 +51,13 @@ pub struct MemoryResponse {
     /// Number of times accessed in search results.
     pub access_count: i64,
     /// ISO 8601 timestamp of last access.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub last_accessed: Option<String>,
     /// Tags attached to this memory.
     pub tags: Vec<String>,
 }
 
 // ── Request types ─────────────────────────────────────────────────────
-
-/// Request body for `PUT /memory/blocks/{label}`.
-#[derive(Deserialize)]
-pub struct PutBlockRequest {
-    /// Markdown content for the block.
-    pub content: String,
-    /// Optional scope override: "global" or "project" (default: "project").
-    #[serde(default = "default_scope")]
-    pub scope: String,
-    /// Optional description.
-    #[serde(default)]
-    pub description: String,
-    /// Optional content size limit in bytes (0 = unlimited).
-    #[serde(default)]
-    pub limit: usize,
-    /// Optional read-only flag.
-    #[serde(default)]
-    pub read_only: bool,
-}
-
-fn default_scope() -> String {
-    "project".to_string()
-}
 
 /// Request body for `POST /memory/store`.
 #[derive(Deserialize)]
@@ -163,38 +114,6 @@ const fn default_limit() -> usize {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-/// Parse a scope string into a `BlockScope`.
-fn parse_scope(s: &str) -> Result<BlockScope, (StatusCode, Json<serde_json::Value>)> {
-    match s.to_lowercase().as_str() {
-        "global" | "user" => Ok(BlockScope::Global),
-        "project" => Ok(BlockScope::Project),
-        _ => Err(error_response(
-            StatusCode::BAD_REQUEST,
-            format!("Invalid scope '{s}'. Use 'global' or 'project'."),
-        )),
-    }
-}
-
-/// Convert a `MemoryBlock` into a JSON-friendly response.
-fn block_to_response(
-    scope: &BlockScope,
-    block: &ragent_agent::memory::MemoryBlock,
-) -> BlockResponse {
-    BlockResponse {
-        label: block.label.clone(),
-        description: block.description.clone(),
-        scope: match scope {
-            BlockScope::Global => "global".to_string(),
-            BlockScope::Project => "project".to_string(),
-        },
-        limit: block.limit,
-        read_only: block.read_only,
-        created_at: block.created_at.to_rfc3339(),
-        updated_at: block.updated_at.to_rfc3339(),
-        content: block.content.clone(),
-    }
-}
-
 /// Convert a `MemoryRow` and its tags into a JSON-friendly response.
 fn memory_row_to_response(
     row: &ragent_agent::storage::MemoryRow,
@@ -216,161 +135,7 @@ fn memory_row_to_response(
     }
 }
 
-/// Get the current working directory for block storage resolution.
-fn working_dir() -> PathBuf {
-    std::env::current_dir().unwrap_or_default()
-}
-
 // ── Handlers ──────────────────────────────────────────────────────────
-
-/// `GET /memory/blocks` — list all memory blocks (global + project).
-pub async fn list_blocks(State(_state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    let storage = FileBlockStorage::new();
-    let wd = working_dir();
-    let blocks = load_all_blocks(&storage, &wd);
-
-    let responses: Vec<BlockResponse> = blocks
-        .iter()
-        .map(|(scope, block)| block_to_response(scope, block))
-        .collect();
-
-    serialize_response(responses, "list_blocks")
-}
-
-/// `GET /memory/blocks/{label}` — read a specific memory block.
-pub async fn get_block(
-    State(_state): State<AppState>,
-    Path(label): Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let storage = FileBlockStorage::new();
-    let wd = working_dir();
-
-    // Try project scope first, then global.
-    let result = storage
-        .load(&label, &BlockScope::Project, &wd)
-        .ok()
-        .flatten()
-        .map(|b| (BlockScope::Project, b))
-        .or_else(|| {
-            storage
-                .load(&label, &BlockScope::Global, &wd)
-                .ok()
-                .flatten()
-                .map(|b| (BlockScope::Global, b))
-        });
-
-    match result {
-        Some((scope, block)) => serialize_response(block_to_response(&scope, &block), "get_block"),
-        None => error_response(StatusCode::NOT_FOUND, format!("Block '{label}' not found")),
-    }
-}
-
-/// `PUT /memory/blocks/{label}` — create or update a memory block.
-pub async fn put_block(
-    State(state): State<AppState>,
-    Path(label): Path<String>,
-    Json(body): Json<PutBlockRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    // Validate label
-    if ragent_agent::memory::MemoryBlock::validate_label(&label).is_err() {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            format!("Invalid label '{label}'. Use lowercase alphanumeric with hyphens."),
-        );
-    }
-
-    let scope = match parse_scope(&body.scope) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    let wd = working_dir();
-    let storage = FileBlockStorage::new();
-
-    // Load existing block to preserve metadata, or create new
-    let mut block = match storage.load(&label, &scope, &wd) {
-        Ok(Some(existing)) => existing,
-        _ => ragent_agent::memory::MemoryBlock::new(&label, scope.clone()),
-    };
-
-    // Check read-only before modifying
-    if block.read_only {
-        return error_response(
-            StatusCode::FORBIDDEN,
-            format!("Block '{label}' is read-only"),
-        );
-    }
-
-    block.scope = scope;
-    block.content = body.content;
-    if !body.description.is_empty() {
-        block.description = body.description;
-    }
-    if body.limit > 0 {
-        block.limit = body.limit;
-    }
-    if body.read_only {
-        block.read_only = true;
-    }
-    block.updated_at = chrono::Utc::now();
-
-    match storage.save(&block, &wd) {
-        Ok(()) => {
-            state.event_bus.publish(Event::MemoryStored {
-                session_id: "api".to_string(),
-                id: 0, // Block operations don't have numeric IDs
-                category: "block".to_string(),
-            });
-            serialize_response(block_to_response(&block.scope, &block), "put_block")
-        }
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to save block: {e}"),
-        ),
-    }
-}
-
-/// `DELETE /memory/blocks/{label}` — delete a memory block.
-pub async fn delete_block(
-    State(state): State<AppState>,
-    Path(label): Path<String>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    let storage = FileBlockStorage::new();
-    let wd = working_dir();
-
-    // Try project scope first, then global.
-    let scope = if storage
-        .load(&label, &BlockScope::Project, &wd)
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        BlockScope::Project
-    } else if storage
-        .load(&label, &BlockScope::Global, &wd)
-        .ok()
-        .flatten()
-        .is_some()
-    {
-        BlockScope::Global
-    } else {
-        return error_response(StatusCode::NOT_FOUND, format!("Block '{label}' not found"));
-    };
-
-    match storage.delete(&label, &scope, &wd) {
-        Ok(()) => {
-            state.event_bus.publish(Event::MemoryForgotten {
-                session_id: "api".to_string(),
-                count: 1,
-            });
-            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
-        }
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to delete block: {e}"),
-        ),
-    }
-}
 
 /// `GET /memory/search` — search structured memories (FTS5).
 pub async fn search_memories(
@@ -519,7 +284,7 @@ pub async fn forget_memory(
     }
 }
 
-// ── Helpers (shared with parent module) ───────────────────────────────
+// ── Helpers (shared with parent module) ──────────────────────────��────
 
 /// Standardized error JSON response.
 fn error_response(
@@ -545,13 +310,7 @@ fn serialize_response<T: serde::Serialize>(
 
 /// Register memory routes on an Axum router.
 pub fn memory_routes() -> axum::Router<AppState> {
-    use axum::routing::post;
     axum::Router::new()
-        .route("/blocks", get(list_blocks))
-        .route(
-            "/blocks/{label}",
-            get(get_block).put(put_block).delete(delete_block),
-        )
         .route("/search", get(search_memories))
         .route("/store", post(store_memory))
         .route("/{id}", delete(forget_memory))
@@ -560,17 +319,13 @@ pub fn memory_routes() -> axum::Router<AppState> {
         .route("/visualisation/tags", get(get_visualisation_tags))
         .route("/visualisation/heatmap", get(get_visualisation_heatmap))
 }
-// ── Visualisation endpoints ──────────────────────────────────────────────────
+// ���─ Visualisation endpoints ──────────────────────────────────────────────────
 
 /// GET /memory/visualisation — Generate visualisation data for all memories.
 pub async fn get_visualisation(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    let block_storage = FileBlockStorage::new();
-    let working_dir = working_dir();
-
-    match ragent_agent::memory::generate_visualisation(&state.storage, &block_storage, &working_dir)
-    {
+    match ragent_agent::memory::generate_visualisation(&state.storage) {
         Ok(data) => serialize_response(data, "visualisation"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,

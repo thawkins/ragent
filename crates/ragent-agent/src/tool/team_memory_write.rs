@@ -1,12 +1,18 @@
-//! `team_memory_write` — Write a file to the agent's persistent memory directory.
+//! `team_memory_write` — Write structured memories for a team.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{MemoryScope, TeamStore, find_team_dir, resolve_memory_dir};
+use crate::memory::store::StructuredMemory;
+use crate::team::{MemoryScope, TeamStore, find_team_dir};
 
-/// Write (or append to) a file in the calling agent's persistent memory directory.
+/// Write (or append to) a structured memory in the team's SQLite store.
+///
+/// The optional `path` parameter is normalised into a tag (`path-<slug>`) so
+/// teammates can partition notes into named buckets. Defaults to `path-memory`.
+/// In `overwrite` mode the most recent memory in the same bucket is updated;
+/// in `append` mode a new memory is always created.
 pub struct TeamMemoryWriteTool;
 
 #[async_trait::async_trait]
@@ -16,9 +22,9 @@ impl Tool for TeamMemoryWriteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Write or append to a file in your persistent memory directory. \
-         Defaults to MEMORY.md if no path is given. \
-         Use mode 'append' to add to an existing file, or 'overwrite' to replace it."
+        "Write or append a structured memory for your team. \
+         Use `path` to select a memory bucket (default: MEMORY.md). \
+         Mode 'append' creates a new memory; 'overwrite' updates the latest memory in the bucket."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -31,16 +37,16 @@ impl Tool for TeamMemoryWriteTool {
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to write"
+                    "description": "Content to store"
                 },
                 "path": {
                     "type": "string",
-                    "description": "Relative path within the memory directory (default: MEMORY.md)"
+                    "description": "Optional memory bucket/path (default: MEMORY.md)"
                 },
                 "mode": {
                     "type": "string",
                     "enum": ["append", "overwrite"],
-                    "description": "Write mode: 'append' adds to the end (default), 'overwrite' replaces the file"
+                    "description": "Write mode: 'append' creates a new memory (default), 'overwrite' updates the latest in the bucket"
                 }
             },
             "required": ["team_name", "content"]
@@ -62,15 +68,16 @@ impl Tool for TeamMemoryWriteTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content"))?;
 
-        let rel_path = input
+        let path = input
             .get("path")
             .and_then(|v| v.as_str())
             .unwrap_or("MEMORY.md");
-
-        let write_mode = input
+        let mode = input
             .get("mode")
             .and_then(|v| v.as_str())
             .unwrap_or("append");
+
+        let path_tag = path_tag(path);
 
         let agent_id = ctx
             .team_context
@@ -80,7 +87,6 @@ impl Tool for TeamMemoryWriteTool {
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
-        // Look up member to get memory scope and name.
         let store = TeamStore::load(&team_dir)?;
         let member = store
             .config
@@ -89,10 +95,7 @@ impl Tool for TeamMemoryWriteTool {
             .find(|m| m.agent_id == agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent '{agent_id}' not found in team"))?;
 
-        let scope = member.memory_scope;
-        let teammate_name = member.name.clone();
-
-        if scope == MemoryScope::None {
+        if member.memory_scope == MemoryScope::None {
             return Ok(ToolOutput {
                 content: "Memory is not enabled for this agent. \
                           Set `\"memory\": \"user\"` or `\"memory\": \"project\"` in your agent profile."
@@ -101,71 +104,130 @@ impl Tool for TeamMemoryWriteTool {
             });
         }
 
-        let mem_dir = resolve_memory_dir(scope, &teammate_name, &ctx.working_dir)
-            .ok_or_else(|| anyhow::anyhow!("Could not resolve memory directory"))?;
+        let storage = ctx
+            .storage
+            .as_ref()
+            .context("Team memory requires storage (SQLite) but none is available")?;
 
-        // Create directory if it doesn't exist.
-        if !mem_dir.exists() {
-            std::fs::create_dir_all(&mem_dir)
-                .map_err(|e| anyhow::anyhow!("Failed to create memory directory: {e}"))?;
+        // Validate the content is non-empty after trimming.
+        let trimmed = content.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("Memory content cannot be empty");
         }
 
-        let target = mem_dir.join(rel_path);
+        let tags = vec![
+            format!(
+                "path-{}",
+                path_tag.strip_prefix("path-").unwrap_or(&path_tag)
+            ),
+            format!("agent-{}", slugify(&member.name)),
+        ];
 
-        // Validate path doesn't escape memory dir.
-        // Use the now-existing mem_dir for canonical comparison.
-        let canonical_dir = mem_dir.canonicalize().unwrap_or_else(|_| mem_dir.clone());
-        // For new files, check the parent directory.
-        let check_path = if target.exists() {
-            target.canonicalize().unwrap_or_else(|_| target.clone())
-        } else {
-            let parent = target.parent().unwrap_or(&mem_dir);
-            if !parent.exists() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| anyhow::anyhow!("Failed to create subdirectory: {e}"))?;
+        let category = "workflow";
+        let confidence = 0.7;
+
+        if mode == "overwrite" {
+            let memories = storage.list_memories(team_name, 50)?;
+            let mut target_id: Option<i64> = None;
+            for mem in &memories {
+                let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+                if tags.contains(&path_tag) {
+                    target_id = Some(mem.id);
+                    // Keep going to find the most recently updated one.
+                }
             }
-            parent
-                .canonicalize()
-                .unwrap_or_else(|_| parent.to_path_buf())
-                .join(target.file_name().unwrap_or_default())
-        };
-        if !check_path.starts_with(&canonical_dir) {
-            return Ok(ToolOutput {
-                content: format!("Path '{rel_path}' escapes the memory directory."),
-                metadata: Some(json!({ "error": "path_escape" })),
-            });
+
+            if let Some(id) = target_id {
+                storage.update_memory_content(id, trimmed)?;
+                storage.set_memory_tags(id, &tags)?;
+                return Ok(ToolOutput {
+                    content: format!(
+                        "Overwrote memory id {id} in team '{team_name}' bucket '{path}'."
+                    ),
+                    metadata: Some(json!({
+                        "id": id,
+                        "team": team_name,
+                        "path": path,
+                        "path_tag": path_tag,
+                        "mode": "overwrite"
+                    })),
+                });
+            }
         }
 
-        // Write or append.
-        use std::io::Write;
-        let bytes_written = if write_mode == "overwrite" {
-            std::fs::write(&target, content)
-                .map_err(|e| anyhow::anyhow!("Failed to write {rel_path}: {e}"))?;
-            content.len()
-        } else {
-            // append
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&target)
-                .map_err(|e| anyhow::anyhow!("Failed to open {rel_path}: {e}"))?;
-            file.write_all(content.as_bytes())
-                .map_err(|e| anyhow::anyhow!("Failed to append to {rel_path}: {e}"))?;
-            content.len()
-        };
+        // Append (or overwrite with no existing bucket): create a new memory.
+        StructuredMemory::validate_category(category).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let id = storage.create_memory(
+            trimmed,
+            category,
+            "team_memory_write",
+            confidence,
+            team_name,
+            &ctx.session_id,
+            &tags,
+        )?;
 
-        let content_line_count = content.lines().count();
         Ok(ToolOutput {
             content: format!(
-                "Wrote {bytes_written} bytes to '{rel_path}' in memory directory (mode: {write_mode})."
+                "Stored memory id {id} in team '{team_name}' bucket '{path}' (mode: {mode})."
             ),
             metadata: Some(json!({
-                "memory_dir": mem_dir.display().to_string(),
-                "path": rel_path,
-                "mode": write_mode,
-                "byte_count": bytes_written,
-                "line_count": content_line_count
+                "id": id,
+                "team": team_name,
+                "path": path,
+                "path_tag": path_tag,
+                "mode": mode,
+                "category": category,
+                "confidence": confidence,
+                "tags": tags
             })),
         })
+    }
+}
+
+/// Normalise a user-supplied path into a tag-safe bucket identifier.
+fn path_tag(path: &str) -> String {
+    let slug: String = path
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let mut slug = slug.replace("--", "-");
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = if slug.is_empty() { "memory" } else { &slug };
+    format!("path-{slug}")
+}
+
+/// Slugify an arbitrary string for use in a tag.
+fn slugify(s: &str) -> String {
+    let slug: String = s
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let mut slug = slug.replace("--", "-");
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    slug
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{path_tag, slugify};
+
+    #[test]
+    fn test_path_tag_normalisation() {
+        assert_eq!(path_tag("MEMORY.md"), "path-memory-md");
+        assert_eq!(path_tag("Notes / Decisions"), "path-notes-decisions");
+    }
+
+    #[test]
+    fn test_slugify() {
+        assert_eq!(slugify("Alice Smith"), "alice-smith");
     }
 }

@@ -1,5 +1,4 @@
-//! TUI overlay panels for memory browsing.
+//! TUI overlay panels.
 
-pub mod memory_browser;
-
-pub use memory_browser::{MemoryBrowserState, render_memory_browser};
+// Overlay panels live in app/state.rs (OutputViewState / ResearchViewState) and
+// are rendered inline by layout.rs; no separate panel modules remain here.

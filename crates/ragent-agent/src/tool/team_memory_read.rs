@@ -1,12 +1,15 @@
-//! `team_memory_read` — Read a file from the agent's persistent memory directory.
+//! `team_memory_read` — Read structured memories for a team.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{MemoryScope, TeamStore, find_team_dir, resolve_memory_dir};
+use crate::team::{MemoryScope, TeamStore, find_team_dir};
 
-/// Read a file from the calling agent's persistent memory directory.
+/// Read structured memories from the team's SQLite-backed memory store.
+///
+/// The optional `path` parameter is normalised into a tag (`path-<slug>`) so
+/// teammates can partition notes into named buckets. Defaults to `path-memory`.
 pub struct TeamMemoryReadTool;
 
 #[async_trait::async_trait]
@@ -16,9 +19,9 @@ impl Tool for TeamMemoryReadTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read a file from your persistent memory directory. \
-         Defaults to MEMORY.md if no path is given. \
-         Memory persists across sessions — use it to recall prior context."
+        "Read structured memories stored for your team. \
+         The optional `path` parameter selects a labelled memory bucket (default: MEMORY.md). \
+         Use it to recall prior context, decisions, and notes."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -31,7 +34,7 @@ impl Tool for TeamMemoryReadTool {
                 },
                 "path": {
                     "type": "string",
-                    "description": "Relative path within the memory directory (default: MEMORY.md)"
+                    "description": "Optional memory bucket/path to read (default: MEMORY.md)"
                 }
             },
             "required": ["team_name"]
@@ -48,10 +51,11 @@ impl Tool for TeamMemoryReadTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: team_name"))?;
 
-        let rel_path = input
+        let path = input
             .get("path")
             .and_then(|v| v.as_str())
             .unwrap_or("MEMORY.md");
+        let path_tag = path_tag(path);
 
         let agent_id = ctx
             .team_context
@@ -61,7 +65,7 @@ impl Tool for TeamMemoryReadTool {
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
-        // Look up member to get memory scope and name.
+        // Look up member to confirm membership and check memory scope.
         let store = TeamStore::load(&team_dir)?;
         let member = store
             .config
@@ -70,10 +74,7 @@ impl Tool for TeamMemoryReadTool {
             .find(|m| m.agent_id == agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent '{agent_id}' not found in team"))?;
 
-        let scope = member.memory_scope;
-        let teammate_name = member.name.clone();
-
-        if scope == MemoryScope::None {
+        if member.memory_scope == MemoryScope::None {
             return Ok(ToolOutput {
                 content: "Memory is not enabled for this agent. \
                           Set `\"memory\": \"user\"` or `\"memory\": \"project\"` in your agent profile."
@@ -82,45 +83,102 @@ impl Tool for TeamMemoryReadTool {
             });
         }
 
-        let mem_dir = resolve_memory_dir(scope, &teammate_name, &ctx.working_dir)
-            .ok_or_else(|| anyhow::anyhow!("Could not resolve memory directory"))?;
+        let storage = ctx
+            .storage
+            .as_ref()
+            .context("Team memory requires storage (SQLite) but none is available")?;
 
-        // Validate path doesn't escape memory dir.
-        let target = mem_dir.join(rel_path);
-        let canonical_dir = mem_dir.canonicalize().unwrap_or_else(|_| mem_dir.clone());
-        let canonical_target = target.canonicalize().unwrap_or_else(|_| target.clone());
-        if !canonical_target.starts_with(&canonical_dir) {
-            return Ok(ToolOutput {
-                content: format!("Path '{rel_path}' escapes the memory directory."),
-                metadata: Some(json!({ "error": "path_escape" })),
-            });
+        let memories = storage.list_memories(team_name, 50)?;
+        let mut matched: Vec<(i64, String)> = Vec::new();
+        let mut available_paths: Vec<String> = Vec::new();
+
+        for mem in &memories {
+            let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+            for tag in &tags {
+                if tag.starts_with("path-") && !available_paths.contains(tag) {
+                    available_paths.push(tag.clone());
+                }
+            }
+            if tags.contains(&path_tag) {
+                matched.push((
+                    mem.id,
+                    format!(
+                        "[{}] {} (confidence: {:.2})",
+                        mem.category, mem.content, mem.confidence
+                    ),
+                ));
+            }
         }
 
-        if !target.is_file() {
+        if matched.is_empty() {
+            let available = if available_paths.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\nAvailable memory buckets: {}",
+                    available_paths
+                        .iter()
+                        .map(|t| t.strip_prefix("path-").unwrap_or(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
             return Ok(ToolOutput {
-                content: format!("File '{rel_path}' not found in memory directory."),
+                content: format!(
+                    "No memories found for path '{path}' in team '{team_name}'.{available}"
+                ),
                 metadata: Some(json!({
-                    "memory_dir": mem_dir.display().to_string(),
-                    "path": rel_path,
-                    "line_count": 0,
-                    "byte_count": 0,
-                    "exists": false
+                    "team": team_name,
+                    "path": path,
+                    "path_tag": path_tag,
+                    "count": 0
                 })),
             });
         }
-        let content = std::fs::read_to_string(&target)
-            .map_err(|e| anyhow::anyhow!("Failed to read {rel_path}: {e}"))?;
 
-        let line_count = content.lines().count();
-        let byte_count = content.len();
+        let mut output = format!("Memory entries for team '{team_name}' (path: '{path}'):\n\n");
+        for (_id, line) in &matched {
+            output.push_str("- ");
+            output.push_str(line);
+            output.push('\n');
+        }
+
         Ok(ToolOutput {
-            content,
+            content: output,
             metadata: Some(json!({
-                "memory_dir": mem_dir.display().to_string(),
-                "path": rel_path,
-                "line_count": line_count,
-                "byte_count": byte_count
+                "team": team_name,
+                "path": path,
+                "path_tag": path_tag,
+                "count": matched.len()
             })),
         })
+    }
+}
+
+/// Normalise a user-supplied path into a tag-safe bucket identifier.
+fn path_tag(path: &str) -> String {
+    let slug: String = path
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let slug = slug.trim_matches('-');
+    let mut slug = slug.replace("--", "-");
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = if slug.is_empty() { "memory" } else { &slug };
+    format!("path-{slug}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_tag;
+
+    #[test]
+    fn test_path_tag_normalisation() {
+        assert_eq!(path_tag("MEMORY.md"), "path-memory-md");
+        assert_eq!(path_tag("Notes / Decisions"), "path-notes-decisions");
+        assert_eq!(path_tag("--weird__path!!"), "path-weird-path");
     }
 }

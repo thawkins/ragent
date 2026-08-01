@@ -630,17 +630,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
-    // Memory browser: Esc closes the panel
-    if app.memory_browser.is_some() {
-        return match key.code {
-            KeyCode::Esc => {
-                app.memory_browser = None;
-                None
-            }
-            _ => None,
-        };
-    }
-
     match key.code {
         KeyCode::Enter
             if key.modifiers.contains(KeyModifiers::SHIFT)

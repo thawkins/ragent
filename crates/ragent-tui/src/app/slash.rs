@@ -5437,18 +5437,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 }
             }
             "memory" => {
-                let project_mem = std::env::current_dir()
-                    .unwrap_or_default()
-                    .join(".ragent")
-                    .join("memory")
-                    .join("MEMORY.md");
-                let project_analysis = std::env::current_dir()
-                    .unwrap_or_default()
-                    .join(".ragent")
-                    .join("memory")
-                    .join("PROJECT_ANALYSIS.md");
-                let user_mem =
-                    dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+                let project_dir = std::env::current_dir().unwrap_or_default();
 
                 match args.trim() {
                     "show" | "" => {
@@ -5474,62 +5463,69 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                         let mut output = String::from("From: /memory show\n\n");
 
-                        let proj_content = std::fs::read_to_string(&project_mem)
-                            .unwrap_or_else(|_| "(no project memory)".to_string());
-                        output.push_str(&format!(
-                            "## Project Memory ({})\n{}\n\n",
-                            project_mem.display(),
-                            proj_content
-                        ));
-
-                        if project_analysis.exists() {
-                            let analysis =
-                                std::fs::read_to_string(&project_analysis).unwrap_or_default();
-                            output.push_str(&format!("## Project Analysis\n{}\n\n", analysis));
+                        match self.storage.count_memories_for_project(&project_dir) {
+                            Ok(count) => {
+                                output.push_str(&format!("**Structured memories:** {count}\n\n"));
+                            }
+                            Err(e) => {
+                                output.push_str(&format!(
+                                    "⚠️ Could not read structured memories: {e}\n\n"
+                                ));
+                            }
                         }
 
-                        if let Some(path) = user_mem {
-                            let user_content = std::fs::read_to_string(&path)
-                                .unwrap_or_else(|_| "(no user memory)".to_string());
-                            output.push_str(&format!(
-                                "## User Memory ({})\n{}\n\n",
-                                path.display(),
-                                user_content
-                            ));
+                        match self.storage.list_memories_for_project(&project_dir, 50) {
+                            Ok(rows) => {
+                                if rows.is_empty() {
+                                    output.push_str("(no memories for this project)\n");
+                                } else {
+                                    let mut by_category: std::collections::BTreeMap<
+                                        String,
+                                        Vec<&ragent_storage::storage::MemoryRow>,
+                                    > = std::collections::BTreeMap::new();
+                                    for row in &rows {
+                                        by_category
+                                            .entry(row.category.clone())
+                                            .or_default()
+                                            .push(row);
+                                    }
+
+                                    for (category, mems) in &by_category {
+                                        output.push_str(&format!(
+                                            "### {category} ({} entries)\n",
+                                            mems.len()
+                                        ));
+                                        for row in mems {
+                                            let preview = if row.content.len() > 120 {
+                                                format!("{}…", &row.content[..120])
+                                            } else {
+                                                row.content.clone()
+                                            };
+                                            output.push_str(&format!(
+                                                "- **#{id}** `{conf:.2}` {preview}\n",
+                                                id = row.id,
+                                                conf = row.confidence,
+                                            ));
+                                        }
+                                        output.push_str("\n");
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                output.push_str(&format!("⚠️ Could not list memories: {e}\n"));
+                            }
                         }
 
                         self.append_assistant_text(&output);
                     }
-                    sub if sub.starts_with("clear") => {
-                        let scope = sub.strip_prefix("clear").unwrap_or("").trim();
-                        let path = match scope {
-                            "user" => dirs::home_dir()
-                                .map(|h| h.join(".ragent").join("memory").join("MEMORY.md")),
-                            _ => Some(
-                                std::env::current_dir()
-                                    .unwrap_or_default()
-                                    .join(".ragent")
-                                    .join("memory")
-                                    .join("MEMORY.md"),
-                            ),
-                        };
-                        if let Some(p) = path {
-                            if p.exists() {
-                                let _ = std::fs::remove_file(&p);
-                                self.append_assistant_text(&format!(
-                                    "From: /memory clear\nMemory cleared: {}",
-                                    p.display()
-                                ));
-                            } else {
-                                self.append_assistant_text(
-                                    "From: /memory clear\nNo memory file found.",
-                                );
-                            }
-                        }
+                    "help" => {
+                        self.append_assistant_text(
+                            "From: /memory\nUsage: `/memory show` | `/memory help`",
+                        );
                     }
                     _ => {
                         self.append_assistant_text(
-                            "From: /memory\nUsage: `/memory show` | `/memory clear [project|user]`",
+                            "From: /memory\nUsage: `/memory show` | `/memory help`",
                         );
                     }
                 }

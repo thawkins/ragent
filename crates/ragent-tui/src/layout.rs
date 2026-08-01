@@ -31,6 +31,7 @@ use crate::theme;
 use crate::utils::{ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size};
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
+use ragent_storage::storage::MemoryRow;
 
 use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
@@ -2556,16 +2557,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.teams_close_button_area = Rect::default();
     }
 
-    // Memory browser overlay
-    if app.memory_browser.is_some() {
-        crate::panels::render_memory_browser(frame, app);
-    } else {
-        app.memory_browser_close_area = Rect::default();
-        app.memory_browser_area = Rect::default();
-    }
-
     // Internal-LLM chat overlay (rendered above everything except output view).
-
     // Model loading / download progress popups (rendered above normal UI).
     if app.model_loading_state.is_some() {
         render_model_loading_popup(frame, app);
@@ -3359,117 +3351,12 @@ fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Append a memory source section (header + body) to `lines`.
-///
-/// Used by [`render_memory_panel`] to render each of the three memory sources
-/// (project memory, project analysis, user memory) with a consistent property
-/// header line and either the file body or a `(no memory file)` placeholder.
-fn append_memory_source<'a>(
-    lines: &mut Vec<Line<'a>>,
-    title: &str,
-    path: &std::path::Path,
-    scope_label: &'a str,
-    default_scope: ragent_agent::memory::BlockScope,
-) {
-    use ragent_agent::memory::MemoryBlock;
-    use std::fs;
-
-    // Property header (FR-006).
-    let (exists, size, mtime, description, body_text) = match fs::read_to_string(path) {
-        Ok(text) => {
-            let block = MemoryBlock::from_markdown(&text, default_scope);
-            let size = text.len();
-            let mtime = fs::metadata(path)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "-".to_string());
-            let desc = if block.description.is_empty() {
-                String::new()
-            } else {
-                block.description.clone()
-            };
-            (true, size, mtime, desc, block.content.clone())
-        }
-        Err(_) => (false, 0usize, "-".to_string(), String::new(), String::new()),
-    };
-
-    // Header line 1: title + path.
-    lines.push(Line::from(vec![
-        Span::styled(
-            format!("{title} "),
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("({})", path.display()),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
-    // Header line 2: properties (scope, size, mtime, description).
-    let desc_span = if description.is_empty() {
-        Span::raw("")
-    } else {
-        Span::styled(
-            format!("  desc: {description}"),
-            Style::default().fg(Color::DarkGray),
-        )
-    };
-    lines.push(Line::from(vec![
-        Span::styled("scope ", Style::default().fg(Color::DarkGray)),
-        Span::raw(scope_label),
-        Span::raw("  "),
-        Span::styled("size ", Style::default().fg(Color::DarkGray)),
-        Span::raw(format!("{size}B")),
-        Span::raw("  "),
-        Span::styled("mtime ", Style::default().fg(Color::DarkGray)),
-        Span::raw(mtime),
-        desc_span,
-    ]));
-    lines.push(Line::raw(""));
-
-    // Body (FR-015: placeholder for missing files).
-    if exists {
-        for raw in body_text.lines() {
-            lines.push(Line::raw(raw.to_string()));
-        }
-    } else {
-        lines.push(Line::from(Span::styled(
-            "(no memory file)",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-    lines.push(Line::raw(""));
-}
-
 /// Render the Memory side panel (toggled via `Alt+M`).
 ///
-/// Surfaces the same information as the `/memory show` slash command inside a
-/// live, scrollable side panel. Three memory sources are displayed, each with
-/// a property header line (path, scope, byte size, last-modified time, and
-/// description extracted from YAML frontmatter when present):
-///
-/// 1. **Project Memory** — `<working_dir>/.ragent/memory/MEMORY.md` (FR-001)
-/// 2. **Project Analysis** — `<working_dir>/.ragent/memory/PROJECT_ANALYSIS.md`
-///    (rendered only when the file exists)
-/// 3. **User Memory** — `~/.ragent/memory/MEMORY.md`
-///
-/// Missing or unreadable files render a `(no … memory)` placeholder instead of
-/// aborting the whole panel (FR-015). Files are re-read on every render so
-/// external edits are reflected without restarting the TUI (FR-010). A
-/// structured-memory count summary line is rendered at the top when the
-/// SQLite store is available (FR-007). Plain-text content is cached in
-/// `memory_content_lines` for text selection / copy (FR-013), and a vertical
-/// scrollbar is rendered when content overflows the visible height (FR-009).
-///
-/// # Arguments
-/// - `frame` — the ratatui frame to render into.
-/// - `app` — mutable `App` state; reads `memory_scroll_offset` and `storage`;
-///   writes `memory_area`, `memory_max_scroll`, and `memory_content_lines`.
-/// - `area` — the rect allocated to the panel by the side-panel split.
+/// Lists the project's structured memories stored in SQLite, grouped by
+/// category, with a scrollable view. Each entry shows its row id, category,
+/// confidence, and a content preview. The panel also reports the total
+/// memory count and the last refresh time.
 fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -3485,77 +3372,92 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(block, area);
     app.memory_area = area;
 
-    use ragent_agent::memory::BlockScope;
-    use std::path::PathBuf;
-
-    // Resolve the three memory source paths (FR-001).
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let project_mem: PathBuf = cwd.join(".ragent").join("memory").join("MEMORY.md");
-    let project_analysis: PathBuf = cwd
-        .join(".ragent")
-        .join("memory")
-        .join("PROJECT_ANALYSIS.md");
-    let user_mem: Option<PathBuf> =
-        dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
-
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    // Optional structured-memory count summary line at the top of the panel
-    // (FR-007). Rendered only when the SQLite structured-memory store is
-    // available and reports a non-zero count, so the panel stays compact for
-    // projects that have not adopted structured memories yet.
-    if let Ok(count) = app.storage.count_memories() {
-        if count > 0 {
+    let project_dir = std::env::current_dir().unwrap_or_default();
+
+    match app.storage.count_memories_for_project(&project_dir) {
+        Ok(count) => {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Structured memories: ",
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::raw(format!("{count}")),
+            ]));
+        }
+        Err(_) => {
             lines.push(Line::from(Span::styled(
-                format!("Structured memories: {count}"),
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::ITALIC),
+                "Structured memories: (unavailable)",
+                Style::default().fg(Color::DarkGray),
             )));
+        }
+    }
+    lines.push(Line::raw(""));
+
+    let entries = app
+        .storage
+        .list_memories_for_project(&project_dir, 100)
+        .unwrap_or_default();
+    if entries.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "(no memories for this project)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        // Group by category.
+        let mut by_category: std::collections::BTreeMap<&str, Vec<&MemoryRow>> =
+            std::collections::BTreeMap::new();
+        for row in &entries {
+            by_category
+                .entry(row.category.as_str())
+                .or_default()
+                .push(row);
+        }
+
+        for (category, rows) in &by_category {
+            lines.push(Line::from(Span::styled(
+                format!("{category} ({})", rows.len()),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            for row in rows {
+                let preview = if row.content.len() > 80 {
+                    format!("{}…", &row.content[..80])
+                } else {
+                    row.content.clone()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("#{}", row.id), Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("{:.2}", row.confidence),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::raw(" "),
+                    Span::raw(preview),
+                ]));
+
+                let tags = app.storage.get_memory_tags(row.id).unwrap_or_default();
+                if !tags.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::styled("    tags: ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(tags.join(", "), Style::default().fg(Color::Cyan)),
+                    ]));
+                }
+
+                if !row.source.is_empty() {
+                    lines.push(Line::from(vec![
+                        Span::styled("    source: ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(row.source.clone()),
+                    ]));
+                }
+            }
             lines.push(Line::raw(""));
         }
     }
 
-    // Project memory.
-    append_memory_source(
-        &mut lines,
-        "Project Memory",
-        &project_mem,
-        "project",
-        BlockScope::Project,
-    );
-
-    // Project analysis (only if the file exists — FR-001).
-    if project_analysis.exists() {
-        append_memory_source(
-            &mut lines,
-            "Project Analysis",
-            &project_analysis,
-            "project",
-            BlockScope::Project,
-        );
-    }
-
-    // User memory.
-    if let Some(path) = &user_mem {
-        append_memory_source(&mut lines, "User Memory", path, "user", BlockScope::Global);
-    } else {
-        lines.push(Line::from(Span::styled(
-            "User Memory (no home directory)",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::raw(""));
-        lines.push(Line::from(Span::styled(
-            "(no user memory)",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::raw(""));
-    }
-
-    // Cache plain-text content for text selection copy (FR-013), matching the
-    // log / todo / profile panels' wrapping behaviour.
     let memory_inner_width = inner.width as usize;
     app.memory_content_lines = build_wrapped_content_lines(&lines, memory_inner_width);
 
@@ -3568,14 +3470,11 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let paragraph = paragraph.scroll((scroll, 0));
     frame.render_widget(paragraph, inner);
 
-    // Render scrollbar when content overflows (FR-009).
     if total_lines > visible_height {
         let mut scrollbar_state =
             ScrollbarState::new(max_scroll as usize).position(scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        // Render in the full panel area so the scrollbar gutter aligns with
-        // the mouse hit-test column used by the drag handler.
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
 }

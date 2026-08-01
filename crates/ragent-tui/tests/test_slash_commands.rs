@@ -24,6 +24,7 @@ use ragent_tui::app::{
 };
 use ragent_tui::{App, layout};
 use ratatui::{Terminal, backend::TestBackend};
+use tempfile::TempDir;
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -89,6 +90,44 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         let _ = std::env::set_current_dir(&self.0);
     }
+}
+
+/// Change the process working directory to `dir`, returning a guard that
+/// restores the previous cwd on drop. Uses the same global mutex as
+/// `cwd_lock()` so it composes safely with tests that call `enter_temp_config_dir`.
+fn with_cwd(dir: &std::path::Path) -> CwdGuard {
+    let _lock = cwd_lock();
+    let prev = std::env::current_dir().expect("current dir");
+    std::env::set_current_dir(dir).expect("set_current_dir");
+    CwdGuard(prev)
+}
+
+/// Write `content` to `<dir>/.ragent/memory/MEMORY.md` (creating parent dirs).
+fn write_project_memory(dir: &std::path::Path, content: &str) {
+    let mem_dir = dir.join(".ragent").join("memory");
+    std::fs::create_dir_all(&mem_dir).expect("create memory dir");
+    std::fs::write(mem_dir.join("MEMORY.md"), content).expect("write MEMORY.md");
+}
+
+/// Render the app into a string buffer of the given terminal size.
+fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("test terminal");
+    terminal
+        .draw(|frame| layout::render(frame, app))
+        .expect("render memory panel");
+
+    let backend = terminal.backend();
+    let buffer = backend.buffer();
+    let mut text = String::new();
+    let area = buffer.area();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            text.push_str(buffer[(x, y)].symbol());
+        }
+        text.push('\n');
+    }
+    text
 }
 
 fn enter_temp_config_dir() -> tempfile::TempDir {
@@ -2903,5 +2942,28 @@ fn test_config_save_picker_intercepts_keys_in_handle_key_event() {
     assert!(
         app.input.is_empty(),
         "keys must be intercepted while config save picker is open"
+    );
+}
+
+#[test]
+fn test_slash_memory_no_args_shows_usage() {
+    // /memory with an unknown subcommand should list the supported subcommands.
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/memory foobar");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Usage:"),
+        "response should show usage: {text}"
+    );
+    assert!(
+        text.contains("/memory show"),
+        "usage should mention /memory show: {text}"
+    );
+    assert!(
+        text.contains("/memory help"),
+        "usage should mention /memory help: {text}"
     );
 }

@@ -31,6 +31,7 @@ use ragent_agent::{
     session::{SessionManager, processor::SessionProcessor},
     storage::Storage,
     tool,
+    tool::{Tool, ToolContext, structured_memory::MemoryStoreTool},
 };
 use ragent_tui::{
     App,
@@ -38,6 +39,7 @@ use ragent_tui::{
     input::{InputAction, handle_key},
     layout,
 };
+use serde_json::json;
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -208,11 +210,22 @@ fn with_cwd(dir: &std::path::Path) -> CwdGuard {
     CwdGuard { _lock: lock, prev }
 }
 
-/// Write `content` to `<dir>/.ragent/memory/MEMORY.md` (creating parent dirs).
-fn write_project_memory(dir: &std::path::Path, content: &str) {
-    let mem_dir = dir.join(".ragent").join("memory");
-    std::fs::create_dir_all(&mem_dir).expect("create memory dir");
-    std::fs::write(mem_dir.join("MEMORY.md"), content).expect("write MEMORY.md");
+/// Seed a structured memory for the project identified by `dir`.
+fn seed_project_memory_with_tags(
+    storage: &Storage,
+    dir: &std::path::Path,
+    content: &str,
+    tags: &[String],
+) {
+    let project = dir.to_string_lossy().to_string();
+    storage
+        .create_memory(content, "fact", "test", 0.7, &project, "", tags)
+        .expect("seed memory");
+}
+
+/// Seed a structured memory for the project identified by `dir`.
+fn seed_project_memory(storage: &Storage, dir: &std::path::Path, content: &str) {
+    seed_project_memory_with_tags(storage, dir, content, &[]);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -713,15 +726,14 @@ fn test_render_memory_panel_hidden_clears_memory_area() {
 
 #[test]
 fn test_render_memory_panel_with_populated_project_memory() {
-    // FR-015 (positive case): when the project memory file exists and
-    // contains content, the panel renders that content (not the
-    // "(no memory file)" placeholder) for the Project Memory section.
+    // FR-015 (positive case): when the project has structured memories, the
+    // panel renders their content.
     let dir = TempDir::new().expect("tempdir");
-    let body = "# Project Memory\n\nUnique marker line: zebra-tango-mango\n";
-    write_project_memory(dir.path(), body);
     let _guard = with_cwd(dir.path());
 
     let mut app = make_app();
+    let body = "Unique marker line: zebra-tango-mango";
+    seed_project_memory(&app.storage, dir.path(), body);
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
@@ -730,26 +742,22 @@ fn test_render_memory_panel_with_populated_project_memory() {
 
     let text = render_app_to_string(&mut app, 140, 40);
     assert!(
-        text.contains("Project Memory"),
-        "panel should render the Project Memory header; got:\n{text}"
+        text.contains("Memory"),
+        "panel border/title should be rendered; got:
+{text}"
     );
     assert!(
         text.contains("zebra-tango-mango"),
-        "panel should render the project memory body content; got:\n{text}"
+        "panel should render the project memory content; got:
+{text}"
     );
-    // The User Memory section resolves to ~//.ragent/memory/MEMORY.md which
-    // we do not control from the tempdir; it may be present or missing. We
-    // only assert that the Project Memory section did NOT fall back to the
-    // placeholder by checking the unique marker appears.
 }
 
 #[test]
 fn test_render_memory_panel_with_missing_files_shows_placeholder() {
-    // FR-015 (missing case): when a memory source file does not exist, the
-    // panel renders a "(no memory file)" placeholder for that source and
-    // does NOT abort rendering of the remaining sources.
+    // FR-015 (missing case): when a project has no structured memories, the
+    // panel renders a placeholder and does NOT abort rendering.
     let dir = TempDir::new().expect("tempdir");
-    // No .ragent/memory/ anywhere in the tempdir.
     let _guard = with_cwd(dir.path());
 
     let mut app = make_app();
@@ -762,11 +770,12 @@ fn test_render_memory_panel_with_missing_files_shows_placeholder() {
     let text = render_app_to_string(&mut app, 140, 40);
     assert!(
         text.contains("Memory"),
-        "panel border/title should be rendered even with missing files"
+        "panel border/title should be rendered even with no memories"
     );
     assert!(
-        text.contains("(no memory file)"),
-        "missing project memory should render the '(no memory file)' placeholder; got:\n{text}"
+        text.contains("(no memories for this project)"),
+        "missing memories should render the placeholder; got:
+{text}"
     );
 }
 
@@ -788,10 +797,8 @@ fn test_render_memory_panel_does_not_panic_with_no_home_dir() {
 
 #[test]
 fn test_render_memory_panel_re_reads_files_on_every_render() {
-    // FR-010: the panel re-reads its underlying files on every render so
-    // external changes are reflected without restarting the TUI. We render
-    // once (missing file → placeholder), write the file, render again, and
-    // assert the new content appears.
+    // FR-010: the panel re-reads the SQLite store on every render so external
+    // changes are reflected without restarting the TUI.
     let dir = TempDir::new().expect("tempdir");
     let _guard = with_cwd(dir.path());
 
@@ -800,38 +807,40 @@ fn test_render_memory_panel_re_reads_files_on_every_render() {
     app.current_screen = ScreenMode::Chat;
 
     let first = render_app_to_string(&mut app, 140, 40);
-    assert!(first.contains("(no memory file)"));
+    assert!(first.contains("(no memories for this project)"));
 
-    write_project_memory(dir.path(), "Fresh content marker: kiwi-rewrite\n");
+    seed_project_memory(
+        &app.storage,
+        dir.path(),
+        "Fresh content marker: kiwi-rewrite",
+    );
     let second = render_app_to_string(&mut app, 140, 40);
     assert!(
         second.contains("kiwi-rewrite"),
-        "second render should pick up the newly written file; got:\n{second}"
+        "second render should pick up the newly stored memory; got:
+{second}"
     );
 }
-
-// ═════════════════════════════════════════════════════════════════════════════
-// T-012: scroll-offset bounds (FR-009)
-// ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
 fn test_render_memory_panel_sets_max_scroll_when_content_overflows() {
     // FR-009: when the rendered content exceeds the visible height,
-    // `memory_max_scroll` is set to a positive value (the scrollbar only
-    // renders when total_lines > visible_height, which implies max_scroll >
-    // 0 for single-line rows). We use a short terminal and a long memory
-    // file to force overflow.
+    // `memory_max_scroll` is set to a positive value.
     let dir = TempDir::new().expect("tempdir");
-    let mut body = String::from("# Project Memory\n\n");
-    for i in 0..60u32 {
-        body.push_str(&format!("overflow line number {i}\n"));
-    }
-    write_project_memory(dir.path(), &body);
     let _guard = with_cwd(dir.path());
 
     let mut app = make_app();
     app.show_memory = true;
     app.current_screen = ScreenMode::Chat;
+
+    // Seed many memories to force content overflow.
+    for i in 0..60u32 {
+        seed_project_memory(
+            &app.storage,
+            dir.path(),
+            &format!("overflow line number {i}"),
+        );
+    }
 
     let _ = render_app_to_string(&mut app, 120, 20);
     assert!(
@@ -912,4 +921,127 @@ fn test_scrollbar_drag_clamps_offset_within_bounds() {
     // Drag below the pane → clamps to bottom (offset = 0).
     app.handle_mouse_event(mouse_drag(109, 30));
     assert_eq!(app.memory_scroll_offset, 0);
+}
+
+#[tokio::test]
+async fn test_memory_store_tool_content_appears_in_memory_panel() {
+    // Regression for the bug where `memory_store` wrote memories under the
+    // directory basename ("myproject") while the TUI memory panel and the
+    // `/memory show` slash command queried by the full working directory path
+    // ("/home/user/myproject"). The mismatch made freshly stored memories
+    // invisible in the panel.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_todo = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let tool = MemoryStoreTool;
+    let ctx = ToolContext {
+        session_id: "memory-panel-regression-sess".to_string(),
+        working_dir: dir.path().to_path_buf(),
+        event_bus: Arc::new(EventBus::new(16)),
+        storage: Some(app.storage.clone()),
+        task_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
+        code_index: None,
+        bg_service: None,
+        spec_manager: None,
+        active_spec_id: None,
+        config: None,
+        cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+        read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+    };
+    tool.execute(
+        json!({
+            "content": "memory_store panel visibility marker: banana-kangaroo-sapphire",
+            "category": "fact",
+            "confidence": 0.85,
+            "tags": ["regression", "memory-panel"],
+            "source": "memory_store"
+        }),
+        &ctx,
+    )
+    .await
+    .expect("memory_store tool should execute");
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("Memory"),
+        "panel border/title should be rendered; got:\n{text}"
+    );
+    assert!(
+        text.contains("banana-kangaroo-sapphire"),
+        "panel must render a memory written by memory_store using the same project key as the panel; got:\n{text}"
+    );
+    assert!(
+        text.contains("Structured memories: 1"),
+        "panel should report the single stored memory; got:\n{text}"
+    );
+}
+
+#[test]
+fn test_render_memory_panel_shows_tags_for_structured_memories() {
+    // The Memory panel should render the comma-separated tags stored for each
+    // structured memory alongside the content preview.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory_with_tags(
+        &app.storage,
+        dir.path(),
+        "Memory with tags marker: alpha-bravo",
+        &["rust".to_string(), "tui".to_string()],
+    );
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_todo = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("alpha-bravo"),
+        "panel should render the memory content; got:\n{text}"
+    );
+    assert!(
+        text.contains("tags: rust, tui"),
+        "panel should render the associated tags; got:\n{text}"
+    );
+}
+
+#[test]
+fn test_render_memory_panel_omits_tags_line_when_memory_has_no_tags() {
+    // Memories without tags should not produce a 'tags:' line in the panel.
+    let dir = TempDir::new().expect("tempdir");
+    let _guard = with_cwd(dir.path());
+
+    let mut app = make_app();
+    seed_project_memory(
+        &app.storage,
+        dir.path(),
+        "No-tags memory marker: charlie-delta",
+    );
+    app.show_memory = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.show_todo = false;
+    app.current_screen = ScreenMode::Chat;
+
+    let text = render_app_to_string(&mut app, 140, 40);
+    assert!(
+        text.contains("charlie-delta"),
+        "panel should render the memory content; got:\n{text}"
+    );
+    assert!(
+        !text.contains("tags:"),
+        "panel should not render a tags line for tag-less memory; got:\n{text}"
+    );
 }

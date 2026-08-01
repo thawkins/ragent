@@ -2065,6 +2065,127 @@ impl Storage {
         Ok(count)
     }
 
+    /// Counts structured memories scoped to the current working directory.
+    ///
+    /// Memories are matched by either the full directory path (as used by the
+    /// current `memory_store` tool) or the directory basename (used by older
+    /// versions), so that legacy entries remain visible after the project key
+    /// format changed from a basename to a full path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn count_memories_for_project(&self, project_dir: &Path) -> Result<u64> {
+        let conn = lock_conn!(self)?;
+        let full = project_dir.to_string_lossy();
+        let name = project_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let count: u64 = if name.is_empty() {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE project = ?1",
+                params![full.as_ref()],
+                |row| row.get(0),
+            )?
+        } else {
+            conn.query_row(
+                "SELECT COUNT(*) FROM memories WHERE project IN (?1, ?2)",
+                params![full.as_ref(), name],
+                |row| row.get(0),
+            )?
+        };
+        Ok(count)
+    }
+
+    /// List structured memories scoped to the current working directory.
+    ///
+    /// Matches memories whose `project` column equals either the full directory
+    /// path or the directory basename. This keeps memories stored by older
+    /// ragent versions (which used the basename as the project key) visible
+    /// alongside memories stored by the current full-path format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_memories_for_project(
+        &self,
+        project_dir: &Path,
+        limit: usize,
+    ) -> Result<Vec<MemoryRow>> {
+        let conn = lock_conn!(self)?;
+        let full = project_dir.to_string_lossy();
+        let name = project_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        let mut stmt;
+        let rows = if name.is_empty() {
+            stmt = conn.prepare(
+                "SELECT id, content, category, source, confidence, project, session_id,
+                        created_at, updated_at, access_count, last_accessed
+                 FROM memories
+                 WHERE project = ?1
+                 ORDER BY updated_at DESC, confidence DESC
+                 LIMIT ?2",
+            )?;
+            stmt.query_map(params![full.as_ref(), limit as i64], memory_row_from_sql)?
+        } else {
+            stmt = conn.prepare(
+                "SELECT id, content, category, source, confidence, project, session_id,
+                        created_at, updated_at, access_count, last_accessed
+                 FROM memories
+                 WHERE project IN (?1, ?2)
+                 ORDER BY updated_at DESC, confidence DESC
+                 LIMIT ?3",
+            )?;
+            stmt.query_map(
+                params![full.as_ref(), name, limit as i64],
+                memory_row_from_sql,
+            )?
+        };
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// List all structured memories across every project.
+    ///
+    /// Returns entries ordered by most recently updated first, limited to the
+    /// requested number. This is used by UI panels that need to surface every
+    /// stored memory regardless of project scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_all_memories(&self, limit: usize) -> Result<Vec<MemoryRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content, category, source, confidence, project, session_id,
+                    created_at, updated_at, access_count, last_accessed
+             FROM memories
+             ORDER BY updated_at DESC, confidence DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(MemoryRow {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    category: row.get(2)?,
+                    source: row.get(3)?,
+                    confidence: row.get(4)?,
+                    project: row.get(5)?,
+                    session_id: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    access_count: row.get(9)?,
+                    last_accessed: row.get(10)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// Updates the content of a memory.
     ///
     /// # Errors
@@ -3324,6 +3445,23 @@ pub struct RunCostSummaryRow {
     pub duration_ms: u64,
     /// ISO-8601 creation timestamp.
     pub created_at: String,
+}
+
+/// Maps a SQL row to a [`MemoryRow`].
+fn memory_row_from_sql(row: &rusqlite::Row) -> rusqlite::Result<MemoryRow> {
+    Ok(MemoryRow {
+        id: row.get(0)?,
+        content: row.get(1)?,
+        category: row.get(2)?,
+        source: row.get(3)?,
+        confidence: row.get(4)?,
+        project: row.get(5)?,
+        session_id: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        access_count: row.get(9)?,
+        last_accessed: row.get(10)?,
+    })
 }
 
 /// Row representation of a structured memory.

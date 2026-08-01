@@ -206,7 +206,8 @@ impl App {
                               } else if self.message_area.contains((event.column, event.row).into()) {
                                   self.scroll_offset = self.scroll_offset.saturating_sub(3);
                               }
-                          }            MouseEventKind::Down(MouseButton::Left) => {
+                          }
+            MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {
                     if self.active_tasks.is_empty() {
@@ -232,28 +233,11 @@ impl App {
                     self.show_agents_window = false;
                     return;
                 }
-                if self.teams_close_button_area.contains(pos.into()) {
-                    self.show_teams_window = false;
-                    return;
-                }
-                // Memory browser close button
-                if self.memory_browser.is_some()
-                    && self.memory_browser_close_area.contains(pos.into())
-                {
-                    self.memory_browser = None;
-                    return;
-                }
-                // Click outside memory browser closes it.
-                if self.memory_browser.is_some() {
-                    let memory_area = self
-                        .memory_browser_area
-                        .union(self.memory_browser_close_area);
-                    if !memory_area.contains(pos.into()) {
-                        self.memory_browser = None;
-                        return;
-                    }
-                }
-                if self.research_view.is_some() {
+                                  if self.teams_close_button_area.contains(pos.into()) {
+                                      self.show_teams_window = false;
+                                      return;
+                                  }
+                                  if self.research_view.is_some() {
                     if self.research_view_area.contains(pos.into()) {
                         return;
                     }

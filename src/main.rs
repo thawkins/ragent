@@ -18,7 +18,6 @@ use tracing_subscriber::EnvFilter;
 use ragent_agent::{
     Config, StartupTimings, agent,
     event::EventBus,
-    memory::BlockStorage,
     permission::PermissionChecker,
     provider,
     session::{SessionManager, processor::SessionProcessor},
@@ -188,20 +187,7 @@ enum SessionCommands {
 /// Sub-commands for the `memory` namespace.
 #[derive(Subcommand)]
 enum MemoryCommands {
-    /// Export structured memories and blocks to JSON on stdout
-    Export,
-    /// Import memories from a JSON file or external format
-    Import {
-        /// Path to import file or directory
-        path: String,
-        /// Input format: "ragent" (default), "cline", or "claude-code"
-        #[arg(long, default_value = "ragent")]
-        format: String,
-        /// Preview import without writing (dry run)
-        #[arg(long)]
-        dry_run: bool,
-    },
-    /// List all memory blocks and structured memory statistics
+    /// List structured memory statistics for the current project
     List,
 }
 
@@ -963,150 +949,28 @@ async fn main() -> Result<()> {
             }
         },
         Some(Commands::Memory { command }) => {
-            let working_dir =
+            let project_dir =
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            let block_storage = ragent_agent::memory::FileBlockStorage::new();
             match command {
-                MemoryCommands::Export => {
-                    let (export, result) =
-                        ragent_agent::memory::export_all(&storage, &block_storage, &working_dir)?;
-                    let json = serde_json::to_string_pretty(&export)?;
-                    writeln!(std::io::stdout(), "{json}")?;
-                    eprintln!(
-                        "Exported {} memories, {} project blocks, {} global blocks",
-                        result.memory_count, result.project_block_count, result.global_block_count,
-                    );
-                }
-                MemoryCommands::Import {
-                    path,
-                    format,
-                    dry_run,
-                } => {
-                    let path_buf = PathBuf::from(&path);
-
-                    let result = match format.as_str() {
-                        "ragent" => {
-                            let json_data = std::fs::read_to_string(&path_buf).map_err(|e| {
-                                anyhow::anyhow!(
-                                    "Failed to read import file: {}: {}",
-                                    path_buf.display(),
-                                    e
-                                )
-                            })?;
-                            ragent_agent::memory::import_ragent(
-                                &json_data,
-                                &storage,
-                                &block_storage,
-                                &working_dir,
-                                dry_run,
-                            )?
-                        }
-                        "cline" => ragent_agent::memory::import_cline(
-                            &path_buf,
-                            &block_storage,
-                            &working_dir,
-                            dry_run,
-                        )?,
-                        "claude-code" => ragent_agent::memory::import_claude_code(
-                            &path_buf,
-                            &block_storage,
-                            &working_dir,
-                            dry_run,
-                        )?,
-                        _ => anyhow::bail!(
-                            "Unknown import format '{format}'. Supported: ragent, cline, claude-code"
-                        ),
-                    };
-
-                    if dry_run {
-                        writeln!(
-                            std::io::stdout(),
-                            "[DRY RUN] Would import {} memories, {} project blocks, {} global blocks",
-                            result.memory_count,
-                            result.project_block_count,
-                            result.global_block_count,
-                        )?;
-                    } else {
-                        writeln!(
-                            std::io::stdout(),
-                            "Imported {} memories, {} project blocks, {} global blocks",
-                            result.memory_count,
-                            result.project_block_count,
-                            result.global_block_count,
-                        )?;
-                    }
-                    if !result.warnings.is_empty() {
-                        eprintln!("\nWarnings:");
-                        for w in &result.warnings {
-                            eprintln!("  - {w}");
-                        }
-                    }
-                }
                 MemoryCommands::List => {
-                    let block_storage: &dyn BlockStorage =
-                        &ragent_agent::memory::FileBlockStorage::new();
                     let mut stdout = std::io::stdout().lock();
 
-                    // List structured memory stats.
-                    let memory_count = storage.list_memories("", 10_000)?.len();
+                    // List structured memory stats scoped to the current directory.
+                    let memory_count = storage.count_memories_for_project(&project_dir)?;
                     writeln!(stdout, "Structured memories: {memory_count}")?;
 
-                    // List project blocks.
-                    let project_labels = block_storage
-                        .list(&ragent_agent::memory::BlockScope::Project, &working_dir)
-                        .unwrap_or_default();
-                    writeln!(stdout, "\nProject memory blocks:")?;
-                    if project_labels.is_empty() {
-                        writeln!(stdout, "  (none)")?;
+                    if memory_count == 0 {
+                        writeln!(
+                            stdout,
+                            "
+No memories stored for this project yet."
+                        )?;
                     } else {
-                        for label in &project_labels {
-                            if let Ok(Some(block)) = block_storage.load(
-                                label,
-                                &ragent_agent::memory::BlockScope::Project,
-                                &working_dir,
-                            ) {
-                                writeln!(
-                                    stdout,
-                                    "  {} ({} bytes, {})",
-                                    label,
-                                    block.content.len(),
-                                    if block.read_only {
-                                        "read-only"
-                                    } else {
-                                        "writable"
-                                    }
-                                )?;
-                            }
-                        }
-                    }
-
-                    // List global blocks.
-                    let global_labels = block_storage
-                        .list(&ragent_agent::memory::BlockScope::Global, &working_dir)
-                        .unwrap_or_default();
-                    writeln!(stdout, "\nGlobal memory blocks:")?;
-                    if global_labels.is_empty() {
-                        writeln!(stdout, "  (none)")?;
-                    } else {
-                        for label in &global_labels {
-                            if let Ok(Some(block)) = block_storage.load(
-                                label,
-                                &ragent_agent::memory::BlockScope::Global,
-                                &working_dir,
-                            ) {
-                                writeln!(
-                                    stdout,
-                                    "  {} ({} bytes, {})",
-                                    label,
-                                    block.content.len(),
-                                    if block.read_only {
-                                        "read-only"
-                                    } else {
-                                        "writable"
-                                    }
-                                )?;
-                            }
-                        }
+                        writeln!(
+                            stdout,
+                            "
+Use the TUI Memory panel (Alt+M or /memory) to browse entries."
+                        )?;
                     }
                 }
             }

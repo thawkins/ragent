@@ -1,5 +1,15 @@
 # Changelog
 
+## Version: 0.1.0-beta.29
+
+### Changed
+
+- Removed legacy memory system (file-block memory modules, old structured-memory
+  storage, migration helpers, and cross-project import/export code) and replaced
+  it with the new structured-memory store backed by `ragent-storage`.
+- Fixed the memory panel in the TUI after the memory-system refactor so it
+  continues to browse and render stored memories correctly.
+
 ## Version: 0.1.0-beta.28
 
 ### Changed

@@ -220,66 +220,68 @@ pub fn apply_teammate_model_override(
 
 // ── Persistent memory injection ────────────────────────────────────────────────
 
-/// Maximum number of lines to inject from `MEMORY.md`.
-const MEMORY_MAX_LINES: usize = 200;
-/// Maximum bytes to inject from `MEMORY.md`.
-const MEMORY_MAX_BYTES: usize = 25 * 1024; // 25 KB
+/// Maximum number of memories to inject from the team's structured memory store.
+const TEAM_MEMORY_LIMIT: usize = 25;
 
-/// Load the persistent-memory prompt block for an agent.
+/// Load the persistent-memory prompt block for a teammate from the structured
+/// SQLite store.
 ///
-/// If `MEMORY.md` exists in `mem_dir`, its content is read (truncated to
-/// [`MEMORY_MAX_LINES`] lines / [`MEMORY_MAX_BYTES`] bytes) and wrapped in
-/// a labelled section.  The block also tells the agent where its memory
-/// directory lives so it can use `team_memory_read` / `team_memory_write`.
-///
-/// Returns an empty string when memory is unavailable.
-fn load_memory_block(mem_dir: &Path) -> String {
-    let memory_file = mem_dir.join("MEMORY.md");
-    let content = if memory_file.is_file() {
-        match std::fs::read_to_string(&memory_file) {
-            Ok(raw) => {
-                let mut taken = 0usize;
-                let truncated: String = raw
-                    .lines()
-                    .take(MEMORY_MAX_LINES)
-                    .take_while(|line| {
-                        taken += line.len() + 1; // +1 for newline
-                        taken <= MEMORY_MAX_BYTES
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                truncated
-            }
-            Err(e) => {
-                tracing::warn!(path = %memory_file.display(), error = %e, "Failed to read MEMORY.md");
-                String::new()
-            }
+/// Queries memories whose `project` field matches the team name and formats
+/// them as a labelled section. Returns an empty string when memory is
+/// unavailable or when the teammate's memory scope is `None`.
+fn load_team_memory_block(
+    storage: &crate::storage::Storage,
+    team_name: &str,
+    teammate_name: &str,
+) -> String {
+    let memories = match storage.list_memories(team_name, TEAM_MEMORY_LIMIT) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(team = %team_name, error = %e, "Failed to load team memories");
+            return String::new();
         }
-    } else {
-        String::new()
     };
 
-    let dir_display = mem_dir.display();
-    let preamble = format!(
-        "\n\n## Persistent Memory\n\
-         \n\
-         Your memory directory: `{dir_display}`\n\
-         Use `team_memory_read` to read files and `team_memory_write` to write files in this directory.\n\
-         Write important findings, decisions, and context to `MEMORY.md` so you can recall them in future sessions.\n"
-    );
-    if content.is_empty() {
-        format!(
-            "{preamble}\n\
-             _No prior memory found — this is your first session.  Start writing notes to `MEMORY.md`._\n"
-        )
-    } else {
-        format!(
-            "{preamble}\n\
-             ### Prior Memory (MEMORY.md)\n\
+    if memories.is_empty() {
+        return format!(
+            "\n\n## Persistent Memory\n\
              \n\
-             {content}\n"
-        )
+             Team memory is enabled. No prior memories have been recorded for team \"{team_name}\". \
+\
+             Use `team_memory_write` to store notes, decisions, and context so you can recall them in future sessions.\n"
+        );
     }
+
+    let mut lines = vec![
+        String::new(),
+        String::from("## Persistent Memory"),
+        String::new(),
+        format!(
+            "The following structured memories are shared with team \"{team_name}\" (teammate \"{teammate_name}\"):"
+        ),
+        String::new(),
+    ];
+
+    for mem in &memories {
+        let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+        let tag_str = if tags.is_empty() {
+            String::new()
+        } else {
+            format!(" tags: {}", tags.join(", "))
+        };
+        lines.push(format!(
+            "- [{}] {} (confidence: {:.2}){}",
+            mem.category, mem.content, mem.confidence, tag_str
+        ));
+    }
+
+    lines.push(String::new());
+    lines.push(String::from(
+        "Use `team_memory_read` to recall and `team_memory_write` to add to these memories.",
+    ));
+    lines.push(String::new());
+
+    lines.join("\n")
 }
 
 // ── Hook runner ───────────────────────────────────────────────────────────────
@@ -808,12 +810,11 @@ impl TeamManager {
         } else {
             memory_scope
         };
-        if let Some(mem_dir) =
-            super::config::resolve_memory_dir(effective_scope, teammate_name, working_dir)
-        {
-            let memory_block = load_memory_block(&mem_dir);
+        if effective_scope != super::config::MemoryScope::None {
+            let storage = self.processor.session_manager.storage();
+            let memory_block = load_team_memory_block(storage, &self.team_name, teammate_name);
             let current = agent.prompt.as_deref().unwrap_or("");
-            agent.prompt = Some(format!("{current}\n{memory_block}"));
+            agent.prompt = Some(format!("{current}{memory_block}"));
         }
 
         let cancel = Arc::new(AtomicBool::new(false));

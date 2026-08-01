@@ -721,18 +721,17 @@ impl App {
         }
     }
 
-    /// Refresh cached memory-system stats (file-block and structured-store
-    /// counts) on a throttled 5s interval.
+    /// Refresh cached structured-memory stats on a throttled 5s interval.
     pub fn refresh_memory_stats(&mut self) {
         if self.memory_stats_last_refresh.elapsed() < std::time::Duration::from_secs(5) {
             return;
         }
         self.memory_stats_last_refresh = std::time::Instant::now();
-        let working_dir = std::env::current_dir().unwrap_or_default();
-        let block_storage = ragent_agent::memory::FileBlockStorage::new();
-        let blocks = ragent_agent::memory::load_all_blocks(&block_storage, &working_dir);
-        self.memory_block_count = blocks.len();
-        self.memory_entry_count = self.storage.count_memories().unwrap_or(0);
+        let project_dir = std::env::current_dir().unwrap_or_default();
+        self.memory_entry_count = self
+            .storage
+            .count_memories_for_project(&project_dir)
+            .unwrap_or(0);
     }
 
     /// Map the primary session's short id to the current agent name for log display.

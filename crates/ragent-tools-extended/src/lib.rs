@@ -21,10 +21,6 @@ pub mod libreoffice_info;
 pub mod libreoffice_read;
 pub mod libreoffice_write;
 pub mod masterfetch;
-pub mod memory_migrate;
-pub mod memory_replace;
-pub mod memory_search;
-pub mod memory_write;
 pub mod office_common;
 pub mod office_info;
 pub mod office_read;
@@ -38,14 +34,7 @@ pub mod websearch;
 pub mod memory {
     //! Memory helpers reused by the extracted memory tools.
 
-    pub mod block;
-    pub mod cross_project;
     pub mod embedding;
-    pub mod migrate;
-    pub mod storage;
-
-    #[cfg(test)]
-    mod test_helpers;
 }
 
 use anyhow::Result;
@@ -319,11 +308,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(webfetch::WebFetchTool));
     registry.register(Arc::new(websearch::WebSearchTool));
     registry.register(Arc::new(http_request::HttpRequestTool));
-    registry.register(Arc::new(memory_write::MemoryWriteTool));
-    registry.register(Arc::new(memory_write::MemoryReadTool));
-    registry.register(Arc::new(memory_replace::MemoryReplaceTool));
-    registry.register(Arc::new(memory_search::MemorySearchTool));
-    registry.register(Arc::new(memory_migrate::MemoryMigrateTool));
     registry.register(Arc::new(todo::TodoReadTool));
     registry.register(Arc::new(todo::TodoWriteTool));
     registry.register(Arc::new(codeindex_search::CodeIndexSearchTool));

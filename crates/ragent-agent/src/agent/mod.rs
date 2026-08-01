@@ -2079,90 +2079,14 @@ pub fn build_memory_prompt_section(
     storage: Option<&crate::storage::Storage>,
     memory_config: Option<&crate::MemoryConfig>,
 ) -> String {
-    use crate::memory::block::BlockScope;
-    use crate::memory::storage::{FileBlockStorage, load_all_blocks, load_legacy_memory};
-
     let mut out = String::new();
-    let block_storage = FileBlockStorage::new();
-    let wd = working_dir.to_path_buf();
-
-    // Load all structured memory blocks from both scopes.
-    let blocks = load_all_blocks(&block_storage, &wd);
-    if !blocks.is_empty() {
-        out.push_str("## Memory Blocks\n");
-        for (scope, block) in &blocks {
-            let scope_label = match scope {
-                BlockScope::Global => "global",
-                BlockScope::Project => "project",
-            };
-            out.push_str(&format!("### {} ({})\n", block.label, scope_label));
-            if !block.description.is_empty() {
-                out.push_str(&format!("*{}*\n\n", block.description));
-            }
-            if block.read_only {
-                out.push_str("*[read-only]*\n");
-            }
-            out.push_str(&block.content);
-            out.push_str("\n\n");
-            if block.limit > 0 {
-                let pct = (block.content.len() as f64 / block.limit as f64 * 100.0) as u32;
-                out.push_str(&format!(
-                    "*[size: {}/{} bytes, {}%]*\n\n",
-                    block.content.len(),
-                    block.limit,
-                    pct
-                ));
-            }
-        }
-    }
-
-    // Also load legacy MEMORY.md files that aren't already loaded as blocks.
-    let has_project_memory_block = blocks
-        .iter()
-        .any(|(s, b)| *s == BlockScope::Project && b.label == "MEMORY");
-    let has_global_memory_block = blocks
-        .iter()
-        .any(|(s, b)| *s == BlockScope::Global && b.label == "MEMORY");
-
-    if !has_project_memory_block {
-        if let Some(block) = load_legacy_memory(&BlockScope::Project, &wd) {
-            out.push_str("## Project Memory\n");
-            out.push_str(&block.content);
-            out.push_str("\n\n");
-        }
-    }
-
-    // Load PROJECT_ANALYSIS.md if present (legacy).
-    let project_analysis = working_dir
-        .join(".ragent")
-        .join("memory")
-        .join("PROJECT_ANALYSIS.md");
-    if let Ok(content) = std::fs::read_to_string(&project_analysis)
-        && !content.trim().is_empty()
-    {
-        out.push_str("## Project Analysis\n");
-        out.push_str(&content);
-        out.push_str("\n\n");
-    }
-
-    if !has_global_memory_block {
-        if let Some(block) = load_legacy_memory(&BlockScope::Global, &wd) {
-            out.push_str("## User Memory\n");
-            out.push_str(&block.content);
-            out.push_str("\n\n");
-        }
-    }
 
     // Load relevant structured memories from SQLite.
     if let Some(sqlite_storage) = storage {
-        let project = working_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
         let max = memory_config
             .map(|c| c.retrieval.max_memories_per_prompt)
             .unwrap_or(5);
-        if let Ok(memories) = sqlite_storage.list_memories(project, max)
+        if let Ok(memories) = sqlite_storage.list_memories_for_project(working_dir, max)
             && !memories.is_empty()
         {
             out.push_str("## Relevant Memories\n");
