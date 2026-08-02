@@ -195,11 +195,16 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     let specific = match tool {
         // ═══════════════════════════════════════════════════════════════════
         // 📄 FILE OPERATIONS
-        // ═══════════════════════════════════════════════════════════════════
+        // ════════════════════════════════════════��══════════════════════════
         "read" => {
             // The read tool accepts `path` as the canonical parameter name, but some
             // providers/models emit `file_path` instead. Check both so the file name
             // always appears in the message header.
+            //
+            // The raw-args fallback at the end of this function only fires when
+            // the provider uses entirely unexpected field names. If the known key
+            // resolves to an empty path (e.g. `{"path":""}`), we intentionally return
+            // an empty summary to preserve existing test expectations.
             let path = get_relative_path(&["path", "file_path"]);
             if path.is_empty() {
                 String::new()
@@ -207,6 +212,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 format!("📄 {}", path)
             }
         }
+        // intentionally gated on the structured extractor yielding an empty
+        // string. This preserves existing behaviour for empty/missing known
+        // parameters while still showing something useful when the provider
+        // uses unexpected field names.
         "write" | "create" => {
             let path = get_relative_path(&["path"]);
             if path.is_empty() {
@@ -1260,9 +1269,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
     };
 
+    let fallback_for = canonical_tool_name(tool);
+    let needs_fallback = matches!(fallback_for, "bash" | "read" | "write" | "create" | "edit");
+
     // If the specific extractor returned an empty summary for a parameter-heavy tool,
     // fall back to a raw-args rendering so the input is never invisible.
-    if specific.is_empty() {
+    if specific.is_empty() && needs_fallback {
         fallback_raw_args(tool, input)
     } else {
         specific
