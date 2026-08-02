@@ -169,7 +169,30 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     // the tool arguments in the chat transcript.
     let trunc120 = |s: &str| truncate_str(s, 120);
 
-    match tool {
+    // Fallback: for tools that must never hide their parameters (bash/read/write/create/edit),
+    // if the structured extractor yields an empty summary (unexpected provider field names),
+    // emit a compact raw-JSON rendering so the user can always see what arguments were sent.
+    let fallback_raw_args = |tool: &str, input: &serde_json::Value| -> String {
+        match canonical_tool_name(tool) {
+            "bash" | "read" | "write" | "create" | "edit" => {
+                if let Some(obj) = input.as_object()
+                    && !obj.is_empty()
+                {
+                    let compact = summarize_tool_args(input, 120);
+                    if !compact.is_empty() {
+                        compact
+                    } else {
+                        truncate_str(&serde_json::to_string(input).unwrap_or_default(), 200)
+                    }
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        }
+    };
+
+    let specific = match tool {
         // ═══════════════════════════════════════════════════════════════════
         // 📄 FILE OPERATIONS
         // ═══════════════════════════════════════════════════════════════════
@@ -1235,6 +1258,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 summarize_tool_args(input, 40)
             }
         }
+    };
+
+    // If the specific extractor returned an empty summary for a parameter-heavy tool,
+    // fall back to a raw-args rendering so the input is never invisible.
+    if specific.is_empty() {
+        fallback_raw_args(tool, input)
+    } else {
+        specific
     }
 }
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## Version: 0.1.0-beta.31
+
+### Fixed
+
+- TUI tool-call summaries now always show parameters by falling back to the raw
+  tool args when the expected JSON keys (`path`, `command`, etc.) are missing.
+  This keeps bash/read/write/create/edit inputs visible even when providers emit
+  unexpected field names.
+- Fixed rustfmt indentation issue in `crates/ragent-tools-extended/src/masterfetch/security.rs`.
+
 ## Version: 0.1.0-beta.30
 
 ### Changed

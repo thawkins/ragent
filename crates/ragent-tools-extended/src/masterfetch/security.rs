@@ -463,6 +463,6 @@ fn parse_ip_octet(part: &str) -> Option<u32> {
         return u32::from_str_radix(part, 8).ok();
     }
 
-      // Decimal
-      part.parse::<u32>().ok()
-  }
+    // Decimal
+    part.parse::<u32>().ok()
+}
