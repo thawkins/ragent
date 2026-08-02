@@ -428,10 +428,10 @@ fn parse_subject_summary(text: &str) -> Option<(String, String)> {
 /// the **Sources Cited / Date Spread** paragraph, few-shot exemplars, and an
 /// optional persona.
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // populated by T-003..T-008; default path uses none of it
 pub(crate) struct SynthesisPromptConfig {
     /// Optional audience/domain framing appended to the task preamble
     /// (FR-009 / Finding 12). `None` preserves the legacy preamble.
+    #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
     pub audience_scope: Option<String>,
     /// When `true`, append the recency-weighting rule block (FR-004 / T-004).
     pub recency_rule: bool,
@@ -442,6 +442,7 @@ pub(crate) struct SynthesisPromptConfig {
     /// instructions (FR-008 / T-007). Each entry is one finding body.
     pub few_shot_examples: Vec<String>,
     /// Optional override for the `system` message persona (FR-009 / T-008).
+    #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
     pub persona: Option<String>,
     /// Optional template body merged with the structured synthesis
     /// requirements (FR-007 / T-006).
@@ -468,7 +469,6 @@ pub(crate) struct SynthesisPromptConfig {
 /// in to additional prompt sections via the config; they never alter the
 /// default output.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // setters exercised by T-003..T-008
 pub(crate) struct SynthesisPromptBuilder<'a> {
     topic: &'a str,
     sources: &'a [SourceBody],
@@ -477,7 +477,7 @@ pub(crate) struct SynthesisPromptBuilder<'a> {
 
 impl<'a> SynthesisPromptBuilder<'a> {
     /// Begin building a synthesis prompt for `topic`.
-    pub fn new(topic: &'a str) -> Self {
+    pub(crate) fn new(topic: &'a str) -> Self {
         Self {
             topic,
             sources: &[],
@@ -486,32 +486,32 @@ impl<'a> SynthesisPromptBuilder<'a> {
     }
 
     /// Attach the captured source corpus. Required before [`build`].
-    pub const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
+    pub(crate) const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
         self.sources = sources;
         self
     }
 
     /// Attach the full prompt configuration (T-003..T-008 knobs).
-    #[allow(dead_code)] // exercised by T-003..T-008
-    pub fn config(mut self, config: SynthesisPromptConfig) -> Self {
+    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
+    pub(crate) fn config(mut self, config: SynthesisPromptConfig) -> Self {
         self.config = config;
         self
     }
 
     /// Set the output artifact for this prompt (FR-012).
-    pub const fn output_format(mut self, fmt: OutputFormat) -> Self {
+    pub(crate) const fn output_format(mut self, fmt: OutputFormat) -> Self {
         self.config.output_format = Some(fmt);
         self
     }
 
     /// Borrow the active config immutably.
-    #[allow(dead_code)] // exercised by T-003..T-008
-    pub const fn cfg(&self) -> &SynthesisPromptConfig {
+    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
+    pub(crate) const fn cfg(&self) -> &SynthesisPromptConfig {
         &self.config
     }
 
     /// Produce the final prompt string.
-    pub fn build(&self) -> String {
+    pub(crate) fn build(&self) -> String {
         let mut prompt = String::new();
         prompt.push_str(&render_preamble(self.topic, &self.config));
         if self.sources.is_empty() {
@@ -778,7 +778,7 @@ fn render_closing(_config: &SynthesisPromptConfig) -> String {
 /// point. It delegates to [`SynthesisPromptBuilder`] with the default config,
 /// so its output is byte-identical to the pre-refactor implementation. Callers
 /// that need the extended knobs (T-003..T-008) should use the builder directly.
-#[allow(dead_code)] // preserved for backward-compat tests; use the builder directly
+#[allow(dead_code)] // preserved for backward-compat byte-identical tests
 fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
     SynthesisPromptBuilder::new(topic)
         .sources(sources)

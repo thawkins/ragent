@@ -1302,7 +1302,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
                     self.apply_selected_model_and_thinking(&mut agent);
 
-                    // Allow file writes so the agent can call memory_write
+                    // Allow file writes so the agent can call memory_store
                     agent.permission = ragent_agent::agent::default_permissions();
 
                     let task = "\
@@ -1314,10 +1314,11 @@ Analyse the following aspects of the project:\n\
 4. Build system and how to build/test the project\n\
 5. Key conventions: naming, error handling, testing patterns\n\
 6. Important files a developer should know about\n\n\
-After your analysis, call the `memory_write` tool with:\n\
-- scope: \"project\"\n\
-- path: \"PROJECT_ANALYSIS.md\"\n\
-- content: a well-structured markdown summary of your findings\n\n\
+After your analysis, call the `memory_store` tool with:\n\
+- category: \"fact\"\n\
+- content: a well-structured markdown summary of your findings\n\
+- confidence: 0.8\n\
+- tags: [\"project-analysis\"]\n\n\
 Be concise but comprehensive. This will be injected into future agent sessions automatically.\
 "
                     .to_string();

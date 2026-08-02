@@ -11,18 +11,20 @@
 use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root};
 
 mod replace {
-    pub use ragent_tools_core::replace::{find_replacement_range_diag, format_match_failure};
+    pub(crate) use ragent_tools_core::replace::{
+        find_replacement_range_diag, format_match_failure,
+    };
 }
 
 mod file_lock {
-    pub use ragent_tools_core::file_lock::lock_file;
+    pub(crate) use ragent_tools_core::file_lock::lock_file;
 }
 
 mod path_util {
-    pub use ragent_tools_core::path_util::resolve_path;
+    pub(crate) use ragent_tools_core::path_util::resolve_path;
 }
-
 #[path = "../src/edit.rs"]
+#[allow(unreachable_pub)] // public items are reachable from the lib target, not this test target
 mod edit;
 
 use edit::{build_snippet, byte_offset_to_line};

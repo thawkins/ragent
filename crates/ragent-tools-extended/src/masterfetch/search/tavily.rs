@@ -131,7 +131,7 @@ impl TavilyEngine {
 
     /// Return a reference to the stored API key (for building the `Authorization`
     /// header). Callers must not log this value.
-    fn api_key(&self) -> &str {
+    pub fn api_key(&self) -> &str {
         &self.api_key
     }
 }
@@ -364,20 +364,3 @@ pub fn mask_key(key: &str) -> String {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_engine_has_empty_key() {
-        let engine = TavilyEngine::default();
-        assert!(engine.api_key().is_empty());
-    }
-
-    #[test]
-    fn test_engine_name_is_tavily() {
-        let engine = TavilyEngine::new("test");
-        assert_eq!(engine.name(), "tavily");
-    }
-}

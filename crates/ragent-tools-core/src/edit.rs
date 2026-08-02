@@ -2,7 +2,8 @@
 //!
 //! Provides [`EditTool`], the single-file edit tool. It replaces exactly one
 //! occurrence of `old_string` with `new_string` in a file using the same robust
-//! multi-pass matcher shared with `memory_replace`. The matcher tolerates
+//! multi-pass matcher shared with `replace.rs` (historically also used by the
+//! legacy `memory_replace` tool). The matcher tolerates
 //! common model-driven mismatches such as CRLF vs LF, trailing/leading
 //! whitespace, and indentation drift, while still requiring the match to be
 //! unique.
@@ -79,6 +80,10 @@ const SNIPPET_CONTEXT_LINES: usize = 4;
 /// The search string must match exactly once; zero or multiple matches are
 /// treated as errors to prevent ambiguous edits. Supports create, update, and
 /// delete operations via empty `old_string` / `new_string` (FR-006).
+///
+/// `#[allow(dead_code)]` — the type is registered and used by the lib target,
+/// but it is never directly constructed by the external integration test target
+/// that re-imports this source via `#[path]`.
 #[allow(dead_code)]
 pub struct EditTool;
 

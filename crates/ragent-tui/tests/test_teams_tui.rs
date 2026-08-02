@@ -1,17 +1,16 @@
 //! Tests for `test_teams_tui.rs`
 
-//! TUI tests for Teams integration (M4-T9).
-//!
-//! Covers:
-//! - `/team status` output with no active team and with an active team
-//! - `/team create` creates a team and updates app state
-//! - `/team tasks` when no team is active
-//! - `/team cleanup` clears in-memory state
-//! - `/team message` with no active team / unknown teammate
-//! - Unknown `/team` subcommand shows error
-//! - `[T]` badge appears when team members are present
-//! - Team events update `active_team` and `team_members`
-
+/// TUI tests for Teams integration (M4-T9).
+///
+/// Covers:
+/// - `/team status` output with no active team and with an active team
+/// - `/team create` creates a team and updates app state
+/// - `/team tasks` when no team is active
+/// - `/team cleanup` clears in-memory state
+/// - `/team message` with no active team / unknown teammate
+/// - Unknown `/team` subcommand shows error
+/// - `[T]` badge appears when team members are present
+/// - Team events update `active_team` and `team_members`
 use std::sync::Mutex;
 
 use ragent_agent::event::Event;

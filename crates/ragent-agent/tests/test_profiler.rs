@@ -202,9 +202,8 @@ fn test_scope_disabled_then_enabled_records() {
     assert_eq!(snapshot.operations[0].name, "unit.enabled");
 }
 
-// A small Mutex-based helper is kept here in case future tests need to
-// observe closure invocation order across threads; currently unused to
-// avoid dead-code warnings, so reference it once.
+// Mutex anchor referenced once to silence dead-code warnings while keeping the
+// helper available for future tests that observe closure invocation order.
 #[allow(dead_code)]
 const fn _unused_mutex_anchor() -> Mutex<usize> {
     Mutex::new(0)

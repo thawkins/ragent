@@ -251,6 +251,10 @@ struct AzureFoundryModelsResponse {
 #[derive(Debug, Deserialize)]
 struct AzureFoundryModelEntry {
     id: String,
+    /// The Azure Foundry API returns an `object` discriminator (e.g. `"model"`).
+    ///
+    /// Currently unused; kept as a documented field in case stricter schema
+    /// validation or filtering is added later.
     #[allow(dead_code)]
     object: String,
 }

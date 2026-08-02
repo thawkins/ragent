@@ -151,10 +151,26 @@ impl App {
         }
     }
 
+    /// Returns `true` for tool-lifecycle events that the safety-net drain in
+    /// [`Self::handle_event`] must not run after, because a handler earlier in
+    /// the same pass is responsible for applying `pending_tool_args`.
+    fn event_handles_pending_args(event: &Event) -> bool {
+        matches!(
+            event,
+            Event::ToolCallArgs { .. } | Event::ToolCallStart { .. } | Event::ToolCallBatch { .. }
+        )
+    }
+
     /// Dispatch a single [`Event`] from the event bus to the appropriate UI
     /// handler. Marks the UI dirty on every event so the next render reflects
     /// the state change.
     pub fn handle_event(&mut self, event: Event) {
+        // After the previous event, re-apply any buffered tool args to parts
+        // that may have been created out-of-order since (safety net for the
+        // rare pending_args-leak path; see `drain_pending_tool_args`).
+        if Self::event_handles_pending_args(&event) {
+            self.drain_pending_tool_args();
+        }
         // Mark UI dirty for any event handling
         self.needs_redraw = true;
         match event {
@@ -2147,6 +2163,53 @@ impl App {
             }
         }
         false
+    }
+
+    /// Applies tool-call args held in `pending_tool_args` to an existing
+    /// ToolCall part whose `state.input` has not been populated yet.
+    ///
+    /// This is the safety net for the case where the Args event was processed
+    /// *before* the Start event but neither the Start-end pending application
+    /// nor the `ToolCallBatch` fallback fired (e.g. `handle_event` calls with
+    /// the event variant extracted, or the batch itself was lost). Without
+    /// this drain, the part would render with an empty input summary even
+    /// though the args were received and logged correctly.
+    pub(crate) fn drain_pending_tool_args(&mut self) {
+        if self.pending_tool_args.is_empty() {
+            return;
+        }
+        let call_ids: Vec<String> = self.pending_tool_args.keys().cloned().collect();
+        for call_id in call_ids {
+            let mut applied = false;
+            for msg in self.messages.iter_mut().rev() {
+                for part in msg.parts.iter_mut() {
+                    if let MessagePart::ToolCall {
+                        call_id: cid,
+                        state,
+                        ..
+                    } = part
+                        && cid == &call_id
+                    {
+                        if state.input.is_null() {
+                            let Some(args_json) = self.pending_tool_args.get(&call_id).cloned()
+                            else {
+                                break;
+                            };
+                            if let Ok(input) = serde_json::from_str::<serde_json::Value>(&args_json)
+                            {
+                                state.input = input;
+                            }
+                        }
+                        self.pending_tool_args.remove(&call_id);
+                        applied = true;
+                        break;
+                    }
+                }
+                if applied {
+                    break;
+                }
+            }
+        }
     }
 
     pub(crate) fn update_tool_call_output(

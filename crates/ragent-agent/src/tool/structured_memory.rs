@@ -2,7 +2,7 @@
 //!
 //! These tools provide access to the SQLite-backed structured memory store
 //! with categories, tags, and confidence scoring. Unlike the file-based
-//! `memory_write`/`memory_read` tools, structured memories are individual
+//! `memory_write`/`memory_read` legacy tools, structured memories are individual
 //! facts, patterns, or insights stored with metadata for intelligent
 //! retrieval.
 

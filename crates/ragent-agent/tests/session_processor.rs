@@ -397,7 +397,8 @@ fn test_token_overflow_is_not_permanent_error() {
     ));
 }
 
-// Silence unused-import warnings for items only used under feature gates.
+// Anchor for `serde_json::Value` import used only under feature gates in this
+// test file; referencing it once silences dead-code warnings.
 #[allow(dead_code)]
 const fn _unused_value_marker() -> Value {
     Value::Null

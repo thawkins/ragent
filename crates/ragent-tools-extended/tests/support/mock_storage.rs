@@ -15,14 +15,14 @@ use ragent_tools_extended::storage::{EmbeddingMatch, MemoryRow, StorageBackend, 
 /// All fields are wrapped in `Arc<Mutex<…>>` so the struct can be cheaply
 /// cloned (via `Arc`) while keeping interior mutability across async calls.
 #[derive(Clone)]
-pub struct MockStorage {
+pub(crate) struct MockStorage {
     todos: Arc<Mutex<HashMap<String, TodoRow>>>,
 }
 
 impl MockStorage {
     /// Create a new empty mock storage.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             todos: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -32,8 +32,8 @@ impl MockStorage {
     ///
     /// Convenience method used by tests that need pre-populated state without
     /// going through the `create_todo` trait method.
-    #[allow(dead_code)]
-    pub fn seed(&self, id: &str, session_id: &str, title: &str, status: &str) {
+    #[allow(dead_code)] // used by integration tests that opt in via this support helper
+    pub(crate) fn seed(&self, id: &str, session_id: &str, title: &str, status: &str) {
         let now = chrono::Utc::now().to_rfc3339();
         let row = TodoRow {
             id: id.to_string(),

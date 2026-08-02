@@ -34,13 +34,9 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `think` — Record a short reasoning note without changing project state.
 - `todo_read` — List TODO items for the current session.
 - `todo_write` — Add, update, remove, or clear TODO items.
-- `memory_read` — Read the contents of a memory file.
-- `memory_write` — Persist notes or learnings to memory files.
-- `memory_replace` — Replace a specific string in a named memory block.
-- `memory_search` — Search memories using semantic similarity or keyword matching.
 - `memory_store` — Store a structured memory with category, tags, and confidence score.
+- `memory_recall` — Search structured memories by full-text query with optional category/tag filters.
 - `memory_forget` — Delete structured memories by ID or filter criteria.
-- `memory_migrate` — Analyse a flat MEMORY.md file and propose splitting it into named blocks.
 - `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
 - `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
 - `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
@@ -141,6 +137,8 @@ Builds can take a long time, so allow up to 600 seconds for a rebuild.
 ### Test Organization
 
 All tests **MUST** be located in the `tests/` directory inside each crate. If a test is at the workspace root, it should be placed in the root `tests/` folder, not inline in source files.
+
+- **Do not add new inline `#[cfg(test)] mod tests` blocks in library source files.** The workspace runs `scripts/check-inline-tests.sh` to enforce the current baseline; new inline blocks cause CI to fail. Existing inline blocks remain only when they test private internals that cannot be reached from `tests/`.
 - Use `#[test]` for sync tests and `#[tokio::test]` for async tests.
 - Import from the relevant public crate for the crate under test rather than assuming a single `ragent` crate path.
 - Organize related tests together.

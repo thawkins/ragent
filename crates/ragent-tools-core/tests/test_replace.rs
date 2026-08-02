@@ -13,8 +13,9 @@
 // public items (`format_match_failure`, `find_batch_normalized_replacement_range`,
 // and the `pass`/`closest_line` fields) are used by the library's `edit` and
 // `multiedit` modules and by `test_multiedit_helpers`. They are dead within
-// this compilation unit only, so we silence the lint.
-#[allow(dead_code)]
+// this compilation unit only, so we silence both lints for the re-import.
+#[allow(dead_code)] // FR-008 test re-import of a source module
+#[allow(unreachable_pub)] // public items are reachable from the lib target, not this test target
 #[path = "../src/replace.rs"]
 mod replace;
 

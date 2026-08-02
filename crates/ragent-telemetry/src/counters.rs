@@ -504,41 +504,6 @@ pub fn set_tool_calls_per_session_last(value: u64) {
         .store(value, Ordering::Relaxed);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_atomic_f64_store_load() {
-        let a = AtomicF64::default();
-        a.store(std::f64::consts::PI);
-        assert!((a.load() - std::f64::consts::PI).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_atomic_f64_fetch_add() {
-        let a = AtomicF64::default();
-        a.fetch_add(1.5);
-        a.fetch_add(2.5);
-        assert!((a.load() - 4.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_counter_helpers_update_snapshot() {
-        increment_llm_requests(2);
-        add_sessions_active(1);
-        add_sessions_active(-1);
-        set_rate_limit_requests_pct(42.0);
-        set_llm_duration_last(123.4);
-
-        let values = current_values();
-        assert_eq!(values.llm_requests, 2);
-        assert_eq!(values.sessions_active, 0);
-        assert!((values.rate_limit_requests_pct - 42.0).abs() < 1e-9);
-        assert!((values.llm_duration_last - 123.4).abs() < 1e-9);
-    }
-}
-
 /// Structured representation of the counter/gauge groups used by
 /// `/telemetry counters` and the live telemetry side panel. Keeps the chat
 /// markdown output and the panel rendering in sync without duplicating metric

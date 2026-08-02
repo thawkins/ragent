@@ -219,11 +219,11 @@ mod arc_str_serde {
     use serde::{Deserialize, Deserializer, Serializer};
     use std::sync::Arc;
 
-    pub fn serialize<S: Serializer>(value: &Arc<str>, ser: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(value: &Arc<str>, ser: S) -> Result<S::Ok, S::Error> {
         ser.serialize_str(value)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Arc<str>, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Arc<str>, D::Error> {
         let s = String::deserialize(de)?;
         Ok(Arc::from(s))
     }
@@ -238,14 +238,19 @@ mod optional_arc_str_serde {
     use serde::{Deserialize, Deserializer, Serializer};
     use std::sync::Arc;
 
-    pub fn serialize<S: Serializer>(value: &Option<Arc<str>>, ser: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(
+        value: &Option<Arc<str>>,
+        ser: S,
+    ) -> Result<S::Ok, S::Error> {
         match value {
             Some(arc) => ser.serialize_some(&**arc),
             None => ser.serialize_none(),
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Arc<str>>, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        de: D,
+    ) -> Result<Option<Arc<str>>, D::Error> {
         let opt = Option::<String>::deserialize(de)?;
         Ok(opt.map(Arc::from))
     }

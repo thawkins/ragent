@@ -299,13 +299,13 @@ pub const SUPPORTED_LANGUAGES: &[&str] = &[
 ];
 
 /// Check if content looks like a binary file (contains NUL bytes in the first chunk).
-fn is_binary(content: &[u8]) -> bool {
+pub fn is_binary(content: &[u8]) -> bool {
     let check_len = content.len().min(BINARY_CHECK_BYTES);
     content[..check_len].contains(&0)
 }
 
 /// Count the number of newline characters in file content.
-fn count_lines(content: &[u8]) -> u64 {
+pub fn count_lines(content: &[u8]) -> u64 {
     bytecount(content)
 }
 
@@ -323,50 +323,4 @@ fn mtime_nanos(metadata: &fs::Metadata) -> i64 {
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_nanos() as i64)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_detect_language_rust() {
-        assert_eq!(
-            detect_language(Path::new("src/main.rs")),
-            Some("rust".to_string())
-        );
-    }
-
-    #[test]
-    fn test_detect_language_python() {
-        assert_eq!(
-            detect_language(Path::new("app.py")),
-            Some("python".to_string())
-        );
-    }
-
-    #[test]
-    fn test_detect_language_unknown() {
-        assert_eq!(detect_language(Path::new("README")), None);
-    }
-
-    #[test]
-    fn test_hash_content_deterministic() {
-        let h1 = hash_content(b"hello world");
-        let h2 = hash_content(b"hello world");
-        assert_eq!(h1, h2);
-        assert_ne!(h1, hash_content(b"different content"));
-    }
-
-    #[test]
-    fn test_is_binary() {
-        assert!(is_binary(b"hello\x00world"));
-        assert!(!is_binary(b"hello world\n"));
-    }
-
-    #[test]
-    fn test_count_lines() {
-        assert_eq!(count_lines(b"line1\nline2\nline3\n"), 3);
-        assert_eq!(count_lines(b"no newline"), 0);
-    }
 }

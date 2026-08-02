@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 /// A simple mock response body mimicking an Anthropic SSE stream.
-#[allow(dead_code)]
+#[allow(dead_code)] // retained for future Azure Resource provider Anthropic tests
 fn mock_anthropic_sse_body() -> String {
     r#"event: message_start
 data: {"message":{"id":"msg_01","type":"message","role":"assistant","model":"claude-sonnet-4","usage":{"input_tokens":10,"output_tokens":0},"content":[],"stop_reason":null,"stop_sequence":null}}

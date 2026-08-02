@@ -17,7 +17,7 @@ fn create_project() -> TempDir {
     fs::write(
         src.join("lib.rs"),
         r"
-//! Main library for the sample project.
+/// Main library for the sample project.
 
 /// Application configuration loaded from disk.
 pub struct Config {

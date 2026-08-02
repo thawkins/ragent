@@ -54,6 +54,10 @@ use super::{Tool, ToolContext, ToolOutput};
 /// All edits are validated first (each `old_string` must match exactly once in
 /// its target file). Only after all validations pass are the files written. If
 /// any edit fails validation, no files are modified.
+///
+/// `#[allow(dead_code)]` — the type is registered and used by the lib target,
+/// but it is never directly constructed by the external integration test target
+/// that re-imports this source via `#[path]`.
 #[allow(dead_code)]
 pub struct MultiEditTool;
 // `MultiEditTool` is constructed and registered via

@@ -2186,8 +2186,10 @@ pub struct CrossProjectConfig {
     pub enabled: bool,
     /// Whether search operations include global memories.
     ///
-    /// When `true` (default when cross_project is enabled), `memory_search`
-    /// and `memory_recall` search across both global and project scopes.
+    /// When `true` (default when cross_project is enabled), `memory_recall`
+    /// searches across both global and project scopes. The legacy `memory_search`
+    /// tool has been removed; `memory_recall` is the current structured-memory
+    /// search tool.
     /// When `false`, even if cross_project is enabled, searches are
     /// restricted to the current project scope.
     #[serde(default = "default_search_global")]

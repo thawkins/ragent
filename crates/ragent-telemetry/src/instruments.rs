@@ -20,8 +20,13 @@ use crate::cardinality::CardinalityCache;
 /// Instrument names from the otel spec Metric Catalog.
 ///
 /// Centralised as constants so the registry and tests reference a single
-/// source of truth (FR-003).
-#[allow(dead_code)] // Some metrics are used only when instrumented by later tasks
+/// source of truth (FR-003). The module is public so external callers (e.g.
+/// dashboards, exporters, and integration tests) can use the canonical names
+/// without duplicating them.
+// `#[allow(dead_code)]` — some constants are not yet referenced by live
+// instrumentation but are part of the approved Metric Catalog and may be used
+// by later tasks.
+#[allow(dead_code)]
 pub mod names {
     // ── Usage metrics ───────────────────────────────────────────────────
     /// Metric name for total LLM requests (`ragent.llm.requests`).
@@ -119,8 +124,8 @@ pub struct InstrumentRegistry {
     /// registry; it is not directly exposed because callers interact with
     /// the typed instrument handles instead.
     #[allow(dead_code)]
+    // anchors the `Meter` lifetime; read by future debug/introspection paths
     meter: opentelemetry::metrics::Meter,
-
     /// Cardinality cache shared across all clones (FR-035).
     /// Tracks distinct attribute combinations per metric and collapses
     /// overflow into an `unknown` bucket.

@@ -1,10 +1,9 @@
 //! Tests for `test_slash_commands.rs`
 
-//! Tests for TUI slash command parsing and dispatch (TASK-006).
-//!
-//! Verifies each slash command updates app state correctly, handles arguments,
-//! and provides user feedback via status bar and log entries.
-
+/// Tests for TUI slash command parsing and dispatch (TASK-006).
+///
+/// Verifies each slash command updates app state correctly, handles arguments,
+/// and provides user feedback via status bar and log entries.
 use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -24,7 +23,6 @@ use ragent_tui::app::{
 };
 use ragent_tui::{App, layout};
 use ratatui::{Terminal, backend::TestBackend};
-use tempfile::TempDir;
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -95,6 +93,7 @@ impl Drop for CwdGuard {
 /// Change the process working directory to `dir`, returning a guard that
 /// restores the previous cwd on drop. Uses the same global mutex as
 /// `cwd_lock()` so it composes safely with tests that call `enter_temp_config_dir`.
+#[allow(dead_code)] // used by tests that require cwd manipulation
 fn with_cwd(dir: &std::path::Path) -> CwdGuard {
     let _lock = cwd_lock();
     let prev = std::env::current_dir().expect("current dir");
@@ -103,6 +102,7 @@ fn with_cwd(dir: &std::path::Path) -> CwdGuard {
 }
 
 /// Write `content` to `<dir>/.ragent/memory/MEMORY.md` (creating parent dirs).
+#[allow(dead_code)] // used by tests that set up project memory state
 fn write_project_memory(dir: &std::path::Path, content: &str) {
     let mem_dir = dir.join(".ragent").join("memory");
     std::fs::create_dir_all(&mem_dir).expect("create memory dir");
@@ -110,6 +110,7 @@ fn write_project_memory(dir: &std::path::Path, content: &str) {
 }
 
 /// Render the app into a string buffer of the given terminal size.
+#[allow(dead_code)] // used by visual assertion tests
 fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");

@@ -182,7 +182,6 @@ pub fn is_profiling_enabled() -> bool {
 pub fn env_var_name() -> &'static str {
     ENV_VAR
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

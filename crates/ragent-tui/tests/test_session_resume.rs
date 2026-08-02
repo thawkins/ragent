@@ -1,10 +1,9 @@
 //! Tests for `test_session_resume.rs`
 
-//! Tests for CLI session resume (TASK-007).
-//!
-//! Verifies that `App::load_session` correctly restores session state
-//! including messages, screen mode, status bar, and log entries.
-
+/// Tests for CLI session resume (TASK-007).
+///
+/// Verifies that `App::load_session` correctly restores session state
+/// including messages, screen mode, status bar, and log entries.
 use std::sync::Arc;
 
 use ragent_agent::{

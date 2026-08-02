@@ -1,10 +1,9 @@
 //! Tests for `test_agent_switching.rs`
 
-//! Tests for TUI agent switching (TASK-005).
-//!
-//! Verifies that cycling through agents updates the agent name, status bar,
-//! log entries, and publishes `AgentSwitched` events when a session is active.
-
+/// Tests for TUI agent switching (TASK-005).
+///
+/// Verifies that cycling through agents updates the agent name, status bar,
+/// log entries, and publishes `AgentSwitched` events when a session is active.
 use std::sync::Arc;
 
 use ragent_agent::{

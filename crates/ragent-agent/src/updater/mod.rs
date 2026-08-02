@@ -154,33 +154,3 @@ pub async fn download_and_replace(download_url: &str) -> Result<()> {
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_is_newer_same() {
-        assert!(!is_newer("0.1.0-alpha.21", "0.1.0-alpha.21"));
-    }
-
-    #[test]
-    fn test_is_newer_higher_prerelease() {
-        assert!(is_newer("0.1.0-alpha.22", "0.1.0-alpha.21"));
-    }
-
-    #[test]
-    fn test_is_newer_higher_patch() {
-        assert!(is_newer("0.1.1", "0.1.0"));
-    }
-
-    #[test]
-    fn test_is_newer_lower() {
-        assert!(!is_newer("0.1.0-alpha.20", "0.1.0-alpha.21"));
-    }
-
-    #[test]
-    fn test_is_newer_with_v_prefix() {
-        assert!(is_newer("v0.2.0", "0.1.0"));
-    }
-}

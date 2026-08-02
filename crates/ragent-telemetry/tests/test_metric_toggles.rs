@@ -118,7 +118,7 @@ fn registry_with_toggles(
 /// Since we can't build a recorder from a raw registry directly, the
 /// recorder-level tests below build a full `TelemetrySubsystem` with the
 /// toggles in the config and use `from_subsystem`.
-#[allow(dead_code)]
+#[allow(dead_code)] // currently unused but kept for the planned recorder-level export tests
 fn build_subsystem_with_toggles(
     toggles: HashMap<String, bool>,
 ) -> (

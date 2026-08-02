@@ -253,7 +253,6 @@ Continue until cancelled by the user (ESC).
 
 Note: This skill provides the instruction framework. The actual scheduling \
 loop must be implemented by the agent runtime.";
-
 #[cfg(test)]
 mod tests {
     use super::*;

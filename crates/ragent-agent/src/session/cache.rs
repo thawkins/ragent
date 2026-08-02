@@ -541,30 +541,3 @@ pub trait CachedSessionProcessor {
     /// Get the session state cache for a given session ID.
     fn session_state(&self, session_id: &str) -> Option<std::sync::MutexGuard<'_, SessionState>>;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_cached_basic() {
-        let mut cached: Cached<String> = Cached::new();
-        assert!(cached.get(current_cache_version()).is_none());
-
-        cached.set("test".to_string());
-        assert_eq!(
-            cached.get(current_cache_version()),
-            Some("test".to_string())
-        );
-
-        invalidate_all_caches();
-        assert!(cached.get(current_cache_version()).is_none());
-    }
-
-    #[test]
-    fn test_session_state_stores_thinking_config() {
-        let mut state = SessionState::new("test-session");
-        state.set_thinking(ThinkingConfig::off());
-        assert_eq!(state.thinking(), &ThinkingConfig::off());
-    }
-}

@@ -29,7 +29,7 @@ use crate::ToolOutput;
 ///
 /// A [`ToolOutput`] with the disabled message and structured metadata.
 #[must_use]
-pub fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str]) -> ToolOutput {
+pub(crate) fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str]) -> ToolOutput {
     let content = if fallback_hint.is_empty() {
         "Code index is not available. It may be disabled or not yet initialised.".to_string()
     } else {
@@ -47,7 +47,7 @@ pub fn codeindex_not_available(fallback_hint: &str, fallback_tools: &[&str]) -> 
 }
 
 /// Tool output returned when the code index is temporarily locked.
-pub fn busy_output(name: &str) -> ToolOutput {
+pub(crate) fn busy_output(name: &str) -> ToolOutput {
     ToolOutput {
         content: format!(
             "Code index is currently busy (re-indexing in progress). \
@@ -70,7 +70,7 @@ pub fn busy_output(name: &str) -> ToolOutput {
 /// * `Ok(Some(value))` when the lock was acquired and the operation completed.
 /// * `Ok(None)` when the index is currently busy (the lock was not acquired).
 /// * `Err(...)` on a real failure such as a database error.
-pub async fn with_retry<T, F>(op: F) -> Result<Option<T>>
+pub(crate) async fn with_retry<T, F>(op: F) -> Result<Option<T>>
 where
     F: FnMut() -> Result<Option<T>> + Send,
 {

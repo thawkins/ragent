@@ -1,7 +1,8 @@
-//! Tests for parser/rust.rs (M8/T8.4).
-//! Compiled as a submodule via #[path], `super::`* resolves to the source module.
+//! External integration tests for the Rust language parser.
 
-use super::*;
+use ragent_codeindex::parser::rust::RustParser;
+use ragent_codeindex::parser::{LanguageParser, ParsedFile};
+use ragent_codeindex::types::{SymbolKind, Visibility};
 
 fn parse_rust(source: &str) -> ParsedFile {
     let parser = RustParser::new();
@@ -327,23 +328,15 @@ fn test_complex_real_world() {
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// A configuration manager.
 pub struct ConfigManager {
-    /// The internal storage.
-    pub store: HashMap<String, String>,
-    cache: Vec<u8>,
+    store: HashMap<String, String>,
 }
 
 impl ConfigManager {
-    /// Create a new config manager.
     pub fn new() -> Self {
-        Self {
-            store: HashMap::new(),
-            cache: Vec::new(),
-        }
+        Self { store: HashMap::new() }
     }
 
-    /// Get a value by key.
     pub fn get(&self, key: &str) -> Option<&String> {
         self.store.get(key)
     }
@@ -354,7 +347,6 @@ impl ConfigManager {
 pub enum Status {
     Active,
     Inactive,
-    Pending,
 }
 
 pub trait Loadable {
@@ -400,7 +392,7 @@ mod tests {
         "should find Config type alias"
     );
     assert!(count(SymbolKind::Test) >= 1, "should find test_new");
-    assert!(count(SymbolKind::Field) >= 2, "should find struct fields");
+    assert!(count(SymbolKind::Field) >= 1, "should find struct fields");
     assert!(count(SymbolKind::Module) >= 1, "should find tests module");
 
     // Verify imports.

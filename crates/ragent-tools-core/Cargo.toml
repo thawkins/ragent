@@ -10,7 +10,6 @@ repository = "https://github.com/thawkins/ragent"
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 ragent-config = { path = "../ragent-config" }
-ragent-storage = { path = "../ragent-storage" }
 
 # Core async runtime
 tokio = { workspace = true }
@@ -23,13 +22,11 @@ rust_xlsxwriter = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
 
 # File operations
-glob = { workspace = true }
 globset = { workspace = true }
 walkdir = "2.5"
 similar = { workspace = true }
@@ -45,13 +42,8 @@ rayon = { workspace = true }
 # Shell utilities
 which = "7.0"
 
-# Process management
-nix = { version = "0.29", features = ["signal", "process"] }
-
 # Utilities
 chrono = { workspace = true }
-sha2 = "0.10"
-dashmap = { workspace = true }
 uuid = { workspace = true }
 dirs = "6"
 

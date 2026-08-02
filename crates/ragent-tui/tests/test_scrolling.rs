@@ -1,10 +1,9 @@
 //! Tests for `test_scrolling.rs`
 
-//! Tests for scroll and mouse support.
-//!
-//! Verifies keyboard and mouse-driven scrolling of the message and log panes,
-//! including scroll offset clamping and mouse hit-testing.
-
+/// Tests for scroll and mouse support.
+///
+/// Verifies keyboard and mouse-driven scrolling of the message and log panes,
+/// including scroll offset clamping and mouse hit-testing.
 use std::sync::Arc;
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};

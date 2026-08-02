@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-futures = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

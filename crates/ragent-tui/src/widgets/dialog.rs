@@ -154,21 +154,3 @@ impl Widget for DialogRender<'_, '_> {
         content_widget.render(area, buf);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_dialog_creation() {
-        let dialog = Dialog::new("Test Dialog", DialogVariant::Info);
-        assert_eq!(dialog.title, "Test Dialog");
-        assert_eq!(dialog.variant, DialogVariant::Info);
-    }
-
-    #[test]
-    fn test_dialog_border_color() {
-        let dialog = Dialog::new("Test", DialogVariant::Danger);
-        assert_eq!(dialog.border_color(), Color::Red);
-    }
-}

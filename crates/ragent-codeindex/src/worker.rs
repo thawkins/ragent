@@ -88,31 +88,38 @@ impl SharedStats {
 }
 
 /// Collects and deduplicates events into an actionable batch.
-struct EventBatch {
+#[derive(Debug)]
+pub struct EventBatch {
     /// Files to (re-)index — keeps only the latest event per path.
-    to_index: HashSet<PathBuf>,
+    pub to_index: HashSet<PathBuf>,
     /// Files to remove from the index.
-    to_remove: HashSet<PathBuf>,
+    pub to_remove: HashSet<PathBuf>,
 }
 
 impl EventBatch {
-    fn new() -> Self {
+    /// Create an empty batch.
+    #[must_use]
+    pub fn new() -> Self {
         Self {
             to_index: HashSet::new(),
             to_remove: HashSet::new(),
         }
     }
 
-    fn is_empty(&self) -> bool {
+    /// True if there are no events in the batch.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.to_index.is_empty() && self.to_remove.is_empty()
     }
 
-    fn len(&self) -> usize {
+    /// Total number of events in the batch.
+    #[must_use]
+    pub fn len(&self) -> usize {
         self.to_index.len() + self.to_remove.len()
     }
 
     /// Add an event, deduplicating: a later Delete overrides a Create/Change.
-    fn push(&mut self, event: WatchEvent) {
+    pub fn push(&mut self, event: WatchEvent) {
         match event {
             WatchEvent::Created(p) | WatchEvent::Changed(p) => {
                 self.to_remove.remove(&p);
@@ -376,136 +383,4 @@ fn process_batch(
     stats.batches_processed.fetch_add(1, Ordering::Relaxed);
     stats.is_busy.store(false, Ordering::Relaxed);
     batch.clear();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::CodeIndexConfig;
-    use std::sync::mpsc as std_mpsc;
-
-    fn make_test_index(dir: &std::path::Path) -> Arc<CodeIndex> {
-        let cfg = CodeIndexConfig {
-            enabled: true,
-            project_root: dir.to_path_buf(),
-            ..Default::default()
-        };
-        Arc::new(CodeIndex::open_in_memory(&cfg).unwrap())
-    }
-
-    #[test]
-    fn test_event_batch_dedup() {
-        let mut b = EventBatch::new();
-        b.push(WatchEvent::Changed(PathBuf::from("src/main.rs")));
-        b.push(WatchEvent::Changed(PathBuf::from("src/main.rs")));
-        b.push(WatchEvent::Changed(PathBuf::from("src/lib.rs")));
-        assert_eq!(b.to_index.len(), 2);
-        assert!(b.to_remove.is_empty());
-    }
-
-    #[test]
-    fn test_event_batch_delete_overrides_create() {
-        let mut b = EventBatch::new();
-        b.push(WatchEvent::Created(PathBuf::from("src/main.rs")));
-        b.push(WatchEvent::Deleted(PathBuf::from("src/main.rs")));
-        assert!(b.to_index.is_empty());
-        assert_eq!(b.to_remove.len(), 1);
-    }
-
-    #[test]
-    fn test_event_batch_create_after_delete() {
-        let mut b = EventBatch::new();
-        b.push(WatchEvent::Deleted(PathBuf::from("src/main.rs")));
-        b.push(WatchEvent::Created(PathBuf::from("src/main.rs")));
-        assert_eq!(b.to_index.len(), 1);
-        assert!(b.to_remove.is_empty());
-    }
-
-    #[test]
-    fn test_event_batch_rename() {
-        let mut b = EventBatch::new();
-        b.push(WatchEvent::Renamed {
-            from: PathBuf::from("old.rs"),
-            to: PathBuf::from("new.rs"),
-        });
-        assert_eq!(b.to_remove.len(), 1);
-        assert!(b.to_remove.contains(&PathBuf::from("old.rs")));
-        assert_eq!(b.to_index.len(), 1);
-        assert!(b.to_index.contains(&PathBuf::from("new.rs")));
-    }
-
-    #[test]
-    fn test_worker_stats_default() {
-        let s = WorkerStats::default();
-        assert_eq!(s.files_indexed, 0);
-        assert_eq!(s.files_removed, 0);
-        assert_eq!(s.batches_processed, 0);
-        assert!(!s.is_busy);
-    }
-
-    #[test]
-    fn test_worker_start_stop() {
-        let dir = tempfile::tempdir().unwrap();
-        let index = make_test_index(dir.path());
-        let (_tx, rx) = std_mpsc::channel();
-
-        let mut handle = IndexWorker::start(index, rx, WorkerConfig::default());
-        assert!(!handle.is_stopped());
-
-        handle.stop();
-        assert!(handle.is_stopped());
-    }
-
-    #[test]
-    fn test_worker_processes_events() {
-        let dir = tempfile::tempdir().unwrap();
-        // Create a source file for the worker to index.
-        let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).unwrap();
-        std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
-
-        let index = make_test_index(dir.path());
-        let (tx, rx) = std_mpsc::channel();
-
-        let config = WorkerConfig {
-            debounce_ms: 100,
-            batch_size: 50,
-            max_queue_size: 1000,
-        };
-
-        let mut handle = IndexWorker::start(Arc::clone(&index), rx, config);
-
-        // Send a change event.
-        tx.send(WatchEvent::Changed(PathBuf::from("src/main.rs")))
-            .unwrap();
-
-        // Wait for the worker to process it.
-        std::thread::sleep(Duration::from_millis(500));
-
-        let stats = handle.stats();
-        // The file should have been indexed.
-        assert!(
-            stats.batches_processed >= 1,
-            "expected at least 1 batch, got {}",
-            stats.batches_processed
-        );
-
-        handle.stop();
-    }
-
-    #[test]
-    fn test_worker_channel_disconnect_stops() {
-        let dir = tempfile::tempdir().unwrap();
-        let index = make_test_index(dir.path());
-        let (tx, rx) = std_mpsc::channel();
-
-        let mut handle = IndexWorker::start(index, rx, WorkerConfig::default());
-
-        // Drop the sender — should cause worker to exit.
-        drop(tx);
-
-        // Give the worker time to notice.
-        std::thread::sleep(Duration::from_millis(200));
-        handle.stop();
-    }
 }

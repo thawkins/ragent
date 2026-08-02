@@ -238,9 +238,13 @@ enum OpKind {
 
 #[derive(Debug)]
 struct Hunk {
+    /// Unified-diff hunk header line (e.g. `@@ -1,5 +1,5 @@`). Currently
+    /// retained for diagnostics and future diff-format round-tripping.
     #[allow(dead_code)]
     header: String,
     lines: Vec<HunkLine>,
+    /// `true` when the hunk body included the end-of-file newline marker.
+    /// Used by future newline-preservation logic.
     #[allow(dead_code)]
     end_of_file: bool,
 }

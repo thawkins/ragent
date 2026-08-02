@@ -3,8 +3,8 @@
 #[path = "support/mod.rs"]
 mod support;
 
+use ragent_tui::app::sanitize_for_display;
 use ragent_tui::research_progress::{decode_progress_event, encode_progress_event};
-use ragent_tui::sanitize_for_display;
 
 // =========================================================================
 // sanitize_for_display

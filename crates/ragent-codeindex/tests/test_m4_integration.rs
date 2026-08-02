@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 
-//! Integration tests for Milestone 4: background worker, watcher, and watch session.
-
+/// Integration tests for Milestone 4: background worker, watcher, and watch session.
 use ragent_codeindex::CodeIndex;
 use ragent_codeindex::types::{CodeIndexConfig, SearchQuery};
 use ragent_codeindex::watcher::{CodeWatcher, WatchEvent};

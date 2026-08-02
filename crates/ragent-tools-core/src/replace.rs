@@ -2,7 +2,7 @@
 //!
 //! [`find_replacement_range`] is the canonical implementation of the
 //! multi-pass matcher used by every replace-style tool in ragent (`edit`,
-//! `multiedit`, `memory_replace`). It locates a unique byte range `[start, end)`
+//! `multiedit`; historically also the legacy `memory_replace`). It locates a unique byte range `[start, end)`
 //! in `content` where `needle` should be replaced, and computes the effective
 //! replacement text (which may differ from `new_str` when leading indentation
 //! has to be re-applied).

@@ -281,6 +281,9 @@ fn is_in_navigation(context: &[&str]) -> bool {
 }
 
 /// Check if any element in the context stack is a content element.
+///
+/// Currently unused; kept because it pairs with [`is_in_navigation`] and may
+/// be used by future content-aware link classification.
 #[allow(dead_code)]
 fn is_in_content(context: &[&str]) -> bool {
     context.iter().any(|tag| CONTENT_ELEMENTS.contains(tag))

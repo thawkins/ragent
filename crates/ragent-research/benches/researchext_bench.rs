@@ -39,6 +39,7 @@ impl WebFetchTool for FixedFetch {
             body: "This is the body of the fake source used for benchmarking.".into(),
             content_type: None,
             page_type: None,
+            language: None,
         })
     }
 }

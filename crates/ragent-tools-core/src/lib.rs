@@ -4,7 +4,8 @@
 //! minimal shared tool abstractions those moved implementations require.
 
 // Shared whitespace-tolerant replacement matcher (used by edit, multiedit,
-// and memory_replace). Extracted in WSPLAN Milestone 2.
+// and the legacy memory_replace tool; now retained for edit/multiedit).
+// Extracted in WSPLAN Milestone 2.
 pub mod replace;
 
 // Shared path-resolution helper (DUPPLAN.md Milestone B).

@@ -697,6 +697,11 @@ fn parse_hf_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> Option<S
 /// HuggingFace error response structure for model loading and other errors.
 #[derive(Debug, Deserialize)]
 struct HfErrorResponse {
+    /// Human-readable HuggingFace error message.
+    ///
+    /// Currently unused; the provider relies on HTTP status codes and
+    /// `estimated_time` for polling logic. Kept as a documented field so future
+    /// diagnostics can surface the provider message without schema changes.
     #[serde(default)]
     #[allow(dead_code)]
     error: String,

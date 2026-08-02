@@ -52,7 +52,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.
-pub struct AskPassBroker {
+pub(crate) struct AskPassBroker {
     /// Absolute path to the generated askpass helper script.
     helper_path: PathBuf,
     /// Per-invocation directory the helper writes request files into and the
@@ -153,7 +153,7 @@ impl AskPassBroker {
     }
 
     /// Absolute path to the request directory (mainly useful for logging).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // kept for test diagnostics; used by the inline askpass tests
     pub(crate) fn request_dir(&self) -> &Path {
         &self.request_dir
     }

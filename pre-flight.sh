@@ -98,6 +98,10 @@ fi
 print_step "Inline test guard..."
 bash "$(dirname "$0")/scripts/check-inline-tests.sh" || print_failure "Inline test guard failed"
 
+# Dead-code reason guard (RMPLAN.md Milestone 7 / T7.2)
+print_step "Dead-code reason guard..."
+bash "$(dirname "$0")/scripts/check-dead-code-reasons.sh" || print_failure "Dead-code reason guard failed"
+
 # VCS tool duplication guard (DUPPLAN.md Milestone A)
 print_step "VCS tool duplication guard..."
 bash "$(dirname "$0")/scripts/check-vcs-duplication.sh" || print_failure "VCS tool duplication guard failed"

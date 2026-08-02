@@ -883,9 +883,3 @@ fn extract_body_hash(ctx: &ExtractionContext, node: Node) -> String {
     let text = ctx.node_text(node);
     crate::scanner::hash_content(text.as_bytes())
 }
-
-// ── Tests ───────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-#[path = "../../tests/inline/codeindex_rust_parser.rs"]
-mod parser_rust_tests;

@@ -46,6 +46,46 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  dead-code-lint:
+    name: Dead-code lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTFLAGS: '-D unreachable_pub -D dead_code -D unused_imports'
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          sudo swapon --show
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check for unreachable/dead code
+        run: cargo check --workspace --lib --all-features
+
+  dead-code-reasons:
+    name: Dead-code reason check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify allow(dead_code) reasons
+        run: bash scripts/check-dead-code-reasons.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

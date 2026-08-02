@@ -1,10 +1,9 @@
 //! Tests for `test_text_selection.rs`
 
-//! Tests for text selection and copy.
-//!
-//! Verifies mouse-driven text selection, highlight tracking,
-//! right-click copy, and selection state management.
-
+/// Tests for text selection and copy.
+///
+/// Verifies mouse-driven text selection, highlight tracking,
+/// right-click copy, and selection state management.
 use std::sync::Arc;
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};

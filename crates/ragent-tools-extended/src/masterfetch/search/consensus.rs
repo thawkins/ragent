@@ -107,6 +107,10 @@ const MAX_RELATED_QUERIES: usize = 10;
 const MIN_TERM_LEN: usize = 3;
 
 /// Maximum number of results to return by default.
+///
+/// The consensus module returns all available ranked results; the caller
+/// slices as needed. This constant is retained as a documented default so
+/// future callers do not need to hard-code 20.
 #[allow(dead_code)]
 const DEFAULT_MAX_RESULTS: usize = 20;
 

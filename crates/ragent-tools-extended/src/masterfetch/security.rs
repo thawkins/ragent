@@ -55,6 +55,11 @@ const DNS_REBINDING_SUFFIXES: &[&str] = &[".nip.io", ".sslip.io", ".xip.io", ".n
 const CLOUD_METADATA_HOSTS: &[&str] = &["metadata.google.internal", "metadata.azure.com"];
 
 /// Cloud metadata endpoint IP literal `169.254.169.254`.
+///
+/// This constant is currently unused by the active validation path, which
+/// rejects cloud metadata by hostname via [`CLOUD_METADATA_HOSTS`]. It is
+/// retained as a documented literal in case IP-literal metadata URLs need to
+/// be blocked explicitly in the future.
 #[allow(dead_code)]
 const CLOUD_METADATA_IP: &str = "169.254.169.254";
 
@@ -458,6 +463,6 @@ fn parse_ip_octet(part: &str) -> Option<u32> {
         return u32::from_str_radix(part, 8).ok();
     }
 
-    // Decimal
-    part.parse::<u32>().ok()
-}
+      // Decimal
+      part.parse::<u32>().ok()
+  }

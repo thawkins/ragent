@@ -674,6 +674,10 @@ impl App {
         (tier, multiplier)
     }
 
+    /// Build the default HuggingFace model picker entries. Currently unused
+    /// because the model picker now uses the generic provider-based flow, but
+    /// retained as a documented helper in case a provider-specific default list
+    /// is reintroduced.
     #[allow(dead_code)]
     pub(crate) fn hf_default_model_entries(&self) -> Vec<ModelPickerEntry> {
         self.provider_registry
@@ -1262,6 +1266,13 @@ impl App {
             Ok(h) => h,
             Err(_) => return Vec::new(),
         };
+        // `block_in_place` is only permitted on the multi-threaded Tokio
+        // scheduler. Tests run on the current-thread scheduler (or outside a
+        // runtime), so skip synchronous discovery there to avoid a runtime
+        // panic. The caller falls back to cached/default model entries.
+        if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
+            return Vec::new();
+        }
         match tokio::task::block_in_place(|| handle.block_on(provider.discover_models())) {
             Ok(models) => {
                 self.cache_discovered_models(provider_id, &models);

@@ -140,6 +140,10 @@ struct OllamaModelDetails {
     #[serde(default)]
     parameter_size: String,
     /// Model family (e.g. `"llama"`, `"qwen"`).
+    ///
+    /// Currently parsed but not used for context-window estimation, which relies
+    /// on `parameter_size`. Kept as a documented field so future routing or
+    /// display logic can use it without changing the API response schema.
     #[serde(default)]
     #[allow(dead_code)]
     family: String,

@@ -111,6 +111,7 @@ fn make_pages(n: usize) -> HashMap<String, WebFetchedPage> {
                     body: "Rust async body content".repeat(20),
                     content_type: None,
                     page_type: None,
+                    language: None,
                 },
             )
         })

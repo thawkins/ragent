@@ -8,13 +8,8 @@ description = "Spec management system for ragent: EARS notation specs, validatio
 repository = "https://github.com/thawkins/ragent"
 
 [dependencies]
-ragent-types = { path = "../ragent-types" }
-
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
-anyhow = "1"
 regex = "1"
 tokio = { version = "1.42", features = ["fs", "io-util"] }
 tracing = "0.1"
