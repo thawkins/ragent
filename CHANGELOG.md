@@ -1,5 +1,16 @@
 # Changelog
 
+## Version: 0.1.0-beta.33
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.33.
+- Removed the `agentgrep` structure-aware code search tool and its unused
+  dependencies (`grep-regex`, `grep-searcher`, `ignore`, `glob` from
+  `ragent-tools-extended`) because it duplicated the `codeindex_*` toolset.
+- Updated `README.md`, `QUICKSTART.md`, `TUI-QUICKSTART.md`, `SPEC.md`, and
+  `docs/JCODEPLAN.md` to remove `agentgrep` references.
+
 ## Version: 0.1.0-beta.32
 
 ### Changed

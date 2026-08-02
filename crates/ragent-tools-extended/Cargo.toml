@@ -37,10 +37,6 @@ reqwest = { workspace = true, features = ["cookies", "gzip", "deflate"] }
 tokio-tungstenite = { workspace = true }
 regex = { workspace = true }
 percent-encoding = "2"
-grep-regex = "0.1"
-grep-searcher = "0.1"
-ignore = "0.4"
-glob = "0.3"
 docx-rust = { workspace = true }
 calamine = { workspace = true }
 rust_xlsxwriter = { workspace = true }

@@ -46,7 +46,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
     - **Interactive** — question, think, todo_read, todo_write
     - **Utility** — calculator, get_env
-    - **Code search & navigation** — agentgrep, codeindex_search, codeindex_symbols,
+    - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
     - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
       extraction, search, and crawling
@@ -367,10 +367,16 @@ Recent highlights:
 
 - `memory_store` now reports a clear `stored` result and the TUI summary correctly shows
   successful structured-memory writes
-- `agentgrep` structure-aware code search tool (with symbol boundaries and file outlines)
-- MasterFetch web tools (`mf_fetch`, `mf_search`, `mf_crawl`, `mf_cache_clear`) for content
-  extraction, keyless search, and focused crawling
-- Gmail and messaging-channel tools (`gmail`, `send_channel_message`) for external notifications
+- Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
+- Startup timing instrumentation with `/startup` slash command
+- Copilot `gh auth token` cached process-wide via `OnceLock`
+- Code-index SQLite WAL mode and direct `file_id` symbol queries
+- First printable keystroke after run-cost banner no longer swallowed
+- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools
+- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions
+- TODO side panel added (`Alt+T`) with `/todo` slash alias
+- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F)
+- All 279 compiler warnings eliminated (build, tests, benches, examples)
 - Model Router cluster provider with downstream-model status bar and terminal-signal guarantee
 - `/provider` now always prompts for the API key (pre-filled with the existing key) so keys can be edited without removing the provider
 - `/model` jumps straight to the model list when a provider is already configured

@@ -433,19 +433,6 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         // 🔎 EXTENDED SEARCH / INTELLIGENCE
         // ═══════════════════════════════════════════════════════════════════
-        "agentgrep" => {
-            let query = get_str(&["query"]).unwrap_or_default();
-            let mode = get_str(&["mode"]).unwrap_or_else(|| "grep".to_string());
-            let scope = get_str(&["path"])
-                .map(|p| make_relative_path(&p, cwd))
-                .filter(|p| !p.is_empty());
-            match scope {
-                Some(p) if !p.is_empty() => {
-                    format!("🔎 {} \"{}\" in {}", mode, trunc120(&query), p)
-                }
-                _ => format!("🔎 {} \"{}\"", mode, trunc120(&query)),
-            }
-        }
         "conversation_search" => {
             let query = get_str(&["query"]).unwrap_or_default();
             format!("🔎 session: \"{}\"", trunc120(&query))

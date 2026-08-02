@@ -39,7 +39,7 @@ specs, MCP) or building UI-only features that are out of scope.
 
 | jcode capability               | jcode tool(s)                                             | ragent status                                                                                                                | relevance                                          |
 | ------------------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Structure-aware search         | `agentgrep`                                             | Not present. Core`grep` exists, but does not return symbols/outline/displacement info.                                     | High — reduces context use.                       |
+| Structure-aware search         | `codeindex_*` tools                                     | Implemented. `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, and `codeindex_status` provide symbol-aware code navigation. | High — reduces context use.                       |
 | Codex-style patches            | `apply_patch`                                           | Not present.`patch` + `multi_edit` exist.                                                                                | Medium — model often emits Codex patches.         |
 | Parallel batched calls         | `batch`                                                 | Not present. Sub-agents/teams exist, but no in-turn batch wrapper.                                                           | Medium — throughput for independent reads.        |
 | Background task manager        | `bg`                                                    | Partial.`new_task`/`wait_tasks`/`cancel_task` exist for sub-agents, but no generic background bash task introspection. | High — long-running builds/tests.                 |
@@ -58,29 +58,6 @@ specs, MCP) or building UI-only features that are out of scope.
 | Debug socket introspection     | `debug_socket`                                          | Not present.                                                                                                                 | Low — internal tooling.                           |
 
 ## Milestones
-
-### M1 — Structure-aware code search (`agentgrep`)
-
-**What:** Port the `agentgrep` concept: a `grep`-like tool that also returns file
-structure metadata (function list, line ranges, symbol displacement) and can
-truncate results based on what the session has already read.
-
-**Where:** `crates/ragent-tools-extended/src/agentgrep.rs`
-
-**Tasks:**
-
-- T-001 Design `agentgrep` JSON schema (`mode`: `grep`/`outline`/`smart`/`find`,
-  `query`, `path`, `glob`, `max_regions`, `max_files`, `full_region`, etc.).
-- T-002 Integrate the existing `ragent-codeindex` index as a symbol source, or
-  build a lightweight tree-sitter/outline fallback.
-- T-003 Implement adaptive truncation using session read history.
-- T-004 Add tests in `crates/ragent-tools-extended/tests/test_agentgrep.rs`.
-- T-005 Register as `agentgrep` in `ragent-agent/src/tool/mod.rs`.
-- T-006 Optionally alias legacy `grep` calls to `agentgrep` when the model asks
-  for structure info.
-
-**Acceptance:** `agentgrep pattern="pub fn" glob="*.rs"` returns ranked matches
-with surrounding symbol boundaries and omits already-read regions.
 
 ### M2 — Codex-style patch + batched tool calls
 
@@ -282,11 +259,9 @@ infrastructure that is not part of this effort:
 ## Open Questions
 
 1. Should `apply_patch` replace or coexist with the existing `patch` tool?
-2. Should `agentgrep` supersede `grep` for all model calls, or be an opt-in
-   advanced tool?
-3. Does `ragent` want to support ambient/autonomous execution, or should M6 be
+2. Does `ragent` want to support ambient/autonomous execution, or should M6 be
    deferred until permission/audit logging is stronger?
-4. Which browser backend should be implemented first: CDP (Chrome), Firefox
+3. Which browser backend should be implemented first: CDP (Chrome), Firefox
    Agent Bridge, or Playwright-style remote?
 
 ## Success Criteria

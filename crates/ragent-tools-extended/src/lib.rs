@@ -3,7 +3,6 @@
 //! This crate owns the Milestone 5 extracted tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
-pub mod agentgrep;
 pub mod browser;
 pub mod channels;
 pub mod codeindex_dependencies;
@@ -316,7 +315,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
     registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
     registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
-    registry.register(Arc::new(agentgrep::AgentGrepTool));
     registry.register(Arc::new(browser::BrowserTool));
     // JCODEPLAN M7 — external integrations.
     registry.register(Arc::new(gmail::GmailTool::new()));

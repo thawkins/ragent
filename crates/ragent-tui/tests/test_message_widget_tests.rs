@@ -73,31 +73,6 @@ fn test_read_tool_summary_uses_path_or_file_path() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn test_agentgrep_input_summary_shows_icon_and_query() {
-    let input = json!({
-        "mode": "grep",
-        "query": "struct AgentGrep",
-        "path": "/tmp/proj/crates"
-    });
-    let summary = tool_input_summary("agentgrep", &input, "/tmp/proj");
-    assert!(
-        summary.starts_with("🔎"),
-        "expected 🔎 icon, got: {summary}"
-    );
-    assert!(summary.contains("AgentGrep"));
-    assert!(summary.contains("crates"));
-}
-
-#[test]
-fn test_agentgrep_input_summary_without_path() {
-    let input = json!({"mode": "outline", "query": "tool"});
-    let summary = tool_input_summary("agentgrep", &input, "/tmp");
-    assert!(summary.starts_with("🔎"));
-    assert!(summary.contains("outline"));
-    assert!(summary.contains("tool"));
-}
-
-#[test]
 fn test_apply_patch_input_summary_shows_icon() {
     let input = json!({"patch": "*** Begin Patch\n*** Update File: src/x.rs\n@@\n*** End Patch"});
     let summary = tool_input_summary("apply_patch", &input, "/tmp");

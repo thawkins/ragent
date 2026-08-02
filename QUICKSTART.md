@@ -5,8 +5,16 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-beta.28)
+## Highlights (0.1.0-beta.32)
 
+- **Legacy memory system removed** — replaced by the structured-memory store
+  backed by `ragent-storage`. The `memory_store`/`memory_recall` tools and TUI
+  memory panel (`Alt+M`) now use the new store.
+- **Tool-call summaries improved** — bash/read/write/create/edit inputs remain
+  visible even when providers emit unexpected JSON field names by falling back to
+  the raw tool args.
+- **CI workflow improvements** — `check-and-test` reverted to debug builds with
+  an 8 GiB swapfile and 45-minute timeout to avoid OOM during release-linking.
 - **Model Router** — route requests across a local cluster of providers; status bar
   shows the actual downstream model and tier.
 - **Provider key editing** — `/provider` now pre-fills the existing API key so you
@@ -17,8 +25,6 @@ configuration, and common workflows.
   report `stored: true` and the TUI summary reflects it.
 - **MasterFetch web tools** — `mf_fetch`, `mf_search`, `mf_crawl`, and
   `mf_cache_clear` for content extraction, keyless search, and focused crawling.
-- **`agentgrep` structure-aware code search** — symbol boundaries, file outlines,
-  and ranked results.
 - **Gmail and messaging channels** — `gmail` and `send_channel_message` tools for
   external notifications.
 - **Browser automation** — `browser` tool with 14 CDP actions; toggle with

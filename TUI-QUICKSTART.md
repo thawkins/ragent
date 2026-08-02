@@ -2,10 +2,46 @@
 
 A hands-on guide to using **ragent** through its full-screen terminal UI.
 
-This guide reflects **v0.1.0-beta.28** behaviour. Recent highlights include the
-Model Router status bar, editable provider keys, configuration snapshots,
-`/autopilot`, `/startup` timings, browser tool visibility, structured-memory
-fixes, and research seeded from URLs or local files.
+---
+
+## Highlights (0.1.0-beta.32)
+
+- **Legacy memory system removed** — replaced by the structured-memory store
+  backed by `ragent-storage`. The `memory_store`/`memory_recall` tools and TUI
+  memory panel (`Alt+M`) now use the new store.
+- **Tool-call summaries improved** — bash/read/write/create/edit inputs remain
+  visible even when providers emit unexpected JSON field names by falling back to
+  the raw tool args.
+- **CI workflow improvements** — `check-and-test` reverted to debug builds with
+  an 8 GiB swapfile and 45-minute timeout to avoid OOM during release-linking.
+- **Model Router** — route requests across a local cluster of providers; status bar
+  shows the actual downstream model and tier.
+- **Provider key editing** — `/provider` now pre-fills the existing API key so you
+  can update it without removing the provider.
+- **Configuration snapshots** — `/config show`, `/config save`, and `/config list`
+  let you inspect, back up, and restore your global `ragent.json`.
+- **`memory_store` result clarity** — successful structured-memory writes now
+  report `stored: true` and the TUI summary reflects it.
+- **MasterFetch web tools** — `mf_fetch`, `mf_search`, `mf_crawl`, and
+  `mf_cache_clear` for content extraction, keyless search, and focused crawling.
+- **Gmail and messaging channels** — `gmail` and `send_channel_message` tools for
+  external notifications.
+- **Browser automation** — `browser` tool with 14 CDP actions; toggle with
+  `/tools browser on|off`.
+- **Research system** — `/research create <name>` gathers web and local-file sources,
+  producing a self-contained `RESEARCH.md`.
+- **Teams and swarms** — `/team` and `/swarm` slash commands for multi-agent
+  coordination.
+- **Autopilot** — `/autopilot on` with optional token/time limits and a TUI status
+  indicator.
+- **Context compaction** — `/compact` and the `compaction` config block to keep long
+  sessions within context limits.
+- **Image attachments (Alt+V)** — paste images from clipboard or file URIs; pending
+  attachments are displayed before sending.
+- **New editing tools** — `multiedit`, `patch`, `apply_patch`, and `open` for
+  atomic multi-file edits, diff patching, and desktop opening.
+- **All compiler warnings eliminated** — build, tests, benches, and examples are
+  warning-free.
 
 ---
 

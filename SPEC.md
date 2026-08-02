@@ -113,7 +113,7 @@ current state of all subsystems.
 - **Research system maturation** — Wired real gatherers with completion reporting; added `--use-low-relevance` flag, `--from-file` local-document seeding, `--from-url` seeding, PDF/YouTube text extraction, excluded-source counts, search-tool/engine provenance, control-character sanitisation, and `html2text` panic recovery; web search diagnostics via `/websearch show|help|test`; added Tavily and LangSearch backends (beta.9–beta.22)
 - **Context compaction & autopilot reliability** — Compaction bail paths now publish `AgentNotice` events; post-compaction continuation nudge is threaded across loop iterations; autopilot suppresses auto-continue after `task_complete`; router status bar shows the actual downstream model and tier; synthetic `Finish` injected on router streams that end without a terminal event (beta.21)
 - **Startup responsiveness** — MCP, code-index startup, and provider health checks moved to background tasks; `/startup` slash command exposes per-stage timings; first keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
-- **Tool expansion** — Added `apply_patch`, `open`, `browser`, `conversation_search`, `session_search`, `bg`, `agentgrep`, `initiative`, `skill_manage`, `gmail`, `send_channel_message`, and the six `mf_*` MasterFetch tools; `ask_user` is now a standalone event-driven tool with multiple-choice support (beta.12–beta.17)
+- **Tool expansion** — Added `apply_patch`, `open`, `browser`, `conversation_search`, `session_search`, `bg`, `initiative`, `skill_manage`, `gmail`, `send_channel_message`, and the six `mf_*` MasterFetch tools; `ask_user` is now a standalone event-driven tool with multiple-choice support (beta.12–beta.17)
 - **Cost accounting** — `Event::RunCostSummary` is published at the end of each turn, persisted to SQLite, surfaced as a TUI banner, and included in `--include-cost` session exports (beta.12)
 - **Telemetry & operator features** — OpenTelemetry metrics export with `/telemetry` slash family and ALT-O panel; `sudo` askpass broker routes password prompts through the TUI question dialog; durable initiatives and runtime skill management tools; instruction-file `@<path>` includes (beta.2–beta.17)
 
@@ -577,7 +577,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 |----------|-------|-------|
 | File operations | `read`, `write`/`create`/`update_file`, `edit`, `multi_edit`/`multiedit`, `apply_patch`, `patch`, `rm`, `move`, `copy`, `mkdir`, `append`, `file_info`, `diff`, `glob`, `list` | 18 |
 | Shell / execution | `bash`, `run_code`, `bash_reset`, `calculator`, `open` | 5 |
-| Search | `grep`, `agentgrep`, `codeindex_*` | 7 |
+| Search | `grep`, `codeindex_*` | 6 |
 | Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `browser`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` | 10 |
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
@@ -626,7 +626,6 @@ has a JSON schema, a permission category, and an async `execute` method.
 
 | Tool | Purpose |
 |------|---------|
-| `agentgrep` | Structure-aware code search that returns symbol boundaries, file outlines, and displacement from already-read regions. |
 
 #### External Messaging Tools (2)
 
@@ -2455,7 +2454,7 @@ callers and integrators know the intended surface.
 - **Autopilot & router fixes** — Autopilot auto-continue suppressed after `task_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
 - **Startup responsiveness** — MCP server connections, code-index open/watcher/reindex, and provider health checks moved to background tasks; `/startup` slash command shows per-stage timing; first printable keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
 - **Code-index performance** — SQLite `WAL` mode, `synchronous = NORMAL`, `temp_store = MEMORY`; direct `file_id` symbol queries; reindex chunk yield reduced to 1 ms; per-phase timing logs (beta.18)
-- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `agentgrep` structure-aware search; `initiative` durable goals; `skill_manage` runtime skill control; `gmail` and `send_channel_message` external integrations; six `mf_*` MasterFetch tools (beta.12–beta.17)
+- **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `skill_manage` runtime skill control; `gmail` and `send_channel_message` external integrations; six `mf_*` MasterFetch tools (beta.12–beta.17)
 - **Cost accounting** — `Event::RunCostSummary` published per turn; persisted to SQLite `run_cost_summaries`; TUI banner overlay; `--include-cost` session export flag; HTTP SSE `run_cost_summary` event (beta.12)
 - **Telemetry & operator tools** — OpenTelemetry metrics export, `/telemetry` slash family, ALT-O telemetry panel, `sudo` askpass broker, `askpass` environment wiring (beta.2–beta.5)
 - **Instruction-file includes** — `@<path>` directive with cycle detection, depth cap, escape sequences, and path containment checks (beta.17)
@@ -2472,6 +2471,5 @@ callers and integrators know the intended surface.
 - Skill discovery tests isolated by `SkillScope` and `bundled_count()` to avoid test fragility
 - Doctest build breakages in `session::permissions` and `tool::ToolRegistry`
 - TUI read-tool header now uses pending args when `ToolCallStart` is dropped, and shows `📄 missing path` for malformed calls
-- `agentgrep` clippy warnings
 - `RUSTSEC-2025-0052` (`async-std` discontinued) advisory ignored in `cargo-deny` configuration (beta.26)
 
