@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-beta.32
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.32.
+- Updated CI workflow.
+
 ## Version: 0.1.0-beta.31
 
 ### Fixed
