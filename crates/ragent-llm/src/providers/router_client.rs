@@ -32,6 +32,10 @@ pub struct RouterClient {
     /// Reused for continuation calls (tool-result messages) so the router does
     /// not re-classify or re-log after every tool execution.
     cached_entry: Mutex<Option<TierEntry>>,
+    /// Cache of downstream `(provider, model)` → client so a delegated call
+    /// reuses a warm client (and its connection pool) instead of rebuilding
+    /// one — and re-establishing TLS/keep-alive — on every loop step (H2).
+    downstream_clients: Mutex<HashMap<String, Arc<dyn LlmClient>>>,
 }
 
 impl RouterClient {
@@ -48,6 +52,7 @@ impl RouterClient {
             storage,
             event_bus: None,
             cached_entry: Mutex::new(None),
+            downstream_clients: Mutex::new(HashMap::new()),
         }
     }
 
@@ -370,15 +375,35 @@ impl RouterClient {
             "model_id".to_string(),
             serde_json::Value::String(entry.model.clone()),
         );
-        let downstream = provider
-            .create_client(&api_key, base_url.as_deref(), &options)
-            .await
-            .with_context(|| {
-                format!(
-                    "Router failed to create client for selected model {}",
-                    selected_model
-                )
-            })?;
+
+        // H2: reuse a warm downstream client keyed by (provider, model) so the
+        // connection pool (TLS, keep-alive) is amortised across loop steps
+        // instead of being torn down and rebuilt on every delegated call.
+        let cache_key = format!("{}:{}", entry.provider, entry.model);
+        let downstream = match self
+            .downstream_clients
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&cache_key).cloned())
+        {
+            Some(client) => client,
+            None => {
+                let created = provider
+                    .create_client(&api_key, base_url.as_deref(), &options)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Router failed to create client for selected model {}",
+                            selected_model
+                        )
+                    })?;
+                let arc: Arc<dyn LlmClient> = Arc::from(created);
+                if let Ok(mut guard) = self.downstream_clients.lock() {
+                    guard.insert(cache_key, arc.clone());
+                }
+                arc
+            }
+        };
 
         // Route the request to the downstream model.
         request.model = entry.model.clone();

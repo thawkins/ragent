@@ -363,6 +363,8 @@ impl LlmClient for AzureAnthropicClient {
     {
         let url = format!("{}/anthropic/v1/messages", self.inner.base_url);
         let body = self.inner.build_request_body(&request);
+        let body_bytes =
+            serde_json::to_vec(&body).context("serialise Azure Anthropic request body")?;
 
         let response = self
             .inner
@@ -371,7 +373,7 @@ impl LlmClient for AzureAnthropicClient {
             .header("api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&body)
+            .body(body_bytes)
             .send()
             .await
             .inspect_err(|e| {

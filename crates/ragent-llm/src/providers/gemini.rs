@@ -13,6 +13,7 @@ use std::pin::Pin;
 use super::thinking::{
     full_reasoning_levels, gemini_thinking_config_from_request, gemini_thinking_levels_for_model,
 };
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -490,20 +491,11 @@ impl GeminiClient {
 
         // Add tools if present
         if !request.tools.is_empty() {
-            let tools: Vec<Value> = request
-                .tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "functionDeclarations": [{
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }]
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tools);
+            // H2: reuse the cached serialised Gemini tool list (with the
+            // `functionDeclarations` wrapper) instead of building a fresh
+            // `Vec<Value>` on every call.
+            let cached = cached_tools(ToolFormat::Gemini, &request.tools);
+            body["tools"] = cached.gemini_tools_array();
         }
 
         body
@@ -517,6 +509,7 @@ impl LlmClient for GeminiClient {
         request: ChatRequest,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let body = self.build_request_body(&request);
+        let body_bytes = serde_json::to_vec(&body).context("serialise Gemini request body")?;
 
         // Use streaming endpoint
         let url = format!(
@@ -528,7 +521,7 @@ impl LlmClient for GeminiClient {
             .http
             .post(&url)
             .header("content-type", "application/json")
-            .json(&body)
+            .body(body_bytes)
             .send()
             .await
             .inspect_err(|e| {

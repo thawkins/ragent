@@ -94,6 +94,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         cached_tool_definitions: parking_lot::RwLock::new(None),
         cached_tool_names: parking_lot::RwLock::new(None),
         cached_tool_definition_bytes: parking_lot::RwLock::new(None),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         cached_config: parking_lot::Mutex::new(None),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(HashMap::new())),
         auto_approve: false,

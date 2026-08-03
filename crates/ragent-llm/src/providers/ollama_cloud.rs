@@ -16,6 +16,7 @@ use std::pin::Pin;
 use super::thinking::{
     binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
 };
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -481,22 +482,11 @@ impl OllamaCloudClient {
             body["max_tokens"] = json!(max_tokens);
         }
         if !tools.is_empty() {
-            let tool_defs: Vec<Value> = tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tool_defs);
+            // H2: reuse the cached serialised OpenAI-compatible tool list
+            // instead of building a fresh `Vec<Value>` on every call.
+            let cached = cached_tools(ToolFormat::OpenAi, tools);
+            body["tools"] = cached.openai_tools_array();
         }
-
         // Ollama Cloud supports the `think` boolean parameter on its
         // native `/api/chat` endpoint, just like local Ollama.
         if let Some(think) = think_flag_from_request(request) {
@@ -531,13 +521,15 @@ impl LlmClient for OllamaCloudClient {
         }
 
         let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
+        let body_bytes =
+            serde_json::to_vec(&body).context("serialise Ollama Cloud request body")?;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             self.http
                 .post(&url)
                 .header("content-type", "application/json")
                 .header("Authorization", format!("Bearer {}", self.api_key))
-                .json(&body)
+                .body(body_bytes)
                 .send(),
         )
         .await

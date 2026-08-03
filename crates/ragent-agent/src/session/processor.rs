@@ -114,6 +114,14 @@ pub struct SessionProcessor {
     /// step. Invalidated together with [`cached_tool_definitions`] by
     /// [`invalidate_tool_cache`].
     pub cached_tool_definition_bytes: parking_lot::RwLock<Option<u64>>,
+    /// H2: cache of warm LLM clients keyed by `provider/model`. Providers
+    /// rebuild their `reqwest::Client` (and thus their connection pool / TLS /
+    /// keep-alive state) inside `create_client`, which `prepare_client` used
+    /// to call on every turn. Caching the resulting `Arc<dyn LlmClient>` here
+    /// lets a session reuse one warm client across all its turns and loop
+    /// steps instead of re-establishing connections each time.
+    pub llm_client_cache:
+        parking_lot::RwLock<std::collections::HashMap<String, Arc<dyn crate::llm::LlmClient>>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
@@ -239,6 +247,11 @@ impl SessionProcessor {
             let mut bytes = self.cached_tool_definition_bytes.write();
             *bytes = None;
         }
+        // H2: the tool-JSON byte cache in ragent-llm is keyed by tool content
+        // fingerprint + provider format; invalidate it whenever the session's
+        // tool definitions change so stale serialised tool lists are never
+        // sent after a registry update.
+        ragent_llm::provider::tool_cache::invalidate_tool_cache();
     }
 
     /// Return cached tool definitions, populating the cache if necessary.
@@ -858,7 +871,6 @@ impl SessionProcessor {
                     &mut loop_state,
                     &tool_definitions,
                     &system_prompt,
-                    &cancel_flag,
                     context_window,
                     llm_request_start,
                     &profiler,
@@ -1673,7 +1685,16 @@ impl SessionProcessor {
                     let mut interim =
                         Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
                     interim.id = assistant_msg_id.clone();
-                    let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+                    // H3: use the FTS-skip variant for the interim save. The
+                    // searchable text content of the interim message is either
+                    // unchanged (only a tool-call status transition) or the
+                    // message is still accumulating deltas and will be
+                    // re-synced wholesale on the final save. Rewriting the FTS
+                    // index on every stream event (DELETE + re-INSERT) was the
+                    // dominant cost of `storage.assistant_interim.update`.
+                    let _ = self
+                        .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
+                        .await;
                     last_interim_hash = Some(current_hash);
                 }
             }

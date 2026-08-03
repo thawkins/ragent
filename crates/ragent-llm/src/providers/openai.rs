@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::{openai_thinking_levels_for_model, reasoning_effort_from_request};
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -174,6 +175,15 @@ impl OpenAiClient {
         &self.base_url
     }
 
+    /// Returns the reusable HTTP client held by this client.
+    ///
+    /// Used by wrapper providers (e.g. Azure AI Foundry) that send their own
+    /// authenticated request but want to share the same connection pool.
+    #[must_use]
+    pub(crate) fn http_client(&self) -> &reqwest::Client {
+        &self.http
+    }
+
     /// Build the JSON request body for the `OpenAI` Chat Completions API.
     ///
     /// # Errors
@@ -299,23 +309,11 @@ impl OpenAiClient {
             body["max_tokens"] = json!(max_tokens);
         }
         if !request.tools.is_empty() {
-            let tools: Vec<Value> = request
-                .tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tools);
+            // H2: reuse the cached serialised tool list instead of building
+            // a fresh `Vec<Value>` of `json!` tool objects on every call.
+            let cached = cached_tools(ToolFormat::OpenAi, &request.tools);
+            body["tools"] = cached.openai_tools_array();
         }
-
         if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
             body["reasoning_effort"] = json!(reasoning_effort);
         }
@@ -323,7 +321,6 @@ impl OpenAiClient {
         body
     }
 }
-
 #[async_trait::async_trait]
 impl LlmClient for OpenAiClient {
     async fn chat(
@@ -332,13 +329,17 @@ impl LlmClient for OpenAiClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request);
+        // H2: serialise directly into a byte buffer (single allocation, no
+        // intermediate string) and send via `RequestBuilder::body` rather than
+        // `.json(&body)` which re-serialises through a serde adapter.
+        let body_bytes = serde_json::to_vec(&body).context("serialise OpenAI request body")?;
 
         let response = self
             .http
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("content-type", "application/json")
-            .json(&body)
+            .body(body_bytes)
             .send()
             .await
             .inspect_err(|e| {

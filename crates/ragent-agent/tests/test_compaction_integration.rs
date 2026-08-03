@@ -166,6 +166,7 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         cached_tool_definitions: parking_lot::RwLock::new(None),
         cached_tool_names: parking_lot::RwLock::new(None),
         cached_tool_definition_bytes: parking_lot::RwLock::new(None),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         cached_config: parking_lot::Mutex::new(None),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
@@ -299,6 +300,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
             file_mtimes: Vec::new(),
             env_overrides_present: false,
         })),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -522,6 +524,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
             file_mtimes: Vec::new(),
             env_overrides_present: false,
         })),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -658,6 +661,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
             file_mtimes: Vec::new(),
             env_overrides_present: false,
         })),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),

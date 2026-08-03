@@ -274,15 +274,33 @@ impl SessionProcessor {
                 }
             }
 
-            match provider
-                .create_client(&api_key, base_url.as_deref(), &options)
-                .await
+            // H2: reuse a warm per-(provider,model,key) client across turns so
+            // the connection pool (TLS, keep-alive) built by the provider's
+            // `create_client` is amortised over the whole session instead of
+            // being re-created on every turn.
+            let cache_key = format!("{}/{}", model_ref.provider_id, model_ref.model_id);
+            if let Some(cached) = self
+                .llm_client_cache
+                .read()
+                .get(&cache_key)
+                .map(|c| Arc::clone(c))
             {
-                Ok(c) => c,
-                Err(e) => {
-                    let err = e.to_string();
-                    publish_error(&self.event_bus, session_id, user_msg_id, &err);
-                    return Err(e);
+                cached
+            } else {
+                match provider
+                    .create_client(&api_key, base_url.as_deref(), &options)
+                    .await
+                {
+                    Ok(c) => {
+                        let arc: Arc<dyn crate::llm::LlmClient> = Arc::from(c);
+                        self.llm_client_cache.write().insert(cache_key, arc.clone());
+                        arc
+                    }
+                    Err(e) => {
+                        let err = e.to_string();
+                        publish_error(&self.event_bus, session_id, user_msg_id, &err);
+                        return Err(e);
+                    }
                 }
             }
         };
@@ -787,7 +805,6 @@ impl SessionProcessor {
         loop_state: &mut LoopState,
         tool_definitions: &Arc<Vec<ToolDefinition>>,
         system_prompt: &Arc<str>,
-        cancel_flag: &Arc<AtomicBool>,
         context_window: usize,
         llm_request_start: Instant,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
@@ -795,7 +812,6 @@ impl SessionProcessor {
         let max_retries = self.stream_config.max_retries;
         let backoff_secs = self.stream_config.retry_backoff_secs;
         let _session_id_arc: Arc<str> = Arc::from(session_id);
-
         let mut text_buffer = String::new();
         let mut reasoning_buffer = String::new();
         let mut tool_calls: Vec<PendingToolCall> = Vec::new();
@@ -854,6 +870,38 @@ impl SessionProcessor {
                 outbound_bytes: chat_request_payload_bytes(&attempt_request),
             });
             llm_recorder.record_request(&turn.model_ref.model_id, &turn.model_ref.provider_id);
+
+                          // H4: surface provider progress so long `create_stream` waits do not
+                          // feel like hangs. A background task publishes an AgentNotice every 30s
+                          // after the first 30s, until the first stream event arrives.
+                          let first_event_arrived = Arc::new(AtomicBool::new(false));
+                          let notice_handle = {
+                              let event_bus = Arc::clone(&self.event_bus);
+                              let session_id = session_id.to_string();
+                              let first_event_arrived = Arc::clone(&first_event_arrived);
+                              let provider_id = turn.model_ref.provider_id.clone();
+                              tokio::spawn(async move {
+                                  let interval = std::time::Duration::from_secs(30);
+                                  let mut elapsed = 0u64;
+                                  loop {
+                                      tokio::time::sleep(interval).await;
+                                      elapsed += 30;
+                                      if first_event_arrived.load(Ordering::Relaxed) {
+                                          break;
+                                      }
+                                      let message = if elapsed == 30 && provider_id == "ollama" {
+                                          "Waiting for model response (Ollama may be loading the model)..."
+                                              .to_string()
+                                      } else {
+                                          format!("Waiting for model response... ({elapsed}s)")
+                                      };
+                                      event_bus.publish(Event::AgentNotice {
+                                          session_id: session_id.clone(),
+                                          message,
+                                      });
+                                  }
+                              })
+                          };
             let mut stream = {
                 let _scope = profiler.scope("loop.llm.create_stream");
                 match turn.client.chat(attempt_request).await {
@@ -954,54 +1002,25 @@ impl SessionProcessor {
                 }
             };
 
+            // Stop the H4 progress-notice task: the stream has been created.
+            notice_handle.abort();
+
             let mut had_retryable_error = false;
             let mut first_stream_event_pending = true;
             let mut fatal_stream_error: Option<String> = None;
             let mut stream_buffer = StreamBuffer::new();
-            let last_event_at: Option<Instant> = None;
-            let stall_timeout =
-                std::time::Duration::from_secs(self.stream_config.timeout_secs.max(60));
             {
                 let _scope = profiler.scope("loop.llm.stream");
                 loop {
                     let wait_started = Instant::now();
-                    let next_event = {
-                        let _scope = profiler.scope("loop.llm.wait_next_event");
-                        let cancel = cancel_flag.clone();
-                        let stall_fut = async {
-                            tokio::time::sleep(stall_timeout).await;
-                            cancel.load(Ordering::Relaxed)
-                        };
-                        tokio::select! {
-                            biased;
-                            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
-                                if let Some(last) = last_event_at {
-                                    if last.elapsed() > stall_timeout
-                                        && cancel_flag.load(Ordering::Relaxed)
-                                    {
-                                        self.event_bus.publish(Event::AgentNotice {
-                                            session_id: session_id.to_string(),
-                                            message: format!(
-                                                "Stream stall detected after {}s with no delta; aborting",
-                                                stall_timeout.as_secs()
-                                            ),
-                                        });
-                                        fatal_stream_error =
-                                            Some("stream stall timeout".to_string());
-                                        None
-                                    } else {
-                                        let _ = stall_fut.await;
-                                        stream.next().await
-                                    }
-                                } else {
-                                    stream.next().await
-                                }
-                            }
-                            ev = stream.next() => ev,
-                        }
-                    };
+                    // H1: stall detection lives inside each provider stream
+                    // (e.g. ollama.rs wraps `stream.next()` in its own timeout),
+                    // so we poll the stream directly instead of layering a
+                    // redundant `tokio::select!` + sleep wrapper here.
+                    let next_event = stream.next().await;
                     if first_stream_event_pending {
                         if next_event.is_some() {
+                            first_event_arrived.store(true, Ordering::Relaxed);
                             profiler.record_duration(
                                 "loop.llm.first_event_wait",
                                 wait_started.elapsed(),

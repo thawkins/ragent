@@ -7,6 +7,7 @@
 //! - HTTP/2 configuration
 //! - Retry logic with exponential backoff
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -42,17 +43,22 @@ const REQUEST_TIMEOUT_SECS: u64 = 120;
 /// ```
 #[must_use]
 pub fn create_http_client() -> Client {
-    Client::builder()
-        .pool_max_idle_per_host(MAX_IDLE_PER_HOST)
-        .pool_idle_timeout(Duration::from_secs(90))
-        .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "Failed to build HTTP client with custom settings, using defaults");
-            Client::new()
+    static CACHED: OnceLock<Client> = OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            Client::builder()
+                .pool_max_idle_per_host(MAX_IDLE_PER_HOST)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+                .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+                .tcp_keepalive(Duration::from_secs(60))
+                .build()
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "Failed to build HTTP client with custom settings, using defaults");
+                    Client::new()
+                })
         })
+        .clone()
 }
 
 /// Creates an HTTP client for streaming LLM responses.
@@ -64,16 +70,21 @@ pub fn create_http_client() -> Client {
 /// 120 seconds, causing "error decoding response body" failures.
 #[must_use]
 pub fn create_streaming_http_client() -> Client {
-    Client::builder()
-        .pool_max_idle_per_host(MAX_IDLE_PER_HOST)
-        .pool_idle_timeout(Duration::from_secs(90))
-        .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-        .tcp_keepalive(Duration::from_secs(60))
-        .build()
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "Failed to build streaming HTTP client, using defaults");
-            Client::new()
+    static CACHED: OnceLock<Client> = OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            Client::builder()
+                .pool_max_idle_per_host(MAX_IDLE_PER_HOST)
+                .pool_idle_timeout(Duration::from_secs(90))
+                .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+                .tcp_keepalive(Duration::from_secs(60))
+                .build()
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "Failed to build streaming HTTP client, using defaults");
+                    Client::new()
+                })
         })
+        .clone()
 }
 
 /// Executes an HTTP request with retry logic for transient failures.

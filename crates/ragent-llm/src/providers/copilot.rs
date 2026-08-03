@@ -31,6 +31,7 @@ use std::pin::Pin;
 use std::sync::Mutex;
 
 use super::thinking::{reasoning_effort_from_request, reasoning_levels_from_supported_efforts};
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -405,20 +406,10 @@ impl CopilotClient {
             body["max_tokens"] = json!(max_tokens);
         }
         if !tools.is_empty() {
-            let tool_defs: Vec<Value> = tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tool_defs);
+            // H2: reuse the cached serialised OpenAI-compatible tool list
+            // instead of building a fresh `Vec<Value>` on every call.
+            let cached = cached_tools(ToolFormat::OpenAi, tools);
+            body["tools"] = cached.openai_tools_array();
         }
 
         if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
@@ -443,6 +434,7 @@ impl LlmClient for CopilotClient {
         let url = format!("{}/chat/completions", self.base_url);
         tracing::info!(url = %url, model = %request.model, "copilot chat request");
         let body = self.build_request_body(&request, &request.tools);
+        let body_bytes = serde_json::to_vec(&body).context("serialise Copilot request body")?;
 
         let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
         let response = tokio::time::timeout(
@@ -460,7 +452,7 @@ impl LlmClient for CopilotClient {
                 .header("x-github-api-version", "2023-07-07")
                 .header("x-request-id", request.request_id.as_deref().unwrap_or(""))
                 .header("x-session-id", request.session_id.as_deref().unwrap_or(""))
-                .json(&body)
+                .body(body_bytes)
                 .send(),
         )
         .await

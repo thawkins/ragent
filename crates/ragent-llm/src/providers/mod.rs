@@ -24,6 +24,7 @@ pub mod router_client;
 pub mod router_config;
 pub mod router_modifiers;
 mod thinking;
+pub mod tool_cache;
 pub mod xai;
 
 use std::collections::HashMap;

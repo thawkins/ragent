@@ -47,7 +47,11 @@ impl Tool for TeamCreateTool {
                     "type": "boolean",
                     "description": "If true, store team in [PROJECT]/.ragent/teams/; otherwise in ~/.ragent/teams/. Default: true"
                 }
-            }
+            },
+            "required": [
+                "blueprint",
+                "context"
+            ]
         })
     }
 

@@ -38,12 +38,13 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::bedrock_credentials::{AwsCredentials, resolve_aws_credentials};
+use super::tool_cache::{ToolFormat, cached_tools};
 
 use super::thinking::{
     anthropic_thinking_levels_for_model, anthropic_thinking_payload_from_request,
     request_uses_unsupported_anthropic_display,
 };
-use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
+use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 use ragent_types::event::FinishReason;
@@ -504,18 +505,10 @@ impl BedrockAnthropicClient {
 
         // FR-020: Tool use support
         if !request.tools.is_empty() {
-            let tools: Vec<Value> = request
-                .tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "name": t.name,
-                        "description": t.description,
-                        "input_schema": t.parameters
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tools);
+            // H2: reuse the cached serialised Anthropic-format tool list (the
+            // Bedrock Anthropic body uses the same `input_schema` shape).
+            let cached = cached_tools(ToolFormat::Anthropic, &request.tools);
+            body["tools"] = cached.anthropic_tools_array();
         }
 
         // FR-025: Thinking/reasoning support for Claude models
@@ -857,34 +850,14 @@ impl BedrockConverseClient {
 
         // FR-021: Tool definitions in Converse format
         if !request.tools.is_empty() {
-            let tool_config = build_converse_tool_config(&request.tools);
-            body["toolConfig"] = tool_config;
+            // H2: reuse the cached serialised `toolConfig` object instead of
+            // rebuilding a fresh `Vec<Value>` of `toolSpec` objects per call.
+            let cached = cached_tools(ToolFormat::Bedrock, &request.tools);
+            body["toolConfig"] = cached.bedrock_tool_config_object();
         }
 
         body
     }
-}
-
-/// Builds the `toolConfig` object for the Converse API (FR-021).
-fn build_converse_tool_config(tools: &[ToolDefinition]) -> Value {
-    let tool_specs: Vec<Value> = tools
-        .iter()
-        .map(|t| {
-            json!({
-                "toolSpec": {
-                    "name": t.name,
-                    "description": t.description,
-                    "inputSchema": {
-                        "json": t.parameters
-                    }
-                }
-            })
-        })
-        .collect();
-
-    json!({
-        "tools": tool_specs
-    })
 }
 
 /// Converts a MIME type to the Converse API image format string.
@@ -1278,6 +1251,8 @@ pub async fn discover_bedrock_models(
 
 #[cfg(test)]
 mod tests {
+    use ragent_types::ToolDefinition;
+
     use super::*;
 
     #[test]
@@ -1397,9 +1372,9 @@ mod tests {
             }),
         }];
 
-        let config = build_converse_tool_config(&tools);
+        let config = cached_tools(ToolFormat::Bedrock, &tools).bedrock_tool_config_object();
 
-        // Should have tools array with toolSpec
+        // Should have tools array with toolSpec.
         let tool_specs = config["tools"].as_array().unwrap();
         assert_eq!(tool_specs.len(), 1);
         assert_eq!(tool_specs[0]["toolSpec"]["name"], "get_weather");

@@ -967,6 +967,21 @@ impl Storage {
     /// storage.update_message(&msg).unwrap();
     /// ```
     pub fn update_message(&self, msg: &Message) -> Result<()> {
+        self.update_message_parts(msg, true)
+    }
+
+    /// Updates the parts and `updated_at` timestamp of a message, optionally
+    /// syncing the FTS index.
+    ///
+    /// When `sync_fts` is `false` the `messages_fts` entry is left untouched.
+    /// This is used for cheap interim saves whose text content is unchanged
+    /// (e.g. a tool-call status transition mid-step) so the FTS index is not
+    /// rewritten on every stream event.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or the update fails.
+    fn update_message_parts(&self, msg: &Message, sync_fts: bool) -> Result<()> {
         let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
         let updated = Utc::now().to_rfc3339();
@@ -974,19 +989,36 @@ impl Storage {
             "UPDATE messages SET parts = ?1, updated_at = ?2 WHERE id = ?3",
             params![parts_json, updated, msg.id],
         )?;
-        // M5: Sync the message FTS index — delete old entry and re-insert.
-        conn.execute(
-            "DELETE FROM messages_fts WHERE message_id = ?1",
-            params![msg.id],
-        )?;
-        let content = extract_message_text(&msg.parts);
-        let role_str = msg.role.to_string();
-        conn.execute(
-            "INSERT INTO messages_fts (message_id, session_id, role, content) \
-             VALUES (?1, ?2, ?3, ?4)",
-            params![msg.id, msg.session_id, role_str, content],
-        )?;
+        if sync_fts {
+            // M5: Sync the message FTS index — delete old entry and re-insert.
+            conn.execute(
+                "DELETE FROM messages_fts WHERE message_id = ?1",
+                params![msg.id],
+            )?;
+            let content = extract_message_text(&msg.parts);
+            let role_str = msg.role.to_string();
+            conn.execute(
+                "INSERT INTO messages_fts (message_id, session_id, role, content) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![msg.id, msg.session_id, role_str, content],
+            )?;
+        }
         Ok(())
+    }
+
+    /// Updates the parts of a message without rewriting the FTS index.
+    ///
+    /// This is a cheap variant of [`Storage::update_message`] intended for
+    /// interim (in-progress) assistant saves whose searchable text content is
+    /// unchanged — typically a tool-call status transition mid-step. The FTS
+    /// entry is only re-synced once the message is finalised via
+    /// [`Storage::update_message`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or the update fails.
+    pub fn update_message_parts_skip_fts(&self, msg: &Message) -> Result<()> {
+        self.update_message_parts(msg, false)
     }
 
     /// Deletes all messages for a session.

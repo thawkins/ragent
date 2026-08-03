@@ -202,6 +202,8 @@ impl LlmClient for AzureFoundryClient {
             format!("{}/openai/v1/chat/completions", self.base_url)
         };
         let body = self.inner.build_request_body(&request);
+        let body_bytes =
+            serde_json::to_vec(&body).context("serialise Azure Foundry request body")?;
 
         tracing::info!(
             endpoint = %url,
@@ -209,7 +211,10 @@ impl LlmClient for AzureFoundryClient {
             "[azure_foundry/{}] Sending chat request", request.model
         );
 
-        let client = crate::provider::http_client::create_streaming_http_client();
+        // H2: reuse the inner OpenAI client's HTTP client (which itself is a
+        // clone of the process-global cached streaming client) instead of
+        // creating another streaming client inside the hot chat() path.
+        let client = self.inner.http_client().clone();
         let api_key = self.api_key.clone();
         let url_for_error = url.clone();
         let response = crate::provider::http_client::execute_with_retry(
@@ -217,13 +222,13 @@ impl LlmClient for AzureFoundryClient {
                 let client = client.clone();
                 let api_key = api_key.clone();
                 let url = url.clone();
-                let body = body.clone();
+                let body = body_bytes.clone();
                 async move {
                     client
                         .post(&url)
                         .header("api-key", api_key)
                         .header("content-type", "application/json")
-                        .json(&body)
+                        .body(body)
                         .send()
                         .await
                 }

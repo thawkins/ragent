@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::thinking::should_warn_unsupported_thinking;
+use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -408,21 +409,10 @@ impl HuggingFaceClient {
             body["max_tokens"] = json!(max_tokens);
         }
         if !request.tools.is_empty() {
-            let tools: Vec<Value> = request
-                .tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "type": "function",
-                        "function": {
-                            "name": Self::safe_tool_name(&t.name),
-                            "description": t.description,
-                            "parameters": t.parameters
-                        }
-                    })
-                })
-                .collect();
-            body["tools"] = json!(tools);
+            // H2: reuse the cached serialised tool list (with the `t_` name
+            // prefix) instead of building a fresh `Vec<Value>` on every call.
+            let cached = cached_tools(ToolFormat::HuggingFace, &request.tools);
+            body["tools"] = cached.openai_tools_array();
         }
 
         if should_warn_unsupported_thinking(request) {
@@ -454,6 +444,7 @@ impl LlmClient for HuggingFaceClient {
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.build_request_body(&request);
+        let body_bytes = serde_json::to_vec(&body).context("serialise HuggingFace request body")?;
 
         let mut req = self
             .http
@@ -470,7 +461,7 @@ impl LlmClient for HuggingFaceClient {
         }
 
         let response = req
-            .json(&body)
+            .body(body_bytes)
             .send()
             .await
             .inspect_err(|e| {

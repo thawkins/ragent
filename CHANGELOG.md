@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.35
+
+### Added
+
+- New `TOOLS.md` root documentation file listing all available agent tools.
+- Updated `team_create` tool input schema to support an optional `context` field
+  for richer teammate creation prompts.
+
 ## Version: 0.1.0-beta.34
 
 ### Added
