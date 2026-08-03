@@ -78,11 +78,30 @@ fn test_effective_request_tokens_prefers_reported() {
 #[test]
 fn test_compaction_threshold_subtracts_max() {
     // max(output, buffer) = max(1000, 20000) = 20000
-    assert_eq!(compaction_threshold(100_000, 1_000, 20_000), 80_000);
+    assert_eq!(compaction_threshold(100_000, 1_000, 20_000, None), 80_000);
     // output larger than buffer
-    assert_eq!(compaction_threshold(100_000, 30_000, 20_000), 70_000);
+    assert_eq!(compaction_threshold(100_000, 30_000, 20_000, None), 70_000);
     // saturates at zero
-    assert_eq!(compaction_threshold(1_000, 30_000, 20_000), 0);
+    assert_eq!(compaction_threshold(1_000, 30_000, 20_000, None), 0);
+}
+
+#[test]
+fn test_compaction_threshold_uses_percentage_when_set() {
+    // 80% of a 100k window fires at 80k regardless of buffer.
+    assert_eq!(
+        compaction_threshold(100_000, 1_000, 20_000, Some(0.8)),
+        80_000
+    );
+    // 80% of a 32k window fires at 25.6k — NOT `window - buffer` (12k).
+    assert_eq!(
+        compaction_threshold(32_000, 1_000, 20_000, Some(0.8)),
+        25_600
+    );
+    // Out-of-range fractions fall back to the buffer model.
+    assert_eq!(
+        compaction_threshold(100_000, 1_000, 20_000, Some(2.0)),
+        80_000
+    );
 }
 
 #[test]
@@ -127,4 +146,24 @@ fn test_evaluate_trigger_boundary_not_inclusive() {
     // effective == threshold -> not > threshold, so no fire.
     let decision = evaluate_trigger(&config, 80_000, 0, 100_000, 8_000);
     assert!(!decision.should_compact);
+}
+
+#[test]
+fn test_evaluate_trigger_honors_percentage_threshold() {
+    // User configured 80% (migrated from `compression.auto_threshold: 0.8`).
+    // On a 32k window the percentage threshold is 25.6k, not the buffer-based
+    // 12k (`window - buffer`) that would fire far too early.
+    let config = CompactionConfig {
+        threshold: Some(0.8),
+        buffer: 20_000,
+        ..Default::default()
+    };
+    // 20k of 32k = 62.5% usage — below the 80% trigger.
+    let below = evaluate_trigger(&config, 20_000, 0, 32_000, 0);
+    assert!(!below.should_compact);
+    assert_eq!(below.threshold, 25_600);
+    // 30k of 32k = 93.75% usage — above the 80% trigger.
+    let above = evaluate_trigger(&config, 30_000, 0, 32_000, 0);
+    assert!(above.should_compact);
+    assert_eq!(above.threshold, 25_600);
 }

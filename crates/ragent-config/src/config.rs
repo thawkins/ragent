@@ -1794,14 +1794,24 @@ impl Config {
             {
                 let has_compaction = value.get("compaction").is_some();
                 let has_compression = value.get("compression").is_some();
-                if !has_compaction
-                    && has_compression
-                    && let Some(enabled) = value
+                if !has_compaction && has_compression {
+                    if let Some(enabled) = value
                         .get("compression")
                         .and_then(|c| c.get("enabled"))
                         .and_then(|v| v.as_bool())
-                {
-                    base.compaction.auto = enabled;
+                    {
+                        base.compaction.auto = enabled;
+                    }
+                    // Carry the configured trigger point across so compaction
+                    // fires at the user's chosen percentage (e.g. 0.8 = 80%)
+                    // instead of the buffer-based default.
+                    if let Some(threshold) = value
+                        .get("compression")
+                        .and_then(|c| c.get("auto_threshold"))
+                        .and_then(|v| v.as_f64())
+                    {
+                        base.compaction.threshold = Some(threshold);
+                    }
                 }
             }
         }

@@ -827,6 +827,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "startup",
         description: "Show startup timing breakdown for the current session",
     },
+    SlashCommandDef {
+        trigger: "actionloop",
+        description: "Agent action-loop timing: /actionloop [help|clip]",
+    },
 ];
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]

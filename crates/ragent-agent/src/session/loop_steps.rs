@@ -619,6 +619,11 @@ impl SessionProcessor {
         let compressed_this_turn = false;
         let last_reported_input_tokens: u64 = 0;
 
+        // P-3: resolve the model's context window. Some providers (notably the
+        // virtual Model Router) report `0` because the real window belongs to
+        // the downstream model; treat non-positive windows as "unknown" and
+        // fall back to a sensible default so compaction does not fire on the
+        // first turn (`context_window - buffer` underflowing to 0).
         let context_window = self
             .provider_registry
             .get(&model_ref.provider_id)
@@ -628,6 +633,7 @@ impl SessionProcessor {
                     .find(|m| m.id == model_ref.model_id)
             })
             .map(|m| m.context_window)
+            .filter(|w| *w > 0)
             .unwrap_or(128_000);
 
         let history = {

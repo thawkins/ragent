@@ -1563,6 +1563,49 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.status = "startup: unavailable".to_string();
                 }
             },
+            "actionloop" => {
+                let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+                match sub.as_str() {
+                    "help" => {
+                        self.append_assistant_text(
+                                          "From: /actionloop help\n\n## /actionloop — agent action-loop timing\n\n| Subcommand | Description |\n|---|---|\n| `/actionloop help` | Show this help |\n| `/actionloop` | Show average timing of the agent action-loop buckets |\n| `/actionloop clip` | Copy the timing data to the system clipboard |",
+                                      );
+                        self.status = "actionloop: help".to_string();
+                        return;
+                    }
+                    "clip" => {
+                        match self.actionloop_report() {
+                            Some(report) => {
+                                Self::set_clipboard(&report);
+                                self.append_assistant_text(
+                                      "From: /actionloop clip\n\n📋 Action-loop timing data copied to the clipboard.",
+                                  );
+                                self.status = "actionloop: clipped".to_string();
+                            }
+                            None => {
+                                self.append_assistant_text(
+                                      "From: /actionloop clip\nNo action-loop timing samples recorded yet.\nEnable `/profile on` and run the agent to collect bucket timings.",
+                                  );
+                                self.status = "actionloop: no samples".to_string();
+                            }
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
+                match self.actionloop_report() {
+                    Some(report) => {
+                        self.append_assistant_text(&format!("From: /actionloop\n{report}"));
+                        self.status = "actionloop: timings shown".to_string();
+                    }
+                    None => {
+                        self.append_assistant_text(
+                              "From: /actionloop\nNo action-loop timing samples recorded yet.\nEnable `/profile on` and run the agent to collect bucket timings.",
+                          );
+                        self.status = "actionloop: no samples".to_string();
+                    }
+                }
+            }
             "help" => {
                 let mut help_lines = String::from("From: /help\nAvailable commands:\n\n```\n");
                 for cmd_def in SLASH_COMMANDS {
@@ -6986,5 +7029,36 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
         }
         self.assert_ui_invariants();
+    }
+
+    /// Build the formatted action-loop timing report, or `None` when no
+    /// samples have been recorded yet. Shared by `/actionloop` and
+    /// `/actionloop clip`.
+    fn actionloop_report(&self) -> Option<String> {
+        let profiler = ragent_agent::session::profiler::agent_loop_profiler();
+        let snapshot = profiler.snapshot();
+        if snapshot.operations.is_empty() {
+            return None;
+        }
+        let mut out = String::from(
+            "Agent action-loop average timings (ms):\n\n\
+               ```\n\
+               count     avg ms     self avg    max ms    operation\n",
+        );
+        // Sort by descending average elapsed time for a useful overview.
+        let mut ops: Vec<_> = snapshot.operations.iter().collect();
+        ops.sort_by(|a, b| {
+            b.avg_ms
+                .partial_cmp(&a.avg_ms)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for op in ops {
+            out.push_str(&format!(
+                "{:>5}  {:>10.2}  {:>10.2}  {:>9.2}  {}\n",
+                op.count, op.avg_ms, op.self_avg_ms, op.max_ms, op.name
+            ));
+        }
+        out.push_str("```\n");
+        Some(out)
     }
 }

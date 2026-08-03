@@ -55,8 +55,19 @@ impl App {
             return false;
         };
 
-        // Start compaction before hitting hard limits.
-        let threshold = (context_window as f32 * 0.92) as u64;
+        // Use the user-configured percentage threshold (migrated from
+        // `compression.auto_threshold`, e.g. 0.8 = 80%) when present, so the
+        // TUI's pre-send check matches the server-side estimator. Otherwise
+        // fall back to a conservative 92% before the hard provider limit.
+        let threshold = match self
+            .current_config()
+            .compaction
+            .threshold
+            .filter(|t| (0.0..=1.0).contains(t))
+        {
+            Some(frac) => (context_window as f64 * frac) as u64,
+            None => (context_window as f32 * 0.92) as u64,
+        };
         self.last_input_tokens >= threshold
     }
 

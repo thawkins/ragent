@@ -195,7 +195,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
     let specific = match tool {
         // ═══════════════════════════════════════════════════════════════════
         // 📄 FILE OPERATIONS
-        // ════════════════════════════════════════��══════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         "read" => {
             // The read tool accepts `path` as the canonical parameter name, but some
             // providers/models emit `file_path` instead. Check both so the file name
@@ -1216,6 +1216,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "github_review_pr" => {
             let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
             format!("📋 review #{}", number)
+        }
+        "github_get_actions" => {
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(1);
+            format!("📋 actions ({})", limit)
         }
         // ═══════════════════════════════════════════════════════════════════
         // ✨ UTILITY
@@ -2333,7 +2337,20 @@ pub fn tool_result_summary(
         "github_review_pr" => {
             let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(format!("📋 reviewed #{}", number))
-        } // ═══════════════════════════════════════════════════════════════════
+        }
+        "github_get_actions" => {
+            let inspected = out
+                .get("runs_inspected")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let failed = out.get("failed_runs").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let mut s = format!("📋 {} inspected", pluralize(inspected, "run", "runs"));
+            if failed > 0 {
+                s.push_str(&format!(", {} failed", pluralize(failed, "run", "runs")));
+            }
+            Some(s)
+        }
+        // ═══════════════════════════════════════════════════════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
         "format" => Some("formatted".to_string()),

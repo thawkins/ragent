@@ -647,3 +647,52 @@ fn test_input_summary_mf_version_tool() {
     let summary = tool_input_summary("mf_version", &json!({}), "/home/user/project");
     assert!(summary.contains("ℹ️"), "Should have info emoji");
 }
+
+#[test]
+fn test_input_summary_github_get_actions_tool() {
+    let summary = tool_input_summary("github_get_actions", &json!({}), "/project");
+    assert!(summary.contains("📋"), "Should have list emoji");
+    assert!(summary.contains("actions"));
+}
+
+#[test]
+fn test_input_summary_github_get_actions_limit() {
+    let summary = tool_input_summary("github_get_actions", &json!({"limit": 10}), "/project");
+    assert!(summary.contains("📋"));
+    assert!(summary.contains("10"), "Should contain limit");
+}
+
+#[test]
+fn test_result_summary_github_get_actions_ok() {
+    let output = json!({
+        "runs_inspected": 3,
+        "failed_runs": 0,
+        "context_radius": 10,
+    });
+    let result = tool_result_summary(
+        "github_get_actions",
+        &Some(output),
+        &json!({"limit": 3}),
+        "/project",
+    );
+    assert_eq!(result, Some("📋 3 runs inspected".to_string()));
+}
+
+#[test]
+fn test_result_summary_github_get_actions_failed() {
+    let output = json!({
+        "runs_inspected": 2,
+        "failed_runs": 1,
+        "context_radius": 10,
+    });
+    let result = tool_result_summary(
+        "github_get_actions",
+        &Some(output),
+        &json!({"limit": 2}),
+        "/project",
+    );
+    assert_eq!(
+        result,
+        Some("📋 2 runs inspected, 1 run failed".to_string())
+    );
+}

@@ -1,5 +1,59 @@
 # Changelog
 
+## Version: 0.1.0-beta.34
+
+### Added
+
+- `/actionloop` slash command (with `help` and `clip` subcommands) that reports
+  agent action-loop average timings from the profiler, sorted by descending
+  average elapsed time so hotspots are visible at a glance.
+- `github_get_actions` tool input/result summaries in the TUI message widget,
+  showing the inspected run count and any failed runs.
+- `CompactionConfig.threshold` percentage-based trigger (0.0–1.0). When set
+  (e.g. `0.8` = 80%), compaction fires at `context_window * threshold`; when
+  `None` the buffer-based `context_window - max(output_tokens, buffer)` model
+  is used. The legacy `compression.auto_threshold` value is migrated into this
+  field so existing configurations keep their trigger point.
+- New documentation: `ALPLAN.md` (agent-loop performance remediation plan with
+  hotspots H1–H4 and rollout order) and `docs/agentorch.md` (component-by-component
+  agent loop / orchestrator internals with exact `file:line` references).
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.34.
+- `Storage::open` now enables `journal_mode=WAL` and a 5s `busy_timeout` so a
+  background writer (e.g. the startup FTS warm-up) no longer serialises
+  concurrent readers behind it and stalls `get_setting`/`detect_provider`.
+- `warm_message_search_index` rebuilds the FTS index inside a single transaction
+  (one fsync instead of one per row), making the startup warm-up effectively free.
+- Loop-step P-3 now treats non-positive provider-reported context windows
+  (notably the virtual Model Router reporting `0`) as "unknown" and falls back
+  to the 128k default so compaction never fires on the first turn.
+- The TUI pre-send compaction check now honours the configured
+  `compaction.threshold` percentage when present, matching the server-side
+  estimator; otherwise it falls back to the conservative 92% hard limit.
+- `detect_provider` now runs a fast pass that defers the Copilot `gh auth token`
+  CLI subprocess until no provider is found cheaply, so startup provider
+  detection never blocks on a cold keyring / slow `gh`.
+- Fixed a corrupted UTF-8 box-drawing comment in `message_widget.rs` (mojibake
+  from a prior commit) and removed redundant double-gating in the raw-args
+  fallback per the `/simplify` review.
+
+### Fixed
+
+- `test_worker_indexes_changed_file` now polls for worker batch processing
+  instead of a fixed sleep, making it robust on slow/saturated CI runners.
+
+### Tests
+
+- Added `crates/ragent-storage/tests/test_wal_warmup.rs` asserting WAL mode is
+  active and that a background warm-up writer does not block a concurrent reader.
+- Added compaction threshold percentage / legacy-alias migration tests in
+  `ragent-config` and `ragent-agent` compaction estimator tests.
+- Added `/actionloop` slash-command tests (help, no-samples hint, clip, timings).
+- Added `github_get_actions` tool summary tests and provider-detection
+  fast-path (defer `gh` CLI) tests.
+
 ## Version: 0.1.0-beta.33
 
 ### Changed

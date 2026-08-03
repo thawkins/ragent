@@ -2968,3 +2968,102 @@ fn test_slash_memory_no_args_shows_usage() {
         "usage should mention /memory help: {text}"
     );
 }
+
+#[test]
+fn test_slash_actionloop_help_shows_subcommands() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/actionloop help");
+
+    assert_eq!(app.status, "actionloop: help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/actionloop help"),
+        "help should mention itself: {text}"
+    );
+    assert!(
+        text.contains("/actionloop clip"),
+        "help should mention clip: {text}"
+    );
+}
+
+#[test]
+fn test_slash_actionloop_no_samples_reports_hint() {
+    // With no profiling samples, the plain form reports the "no samples" hint.
+    // The profiler is shared process-wide, so reset it first for determinism.
+    agent_loop_profiler().reset();
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/actionloop");
+
+    let text = app.messages.last().unwrap().text_content();
+    if app.status == "actionloop: no samples" {
+        assert!(
+            text.contains("No action-loop timing samples recorded yet"),
+            "should report no samples: {text}"
+        );
+    } else {
+        // Another test recorded samples concurrently into the shared profiler;
+        // just confirm the report rendered rather than asserting on the hint.
+        assert_eq!(app.status, "actionloop: timings shown");
+        assert!(
+            text.contains("avg ms"),
+            "should show a timing table: {text}"
+        );
+    }
+}
+
+#[test]
+fn test_slash_actionloop_clip_no_samples_reports_hint() {
+    // The clip variant degrades gracefully when there is nothing to copy.
+    // The profiler is shared process-wide and other tests may have recorded
+    // samples concurrently, so reset before running to make the "no samples"
+    // path deterministic where possible.
+    agent_loop_profiler().reset();
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/actionloop clip");
+
+    // When another test polluted the shared profiler, the clip path reports
+    // success instead; either outcome is acceptable, so assert on the message.
+    let text = app.messages.last().unwrap().text_content().to_lowercase();
+    assert!(
+        text.contains("action-loop timing")
+            && (text.contains("clipboard") || text.contains("no action-loop timing samples")),
+        "clip should report either a copy or the no-samples hint: {text}"
+    );
+}
+
+#[test]
+fn test_slash_actionloop_with_samples_shows_timings() {
+    // Record a sample through the shared profiler so the report path is exercised.
+    let profiler = agent_loop_profiler();
+    profiler.reset();
+    profiler.set_enabled(true);
+    {
+        let _s = profiler.scope("test-op");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    profiler.set_enabled(false);
+
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/actionloop");
+
+    assert_eq!(app.status, "actionloop: timings shown");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("test-op"),
+        "report should include the recorded operation: {text}"
+    );
+    assert!(
+        text.contains("avg ms"),
+        "report should include the table header: {text}"
+    );
+    // Leave the shared profiler clean for other tests.
+    profiler.reset();
+}

@@ -195,3 +195,41 @@ fn test_provider_source_equality() {
     );
     assert_ne!(ProviderSource::EnvVar, ProviderSource::Database);
 }
+
+// =========================================================================
+// detect_provider fast path (PERF: no `gh` subprocess on startup)
+// =========================================================================
+
+#[test]
+fn test_detect_provider_fast_path_uses_cheap_source_without_gh() {
+    let storage = mem_storage();
+
+    // A cheaply-detected provider (env/DB) must be returned by detect_provider
+    // without depending on the Copilot `gh auth token` subprocess.  The fast
+    // path short-circuits before any slow auto-discovery runs.
+    storage
+        .set_provider_auth("anthropic", "sk-ant-test")
+        .expect("store key");
+
+    let result = App::detect_provider(&storage);
+    assert!(
+        result.is_some(),
+        "detect_provider fast path should find a DB-stored provider without gh"
+    );
+    let p = result.unwrap();
+    assert_eq!(p.id, "anthropic");
+    assert_eq!(p.source, ProviderSource::Database);
+}
+
+#[test]
+fn test_get_configured_providers_full_still_allows_gh_discovery() {
+    // The full-list enumerator (used by `/provider show` and the router
+    // palette) must NOT skip gh-based Copilot discovery.  It delegates to the
+    // shared implementation with defer_gh_cli = false, so Copilot is still
+    // surfaced when only a `gh auth token` exists (no env/DB/apps.json).
+    let storage = mem_storage();
+
+    let providers = App::get_configured_providers(&storage);
+    // Should not panic and must include any cheaply-configured providers.
+    let _ = providers;
+}

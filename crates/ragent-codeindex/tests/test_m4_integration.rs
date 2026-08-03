@@ -155,13 +155,21 @@ fn test_worker_indexes_changed_file() {
     tx.send(WatchEvent::Changed(PathBuf::from("src/lib.rs")))
         .unwrap();
 
-    std::thread::sleep(Duration::from_millis(600));
+    // Poll until the worker processes the batch (debounce 100ms) so the test is
+    // robust to slow/saturated CI runners instead of relying on a fixed sleep.
+    let mut processed = 0u64;
+    for _ in 0..50 {
+        if handle.stats().batches_processed >= 1 {
+            processed = 1;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 
-    let stats = handle.stats();
     assert!(
-        stats.batches_processed >= 1,
+        processed >= 1,
         "worker should have processed at least 1 batch, got {}",
-        stats.batches_processed,
+        handle.stats().batches_processed,
     );
 
     // Verify the file was actually indexed.

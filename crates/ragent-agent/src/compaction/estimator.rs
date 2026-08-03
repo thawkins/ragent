@@ -22,11 +22,19 @@
 //!
 //! # Trigger (FR-003)
 //!
-//! Compaction fires when the *effective* request token count exceeds
-//! `context_window - max(output_tokens, buffer)`. The effective count prefers
-//! the provider-reported `input_tokens` from the previous turn when available
-//! (FR-002), falling back to the local estimate on the first call in a turn or
-//! whenever the provider omits usage data.
+//! Compaction fires when the *effective* request token count exceeds a
+//! threshold. Two trigger models are supported:
+//!
+//! * **Percentage (recommended)** — when `CompactionConfig::threshold` is set
+//!   (e.g. `0.8` for 80%), the threshold is `context_window * threshold`. This
+//!   is the legacy `compression.auto_threshold` value, migrated through so
+//!   existing configurations keep their configured trigger point.
+//! * **Buffer** — when `threshold` is `None`, the threshold is
+//!   `context_window - max(output_tokens, buffer)` (the SPEC FR-003 default).
+//!
+//! The effective count prefers the provider-reported `input_tokens` from the
+//! previous turn when available (FR-002), falling back to the local estimate on
+//! the first call in a turn or whenever the provider omits usage data.
 //!
 //! When the trigger fires the runner is expected to emit a compaction-started
 //! event (see [`publish_compaction_started`]) and invoke the summarisation
@@ -167,7 +175,9 @@ pub struct TriggerDecision {
     /// Token count actually used for the decision: the provider-reported
     /// `input_tokens` when available, otherwise [`Self::estimated_tokens`].
     pub effective_tokens: usize,
-    /// Compaction threshold: `context_window - max(output_tokens, buffer)`.
+    /// Compaction threshold: `context_window * threshold` when the user
+    /// configured a percentage, otherwise `context_window -
+    /// max(output_tokens, buffer)`.
     pub threshold: usize,
 }
 
@@ -187,11 +197,23 @@ pub fn effective_request_tokens(estimated_tokens: usize, last_reported_input_tok
 
 /// Compute the compaction threshold (FR-003).
 ///
-/// `context_window - max(output_tokens, buffer)`, saturating at zero so a tiny
-/// context window never produces an underflow.
+/// When `config.threshold` is set (a fraction such as `0.8` for 80%), the
+/// threshold is `context_window * threshold` — the user-configured trigger
+/// point (migrated from the legacy `compression.auto_threshold`). Otherwise it
+/// falls back to the buffer-based model `context_window -
+/// max(output_tokens, buffer)`, saturating at zero so a tiny context window
+/// never produces an underflow.
 #[must_use]
-pub fn compaction_threshold(context_window: usize, output_tokens: usize, buffer: usize) -> usize {
-    context_window.saturating_sub(output_tokens.max(buffer))
+pub fn compaction_threshold(
+    context_window: usize,
+    output_tokens: usize,
+    buffer: usize,
+    threshold: Option<f64>,
+) -> usize {
+    match threshold {
+        Some(frac) if (0.0..=1.0).contains(&frac) => ((context_window as f64) * frac) as usize,
+        _ => context_window.saturating_sub(output_tokens.max(buffer)),
+    }
 }
 
 /// Evaluate whether compaction should fire for the upcoming LLM request.
@@ -219,7 +241,12 @@ pub fn evaluate_trigger(
     output_tokens: usize,
 ) -> TriggerDecision {
     let effective = effective_request_tokens(estimated_tokens, last_reported_input_tokens);
-    let threshold = compaction_threshold(context_window, output_tokens, config.buffer);
+    let threshold = compaction_threshold(
+        context_window,
+        output_tokens,
+        config.buffer,
+        config.threshold,
+    );
     TriggerDecision {
         should_compact: effective > threshold,
         estimated_tokens,

@@ -688,13 +688,41 @@ impl App {
 
     /// Detect the first configured provider from persisted credentials/env.
     /// Returns `None` when no provider has been set up.
+    ///
+    /// This is the hot path used at startup and on provider refresh.  It first
+    /// runs a cheap pass that never spawns a subprocess (env vars, `apps.json`,
+    /// database), and only falls back to the Copilot `gh auth token` CLI
+    /// subprocess when nothing cheaper was found — so provider detection never
+    /// blocks startup on a cold keyring / slow `gh`.
     pub fn detect_provider(storage: &Storage) -> Option<ConfiguredProvider> {
-        Self::get_configured_providers(storage).into_iter().next()
+        // Fast pass: cheap sources only (no `gh` subprocess).
+        let mut fast = Self::get_configured_providers_impl(storage, true);
+        if !fast.is_empty() {
+            return Some(fast.remove(0));
+        }
+        // Slow fallback: include Copilot discovery via the `gh` CLI subprocess,
+        // only reached when no provider was found cheaply.
+        Self::get_configured_providers_impl(storage, false)
+            .into_iter()
+            .next()
     }
 
     /// Enumerate all configured providers from the database, honouring explicit
     /// `provider_{id}_disabled` opt-out flags set via `/provider reset`.
     pub fn get_configured_providers(storage: &Storage) -> Vec<ConfiguredProvider> {
+        Self::get_configured_providers_impl(storage, false)
+    }
+
+    /// Shared implementation of configured-provider enumeration.
+    ///
+    /// When `defer_gh_cli` is `true`, the Copilot provider is only detected from
+    /// cheap sources (env var, IDE `apps.json`, database) and the `gh auth token`
+    /// CLI subprocess is skipped.  Used by [`detect_provider`] on its fast path to
+    /// avoid spawning a subprocess during startup.
+    fn get_configured_providers_impl(
+        storage: &Storage,
+        defer_gh_cli: bool,
+    ) -> Vec<ConfiguredProvider> {
         // Helper: returns true when the user has explicitly reset this provider.
         let is_disabled = |pid: &str| -> bool {
             storage
@@ -805,14 +833,18 @@ impl App {
                             Some(ProviderSource::EnvVar)
                         } else if ragent_agent::provider::copilot::find_copilot_token().is_some() {
                             Some(ProviderSource::AutoDiscovered)
-                        } else if ragent_agent::provider::copilot::find_gh_cli_token().is_some() {
+                        } else if !defer_gh_cli
+                            && ragent_agent::provider::copilot::find_gh_cli_token().is_some()
+                        {
                             Some(ProviderSource::AutoDiscovered)
                         } else {
                             None
                         }
                     } else if ragent_agent::provider::copilot::find_copilot_token().is_some() {
                         Some(ProviderSource::AutoDiscovered)
-                    } else if ragent_agent::provider::copilot::find_gh_cli_token().is_some() {
+                    } else if !defer_gh_cli
+                        && ragent_agent::provider::copilot::find_gh_cli_token().is_some()
+                    {
                         Some(ProviderSource::AutoDiscovered)
                     } else {
                         None

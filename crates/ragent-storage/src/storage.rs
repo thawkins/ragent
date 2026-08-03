@@ -296,12 +296,30 @@ impl Storage {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open database at {}", path.display()))?;
+        // PERF: Use WAL so background writers (e.g. the FTS warm-up) do not
+        // block concurrent readers on the main thread, and set a busy_timeout
+        // so a transient lock never surfaces as an immediate `DatabaseBusy`
+        // error. Without these, `journal_mode=delete` serialises every reader
+        // behind a writer and startup `get_setting` calls stall for the whole
+        // rebuild.
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        conn.pragma_update(None, "busy_timeout", 5000)?;
         let storage = Self {
             conn: Mutex::new(conn),
             has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
+    }
+
+    /// Returns the current `journal_mode` (e.g. `"wal"`, `"delete"`) for the
+    /// underlying connection.  Used by tests to assert that a file-backed
+    /// [`open`](Self::open) enables WAL so a background writer never
+    /// serialises concurrent readers.
+    pub fn journal_mode(&self) -> Result<String> {
+        let conn = lock_conn!(self)?;
+        let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        Ok(mode)
     }
 
     /// Opens an ephemeral in-memory database, useful for testing.
@@ -3236,14 +3254,22 @@ impl Storage {
     /// assert!(count >= 1);
     /// ```
     pub fn warm_message_search_index(&self) -> Result<usize> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
+
+        // Batch the rebuild in a single transaction.  Without an explicit
+        // transaction every INSERT commits independently, and with the
+        // default `journal_mode=delete` + `synchronous=FULL` each commit
+        // fsyncs the journal and the database file — ~4ms per row, so a
+        // 2,000+ message history takes ~9s at startup.  One transaction =
+        // one fsync, making the warm-up effectively free.
+        let tx = conn.transaction()?;
 
         // Clear the existing index.
-        conn.execute("DELETE FROM messages_fts", [])?;
+        tx.execute("DELETE FROM messages_fts", [])?;
 
         // Rebuild from the messages table.
         // We extract text content from the JSON parts column.
-        let mut stmt = conn.prepare("SELECT id, session_id, role, parts FROM messages")?;
+        let mut stmt = tx.prepare("SELECT id, session_id, role, parts FROM messages")?;
 
         let rows = stmt
             .query_map([], |row| {
@@ -3254,18 +3280,21 @@ impl Storage {
                 Ok((id, session_id, role, parts_json))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
 
         let mut count = 0usize;
         for (id, session_id, role, parts_json) in rows {
             let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
             let content = extract_message_text(&parts);
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages_fts (message_id, session_id, role, content) \
                  VALUES (?1, ?2, ?3, ?4)",
                 params![id, session_id, role, content],
             )?;
             count += 1;
         }
+
+        tx.commit()?;
 
         Ok(count)
     }
