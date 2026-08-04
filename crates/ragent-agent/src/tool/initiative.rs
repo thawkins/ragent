@@ -44,9 +44,13 @@ impl Tool for InitiativeTool {
 
     fn description(&self) -> &'static str {
         "Manage durable initiatives — long-lived project goals with milestones \
-         that persist across sessions and compaction. Use for multi-week efforts \
-         that should not be forgotten. Actions: create, read, update, checkpoint \
-         (record progress / complete a milestone), list, close."
+         that persist across sessions and compaction. Actions: create, read, update, \
+         checkpoint (record progress / complete a milestone), list, close. REQUIRED \
+         parameter: 'action' (string enum). Conditional required parameters: 'title' for \
+         create; 'id' for read/update/checkpoint/close. Optional: 'description', 'milestones', \
+         'milestone' (checkpoint), 'progress' (0-100), 'note' (checkpoint), 'status' (filter \
+         or transition), 'limit' (list). Common gotcha: 'id' is required for every action \
+         except create and list; use a short slug for create (auto-generated if omitted)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -56,7 +60,7 @@ impl Tool for InitiativeTool {
                 "action": {
                     "type": "string",
                     "enum": ["create", "read", "update", "checkpoint", "list", "close"],
-                    "description": "Operation to perform"
+                    "description": "Operation to perform (required)"
                 },
                 "id": {
                     "type": "string",
@@ -99,7 +103,8 @@ impl Tool for InitiativeTool {
                     "description": "Maximum initiatives returned by list (default: 50)"
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
 

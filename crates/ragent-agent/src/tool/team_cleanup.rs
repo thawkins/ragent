@@ -17,9 +17,12 @@ impl Tool for TeamCleanupTool {
     }
 
     fn description(&self) -> &'static str {
-        "Tear down a team and remove its on-disk resources. Lead-only. \
-         Fails if any teammates are still active (not Stopped). \
-         Use team_shutdown_teammate on each active member first."
+        "Tear down a team and remove its on-disk resources. Lead-only. Fails if any \
+             teammates are still active (not Stopped) unless force is true; use \
+             team_shutdown_teammate on each active member first. REQUIRED parameter: \
+             'team_name' (string). Optional: 'force' (boolean, default false). Common \
+             gotcha: cleanup is permanent and deletes the team's directory; make sure \
+             all results have been extracted before calling it."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -28,17 +31,17 @@ impl Tool for TeamCleanupTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team to clean up"
+                    "description": "Name of the team to clean up (required)"
                 },
                 "force": {
                     "type": "boolean",
                     "description": "If true, remove even if teammates are still active. Default: false"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

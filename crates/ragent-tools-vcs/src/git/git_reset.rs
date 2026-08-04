@@ -16,16 +16,17 @@ impl Tool for GitResetTool {
     }
 
     fn description(&self) -> &'static str {
-        "Unstage files or reset the repository to a specific commit. \
-         CAUTION: mode 'hard' discards all local changes. \
-         Modes: 'soft' (keep changes staged), 'mixed' (keep changes unstaged, default), \
-         'hard' (discard changes), 'keep' (discard changes but abort if overridden). \
-         Provide 'paths' to unstage specific files without resetting commits."
+        "Unstage files or reset the repository to a specific commit. This tool has no universally required parameter, \
+         but you must choose one mode: either provide 'paths' (array of strings) to unstage specific files, \
+         or provide 'target' (string, default HEAD) to reset the current branch with 'mode' (enum 'soft', 'mixed', 'hard', 'keep', default 'mixed'). \
+         CAUTION: mode 'hard' discards all local working-tree changes; 'mixed' keeps changes unstaged (default), 'soft' keeps them staged, and 'keep' discards changes but aborts if they would be overwritten. \
+         Common gotcha: when 'paths' is provided, 'mode' and 'target' are ignored; when resetting, 'target' accepts a commit hash, tag, or ref."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "mode": {
                     "type": "string",

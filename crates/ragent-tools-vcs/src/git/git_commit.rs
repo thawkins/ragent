@@ -16,14 +16,17 @@ impl Tool for GitCommitTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new commit. \
-         Requires a commit message. Use 'all' to stage all modified tracked files before committing. \
-         Use 'amend' to amend the previous commit. Use 'no_verify' to bypass pre-commit hooks."
+        "Create a new git commit from staged changes. Required parameter: 'message' (string) - the commit message. \
+         Optional: 'all' (boolean, default false) to stage all modified tracked files before committing, \
+         'amend' (boolean, default false) to amend the previous commit rather than creating a new one, \
+         and 'no_verify' (boolean, default false) to bypass pre-commit hooks. \
+         Common gotcha: if nothing is staged and 'all' is false the commit will fail; use git_add first or set 'all' to true."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "message": {
                     "type": "string",

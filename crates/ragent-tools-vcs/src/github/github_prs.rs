@@ -28,12 +28,17 @@ impl Tool for GithubListPrsTool {
     }
 
     fn description(&self) -> &'static str {
-        "List GitHub pull requests for the current repository. Optional: state (open/closed/all), base branch, limit (default 20)."
+        "List GitHub pull requests in the repository detected from the current working directory. \
+         No required parameters. 'state' (enum 'open', 'closed', 'all', default 'open') filters by PR state; \
+         'base' (string) filters by the target (base) branch name; 'limit' (integer, default 20, max 100) caps results. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: 'base' must exactly match the branch name in the repository; the tool returns only the most recent PRs up to 'limit'."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "state": {
                     "type": "string",
@@ -111,12 +116,16 @@ impl Tool for GithubGetPrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitHub pull request including description, status, and review comments."
+        "Get details of a specific GitHub pull request including title, description, state, source and base branches, and review comments. \
+         Required parameter: 'number' (integer) - the PR number. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: 'number' is the repository-scoped PR number; the tool returns the first batch of reviews, not the full diff."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",
@@ -194,12 +203,18 @@ impl Tool for GithubCreatePrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new GitHub pull request from the current branch."
+        "Create a new GitHub pull request in the repository detected from the working directory. \
+         Required parameter: 'title' (string) - the PR title. \
+         Optional: 'base' (string, default 'main') is the target branch; 'head' (string, default current git branch) is the source branch; \
+         'body' (string) is the PR description in markdown; 'draft' (boolean, default false) creates a draft PR. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: the 'head' branch must already be pushed to the same remote; otherwise GitHub will reject the PR with a missing head reference error."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "title": {
                     "type": "string",
@@ -290,12 +305,18 @@ impl Tool for GithubMergePrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Merge a GitHub pull request."
+        "Merge an open GitHub pull request using the configured merge method. \
+         Required parameter: 'number' (integer) - the PR number. \
+         Optional: 'method' (enum 'merge', 'squash', 'rebase', default 'merge') selects the merge strategy; \
+         'message' (string) provides a custom merge commit message. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: the PR must be mergeable and all required checks must pass; protected branches may reject merges from this tool."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",
@@ -358,12 +379,17 @@ impl Tool for GithubReviewPrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Submit a review on a GitHub pull request."
+        "Submit a review (approve, request changes, or comment) on a GitHub pull request. \
+         Required parameters: 'number' (integer) - the PR number, and 'event' (enum 'APPROVE', 'REQUEST_CHANGES', 'COMMENT') - the review action. \
+         Optional: 'body' (string) is the review comment text; required when 'event' is 'COMMENT' or 'REQUEST_CHANGES'. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: 'APPROVE' cannot include a body in the GitHub API; if you need explanatory text use 'COMMENT' separately."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",

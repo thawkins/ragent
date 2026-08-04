@@ -33,10 +33,13 @@ impl Tool for WaitTasksTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Wait for one or more background sub-agent tasks to complete. \
-         Returns full results for all awaited tasks. \
-         Use this instead of polling with list_tasks. \
-         Optionally specify task_ids; if omitted, waits for ALL running background tasks."
+        "Wait for one or more background sub-agent tasks to complete. No required \
+             parameters. Optional: 'task_ids' (array of strings) to wait for specific \
+             tasks, or 'timeout_secs' (number, default 300). Returns full results for \
+             all awaited tasks. Use this instead of polling with list_tasks; omitting \
+             task_ids waits for ALL running background tasks. Common gotcha: this tool \
+             is for new_task sub-agents spawned with background: true, NOT for team \
+             members — for teams, always use team_wait."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -52,10 +55,10 @@ impl Tool for WaitTasksTool {
                     "type": "number",
                     "description": "Maximum seconds to wait before returning partial results. Default: 300."
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.

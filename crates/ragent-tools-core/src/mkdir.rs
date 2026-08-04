@@ -20,17 +20,20 @@ impl Tool for MakeDirTool {
 
     fn description(&self) -> &'static str {
         "Create a directory at the given path, including any missing parent \
-         directories (equivalent to `mkdir -p`). No-op if the directory already \
-         exists."
+         directories (equivalent to `mkdir -p`). Required parameter: `path` \
+         (string). It is a no-op if the directory already exists. The path must \
+         stay within the agent's working-directory root. To create multiple \
+         nested directories in one call, include them all in `path`."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Directory path to create" }
+                "path": { "type": "string", "description": "REQUIRED. Directory path to create" }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

@@ -16,14 +16,17 @@ impl Tool for GitRemoteTool {
     }
 
     fn description(&self) -> &'static str {
-        "List, add, remove, or update git remotes. \
-         Action: 'list' (default), 'add', 'remove', 'set-url'. \
-         Caution: 'add', 'remove', and 'set-url' modify repository configuration."
+        "List, add, remove, or update git remotes for the current repository. \
+         No required parameters for the default 'list' action. \
+         'action' (enum 'list', 'add', 'remove', 'set-url', default 'list') selects the operation. \
+         For 'add', 'remove', or 'set-url' the 'name' (string) parameter is required, and 'add'/'set-url' also require 'url' (string). \
+         Common gotcha: 'list' is read-only, but 'add', 'remove', and 'set-url' write to .git/config and require a configured GitHub/GitLab URL."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "action": {
                     "type": "string",

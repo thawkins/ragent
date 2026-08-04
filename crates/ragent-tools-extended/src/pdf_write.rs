@@ -47,7 +47,10 @@ impl Tool for PdfWriteTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Create a PDF file from structured content. Supports text paragraphs with headings, tables, and embedded images."
+        "Create a PDF file from structured content. Required parameters: 'path' and \
+         'content'. The 'content' object must contain an 'elements' array of paragraphs, \
+         headings (level 1-3), tables, and embedded images. Creates parent directories \
+         if needed."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -111,14 +114,17 @@ impl Tool for PdfWriteTool {
                                         "description": "Optional caption below the image"
                                     }
                                 },
-                                "required": ["type"]
+                                "required": ["type"],
+                                "additionalProperties": false
                             }
                         }
                     },
-                    "required": ["elements"]
+                    "required": ["elements"],
+                    "additionalProperties": false
                 }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
         })
     }
 

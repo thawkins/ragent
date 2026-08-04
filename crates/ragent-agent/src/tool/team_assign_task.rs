@@ -24,8 +24,11 @@ impl Tool for TeamAssignTaskTool {
 
     fn description(&self) -> &'static str {
         "Assign a specific pending task directly to a named teammate. Lead-only. \
-         The task is marked InProgress and assigned to the specified agent. \
-         The assigned teammate is notified via a mailbox message."
+             The task is marked InProgress and assigned to the specified agent, who is \
+             notified via a mailbox message. REQUIRED parameters: 'team_name' (string), \
+             'task_id' (string, e.g. 'task-001'), and 'to' (string, teammate name or agent \
+             ID). Common gotcha: the task must already exist in the team's shared task list; \
+             use team_task_create first if it does not."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -34,21 +37,21 @@ impl Tool for TeamAssignTaskTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "ID of the task to assign (e.g. 'task-001')"
+                    "description": "ID of the task to assign, e.g. 'task-001' (required)"
                 },
                 "to": {
                     "type": "string",
-                    "description": "Teammate name or agent ID to assign the task to"
+                    "description": "Teammate name or agent ID to assign the task to (required)"
                 }
             },
-            "required": ["team_name", "task_id", "to"]
+            "required": ["team_name", "task_id", "to"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

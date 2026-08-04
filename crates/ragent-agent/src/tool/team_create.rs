@@ -20,11 +20,15 @@ impl Tool for TeamCreateTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new named agent team. ALWAYS pass `context` with the user's specific request \
-         (e.g. which directory/files to review, what task to perform, where to write output). \
-         If a blueprint is provided, all teammates defined in the blueprint's spawn-prompts.json \
-         are spawned automatically — do NOT spawn them again. \
-         After team_create, call `team_wait` to block until all teammates finish their initial work."
+        "Create a new named agent team. ALWAYS pass 'context' with the user's \
+             specific request (e.g. which directory/files to review, what task to \
+             perform, where to write output). If a blueprint is provided, all teammates \
+             defined in the blueprint's spawn-prompts.json are spawned automatically — \
+             do NOT spawn them again. REQUIRED parameters: 'blueprint' (string) and \
+             'context' (string). Optional: 'name' (string, lowercase/hyphens OK; auto-generated \
+             from blueprint and timestamp if omitted) and 'project_local' (boolean, default true). \
+             After team_create, call team_wait to block until all teammates finish their \
+             initial work."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -33,7 +37,7 @@ impl Tool for TeamCreateTool {
             "properties": {
                 "blueprint": {
                     "type": "string",
-                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name>"
+                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name> (required)"
                 },
                 "context": {
                     "type": "string",
@@ -51,10 +55,10 @@ impl Tool for TeamCreateTool {
             "required": [
                 "blueprint",
                 "context"
-            ]
+            ],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

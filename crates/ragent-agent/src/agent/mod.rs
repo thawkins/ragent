@@ -2624,6 +2624,25 @@ fn build_system_prompt_with_storage_inner(
     );
 
     // Specific guidance on using line ranges for file reads.
+    // -------------------------------------------------------------------
+    // VCS / remote safety — these rules are also in AGENTS.md, but
+    // reinforcing them in the system prompt reduces accidental pushes,
+    // tags, merges, and destructive git checkouts.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## Version Control Safety\n\n\
+         Treat remote operations as destructive. Follow these rules exactly:\n\
+         - **NEVER push to a remote** unless the user explicitly says words like \
+           \"push to remote\", \"push to github\", or \"commit and push\". \
+           Looks good / that works is NOT permission to push.\n\
+         - **NEVER tag a release** unless specifically told to.\n\
+         - When bumping the version for a release, use the commit message \
+           format `Version: X.Y.Z` (e.g. `Version: 0.1.0-beta.36`). Do NOT use \"chore: bump version...\".\n\
+         - **Do NOT use `git checkout` to rewind files.** `git checkout` always risks lost work.\n\
+         - Only merge, fast-forward, or force-push when the user has explicitly asked for it.\n\
+         - Prefer `git_status`, `git_diff`, and `git_log` to inspect state before any write operation.\n\n",
+    );
+
     // Built into the system prompt (not just AGENTS.md) so the guidance
     // travels with the agent across all projects.  AGENTS.md is project-
     // specific and can vary widely; putting Read-tool guidance there
@@ -2669,6 +2688,111 @@ fn build_system_prompt_with_storage_inner(
     // distinction is always visible.
     // -------------------------------------------------------------------
     prompt.push_str(TASK_TOOL_FAMILY_GUIDANCE);
+    // -------------------------------------------------------------------
+    // Compact per-tool argument cheat sheet for the most frequently used
+    // file and directory tools. The full schemas are in the tool list.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## File Tool Quick Reference\n\n\
+         | Tool | Required | Common optional | Notes |\n\
+         |------|----------|-----------------|-------|\n\
+         | `read` | none | `start_line`, `num_lines` (preferred), `end_line` (absolute) | For files >100 lines read in sections. |\n\
+         | `write`/`create` | `path`, `content` | — | `create` is preferred for new files. |\n\
+         | `edit` | `file_path`, `old_string`, `new_string` | — | `old_string` must match exactly once. |\n\
+         | `multi_edit` | `edits[]` with `file_path`, `old_string`, `new_string` | — | Atomic rollback if any edit fails. |\n\
+         | `patch` | `patch` (unified diff text) | `path` | For multi-file unified diff patches. |\n\
+         | `apply_patch` | `patch` (Codex-style) | `path` | Supports `*** Add File:` / `*** Update File:` / `*** Delete File:`. |\n\
+         | `diff_files` | `path_a`, `path_b` (or `text_a`/`text_b`) | `context_lines` | Compare two files or inline strings. |\n\
+         | `move_file` | `source`, `destination` | — | Atomic rename on the same filesystem. |\n\
+         | `copy_file` | `source`, `destination` | — | Creates parent directories as needed. |\n\
+         | `rm` | `path` | — | Deletes a single file. No wildcards. |\n\
+         | `make_directory` | `path` | — | Equivalent to `mkdir -p`. |\n\
+         | `glob` | `pattern` | `path` | Find files matching a glob. |\n\
+         | `list` | none | `path`, `depth` | Directory tree listing. |\n\
+         | `file_info` | `path` | — | Metadata: size, mtime, type. |\n\n",
+    );
+
+    // -------------------------------------------------------------------
+    // Web / MasterFetch guidance — clarify when to use which tool and how
+    // to fetch safely.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## Web and MasterFetch Tools\n\n\
+         - Use `mf_fetch` for rich extraction (markdown/HTML/text/raw), PDFs, bulk fetch, \
+           `css_selector` narrowing, or when you need envelope signals (`content_ok`, \
+           `page_type`, `next_action`, `is_stale`).\n\
+         - Use `webfetch` only for simple HTTP GET text extraction when `mf_fetch` is not needed.\n\
+         - Use `mf_search` for keyless multi-engine web search (default 6 results, max 50).\n\
+         - Use `websearch` only for backwards-compatible single-engine search (default 5, max 20).\n\
+         - Use `http_request` when you need full control over method, headers, or body.\n\
+         - Set `respect_robots: true` on `mf_fetch` / `mf_crawl` when you are not sure a site \
+           allows crawling; do not hammer the same domain with repeated calls.\n\
+         - `mf_fetch` supports bulk fetch via the `urls` array (parallel, up to 8 concurrent).\n\
+         - `mf_crawl` is best-first same-domain crawl; cap with `max_pages`, `max_total_chars`, \
+           and `deadline_ms` to avoid runaway fetches.\n\n",
+    );
+
+    // -------------------------------------------------------------------
+    // Memory guidance — confidence scale, categories, tags.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## Memory Tools\n\n\
+         Structured memories (`memory_store`, `memory_recall`, `memory_forget`) are stored in \
+         SQLite with category, tags, and confidence.\n\n\
+         - `memory_store` required parameters: `content`, `category`. Optional: `tags` (array \
+           of lowercase/hyphen strings), `confidence` (0.0–1.0, default 0.7), `source`.\n\
+         - Categories: `fact`, `pattern`, `preference`, `insight`, `error`, `workflow`.\n\
+         - Confidence scale: 0.0 = uncertain, 1.0 = certain. Use 0.7 for ordinary observations, \
+           ≥0.9 for verified facts, ≤0.5 for hunches or unverified notes.\n\
+         - `memory_recall` required: `query`. Optional: `categories`, `tags` (must have ALL), \
+           `limit` (default 5), `min_confidence` (default 0.5).\n\
+         - `memory_forget` deletes by `id` OR by filter (`older_than_days`, `category`, tags, \
+           `max_confidence`). At least one criterion is required.\n\
+         - Tags are free-form but should be lowercase and hyphenated (e.g. `rust`, `startup`, \
+           `fts-warmup`). Use them consistently to improve recall.\n\n",
+    );
+
+    // -------------------------------------------------------------------
+    // ask_user / question guidance — keep in sync with the tool schema.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## Question / AskUser Tools\n\n\
+         - `ask_user` required parameter: `question` (string). Optional: `options` (array of \
+           strings). When `options` is provided the user picks one; otherwise they type free text.\n\
+         - `question` is the legacy alias for `ask_user`; prefer `ask_user`.\n\
+         - Use `ask_user` for clarification, prioritisation, or confirmation before proceeding.\n\n",
+    );
+
+    // -------------------------------------------------------------------
+    // Compact team-tool required-parameter table. The task/anti-confusion
+    // rules are in TASK_TOOL_FAMILY_GUIDANCE and are not duplicated here.
+    // -------------------------------------------------------------------
+    prompt.push_str(
+        "## Team Tools Quick Reference\n\n\
+         All team tools operate inside an active team. `team_name` is required by nearly every tool.\n\n\
+         | Tool | Required parameters | Purpose |\n\
+         |------|---------------------|---------|\n\
+         | `team_create` | `blueprint`, `context` | Create a named team from a blueprint. |\n\
+         | `team_spawn` | `team_name`, `teammate_name`, `agent_type`, `prompt` | Add a teammate for one scoped task. |\n\
+         | `team_message` | `team_name`, `to`, `content` | Direct message to a teammate or lead. |\n\
+         | `team_broadcast` | `team_name`, `content` | Message all active teammates. |\n\
+         | `team_read_messages` | `team_name` | Check your mailbox for unread messages. |\n\
+         | `team_status` | `team_name` | Team and task status summary. |\n\
+         | `team_task_list` | `team_name` | List all team tasks. |\n\
+         | `team_task_create` | `team_name`, `title` | Lead adds a shared task. |\n\
+         | `team_task_claim` | `team_name` | Teammate claims the next available task. |\n\
+         | `team_task_complete` | `team_name`, `task_id` | Mark a claimed team task done. |\n\
+         | `team_assign_task` | `team_name`, `task_id`, `to` | Lead assigns a task to a teammate. |\n\
+         | `team_submit_plan` | `team_name`, `plan` | Teammate submits a plan to the lead. |\n\
+         | `team_approve_plan` | `team_name`, `teammate`, `approved` | Lead approves/rejects a plan. |\n\
+         | `team_wait` | none (uses active team) or `team_name` | Block until teammates finish. |\n\
+         | `team_idle` | `team_name` | Teammate signals no more work. |\n\
+         | `team_shutdown_teammate` | `team_name`, `teammate` | Lead requests teammate shutdown. |\n\
+         | `team_shutdown_ack` | `team_name` | Teammate acks shutdown and exits. |\n\
+         | `team_cleanup` | `team_name` | Lead tears down the team after all stopped. |\n\
+         | `team_memory_read` | `team_name` | Read team memory bucket. |\n\
+         | `team_memory_write` | `team_name`, `content` | Write team memory bucket. |\n\n",
+    );
 
     prompt
 }

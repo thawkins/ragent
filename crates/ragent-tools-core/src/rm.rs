@@ -20,7 +20,10 @@ impl Tool for RmTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Delete a single file. Wildcards are not allowed. Fails if the file does not exist."
+        "Delete a single file. Required parameter: `path` (string). Wildcards and \
+         glob patterns (`*`, `?`, `[...]`) are not allowed — specify one exact \
+         file. Fails if the file does not exist or if the path is a directory. \
+         To delete directories, use `bash` with an appropriate command instead."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,10 +32,11 @@ impl Tool for RmTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to delete. Must be a single file, no wildcards or glob patterns."
+                    "description": "REQUIRED. Path to the file to delete. Must be a single file, no wildcards or glob patterns."
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

@@ -19,19 +19,24 @@ impl Tool for MoveFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Move or rename a file or directory. Uses an atomic OS rename so the \
-         operation is instant on the same filesystem. Fails if source does not \
-         exist or destination's parent directory does not exist."
+        "Move or rename a file or directory within the agent's working-directory \
+         root. Required parameters: `source` (string) — the existing file or \
+         directory, and `destination` (string) — the target path including the \
+         new name. Uses an atomic OS rename when source and destination are on \
+         the same filesystem, so the operation is usually instant. Parent \
+         directories on the destination side are created if missing. To copy \
+         instead of move, use `copy_file`."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "source":      { "type": "string", "description": "Path to the file or directory to move" },
-                "destination": { "type": "string", "description": "Destination path (including new name)" }
+                "source":      { "type": "string", "description": "REQUIRED. Path to the file or directory to move" },
+                "destination": { "type": "string", "description": "REQUIRED. Destination path (including new name)" }
             },
-            "required": ["source", "destination"]
+            "required": ["source", "destination"],
+            "additionalProperties": false
         })
     }
 

@@ -17,7 +17,10 @@ impl Tool for TeamTaskListTool {
 
     fn description(&self) -> &'static str {
         "List all tasks in the team's shared task list, including their status, \
-         assignment, and dependencies."
+             assignment, and dependencies. REQUIRED parameter: 'team_name' (string). Use \
+             this to inspect the current workload before claiming, assigning, or creating \
+             new tasks. Common gotcha: this is read-only — use team_task_create, \
+             team_task_claim, and team_task_complete to modify tasks."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -26,13 +29,13 @@ impl Tool for TeamTaskListTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:read"
     }

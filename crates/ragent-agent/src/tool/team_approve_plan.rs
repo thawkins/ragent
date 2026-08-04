@@ -18,9 +18,13 @@ impl Tool for TeamApprovePlanTool {
     }
 
     fn description(&self) -> &'static str {
-        "Approve or reject a teammate's submitted plan. Lead-only. \
-         On approval, the teammate exits plan-pending mode and begins implementation. \
-         On rejection, provide feedback and the teammate will revise."
+        "Approve or reject a teammate's submitted plan. Lead-only. On approval, \
+             the teammate exits plan-pending mode and begins implementation; on \
+             rejection, provide feedback and the teammate will revise. REQUIRED \
+             parameters: 'team_name' (string), 'teammate' (string or agent ID), and \
+             'approved' (boolean). Optional: 'feedback' (string, required when rejecting). \
+             Common gotcha: feedback is mandatory when approved is false; omitting it \
+             returns an error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,25 +33,25 @@ impl Tool for TeamApprovePlanTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "teammate": {
                     "type": "string",
-                    "description": "Teammate name or agent ID whose plan is being reviewed"
+                    "description": "Teammate name or agent ID whose plan is being reviewed (required)"
                 },
                 "approved": {
                     "type": "boolean",
-                    "description": "true to approve, false to reject"
+                    "description": "true to approve, false to reject (required)"
                 },
                 "feedback": {
                     "type": "string",
                     "description": "Optional feedback message (required when rejecting)"
                 }
             },
-            "required": ["team_name", "teammate", "approved"]
+            "required": ["team_name", "teammate", "approved"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

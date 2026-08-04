@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-beta.36
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.36.
+- Security remediation planning: created `SECPLAN.md` with P0–P3 risk register,
+  concrete file/line references, and milestone-based remediation roadmap.
+
 ## Version: 0.1.0-beta.35
 
 ### Added
@@ -7,6 +15,16 @@
 - New `TOOLS.md` root documentation file listing all available agent tools.
 - Updated `team_create` tool input schema to support an optional `context` field
   for richer teammate creation prompts.
+
+### Improved
+
+- Tool system-prompt sufficiency audit and remediation across all 142 registered
+  tools (T-001–T-004 in `TOOLPLAN.md`). Every tool now has a description of at
+  least 120 characters, explicit required-parameter callouts, and a strict
+  JSON schema with `"additionalProperties": false` to reject hallucinated
+  parameter names. System-prompt guidance sections were added/updated for VCS
+  safety, codeindex usage, memory tools, team tools, ask-user tools, and
+  file-reading best practices.
 
 ## Version: 0.1.0-beta.34
 

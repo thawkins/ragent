@@ -17,7 +17,11 @@ impl Tool for SpecSearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Search all specifications by keyword. Returns matching specs with context snippets."
+        "Search all specifications by keyword. REQUIRED parameter: 'query' (string). \
+         Returns matching specs with context snippets, including spec ID, title, status, \
+         and relevant excerpts. Use this to find the right spec when you do not already \
+         know its identifier. Common gotcha: the search is case-insensitive substring \
+         matching across titles and content, not a semantic search."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -26,7 +30,7 @@ impl Tool for SpecSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query string"
+                    "description": "Search query string (required)"
                 }
             },
             "required": ["query"],

@@ -16,14 +16,16 @@ impl Tool for GitAddTool {
     }
 
     fn description(&self) -> &'static str {
-        "Stage files for the next commit. \
-         Provide file paths or use 'all' to stage all changes. \
-         Use 'update' to stage changes only to tracked files."
+        "Stage files for the next git commit. All parameters are optional but you must provide at least one action: \
+         specify 'paths' (array of file or directory paths) to stage specific items, set 'all' to true to stage every change (git add -A), \
+         or set 'update' to true to stage changes only to already-tracked files (git add -u). \
+         Common gotcha: without 'paths', 'all', or 'update' the call will fail with an error."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "paths": {
                     "type": "array",

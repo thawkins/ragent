@@ -23,10 +23,13 @@ impl Tool for OpenTool {
     }
 
     fn description(&self) -> &'static str {
-        "Open or reveal a file, folder, or URL in the desktop environment. \
-         On Linux uses xdg-open, on macOS uses open, and on Windows uses start. \
-         The 'reveal' action opens the item's parent directory. URL schemes are \
-         validated against an allowlist before launching."
+        "Open or reveal a file, folder, or URL using the desktop default handler. \
+         Required parameter: `target` (string). Optional: `action` (string, one \
+         of `open`, `reveal`, `url`; default `open`). On Linux uses `xdg-open`, \
+         on macOS uses `open`, and on Windows uses `start`. The `reveal` action \
+         opens the item's parent directory. URL schemes are validated against an \
+         allowlist before launching. This tool interacts with the desktop \
+         environment and may fail in headless or sandboxed contexts."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -35,7 +38,7 @@ impl Tool for OpenTool {
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "File path, folder path, or URL to open"
+                    "description": "REQUIRED. File path, folder path, or URL to open"
                 },
                 "action": {
                     "type": "string",

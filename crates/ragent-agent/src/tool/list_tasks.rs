@@ -23,7 +23,11 @@ impl Tool for ListTasksTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "List sub-agent tasks for the current session. Shows running and completed \
-               background tasks with their status, agent, and result summary."
+             background tasks with their status, agent, and result summary. No required \
+             parameters. Optional: 'status' (string enum running/completed/failed/cancelled) \
+             to filter, or 'task_id' (string) to retrieve details for a single task. Common \
+             gotcha: this tool lists tasks created via new_task with background: true; it does \
+             not list team tasks (use team_task_list for those)."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -38,10 +42,10 @@ impl Tool for ListTasksTool {
                     "type": "string",
                     "description": "Get details for a specific task by ID"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "none"
     }

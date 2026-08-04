@@ -17,7 +17,11 @@ impl Tool for SpecListTool {
     }
 
     fn description(&self) -> &'static str {
-        "List all specifications. Optionally filter by status (draft, in_review, approved, in_progress, implemented, verified, archived)."
+        "List all specifications. No required parameters. Optional: 'status' (string \
+         enum: draft, in_review, approved, in_progress, implemented, verified, archived) \
+         to filter results. Returns spec identifiers, titles, statuses, and other metadata. \
+         Common gotcha: status values are case-insensitive when parsed but must be one of \
+         the seven valid spec statuses."
     }
 
     fn parameters_schema(&self) -> Value {

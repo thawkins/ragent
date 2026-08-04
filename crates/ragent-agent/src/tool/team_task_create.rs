@@ -17,8 +17,13 @@ impl Tool for TeamTaskCreateTool {
     }
 
     fn description(&self) -> &'static str {
-        "Add a new task to the team's shared task list. Lead-only. \
-         Teammates will be able to claim it via team_task_claim."
+        "Add a new task to the team's shared task list. Lead-only. REQUIRED parameters: \
+             'team_name' (string) and 'title' (string, short task title). Optional: \
+             'description' (string, full work description) and 'depends_on' (array of \
+             task IDs that must be completed before this task can be claimed). Teammates \
+             will be able to claim it via team_task_claim. Common gotcha: dependency \
+             task IDs refer to other tasks in the same team; dangling dependencies will \
+             block the task from being claimed."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -27,11 +32,11 @@ impl Tool for TeamTaskCreateTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "title": {
                     "type": "string",
-                    "description": "Short title for the task"
+                    "description": "Short title for the task (required)"
                 },
                 "description": {
                     "type": "string",
@@ -43,10 +48,10 @@ impl Tool for TeamTaskCreateTool {
                     "description": "Task IDs that must be completed before this task can be claimed"
                 }
             },
-            "required": ["team_name", "title"]
+            "required": ["team_name", "title"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

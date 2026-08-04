@@ -40,10 +40,14 @@ impl Tool for GrepTool {
     }
 
     fn description(&self) -> &'static str {
-        "Search file contents for a regex pattern using ripgrep. \
-         Respects .gitignore rules. Returns matching lines with file path \
-         and line number. Supports regex, case-insensitive search, and \
-         file-type glob filtering."
+        "Search file contents for a regex pattern using ripgrep, respecting \
+         `.gitignore` rules. Required parameter: `pattern` (string) in Rust \
+         regex syntax. Optional parameters: `path` (string) — directory or file \
+         to search (default: working directory); `include` (string) and \
+         `exclude` (string) — glob filters; `case_insensitive` (boolean) and \
+         `multiline` (boolean); `max_results` (integer, default and max 500). \
+         Returns matching lines with file path and line number. Skips binary \
+         files automatically."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -52,7 +56,7 @@ impl Tool for GrepTool {
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Regex pattern to search for (Rust regex syntax)"
+                    "description": "REQUIRED. Regex pattern to search for (Rust regex syntax)"
                 },
                 "path": {
                     "type": "string",
@@ -79,7 +83,8 @@ impl Tool for GrepTool {
                     "description": "Maximum number of matches to return (default: 500, max: 500)"
                 }
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "additionalProperties": false
         })
     }
 

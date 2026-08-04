@@ -16,14 +16,16 @@ impl Tool for GitDiffTool {
     }
 
     fn description(&self) -> &'static str {
-        "Show changes (diff) between working tree, staged index, or commits. \
-         Target: 'working' (default), 'staged', or a commit ref. \
-         Optional: path filter, stat summary."
+        "Show the difference between the working tree, the staged index, or two commits. \
+         No required parameters. 'target' (string) controls what to diff: 'working' (default), 'staged'/'cached', or a commit ref; \
+         'path' (string) limits the diff to a single file or directory; 'stat' (boolean, default false) shows a compact change summary. \
+         Common gotcha: when 'target' is a commit ref the diff compares that ref against the working tree; use 'staged' to see index changes."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "target": {
                     "type": "string",

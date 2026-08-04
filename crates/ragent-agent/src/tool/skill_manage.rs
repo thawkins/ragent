@@ -36,8 +36,13 @@ impl Tool for SkillManageTool {
 
     fn description(&self) -> &'static str {
         "Manage the skill registry at runtime: list available skills, read a \
-         skill's prompt, load (discover + invoke) a skill by name, or reload \
-         all skills from disk. Actions: list, read, load, reload."
+             skill's prompt, load (discover + invoke) a skill by name, or reload \
+             all skills from disk. Actions: list, read, load, reload. REQUIRED \
+             parameter: 'action' (string enum). Conditional required parameters: \
+             'name' for read and load. Optional: 'arguments' (string) for read/load, \
+             'scope' (string enum) for list, 'include_bodies' (boolean) for list. \
+             Common gotcha: 'name' is required when action is read or load; omitting it \
+             returns an error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -47,7 +52,7 @@ impl Tool for SkillManageTool {
                 "action": {
                     "type": "string",
                     "enum": ["list", "read", "load", "reload"],
-                    "description": "Operation to perform"
+                    "description": "Operation to perform (required)"
                 },
                 "name": {
                     "type": "string",
@@ -70,10 +75,10 @@ impl Tool for SkillManageTool {
                     "description": "When true, list includes each skill's full prompt body (default: false — metadata only)"
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "skill:manage"
     }

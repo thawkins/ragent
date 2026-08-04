@@ -16,13 +16,16 @@ impl Tool for GitPushTool {
     }
 
     fn description(&self) -> &'static str {
-        "Push branches and tags to a remote repository. \
-         CAUTION: force push can rewrite history. Use 'force' with care."
+        "Push local branches and tags to a remote git repository. \
+         No required parameters. 'remote' (string, default 'origin') selects the remote; 'branch' (string) pushes a specific branch (default current branch). \
+         'force' (boolean, default false) performs a force-with-lease push; 'tags' (boolean, default false) pushes all tags. \
+         Common gotcha: 'force' is destructive and may overwrite remote history; only use it after confirming no one else has pushed the same branch."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "remote": {
                     "type": "string",

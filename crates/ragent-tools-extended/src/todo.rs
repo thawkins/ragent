@@ -23,7 +23,9 @@ impl Tool for TodoReadTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "List TODO items for the current session, optionally filtered by status"
+        "List TODO items for the current session, optionally filtered by status. \
+         The optional 'status' parameter can be pending, in_progress, done, blocked, \
+         or all (default: all). No parameters are required."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -35,7 +37,8 @@ impl Tool for TodoReadTool {
                     "description": "Filter by status: pending, in_progress, done, blocked, or all (default: all)",
                     "enum": ["pending", "in_progress", "done", "blocked", "all"]
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
 
@@ -100,7 +103,11 @@ impl Tool for TodoWriteTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Add, update, remove, or clear TODO items for the current session"
+        "Add, update, remove, or clear TODO items for the current session. \
+         Required parameter: 'action' (one of add, update, remove, clear, \
+         complete/completed/done). For 'add', 'title' is required. For 'update', \
+         'remove', or 'complete', 'id' is required. Optional 'status' \
+         (pending/in_progress/done/blocked) and 'description'."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -110,7 +117,7 @@ impl Tool for TodoWriteTool {
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                "enum": ["add", "update", "remove", "clear", "complete", "completed", "done"]
+                    "enum": ["add", "update", "remove", "clear", "complete", "completed", "done"]
                 },
                 "id": {
                     "type": "string",
@@ -130,7 +137,8 @@ impl Tool for TodoWriteTool {
                     "enum": ["pending", "in_progress", "done", "blocked"]
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
 

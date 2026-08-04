@@ -17,10 +17,12 @@ impl Tool for TeamTaskClaimTool {
     }
 
     fn description(&self) -> &'static str {
-        "Claim a task to work on. Either claim the next available task (if no task_id provided), \
-         or claim a specific task by ID (if the lead assigned you to one). \
-         Uses file locking to prevent race conditions between teammates. \
-         Returns the task details, or a message if the task is unavailable."
+        "Claim a task to work on. REQUIRED parameter: 'team_name' (string). Optional: \
+             'task_id' (string) to claim a specific task; if omitted, the next available \
+             pending task is claimed atomically using file locking. Returns the task details \
+             or a message if the task is unavailable. Common gotcha: if no task_id is provided \
+             and no pending tasks remain, the result indicates no work is available — call \
+             team_idle when appropriate."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,18 +31,17 @@ impl Tool for TeamTaskClaimTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "Optional: specific task ID to claim. If provided, claims this task. \
-                                   If not provided, claims the next available task."
+                    "description": "Optional: specific task ID to claim. If provided, claims this task; if not provided, claims the next available task."
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:tasks"
     }

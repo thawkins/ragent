@@ -16,14 +16,18 @@ impl Tool for GitTagTool {
     }
 
     fn description(&self) -> &'static str {
-        "List, show, create, or delete git tags. \
-         Action: 'list' (default), 'show', 'create', 'delete'. \
-         Caution: 'create' and 'delete' modify the repository."
+        "List, show, create, or delete git tags in the current repository. \
+         No required parameters for the default 'list' action. \
+         'action' (enum 'list', 'show', 'create', 'delete', default 'list') selects the operation; \
+         'name' (string) is required for 'show', 'create', and 'delete'; 'message' (string) creates an annotated tag with 'create'; \
+         'ref' (string, default HEAD) sets the target commit or ref for 'create'. \
+         Common gotcha: 'create' and 'delete' modify the repository; creating an annotated tag requires both 'name' and 'message'."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "action": {
                     "type": "string",

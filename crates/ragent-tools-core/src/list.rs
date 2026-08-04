@@ -24,7 +24,12 @@ impl Tool for ListTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "List directory contents with tree-like output. Supports depth control."
+        "List directory contents in a tree-like format with depth control. \
+         No parameters are required. Optional parameters: `path` (string) — \
+         the directory to list (default: working directory); `depth` (integer) \
+         — maximum recursion depth (default: 2). Returns a formatted tree \
+         with directories sorted before files. Use `glob` instead if you need \
+         pattern matching rather than browsing."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -39,7 +44,8 @@ impl Tool for ListTool {
                     "type": "integer",
                     "description": "Maximum depth to recurse (default: 2)"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
 

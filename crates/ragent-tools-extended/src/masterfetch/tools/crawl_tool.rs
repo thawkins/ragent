@@ -56,11 +56,11 @@ impl Tool for MfCrawlTool {
     }
 
     fn description(&self) -> &'static str {
-        "Best-first same-domain crawl. Each page as markdown with content_ok \
-         + page_type. Supports discover_only, crawl_urls, focus, sitemap mode, \
-         and time + token caps. Pages are scored by focus relevance + \
-         content-likelihood (docs/guide/api boosted, login/submit/cart \
-         penalised) + shallow depth."
+        "Best-first same-domain crawl. Required parameter: 'url' (start URL). \
+             Optional 'max_pages' (default 10), 'max_depth' (default 2), 'max_total_chars' \
+             (default 200000), 'deadline_ms' (default 120000), 'focus' scoring query, \
+             'sitemap' mode, 'discover_only', 'crawl_urls' subset, and 'respect_robots'. \
+             Returns each page as markdown with content_ok + page_type envelope signals."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -110,10 +110,10 @@ impl Tool for MfCrawlTool {
                     "description": "Check robots.txt before fetching (default: false)"
                 }
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "web"
     }

@@ -16,7 +16,12 @@ impl Tool for TeamStatusTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get the current status of a team: member list, their states, and task progress summary."
+        "Get the current status of a team: member list, their states, and task \
+         progress summary. REQUIRED parameter: 'team_name' (string). Use this \
+         whenever you need to know which teammates are active, idle, stopped, or \
+         failed, or how many tasks are pending/in-progress/completed. Common gotcha: \
+         the tool only returns state — it does not read mailbox messages (use \
+         team_read_messages for that)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -25,10 +30,11 @@ impl Tool for TeamStatusTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
 

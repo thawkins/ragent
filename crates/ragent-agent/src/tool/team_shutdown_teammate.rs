@@ -31,12 +31,14 @@ impl Tool for TeamShutdownTeammateTool {
     }
 
     fn description(&self) -> &'static str {
-        "Request graceful shutdown of a named teammate. Lead-only. \
-         Sends a shutdown_request to the teammate's mailbox via the unified \
-         TeamManager shutdown path. The teammate will call team_shutdown_ack \
-         to confirm before terminating. Pass `immediate: true` to cancel the \
-         agent loop immediately and mark the teammate Stopped without waiting \
-         for an ack (use this only for hung or unresponsive teammates)."
+        "Request graceful shutdown of a named teammate. Lead-only. REQUIRED parameters: \
+             'team_name' (string) and 'teammate' (string, name or agent ID). Sends a \
+             shutdown_request to the teammate's mailbox; the teammate calls team_shutdown_ack \
+             to confirm before terminating. Optional: 'reason' (string) and 'immediate' (boolean, \
+             default false). Pass immediate: true to cancel the agent loop immediately and \
+             mark the teammate Stopped without waiting for an ack — use only for hung or \
+             unresponsive teammates. Common gotcha: graceful shutdown requires the teammate \
+             to process its mailbox and ack; immediate bypasses that handshake."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -45,11 +47,11 @@ impl Tool for TeamShutdownTeammateTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "teammate": {
                     "type": "string",
-                    "description": "Teammate name or agent ID to shut down"
+                    "description": "Teammate name or agent ID to shut down (required)"
                 },
                 "reason": {
                     "type": "string",
@@ -60,10 +62,10 @@ impl Tool for TeamShutdownTeammateTool {
                     "description": "If true, cancel the agent loop immediately and mark the teammate Stopped instead of waiting for team_shutdown_ack. Default: false (graceful)."
                 }
             },
-            "required": ["team_name", "teammate"]
+            "required": ["team_name", "teammate"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

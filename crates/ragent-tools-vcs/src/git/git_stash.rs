@@ -16,15 +16,17 @@ impl Tool for GitStashTool {
     }
 
     fn description(&self) -> &'static str {
-        "Stash and unstash changes. \
-         Actions: 'push' (save changes, default), 'pop' (apply and remove latest), \
-         'apply' (apply without removing), 'drop' (remove a stash), \
-         'list' (show all stashes), 'clear' (remove all stashes)."
+        "Stash and unstash working tree changes. \
+         No required parameters. 'action' (enum 'push', 'pop', 'apply', 'drop', 'list', 'clear', default 'push') selects the operation. \
+         'message' (string) is only used with 'push'; 'index' (integer, default 0) selects a stash for 'pop', 'apply', and 'drop'. \
+         Common gotcha: 'drop' without an 'index' deletes the most recent stash (stash@{0}); \
+         'clear' removes every stash and cannot be undone; ensure local changes are committed or backed up first."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "action": {
                     "type": "string",

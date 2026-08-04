@@ -19,8 +19,11 @@ impl Tool for TeamSubmitPlanTool {
 
     fn description(&self) -> &'static str {
         "Submit a plan to the team lead for approval before starting implementation. \
-         After calling this tool, wait for plan_approved or plan_rejected messages \
-         via team_read_messages before proceeding."
+             REQUIRED parameters: 'team_name' (string) and 'plan' (string, full text of \
+             the intended approach). After calling this tool, wait for plan_approved or \
+             plan_rejected messages via team_read_messages before proceeding. Common \
+             gotcha: do not begin implementation until the lead approves the plan; the \
+             teammate's status is set to PlanPending while waiting."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,17 +32,17 @@ impl Tool for TeamSubmitPlanTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "plan": {
                     "type": "string",
-                    "description": "Full text of the plan describing the intended approach"
+                    "description": "Full text of the plan describing the intended approach (required)"
                 }
             },
-            "required": ["team_name", "plan"]
+            "required": ["team_name", "plan"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

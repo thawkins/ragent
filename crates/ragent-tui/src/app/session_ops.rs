@@ -738,13 +738,16 @@ impl App {
             return;
         }
         self.memory_stats_last_refresh = std::time::Instant::now();
+        let storage = self.storage.clone();
         let project_dir = std::env::current_dir().unwrap_or_default();
-        self.memory_entry_count = self
-            .storage
-            .count_memories_for_project(&project_dir)
-            .unwrap_or(0);
+        let pending = self.memory_entry_count_pending.clone();
+        tokio::task::spawn_blocking(move || {
+            let count = storage
+                .count_memories_for_project(&project_dir)
+                .unwrap_or(0);
+            pending.store(count, std::sync::atomic::Ordering::Relaxed);
+        });
     }
-
     /// Map the primary session's short id to the current agent name for log display.
     pub fn register_primary_session_mapping(&mut self) {
         if let Some(ref sid) = self.session_id {

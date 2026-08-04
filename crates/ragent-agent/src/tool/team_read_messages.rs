@@ -28,11 +28,12 @@ impl Tool for TeamReadMessagesTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read all unread messages from your mailbox in the team. \
-         Messages are marked as read only after this call returns them to you \
-         (at-least-once delivery: if the call fails, messages stay unread and \
-         are redelivered next time). \
-         Call this at the start of each turn to check for new instructions."
+        "Read all unread messages from your mailbox in the team. REQUIRED parameter: \
+             'team_name' (string). Messages are marked as read only after this call returns \
+             them to you (at-least-once delivery: if the call fails, messages stay unread and \
+             are redelivered next time). Call this at the start of each turn to check for new \
+             instructions. Common gotcha: only unread messages are returned; previously-read \
+             messages are not shown again."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -41,13 +42,13 @@ impl Tool for TeamReadMessagesTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

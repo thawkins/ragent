@@ -16,13 +16,16 @@ impl Tool for GitPullTool {
     }
 
     fn description(&self) -> &'static str {
-        "Fetch and integrate changes from a remote repository. \
-         Use 'rebase' to rebase instead of merging."
+        "Fetch and integrate changes from a remote git repository into the current branch. \
+         No required parameters. 'remote' (string, default 'origin') selects the remote; 'branch' (string) pulls a specific branch. \
+         'rebase' (boolean, default false) rebases current local commits onto the fetched history instead of creating a merge commit. \
+         Common gotcha: 'branch' is the branch to pull on the remote, not the local branch; omit it to use the current tracking branch."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "remote": {
                     "type": "string",

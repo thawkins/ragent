@@ -26,7 +26,11 @@ impl Tool for OfficeInfoTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get metadata and structural information about a Word, Excel, or PowerPoint file."
+        "Get metadata and structural information about a Word, Excel, or PowerPoint file. \
+         REQUIRED parameter: 'path' (string, path to the .docx, .xlsx, or .pptx file). \
+         Returns a JSON summary with title, author, creation date, page/slide/sheet \
+         counts, and other available metadata. Common gotcha: only modern Office Open \
+         XML formats are supported; legacy .doc/.xls/.ppt files are rejected."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -35,10 +39,11 @@ impl Tool for OfficeInfoTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the Office document"
+                    "description": "Path to the Office document (.docx, .xlsx, or .pptx) (required)"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

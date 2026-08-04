@@ -22,12 +22,16 @@ impl Tool for TeamSpawnTool {
     }
 
     fn description(&self) -> &'static str {
-        "Spawn a teammate agent session within an existing team. \
-         Each teammate receives the team context and works on a single, bounded task. \
-         CRITICAL: Spawn ONE teammate per independent work item — never assign a list of \
-         items to one teammate (context overflow). After spawning all teammates in the same \
-         response turn, call `team_wait` to block until they finish. \
-         Do NOT use `wait_tasks` for teammates — use `team_wait`."
+        "Spawn a teammate agent session within an existing team. REQUIRED parameters: \
+             'team_name' (string), 'teammate_name' (string, unique within the team), \
+             'agent_type' (string, e.g. 'general', 'explore'), and 'prompt' (string, scoped \
+             to a SINGLE work item). Optional: 'task_id' (string) to pre-assign a task, \
+             'model' (provider/model format) for a model override, and 'memory' (enum \
+             user/project/none) for persistent memory scope. CRITICAL: spawn ONE teammate \
+             per independent work item — never assign a list of items to one teammate \
+             (context overflow). After spawning all teammates in the same response turn, \
+             call team_wait to block until they finish. Do NOT use wait_tasks for teammates. \
+             Common gotcha: wait_tasks is for new_task sub-agents, not team members."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -36,19 +40,19 @@ impl Tool for TeamSpawnTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team to spawn the teammate into"
+                    "description": "Name of the team to spawn the teammate into (required)"
                 },
                 "teammate_name": {
                     "type": "string",
-                    "description": "Unique name for this teammate within the team (e.g. 'security-reviewer')"
+                    "description": "Unique name for this teammate within the team, e.g. 'security-reviewer' (required)"
                 },
                 "agent_type": {
                     "type": "string",
-                    "description": "Agent type / definition name (e.g. 'general', 'explore')"
+                    "description": "Agent type / definition name, e.g. 'general', 'explore' (required)"
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item — never list multiple items. Keep under ~500 words; reference files by path rather than pasting content."
+                    "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item — never list multiple items. Keep under ~500 words; reference files by path rather than pasting content. (required)"
                 },
                 "task_id": {
                     "type": "string",
@@ -64,10 +68,10 @@ impl Tool for TeamSpawnTool {
                     "description": "Persistent memory scope: 'user' (global), 'project' (local), or 'none' (default). Gives the teammate a memory directory for cross-session notes."
                 }
             },
-            "required": ["team_name", "teammate_name", "agent_type", "prompt"]
+            "required": ["team_name", "teammate_name", "agent_type", "prompt"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:manage"
     }

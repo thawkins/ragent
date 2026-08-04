@@ -437,6 +437,7 @@ impl App {
                 } else {
                     self.agent_halted = false;
                     self.status = "ready".to_string();
+                    self.status_set_at = None;
                 }
                 self.force_new_message = true;
                 self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
@@ -2248,6 +2249,9 @@ impl App {
     /// busy, when autopilot is disabled, or when the task was already marked
     /// as completed by the agent (TaskCompleted consumed before or after us).
     pub fn poll_autopilot_continue(&mut self) {
+        if self.autopilot_continued_this_wake {
+            return;
+        }
         if self.last_task_completed_at.is_some() {
             self.autopilot_pending_continue = None;
             self.autopilot_enabled = false;
@@ -2264,6 +2268,7 @@ impl App {
             return;
         }
         if let Some(text) = self.autopilot_pending_continue.take() {
+            self.autopilot_continued_this_wake = true;
             self.dispatch_user_message(text, vec![]);
         }
     }

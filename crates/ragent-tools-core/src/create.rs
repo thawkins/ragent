@@ -24,7 +24,12 @@ impl Tool for CreateTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Create a new file with content. Truncates the file if it already exists. Creates parent directories if needed."
+        "Create a new file and write the given content to it, creating parent \
+         directories as needed. Required parameters: `path` (string) — the \
+         file to create, and `content` (string) — the content to write. If the \
+         file already exists, it is truncated and overwritten. To append to an \
+         existing file without overwriting, use `append_to_file`. To update a \
+         specific region, use `edit`."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -33,14 +38,15 @@ impl Tool for CreateTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to create"
+                    "description": "REQUIRED. Path to the file to create"
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to write to the new file"
+                    "description": "REQUIRED. Content to write to the new file"
                 }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
         })
     }
 

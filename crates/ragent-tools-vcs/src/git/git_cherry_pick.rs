@@ -16,13 +16,16 @@ impl Tool for GitCherryPickTool {
     }
 
     fn description(&self) -> &'static str {
-        "Apply the changes introduced by specific commits onto the current branch. \
-         Provide commit hashes. Set 'no_commit' to apply changes without creating a commit."
+        "Apply the changes introduced by one or more existing commits onto the current branch. \
+         Required parameter: 'commits' (array of commit hash strings). \
+         Optional: 'no_commit' (boolean, default false) to apply changes to the working tree/index without creating a commit. \
+         Common gotcha: the first element of 'commits' must be a valid commit hash or ref; empty arrays are rejected."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "commits": {
                     "type": "array",

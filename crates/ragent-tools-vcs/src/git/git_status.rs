@@ -16,12 +16,17 @@ impl Tool for GitStatusTool {
     }
 
     fn description(&self) -> &'static str {
-        "Show the working tree status: modified, staged, untracked, and conflicted files."
+        "Show the git working tree status, including modified, staged, untracked, and conflicted files. \
+         No required parameters. 'short' (boolean, default false) returns a compact, one-line-per-file format; \
+         'branch' (boolean, default true) includes the current branch name in the output. \
+         The tool parses the output and returns structured lists of staged, modified, untracked, and conflicted paths. \
+         Common gotcha: in porcelain mode untracked files are shown with a '?' prefix; conflicted files appear when a merge or rebase is in progress."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "short": {
                     "type": "boolean",

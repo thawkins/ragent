@@ -83,7 +83,14 @@ impl Tool for OfficeWriteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Write content to Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files."
+        "Write content to Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files. \
+         REQUIRED parameters: 'path' (string) and 'content' (the document payload). \
+         Optional: 'type' (string enum docx/xlsx/pptx, auto-detected from extension if \
+         omitted) and 'title' (string, docx only). The content schema is format-specific: \
+         for docx, an array of paragraph/heading/list/code_block objects; for xlsx, \
+         {sheets:[{name,rows}]}; for pptx, {slides:[{title,body,notes},...]} or an array \
+         of slide objects. Common gotcha: content must match the chosen format; mismatched \
+         shapes fail with a clear error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -92,7 +99,7 @@ impl Tool for OfficeWriteTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to write the Office document"
+                    "description": "Path to write the Office document (required)"
                 },
                 "type": {
                     "type": "string",
@@ -104,10 +111,11 @@ impl Tool for OfficeWriteTool {
                     "description": "Optional document title (docx only)"
                 },
                 "content": {
-                    "description": "Document content. For docx: either an array of paragraph/heading/list objects, or an object with a 'paragraphs' or 'content' array. Each item: {type:'paragraph'|'heading'|'bullet_list'|'code_block', text:'...', level:1-6, items:[...], style:'Normal'|'Heading1'|...}. For xlsx: {sheets:[{name,rows}]}. For pptx: either {slides:[{title,body,notes},...]} or a direct array of slide objects [{title,body,notes},...]."
+                    "description": "Document content (required). For docx: either an array of paragraph/heading/list objects, or an object with a 'paragraphs' or 'content' array. Each item: {type:'paragraph'|'heading'|'bullet_list'|'code_block', text:'...', level:1-6, items:[...], style:'Normal'|'Heading1'|...}. For xlsx: {sheets:[{name,rows}]}. For pptx: either {slides:[{title,body,notes},...]} or a direct array of slide objects [{title,body,notes},...]."
                 }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
         })
     }
 

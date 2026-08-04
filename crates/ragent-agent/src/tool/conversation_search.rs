@@ -26,11 +26,14 @@ impl Tool for ConversationSearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Search the current session conversation history. \
-         Modes: keyword (default), turn_range, stats. \
-         Returns ranked keyword matches with role and timestamp, \
-         a slice of messages by turn number, or a statistical summary \
-         including total/user/assistant/compaction counts."
+        "Search the current session conversation history. Modes: keyword (default), \
+         turn_range, stats. REQUIRED parameter: none for stats mode; 'query' (string) \
+         for keyword mode; 'start_turn' and 'end_turn' (integers, 1-based inclusive) \
+         for turn_range mode. Optional: 'limit' (keyword result count, default 10), \
+         'context_turns' (surrounding turns per keyword match, default 0). Returns \
+         ranked keyword matches, a slice by turn number, or message-count statistics. \
+         Common gotcha: keyword mode fails if 'query' is missing; turn_range requires \
+         both start_turn and end_turn."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -39,7 +42,7 @@ impl Tool for ConversationSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query for keyword mode"
+                    "description": "Search query for keyword mode (required when mode=keyword)"
                 },
                 "mode": {
                     "type": "string",
@@ -48,11 +51,11 @@ impl Tool for ConversationSearchTool {
                 },
                 "start_turn": {
                     "type": "integer",
-                    "description": "First turn to include in turn_range mode (1-based, inclusive)"
+                    "description": "First turn to include in turn_range mode (1-based, inclusive, required when mode=turn_range)"
                 },
                 "end_turn": {
                     "type": "integer",
-                    "description": "Last turn to include in turn_range mode (1-based, inclusive)"
+                    "description": "Last turn to include in turn_range mode (1-based, inclusive, required when mode=turn_range)"
                 },
                 "limit": {
                     "type": "integer",
@@ -63,7 +66,8 @@ impl Tool for ConversationSearchTool {
                     "description": "Number of surrounding turns to include around each keyword match (default: 0)"
                 }
             },
-            "required": []
+            "required": [],
+            "additionalProperties": false
         })
     }
 

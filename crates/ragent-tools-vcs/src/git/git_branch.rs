@@ -16,12 +16,16 @@ impl Tool for GitBranchTool {
     }
 
     fn description(&self) -> &'static str {
-        "List branches. Shows current branch, local branches, and optionally remote branches with tracking info."
+        "List local and remote git branches for the current repository, including the currently checked-out branch. \
+         No required parameters. Set 'all' (boolean) to include remote-tracking branches (default true). \
+         Use 'format' (enum 'short' or 'verbose') to show terse names or verbose output with upstream tracking info. \
+         Common gotcha: branch detection relies on the repository having a valid git worktree; non-git directories will fail."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "all": {
                     "type": "boolean",

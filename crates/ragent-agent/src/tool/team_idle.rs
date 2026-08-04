@@ -19,8 +19,11 @@ impl Tool for TeamIdleTool {
 
     fn description(&self) -> &'static str {
         "Notify the team lead that you have no more tasks to work on (idle state). \
-         This triggers the TeammateIdle hook (if configured). \
-         Use team_task_claim first to verify no tasks remain before calling this."
+             This triggers the TeammateIdle hook if configured. REQUIRED parameter: \
+             'team_name' (string). Optional: 'summary' (string) describing work completed \
+             before going idle. Common gotcha: use team_task_claim first to verify no tasks \
+             remain; the tool blocks idle transitions while InProgress tasks are assigned \
+             to you."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,17 +32,17 @@ impl Tool for TeamIdleTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "summary": {
                     "type": "string",
                     "description": "Optional summary of work completed before going idle"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

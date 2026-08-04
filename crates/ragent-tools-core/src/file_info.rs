@@ -21,17 +21,21 @@ impl Tool for FileInfoTool {
     }
 
     fn description(&self) -> &'static str {
-        "Return metadata for a file or directory: size in bytes, last-modified \
-         time (UTC), file type (file/directory/symlink), and whether it exists."
+        "Return metadata for a file or directory. Required parameter: `path` \
+         (string). Reports size in bytes, last-modified time (UTC), file type \
+         (file/directory/symlink), whether the path exists, and filesystem \
+         permissions. If the path does not exist, the result clearly says so. \
+         Use this before expensive operations to confirm a target's state."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Path to the file or directory" }
+                "path": { "type": "string", "description": "REQUIRED. Path to the file or directory" }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

@@ -22,10 +22,12 @@ impl Tool for CalculatorTool {
     }
 
     fn description(&self) -> &'static str {
-        "Evaluate a mathematical expression and return the result. \
-         Supports Python arithmetic, the 'math' module (e.g. math.sqrt, math.pi), \
-         and integer/float/complex numbers. \
-         Examples: '2 ** 32', 'math.factorial(20)', '(3+4j) * 2'."
+        "Evaluate a mathematical expression and return the computed result. \
+         Required parameter: `expression` (string). Supports Python arithmetic, \
+         the `math` module (e.g. `math.sqrt`, `math.pi`), and integer/float/complex \
+         numbers. Examples: `'2 ** 32'`, `'math.factorial(20)'`, `'(3+4j) * 2'`. \
+         The expression is executed in a short-lived `python3` process with a \
+         10-second timeout; it is not a general-purpose Python shell."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -34,10 +36,11 @@ impl Tool for CalculatorTool {
             "properties": {
                 "expression": {
                     "type": "string",
-                    "description": "Mathematical expression to evaluate (Python syntax)"
+                    "description": "REQUIRED. Mathematical expression to evaluate (Python syntax)"
                 }
             },
-            "required": ["expression"]
+            "required": ["expression"],
+            "additionalProperties": false
         })
     }
 

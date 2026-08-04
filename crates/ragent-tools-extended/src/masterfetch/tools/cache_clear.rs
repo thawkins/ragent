@@ -24,9 +24,9 @@ impl Tool for MfCacheClearTool {
     }
 
     fn description(&self) -> &'static str {
-        "Clear the masterfetch content cache. When all=true, wipes all \
-         entries. When all=false (default), purges only expired entries. \
-         Returns the count of purged entries."
+        "Clear the masterfetch content cache. No required parameters. \
+             Optional 'all' boolean: when true, wipes all entries; when false or \
+             omitted, purges only expired entries. Returns the count of purged entries."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -37,10 +37,10 @@ impl Tool for MfCacheClearTool {
                     "type": "boolean",
                     "description": "If true, purge all entries. If false (default), purge only expired entries."
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "system"
     }

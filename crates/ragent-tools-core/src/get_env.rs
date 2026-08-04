@@ -27,9 +27,13 @@ impl Tool for GetEnvTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read the value of one or more environment variables. \
-         Sensitive variables (containing KEY, SECRET, TOKEN, PASSWORD, etc.) \
-         are redacted. Use 'name' for a single variable or 'names' for a list."
+        "Read the value of one or more environment variables. No parameters are \
+         strictly required, but you must provide at least one of `name` (string) \
+         for a single variable or `names` (array of strings) for multiple \
+         variables. Variable names containing KEY, SECRET, TOKEN, PASSWORD, or \
+         similar substrings are redacted to avoid leaking credentials. The \
+         result returns each requested variable's value or `(not set)` if it \
+         is not defined."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -45,7 +49,8 @@ impl Tool for GetEnvTool {
                     "items": { "type": "string" },
                     "description": "List of environment variable names to read"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
 

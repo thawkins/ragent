@@ -21,10 +21,12 @@ impl Tool for CodeIndexSymbolsTool {
 
     fn description(&self) -> &'static str {
         "Query symbols (functions, structs, enums, traits) from the codebase index. \
-         Supports filtering by name, kind, file, language, and visibility. \
-         Returns structured results with location, signature, and documentation. \
-         USE THIS instead of `grep` when you need to list or find named symbols \
-         in a file or across the project."
+         All parameters are optional: 'name' (substring), 'kind' (function/struct/etc.), \
+         'file_path' (path substring), 'language' (e.g. rust), 'visibility' \
+         (public/private/crate), and 'limit' (default 50, max 200). Returns structured \
+         results with location, signature, and documentation. USE THIS instead of \
+         `grep` when you need to list or find named symbols in a file or across \
+         the project."
     }
 
     fn parameters_schema(&self) -> Value {

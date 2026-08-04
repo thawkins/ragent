@@ -50,14 +50,17 @@ impl Tool for GitlabListPipelinesTool {
     }
 
     fn description(&self) -> &'static str {
-        "List GitLab CI/CD pipelines for the current project. \
-         Optional: status (running/pending/success/failed/canceled/skipped), \
-         ref (branch or tag), limit (default 20)."
+        "List GitLab CI/CD pipelines in the project detected from the current working directory. \
+         No required parameters. 'status' (enum 'running', 'pending', 'success', 'failed', 'canceled', 'skipped', 'created', 'waiting_for_resource', 'manual') \
+         filters by pipeline status; 'ref' (string) filters by branch or tag name; 'limit' (integer, default 20, max 100) caps results. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: pipelines are returned in descending order by ID; 'ref' must match the branch/tag name exactly as stored in GitLab."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "status": {
                     "type": "string",
@@ -143,13 +146,16 @@ impl Tool for GitlabGetPipelineTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitLab pipeline including status, \
-         duration, stages, and metadata."
+        "Get details of a specific GitLab pipeline including status, duration, ref, sha, user, and web URL. \
+         Required parameter: 'pipeline_id' (integer) - the globally unique pipeline ID (not an IID). \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: 'pipeline_id' is the numeric ID from the pipeline URL, not the project-scoped IID used for merge requests."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "pipeline_id": {
                     "type": "integer",
@@ -221,13 +227,17 @@ impl Tool for GitlabListJobsTool {
     }
 
     fn description(&self) -> &'static str {
-        "List jobs in a GitLab pipeline. Shows each job's name, stage, \
-         status, and duration."
+        "List jobs belonging to a GitLab pipeline, including each job's name, stage, status, duration, and runner. \
+         Required parameter: 'pipeline_id' (integer) - the pipeline ID. \
+         Optional: 'scope' (enum 'created', 'pending', 'running', 'failed', 'success', 'canceled', 'skipped', 'manual') filters jobs by status. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: jobs are returned up to 100 per request; use 'scope' to narrow large pipelines."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "pipeline_id": {
                     "type": "integer",
@@ -308,13 +318,16 @@ impl Tool for GitlabGetJobTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitLab CI/CD job including status, \
-         stage, artifacts, runner info, and timing."
+        "Get details of a specific GitLab CI/CD job including name, stage, status, duration, runner, artifacts, and failure reason. \
+         Required parameter: 'job_id' (integer) - the globally unique job ID (not pipeline-scoped). \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: 'job_id' is the numeric ID shown in the job URL; use gitlab_list_jobs to map job names to IDs."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "job_id": {
                     "type": "integer",
@@ -405,13 +418,17 @@ impl Tool for GitlabGetJobLogTool {
     }
 
     fn description(&self) -> &'static str {
-        "Download the log output of a GitLab CI/CD job. Returns the last \
-         N lines of the job trace (default 200, max 2000)."
+        "Download the log (trace) output of a GitLab CI/CD job, returning the last N lines. \
+         Required parameter: 'job_id' (integer) - the globally unique job ID. \
+         Optional: 'tail' (integer, default 200, max 2000) sets the number of trailing lines to return. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: the job must have produced output and not be stuck in a pre-creation state; very large logs are truncated to the last 'tail' lines."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "job_id": {
                     "type": "integer",
@@ -506,12 +523,16 @@ impl Tool for GitlabRetryJobTool {
     }
 
     fn description(&self) -> &'static str {
-        "Retry a failed or cancelled GitLab CI/CD job."
+        "Retry a failed or cancelled GitLab CI/CD job, creating a new job instance. \
+         Required parameter: 'job_id' (integer) - the globally unique job ID to retry. \
+         Requires GitLab configuration and a GitLab-backed git repo with job retry permissions. \
+         Common gotcha: only jobs in 'failed' or 'canceled' state can normally be retried; retrying creates a new job with a new ID."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "job_id": {
                     "type": "integer",
@@ -560,12 +581,16 @@ impl Tool for GitlabCancelJobTool {
     }
 
     fn description(&self) -> &'static str {
-        "Cancel a running or pending GitLab CI/CD job."
+        "Cancel a running or pending GitLab CI/CD job. \
+         Required parameter: 'job_id' (integer) - the globally unique job ID to cancel. \
+         Requires GitLab configuration and a GitLab-backed git repo with job cancellation permissions. \
+         Common gotcha: cancelling an already-finished job is a no-op but returns success; cancelled jobs cannot be resumed, only retried."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "job_id": {
                     "type": "integer",
@@ -613,12 +638,16 @@ impl Tool for GitlabRetryPipelineTool {
     }
 
     fn description(&self) -> &'static str {
-        "Retry all failed jobs in a GitLab CI/CD pipeline."
+        "Retry all failed jobs in a GitLab CI/CD pipeline in a single operation. \
+         Required parameter: 'pipeline_id' (integer) - the globally unique pipeline ID. \
+         Requires GitLab configuration and a GitLab-backed git repo with pipeline retry permissions. \
+         Common gotcha: only failed or cancelled jobs are retried; successful and running jobs are left unchanged."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "pipeline_id": {
                     "type": "integer",
@@ -667,12 +696,16 @@ impl Tool for GitlabCancelPipelineTool {
     }
 
     fn description(&self) -> &'static str {
-        "Cancel a running GitLab CI/CD pipeline (cancels all pending and running jobs)."
+        "Cancel a running GitLab CI/CD pipeline, cancelling all pending and running jobs in it. \
+         Required parameter: 'pipeline_id' (integer) - the globally unique pipeline ID. \
+         Requires GitLab configuration and a GitLab-backed git repo with pipeline cancellation permissions. \
+         Common gotcha: cancelling a finished pipeline is a no-op but returns success; this action cannot be undone."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "pipeline_id": {
                     "type": "integer",

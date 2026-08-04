@@ -17,7 +17,12 @@ impl Tool for SpecTaskUpdateTool {
     }
 
     fn description(&self) -> &'static str {
-        "Update the status of a task within a spec. Statuses: pending, in_progress, completed, blocked."
+        "Update the status of a task within a spec. REQUIRED parameters: 'spec_id' \
+         (string, e.g. 'auth-refactor'), 'task_id' (string within the plan, e.g. 'T-001'), \
+         and 'status' (string enum: pending, in_progress, completed, blocked). This writes \
+         the updated spec back to disk. Use it to track progress against a specification. \
+         Common gotcha: the spec must exist in the configured specs directory, and the task \
+         ID must match one defined in that spec."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -26,15 +31,15 @@ impl Tool for SpecTaskUpdateTool {
             "properties": {
                 "spec_id": {
                     "type": "string",
-                    "description": "The spec identifier"
+                    "description": "The spec identifier (required)"
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "The task identifier within the plan (e.g. 'T-001')"
+                    "description": "The task identifier within the plan, e.g. 'T-001' (required)"
                 },
                 "status": {
                     "type": "string",
-                    "description": "New status: pending, in_progress, completed, blocked",
+                    "description": "New status: pending, in_progress, completed, blocked (required)",
                     "enum": ["pending", "in_progress", "completed", "blocked"]
                 }
             },

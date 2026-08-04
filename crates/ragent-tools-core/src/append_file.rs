@@ -22,19 +22,23 @@ impl Tool for AppendFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Append text to the end of a file. Creates the file and any missing \
-         parent directories if they do not exist. More efficient than a full \
-         rewrite when only adding content to the end."
+        "Append text to the end of an existing file, creating the file and any \
+         missing parent directories if they do not already exist. Required \
+         parameters: `path` (string) — the file to append to, and `content` \
+         (string) — the text to append. This is more efficient than rewriting \
+         the whole file when only adding content to the end. Avoid using this \
+         for mid-file edits; use `edit` or `apply_patch` instead."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path":    { "type": "string", "description": "Path to the file to append to" },
-                "content": { "type": "string", "description": "Text to append" }
+                "path":    { "type": "string", "description": "REQUIRED. Path to the file to append to" },
+                "content": { "type": "string", "description": "REQUIRED. Text to append" }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
         })
     }
 

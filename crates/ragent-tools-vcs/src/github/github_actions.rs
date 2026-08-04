@@ -172,15 +172,18 @@ impl Tool for GithubGetActionsTool {
     }
 
     fn description(&self) -> &'static str {
-        "List the last N GitHub Actions workflow runs for the current repository \
-         (default 1, max 30). Reports each run's status (OK/Failed). For failed \
-         runs, downloads the log archive and shows ±10 lines of context around \
-         every line containing 'error' or 'failed'."
+        "List the most recent GitHub Actions workflow runs for the repository detected from the working directory, \
+         including status summaries and, for failed runs, filtered log excerpts around 'error' or 'failed' lines. \
+         No required parameters. 'limit' (integer, default 1, max 30) sets how many recent runs to inspect. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: failed-run log extraction downloads a zip archive, which may be slow for large workflows; \
+         logs for still-running jobs may be unavailable."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "limit": {
                     "type": "integer",

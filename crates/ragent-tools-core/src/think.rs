@@ -15,7 +15,11 @@ impl Tool for ThinkTool {
     }
 
     fn description(&self) -> &'static str {
-        "Record a short reasoning note without changing project state."
+        "Record a short reasoning note for the current session without changing \
+         any project state. Required parameter: `thought` (string). The note is \
+         published as a reasoning event so it appears in the session log, but it \
+         does not write files, execute commands, or modify configuration. Use it \
+         to document your thinking before taking an action."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -24,7 +28,7 @@ impl Tool for ThinkTool {
             "properties": {
                 "thought": {
                     "type": "string",
-                    "description": "Short reasoning note"
+                    "description": "REQUIRED. Short reasoning note"
                 }
             },
             "required": ["thought"],

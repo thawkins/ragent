@@ -91,7 +91,10 @@ impl Tool for UpdateFileTool {
 
     fn description(&self) -> &'static str {
         "Write new content to an existing file, replacing its current contents. \
-         Alias for 'write'. Use 'path' and 'content'."
+         This is an alias for the canonical 'write' tool and accepts exactly the same \
+         parameters. REQUIRED parameters: 'path' (string, file to create or overwrite) and \
+         'content' (string, new file contents). Common gotcha: 'path' must be relative to \
+         the session working directory; missing either parameter will fail."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -101,7 +104,8 @@ impl Tool for UpdateFileTool {
                 "path":    { "type": "string", "description": "Path to the file to update" },
                 "content": { "type": "string", "description": "New content to write" }
             },
-            "required": ["path", "content"]
+            "required": ["path", "content"],
+            "additionalProperties": false
         })
     }
 
@@ -133,8 +137,11 @@ impl Tool for RunCodeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Run a code snippet. Alias for 'bash'. \
-         Provide the snippet via 'code' or 'command'."
+        "Run a shell command or code snippet as an alias for the canonical 'bash' tool. \
+         REQUIRED parameter: at least one of 'code' or 'command' (string, the shell command \
+         or snippet to execute). The tool maps 'code' to the canonical 'command' parameter. \
+         Optional: 'timeout' (integer seconds, default 120). Common gotcha: if neither 'code' \
+         nor 'command' is provided the call will fail."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -144,7 +151,8 @@ impl Tool for RunCodeTool {
                 "code":    { "type": "string", "description": "Code or command to run" },
                 "command": { "type": "string", "description": "Shell command (alternative to 'code')" },
                 "timeout": { "type": "integer", "description": "Timeout in seconds (default: 120)" }
-            }
+            },
+            "additionalProperties": false
         })
     }
 
@@ -183,15 +191,12 @@ impl Tool for AskUserTool {
     }
 
     fn description(&self) -> &'static str {
-        "Ask the user a question and wait for their typed response. \
-         Use this when you need clarification, prioritisation help, or confirmation \
-         before proceeding. \
-         \
-         When you need a choice from a fixed set, provide the optional `options` \
-         parameter as an array of strings (e.g. [\"Yes\", \"No\", \"Skip\"]). \
-         The user will see a multiple-choice dialog instead of a free-text input, \
-         and their selection is returned as the result. \
-         If `options` is omitted the user sees a plain text-input dialog."
+        "Ask the user a question and wait for their typed response. Use this when you need \
+         clarification, prioritisation help, or confirmation before proceeding. \
+         REQUIRED parameter: 'question' (string, the prompt shown to the user). Optional: \
+         'options' (array of strings) to render a multiple-choice dialog instead of free \
+         text. Common gotcha: if 'options' is provided, the returned value will be one of \
+         the supplied strings; if omitted, the user may type any free-text answer."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -208,7 +213,8 @@ impl Tool for AskUserTool {
                     "description": "Optional multiple-choice options. When provided, the user selects one instead of typing free text."
                 }
             },
-            "required": ["question"]
+            "required": ["question"],
+            "additionalProperties": false
         })
     }
 

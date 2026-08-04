@@ -27,11 +27,11 @@ impl Tool for MfScreenshotTool {
     }
 
     fn description(&self) -> &'static str {
-        "Capture a page as a screenshot image. NOTE: screenshot capture \
-         requires a headless browser engine that is not available in the \
-         integrated Rust runtime. This tool always returns an error \
-         suggesting mf_fetch for text-based content extraction. Use \
-         mf_fetch instead for page content."
+        "Capture a page as a screenshot image. Required parameter: 'url'. \
+             Optional 'width' and 'height' viewport sizes (default 1280x800) and \
+             'full_page' boolean. NOTE: the integrated Rust runtime has no headless \
+             browser engine, so this tool returns an error recommending mf_fetch \
+             for text-based extraction."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -55,10 +55,10 @@ impl Tool for MfScreenshotTool {
                     "description": "Capture the full scrollable page (default: false)"
                 }
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "web"
     }

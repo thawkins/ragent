@@ -17,12 +17,16 @@ impl Tool for GitShowTool {
 
     fn description(&self) -> &'static str {
         "Show details of a commit, tag, or other git object. \
-         Shows author, date, message, and file statistics."
+         No required parameters. 'ref' (string, default HEAD) is the commit hash, tag, or ref to inspect; \
+         'stat' (boolean, default true) includes file change statistics. \
+         Output includes author, date, commit message, and, when 'stat' is true, a list of changed files. \
+         Common gotcha: ambiguous refs or lightweight tags may resolve differently; use a full commit hash when exact output matters."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "ref": {
                     "type": "string",

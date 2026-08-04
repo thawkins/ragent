@@ -28,8 +28,11 @@ impl Tool for PlanEnterTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Delegate to the plan agent for read-only codebase analysis and \
-         architecture planning. The plan agent cannot modify files."
+        "Delegate to the plan agent for read-only codebase analysis and architecture \
+             planning. REQUIRED parameter: 'task' (string) describing what to plan or \
+             analyse. Optional: 'context' (string) for additional background. The plan agent \
+             cannot modify files, so use this for design, investigation, or feasibility \
+             studies before editing code."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -38,14 +41,15 @@ impl Tool for PlanEnterTool {
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Description of what to plan or analyse"
+                    "description": "Description of what to plan or analyse (required)"
                 },
                 "context": {
                     "type": "string",
-                    "description": "Additional context for the plan agent"
+                    "description": "Additional context for the plan agent (optional)"
                 }
             },
-            "required": ["task"]
+            "required": ["task"],
+            "additionalProperties": false
         })
     }
 
@@ -113,8 +117,11 @@ impl Tool for PlanExitTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Return control from the plan agent to the previous agent. \
-         Pass back a summary of the analysis or plan."
+        "Return control from the plan agent to the previous agent. REQUIRED parameter: \
+             'summary' (string) — the plan or analysis result to return. Use this only when \
+             you are inside a plan session and have finished the requested analysis. \
+             Common gotcha: this tool does not modify files; if implementation is needed, \
+             surface the plan summary to the caller."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -123,10 +130,11 @@ impl Tool for PlanExitTool {
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "The plan or analysis result to return to the calling agent"
+                    "description": "The plan or analysis result to return to the calling agent (required)"
                 }
             },
-            "required": ["summary"]
+            "required": ["summary"],
+            "additionalProperties": false
         })
     }
 

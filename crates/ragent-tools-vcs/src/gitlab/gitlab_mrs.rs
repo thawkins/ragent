@@ -33,13 +33,17 @@ impl Tool for GitlabListMrsTool {
     }
 
     fn description(&self) -> &'static str {
-        "List GitLab merge requests for the current project. \
-         Optional: state (opened/closed/merged/all), target_branch, limit (default 20)."
+        "List GitLab merge requests in the project detected from the current working directory. \
+         No required parameters. 'state' (enum 'opened', 'closed', 'merged', 'all', default 'opened') filters by MR state; \
+         'target_branch' (string) filters by the target branch; 'limit' (integer, default 20, max 100) caps the result count. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: 'target_branch' must exactly match the branch name in GitLab; only the most recent MRs up to 'limit' are returned."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "state": {
                     "type": "string",
@@ -117,13 +121,17 @@ impl Tool for GitlabGetMrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitLab merge request including description, \
-         approvals, and review notes."
+        "Get full details of a specific GitLab merge request including title, description, source/target branches, state, \
+         and the first 10 user notes (reviews/comments). \
+         Required parameter: 'iid' (integer) - the project-scoped MR IID. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: use the project-scoped IID from the MR URL; approval rules may prevent the token user from seeing full approval details."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",
@@ -204,12 +212,18 @@ impl Tool for GitlabCreateMrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new GitLab merge request from the current branch."
+        "Create a new GitLab merge request in the project detected from the working directory. \
+         Required parameter: 'title' (string) - the MR title. \
+         Optional: 'target_branch' (string, default 'main') is the branch to merge into; 'source_branch' (string, default current git branch) is the branch to merge from; \
+         'description' (string) is the MR body in markdown; 'draft' (boolean, default false) creates a draft MR by prefixing the title with 'Draft: '. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: 'source_branch' must already exist on the remote; creating an MR from a local-only branch will fail."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "title": {
                     "type": "string",
@@ -305,12 +319,18 @@ impl Tool for GitlabMergeMrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Merge a GitLab merge request."
+        "Merge an open GitLab merge request. \
+         Required parameter: 'iid' (integer) - the project-scoped MR IID. \
+         Optional: 'squash' (boolean, default false) squashes commits on merge; 'message' (string) provides a custom merge commit message; \
+         'delete_source_branch' (boolean, default false) removes the source branch after a successful merge. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: the MR must be mergeable and not have unresolved threads or blocking checks; protected target branches may enforce squash-only merges."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",
@@ -383,12 +403,16 @@ impl Tool for GitlabApproveMrTool {
     }
 
     fn description(&self) -> &'static str {
-        "Approve a GitLab merge request."
+        "Approve a GitLab merge request using the configured token user. \
+         Required parameter: 'iid' (integer) - the project-scoped MR IID. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: approval rules may require a certain number of approvers or disallow self-approval; insufficient permissions will return an API error."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",

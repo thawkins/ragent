@@ -29,7 +29,13 @@ impl Tool for GlobTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Find files matching a glob pattern. Recursively searches directories."
+        "Find files matching a glob pattern by recursively searching directories. \
+         Required parameter: `pattern` (string), e.g. `'**/*.rs'` or \
+         `'src/**/*.ts'`. Optional: `path` (string) — the base directory to \
+         search, defaulting to the agent's working directory. Hidden entries \
+         and common generated directories (such as `node_modules` and `target`) \
+         are skipped automatically. Results are capped at 1,000 matches; if \
+         the cap is reached, the output is marked as truncated."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -38,14 +44,15 @@ impl Tool for GlobTool {
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Glob pattern to match (e.g. '**/*.rs', 'src/**/*.ts')"
+                    "description": "REQUIRED. Glob pattern to match (e.g. '**/*.rs', 'src/**/*.ts')"
                 },
                 "path": {
                     "type": "string",
                     "description": "Base directory (default: working directory)"
                 }
             },
-            "required": ["pattern"]
+            "required": ["pattern"],
+            "additionalProperties": false
         })
     }
 

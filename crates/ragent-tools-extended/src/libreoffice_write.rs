@@ -26,7 +26,9 @@ impl Tool for LibreWriteTool {
     /// Returns the tool description.
     fn description(&self) -> &'static str {
         "Write content to OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
-         ODS uses spreadsheet-ods for full workbook support; ODT/ODP use XML generation."
+             Required parameter: 'path'. For ODS also provide 'rows' (2D strings array) or \
+             'content' (plain text). Optional 'sheet_name', 'title', 'author'. ODS uses \
+             spreadsheet-ods for full workbook support; ODT/ODP use XML generation."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -61,10 +63,10 @@ impl Tool for LibreWriteTool {
                     "description": "Document author for metadata"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:write"
     }

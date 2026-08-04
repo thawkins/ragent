@@ -29,7 +29,9 @@ impl Tool for LibreReadTool {
     /// Returns the tool description.
     fn description(&self) -> &'static str {
         "Read content from OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
-         ODS uses calamine for full spreadsheet fidelity; ODT/ODP use XML extraction."
+             Required parameter: 'path'. Optional 'sheet'/'range' for ODS, 'slide' for ODP, \
+             and 'format' (text/markdown/json, default markdown). ODS uses calamine for \
+             full spreadsheet fidelity; ODT/ODP use XML extraction."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -58,7 +60,8 @@ impl Tool for LibreReadTool {
                     "description": "Output format (default: markdown)"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

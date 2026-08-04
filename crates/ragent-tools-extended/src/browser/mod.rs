@@ -99,13 +99,13 @@ impl Tool for BrowserTool {
     }
 
     fn description(&self) -> &'static str {
-        "Browser automation via Chrome DevTools Protocol (CDP). Can open URLs, \
-         snapshot pages, click elements, type text, fill forms, select options, \
-         wait for conditions, evaluate JavaScript, scroll, upload files, press \
-         keys, capture screenshots, check browser status, and launch a headless \
-         Chrome/Chromium instance. Requires a running Chrome/Chromium with \
-         --remote-debugging-port=9222 (use action=setup to launch one \
-         automatically)."
+        "Browser automation via Chrome DevTools Protocol (CDP). Required parameter: \
+         'action' (one of open, snapshot, click, type, fill_form, select, wait, eval, \
+         scroll, upload, press, screenshot, status, setup). Other parameters depend on \
+         the action, e.g. 'url' for open, 'selector' for click/type/select/upload/wait, \
+         'expression' for eval, 'file_path' for upload, and 'port'/'headless' for setup. \
+         Requires a running Chrome/Chromium with --remote-debugging-port=9222 (use \
+         action=setup to launch one automatically)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -188,7 +188,8 @@ impl Tool for BrowserTool {
                     "description": "Run browser in headless mode (action=setup, default: true)"
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
 

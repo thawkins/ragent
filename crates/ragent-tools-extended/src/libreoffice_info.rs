@@ -28,8 +28,11 @@ impl Tool for LibreInfoTool {
 
     /// Returns the tool description.
     fn description(&self) -> &'static str {
-        "Get metadata and structural info about an OpenDocument file: sheet list and dimensions \
-         for ODS, word/paragraph counts for ODT, slide count for ODP. Returns JSON."
+        "Get metadata and structural info about an OpenDocument file: sheet list and \
+             dimensions for ODS, word/paragraph counts for ODT, slide count for ODP. \
+             REQUIRED parameter: 'path' (string, path to the OpenDocument file). Returns \
+             a JSON summary. Common gotcha: the file extension must be .ods, .odt, or \
+             .odp; unknown extensions are rejected."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -38,13 +41,13 @@ impl Tool for LibreInfoTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the OpenDocument file"
+                    "description": "Path to the OpenDocument file (required)"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:read"
     }

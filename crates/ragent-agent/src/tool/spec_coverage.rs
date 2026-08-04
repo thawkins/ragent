@@ -17,7 +17,11 @@ impl Tool for SpecCoverageTool {
     }
 
     fn description(&self) -> &'static str {
-        "Generate a requirement coverage report for a spec. Shows which requirements are linked to completed tasks."
+        "Generate a requirement coverage report for a spec. REQUIRED parameter: \
+         'spec_id' (string, the spec identifier, e.g. 'auth-refactor'). Shows which \
+         requirements are linked to completed tasks. Use this to verify that a \
+         specification's tasks cover its requirements before marking it complete. \
+         Common gotcha: the spec must exist in the configured specs directory."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -26,7 +30,7 @@ impl Tool for SpecCoverageTool {
             "properties": {
                 "spec_id": {
                     "type": "string",
-                    "description": "The spec identifier"
+                    "description": "The spec identifier (required)"
                 }
             },
             "required": ["spec_id"],

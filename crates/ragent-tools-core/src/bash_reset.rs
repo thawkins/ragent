@@ -19,15 +19,19 @@ impl Tool for BashResetTool {
     }
 
     fn description(&self) -> &'static str {
-        "Reset the persistent shell state (clears the saved working directory and environment \
-         variables). Use when the shell is in a bad state or you want to start fresh from \
-         the agent's working directory."
+        "Reset the persistent shell state for the current session, clearing \
+         any saved working-directory changes and environment variables. This \
+         has no required parameters. Use it when the shell is in a bad state or \
+         when you want the next `bash` invocation to start fresh from the \
+         agent's working directory. It is a no-op if no persistent shell state \
+         exists."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {}
+            "properties": {},
+            "additionalProperties": false
         })
     }
 

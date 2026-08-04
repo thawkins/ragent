@@ -19,18 +19,23 @@ impl Tool for CopyFileTool {
     }
 
     fn description(&self) -> &'static str {
-        "Copy a file to a new location. Creates the destination's parent \
-         directories if they do not exist. The source file is not modified."
+        "Copy a single file to a new location, creating any missing parent \
+         directories on the destination side. Required parameters: `source` \
+         (string) — the existing file to copy, and `destination` (string) — the \
+         target path including the new file name. The source file is left \
+         unchanged. Both paths must stay within the agent's working-directory \
+         root. To move rather than copy, use `move_file`."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "source":      { "type": "string", "description": "Path to the source file" },
-                "destination": { "type": "string", "description": "Destination path for the copy" }
+                "source":      { "type": "string", "description": "REQUIRED. Path to the source file" },
+                "destination": { "type": "string", "description": "REQUIRED. Destination path for the copy" }
             },
-            "required": ["source", "destination"]
+            "required": ["source", "destination"],
+            "additionalProperties": false
         })
     }
 

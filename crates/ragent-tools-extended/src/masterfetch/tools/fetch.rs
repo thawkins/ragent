@@ -67,13 +67,13 @@ impl Tool for MfFetchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Fetch any URL or PDF with automatic content extraction. HTTP first, \
-         auto-escalates to stealthy browser if blocked (browser tier not \
-         available in integrated Rust runtime — degrades honestly). Supports \
-         bulk fetch (urls array), css_selector narrowing, focus query \
-         filtering, pagination, and format selection (markdown/html/text/raw). \
-         Every response carries envelope signals: content_ok, page_type, \
-         next_action, source_type, is_official, content_age_days, is_stale."
+        "Fetch any URL or PDF with automatic content extraction. Required \
+             parameter: 'url' (single) or 'urls' (array) — at least one URL must be \
+             provided. Optional 'format' (markdown/html/text/raw, default markdown), \
+             'css_selector' scope narrowing, 'focus' BM25 query, 'max_content_chars', \
+             'offset' pagination, 'include_links', 'respect_robots', and 'cache_ttl'. \
+             Returns envelope signals: content_ok, page_type, next_action, source_type, \
+             is_official, content_age_days, is_stale."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -122,10 +122,10 @@ impl Tool for MfFetchTool {
                     "type": "integer",
                     "description": "Cache TTL in seconds (0 = bypass cache, default: 3600)"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "web"
     }

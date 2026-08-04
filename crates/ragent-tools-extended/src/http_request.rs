@@ -58,7 +58,8 @@ impl Tool for HttpRequestTool {
                     "description": "Timeout in seconds (default: 30)"
                 }
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": false
         })
     }
 

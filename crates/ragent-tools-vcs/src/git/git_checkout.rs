@@ -16,14 +16,17 @@ impl Tool for GitCheckoutTool {
     }
 
     fn description(&self) -> &'static str {
-        "Switch branches or restore working tree files. \
-         Provide 'branch' to switch branches. Set 'create_branch' to create and switch to a new branch. \
-         Provide 'paths' with optional 'source' to restore specific files from a ref (default: HEAD)."
+        "Switch branches or restore working tree files. This tool has no universally required parameter, \
+         but you must provide exactly one of the two modes: either 'branch' (string) to switch to an existing branch, \
+         optionally with 'create_branch' true to create and switch to a new branch (git checkout -b); \
+         or 'paths' (array of strings) to restore specific files, optionally from 'source' (default HEAD). \
+         Common gotcha: 'create_branch' without 'branch' is invalid, and 'source' is ignored when 'paths' is not provided."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "branch": {
                     "type": "string",

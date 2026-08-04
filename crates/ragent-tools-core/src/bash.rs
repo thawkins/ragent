@@ -1048,8 +1048,14 @@ impl Tool for BashTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Execute a shell command and return stdout and stderr. \
-               Commands are run in the working directory."
+        "Execute a shell command and return its stdout and stderr. Commands are \
+         run in the agent's working directory. Required parameter: `command` \
+         (string). Optional: `timeout` in seconds (integer, default 120). The \
+         command is validated by a 7-layer security model: safe-command \
+         whitelist, banned-command checks, denied patterns, directory-escape \
+         prevention, syntax validation, obfuscation detection, and user \
+         allowlist/denylist. Long-running or interactive commands may need a \
+         higher timeout."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -1057,14 +1063,15 @@ impl Tool for BashTool {
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "Shell command to execute"
+                    "description": "REQUIRED. Shell command to execute."
                 },
                 "timeout": {
                     "type": "integer",
                     "description": "Timeout in seconds (default: 120)"
                 }
             },
-            "required": ["command"]
+            "required": ["command"],
+            "additionalProperties": false
         })
     }
 

@@ -50,9 +50,12 @@ impl Tool for WebFetchTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Fetch the content of a URL via HTTP GET. HTML is automatically converted \
-         to plain text unless format is set to 'raw'. Supports timeout and max \
-         content length."
+        "Fetch the content of a URL via HTTP GET. REQUIRED parameter: 'url' (string). \
+             Optional: 'format' (string enum raw/text, default text), 'max_length' \
+             (integer, default 50000), and 'timeout' (integer seconds, default 30). \
+             HTML is automatically converted to plain text unless format is 'raw'. \
+             Common gotcha: only HTTP/HTTPS URLs are supported; invalid or missing \
+             schemes return an error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -61,7 +64,7 @@ impl Tool for WebFetchTool {
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "The URL to fetch"
+                    "description": "The URL to fetch (required)"
                 },
                 "format": {
                     "type": "string",
@@ -77,10 +80,10 @@ impl Tool for WebFetchTool {
                     "description": "Request timeout in seconds (default: 30)"
                 }
             },
-            "required": ["url"]
+            "required": ["url"],
+            "additionalProperties": false
         })
     }
-
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.

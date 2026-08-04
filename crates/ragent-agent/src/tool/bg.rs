@@ -39,7 +39,11 @@ impl Tool for BgTool {
 
     fn description(&self) -> &'static str {
         "Manage background shell tasks: spawn, list, status, output, tail, cancel, wait, cleanup. \
-         Use this for long-running commands that should continue while the agent does other work."
+         Use this for long-running commands that should continue while the agent does other work. \
+         REQUIRED parameter: 'action' (string enum). Conditional required parameters: for \
+         action='spawn' provide 'command'; for status, output, tail, cancel, wait provide 'task_id'. \
+         Optional filters include 'status' (list), 'lines' (tail), 'timeout' (wait), and \
+         'older_than_minutes' (cleanup). Common gotcha: unknown action values are rejected."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -92,7 +96,8 @@ impl Tool for BgTool {
                     "description": "Maximum number of tasks to return for list (default: 50)"
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
 

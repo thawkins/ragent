@@ -22,9 +22,12 @@ impl Tool for TeamMemoryWriteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Write or append a structured memory for your team. \
-         Use `path` to select a memory bucket (default: MEMORY.md). \
-         Mode 'append' creates a new memory; 'overwrite' updates the latest memory in the bucket."
+        "Write or append a structured memory for your team. REQUIRED parameters: \
+             'team_name' (string) and 'content' (string). Optional: 'path' (string) selects \
+             a memory bucket, defaulting to MEMORY.md; 'mode' (string enum append/overwrite) \
+             controls whether to create a new memory or update the latest in the bucket. \
+             Common gotcha: mode defaults to append; use overwrite only when you intend to \
+             replace the most recent memory in the bucket."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -33,11 +36,11 @@ impl Tool for TeamMemoryWriteTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "content": {
                     "type": "string",
-                    "description": "Content to store"
+                    "description": "Content to store (required)"
                 },
                 "path": {
                     "type": "string",
@@ -49,10 +52,10 @@ impl Tool for TeamMemoryWriteTool {
                     "description": "Write mode: 'append' creates a new memory (default), 'overwrite' updates the latest in the bucket"
                 }
             },
-            "required": ["team_name", "content"]
+            "required": ["team_name", "content"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

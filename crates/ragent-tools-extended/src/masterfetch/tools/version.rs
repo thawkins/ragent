@@ -35,17 +35,17 @@ impl Tool for MfVersionTool {
 
     fn description(&self) -> &'static str {
         "Return the masterfetch integration version, the ragent version, and \
-         a brief description of the integrated tool set. This tool does not \
-         make network calls."
+             a brief description of the integrated tool set. No parameters required. \
+             This tool does not make network calls and always succeeds."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {}
+            "properties": {},
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "system"
     }

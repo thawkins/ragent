@@ -26,9 +26,13 @@ impl Tool for PatchTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Apply a unified diff patch to one or more files. The patch must be in \
-         unified diff format (as produced by `diff -u` or `git diff`). All hunks \
-         are validated before any files are written."
+        "Apply a unified diff patch to one or more files. Required parameter: \
+         `patch` (string) in unified diff format (as produced by `diff -u` or \
+         `git diff`). Optional: `path` (string) to override the target file \
+         path for single-file patches, and `fuzz` (integer, default 0) — the \
+         number of context lines that may be dropped from the top/bottom of \
+         each hunk when matching. All hunks are validated before any files are \
+         written; if any hunk fails, nothing is applied."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -37,7 +41,7 @@ impl Tool for PatchTool {
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "Unified diff content to apply"
+                    "description": "REQUIRED. Unified diff content to apply"
                 },
                 "path": {
                     "type": "string",
@@ -49,7 +53,8 @@ impl Tool for PatchTool {
                                     the top/bottom of each hunk when matching (default: 0)"
                 }
             },
-            "required": ["patch"]
+            "required": ["patch"],
+            "additionalProperties": false
         })
     }
 

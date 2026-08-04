@@ -25,10 +25,12 @@ impl Tool for SessionSearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Search across all past sessions for messages matching a query. \
-         Supports filters for date range, working directory, role, \
-         per-session limits, and optional surrounding context. \
-         Returns ranked results with session title/directory and timestamps."
+        "Search across all past sessions for messages matching a query. REQUIRED \
+             parameter: 'query' (string, FTS5 keyword search). Supports filters for date \
+             range ('since'/'until' ISO-8601 strings), 'working_dir', 'roles' array, \
+             'session_id', 'max_per_session', and 'include_tools'/'include_system' booleans. \
+             Returns ranked results with session title/directory and timestamps. Common \
+             gotcha: all terms in the query must match (FTS5 implicit AND)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -37,7 +39,7 @@ impl Tool for SessionSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query (FTS5 keyword search)"
+                    "description": "Search query (FTS5 keyword search, required)"
                 },
                 "limit": {
                     "type": "integer",
@@ -81,10 +83,10 @@ impl Tool for SessionSearchTool {
                     "description": "Number of surrounding turns to include per result (default: 0)"
                 }
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:read"
     }

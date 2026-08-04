@@ -109,12 +109,14 @@ impl Tool for MultiEditTool {
     ///
     /// Returns an error if the `edits` array is missing, malformed, or empty.
     fn description(&self) -> &'static str {
-        "Apply multiple edits to one or more files atomically. Each edit replaces \
-         exactly one occurrence of old_string with new_string. All edits are validated \
-         before any files are written — if any match fails, no files are modified. \
-         Edits to the same file are overlap-checked and applied highest-offset-first \
-         so input order does not matter. Each edit object uses file_path, old_string, \
-         and new_string (the legacy names path/old_str/new_str are also accepted)."
+        "Apply multiple surgical text edits to one or more files atomically. \
+         Required parameter: `edits` (array of edit objects). Each edit object \
+         must provide `file_path` (string), `old_string` (string), and \
+         `new_string` (string). Every edit must match exactly once in its file; \
+         if any single edit fails validation, no files are modified. Edits to \
+         the same file are overlap-checked and applied highest-offset-first, so \
+         input order does not matter. Legacy aliases `path`/`old_str`/`new_str` \
+         are accepted inside each edit object but deprecated."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -123,21 +125,21 @@ impl Tool for MultiEditTool {
             "properties": {
                 "edits": {
                     "type": "array",
-                    "description": "Array of edit operations to apply. Each edit is a single-instance exact replacement.",
+                    "description": "REQUIRED. Array of edit operations to apply. Each edit is a single-instance exact replacement.",
                     "items": {
                         "type": "object",
                         "properties": {
                             "file_path": {
                                 "type": "string",
-                                "description": "Absolute path to the file to edit"
+                                "description": "REQUIRED. Absolute path to the file to edit"
                             },
                             "old_string": {
                                 "type": "string",
-                                "description": "String to find (must match exactly once; CRLF and trailing-whitespace differences are tolerated after strict exact match fails)"
+                                "description": "REQUIRED. String to find (must match exactly once; CRLF and trailing-whitespace differences are tolerated after strict exact match fails)"
                             },
                             "new_string": {
                                 "type": "string",
-                                "description": "Replacement string"
+                                "description": "REQUIRED. Replacement string"
                             },
                             "path": {
                                 "type": "string",
@@ -152,11 +154,13 @@ impl Tool for MultiEditTool {
                                 "description": "Legacy alias for new_string (deprecated)"
                             }
                         },
-                        "required": ["file_path", "old_string", "new_string"]
+                        "required": ["file_path", "old_string", "new_string"],
+                        "additionalProperties": false
                     }
                 }
             },
-            "required": ["edits"]
+            "required": ["edits"],
+            "additionalProperties": false
         })
     }
 

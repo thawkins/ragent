@@ -40,13 +40,17 @@ impl Tool for GitlabListIssuesTool {
     }
 
     fn description(&self) -> &'static str {
-        "List GitLab issues for the current project. \
-         Optional: state (opened/closed/all), labels (comma-separated), limit (default 20)."
+        "List GitLab issues in the project detected from the current working directory. \
+         No required parameters. 'state' (enum 'opened', 'closed', 'all', default 'opened') filters by issue state; \
+         'labels' (string) is a comma-separated list of label names; 'limit' (integer, default 20, max 100) caps the result count. \
+         Requires GitLab configuration and a GitLab-backed git repo (see /gitlab setup). \
+         Common gotcha: labels must exactly match existing project labels; large issue lists are capped by 'limit' without pagination."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "state": {
                     "type": "string",
@@ -129,12 +133,16 @@ impl Tool for GitlabGetIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitLab issue including description, notes, and labels."
+        "Get full details of a specific GitLab issue including title, description, state, labels, assignees, and the first 10 user notes. \
+         Required parameter: 'iid' (integer) - the project-scoped issue IID. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: GitLab uses project-scoped IIDs, not globally unique IDs; use the number shown in the issue URL (e.g. #42)."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",
@@ -236,12 +244,18 @@ impl Tool for GitlabCreateIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new GitLab issue in the current project."
+        "Create a new GitLab issue in the project detected from the working directory. \
+         Required parameter: 'title' (string) - the issue title. \
+         Optional: 'description' (string) is the issue body in markdown; 'labels' (string) is a comma-separated list of label names; \
+         'assignee_ids' (string) is a comma-separated list of numeric user IDs to assign. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: 'assignee_ids' must be numeric GitLab user IDs, not usernames; unknown labels cause the API call to fail."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "title": {
                     "type": "string",
@@ -322,12 +336,16 @@ impl Tool for GitlabCommentIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Add a note (comment) to a GitLab issue."
+        "Add a note (comment) to an existing GitLab issue. \
+         Required parameters: 'iid' (integer) - the issue IID, and 'body' (string) - the note text (markdown supported). \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: use the project-scoped IID from the issue URL; the note is attributed to the configured GitLab token's user."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",
@@ -387,12 +405,17 @@ impl Tool for GitlabCloseIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Close a GitLab issue (optionally with a note)."
+        "Close an open GitLab issue, optionally posting a closing note first. \
+         Required parameter: 'iid' (integer) - the issue IID. \
+         Optional: 'comment' (string) - a closing note posted before the issue is closed. \
+         Requires GitLab configuration and a GitLab-backed git repo. \
+         Common gotcha: closing an already-closed issue is a no-op; only project members with sufficient permissions can change issue state."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "iid": {
                     "type": "integer",

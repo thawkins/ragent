@@ -25,7 +25,10 @@ impl Tool for PdfReadTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Read text content and metadata from a PDF file. Supports page range selection."
+        "Read text content and metadata from a PDF file. Required parameter: 'path'. \
+         Optional 'start_page' and 'end_page' (1-based, inclusive) for a page range, \
+         and 'format' ('text', 'metadata', or 'json', default 'text'). Returns plain \
+         text, metadata, or structured per-page JSON."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -50,7 +53,8 @@ impl Tool for PdfReadTool {
                     "description": "Output format: 'text' for plain text (default), 'metadata' for document info only, 'json' for structured output with pages and metadata"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

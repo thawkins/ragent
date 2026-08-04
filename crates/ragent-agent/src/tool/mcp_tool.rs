@@ -65,7 +65,14 @@ impl Tool for McpToolWrapper {
     }
 
     fn parameters_schema(&self) -> Value {
-        self.input_schema.clone()
+        let mut schema = self.input_schema.clone();
+        if let Some(obj) = schema.as_object_mut() {
+            if obj.contains_key("properties") {
+                obj.entry("additionalProperties")
+                    .or_insert_with(|| serde_json::json!(false));
+            }
+        }
+        schema
     }
 
     fn permission_category(&self) -> &'static str {

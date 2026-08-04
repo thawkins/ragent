@@ -27,7 +27,12 @@ impl Tool for OfficeReadTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read content from Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files."
+        "Read content from Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files. \
+         REQUIRED parameter: 'path' (string). Optional: 'sheet' (string, Excel sheet \
+         name or index), 'range' (string, Excel cell range e.g. 'A1:D10'), 'slide' \
+         (integer, PowerPoint slide number), and 'format' (string enum text/markdown/json, \
+         default markdown). Common gotcha: for Excel, sheet and range only apply when \
+         reading spreadsheets; for PowerPoint, use slide to narrow output."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -36,7 +41,7 @@ impl Tool for OfficeReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the Office document to read"
+                    "description": "Path to the Office document to read (required)"
                 },
                 "sheet": {
                     "type": "string",
@@ -56,7 +61,8 @@ impl Tool for OfficeReadTool {
                     "description": "Output format (default: markdown)"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

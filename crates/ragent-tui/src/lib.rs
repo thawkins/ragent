@@ -515,7 +515,7 @@ pub async fn run_tui(
     app.startup_timings = Some(startup);
     app.append_assistant_text("\n✅ **Ready**\n");
     app.status = "ready".to_string();
-    // Ensure the init exchange response starts a new message bubble
+    app.status_set_at = None; // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -554,6 +554,10 @@ pub async fn run_tui(
     let mut last_draw = std::time::Instant::now();
 
     while app.is_running {
+        // Only one autopilot continuation may be dispatched per event-loop
+        // wake. Reset the guard at the top of each iteration.
+        app.autopilot_continued_this_wake = false;
+
         // Drain ALL pending events before rendering so the screen
         // always reflects the latest state.
         while let Ok(event) = event_rx.try_recv() {
@@ -583,6 +587,7 @@ pub async fn run_tui(
             // Clear the "starting code index…" status now that setup is done.
             if app.status == "starting code index…" {
                 app.status = "ready".to_string();
+                app.status_set_at = None;
             }
             app.needs_redraw = true;
         }
@@ -624,12 +629,6 @@ pub async fn run_tui(
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 
-        // Refresh cached code index stats periodically (every 5s, not every frame).
-        app.refresh_code_index_stats();
-
-        // Refresh cached memory stats for the status bar.
-        app.refresh_memory_stats();
-
         if app.needs_redraw
             || last_draw.elapsed() >= std::time::Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
         {
@@ -642,30 +641,44 @@ pub async fn run_tui(
             _ = shutdown_rx.recv() => {
                 app.is_running = false;
             }
-                          // Terminal key/mouse events (polled at 50ms intervals)
-                          _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                              let mut got_input = false;
-                                                              while ct_event::poll(std::time::Duration::ZERO)? {
-                                                                  match ct_event::read()? {
-                                                                      CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                                                                      CtEvent::Mouse(mouse)
-                                                                          // Only process mouse events when mouse mode is enabled
-                                                                          if app.mouse_enabled => {
-                                                                              app.handle_mouse_event(mouse); got_input = true;
-                                                                          }
-                                                                      CtEvent::Paste(text) => {
-                                                                          // Insert pasted text as a single operation
-                                                                          // Strip carriage returns but preserve newlines
-                                                                          let clean: String = text.chars().filter(|&c| c != '\r').collect();
-                                                                          app.insert_text_at_cursor(&clean);
-                                                                          got_input = true;
-                                                                      }
-                                                                      _ => {}
-                                                                  }
-                                                              }                              if got_input {
-                                  app.needs_redraw = true;
-                              }
-                          }            // Wake up when a new event arrives from the lossless mpsc bridge
+            // Terminal key/mouse events (polled at 50ms intervals)
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                let mut got_input = false;
+                while ct_event::poll(std::time::Duration::ZERO)? {
+                    match ct_event::read()? {
+                        CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                        CtEvent::Mouse(mouse)
+                            // Only process mouse events when mouse mode is enabled
+                            if app.mouse_enabled => {
+                                app.handle_mouse_event(mouse); got_input = true;
+                            }
+                        CtEvent::Paste(text) => {
+                            // Insert pasted text as a single operation
+                            // Strip carriage returns but preserve newlines
+                            let clean: String = text.chars().filter(|&c| c != '\r').collect();
+                            app.insert_text_at_cursor(&clean);
+                            got_input = true;
+                        }
+                        _ => {}
+                    }
+                }
+                if got_input {
+                    app.needs_redraw = true;
+                }
+
+                // Copy the latest off-thread memory count into the status bar
+                // cache so it is visible even when no events are arriving.
+                app.memory_entry_count = app.memory_entry_count_pending.load(
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+
+                // Refresh cached code index stats periodically (every 5s, not every frame).
+                app.refresh_code_index_stats();
+
+                // Refresh cached memory stats for the status bar.
+                app.refresh_memory_stats();
+            }
+            // Wake up when a new event arrives from the lossless mpsc bridge
             event = event_rx.recv() => {
                 match event {
                     Some(event) => app.handle_event(event),

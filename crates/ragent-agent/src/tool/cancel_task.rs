@@ -19,8 +19,11 @@ impl Tool for CancelTaskTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Cancel a running background sub-agent task. Requires the task_id \
-               returned by new_task when background: true was used."
+        "Cancel a running background sub-agent task that was spawned with background: true. \
+             REQUIRED parameter: 'task_id' (string, the unique task identifier returned by \
+             new_task when background mode was used). The task must belong to the current \
+             session. Common gotcha: do not use this tool for team tasks — inside a team, \
+             use team tools such as team_shutdown_teammate instead."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -31,10 +34,10 @@ impl Tool for CancelTaskTool {
                     "description": "The unique identifier of the task to cancel"
                 }
             },
-            "required": ["task_id"]
+            "required": ["task_id"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }

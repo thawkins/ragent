@@ -16,9 +16,10 @@ impl Tool for CodeIndexReindexTool {
     }
 
     fn description(&self) -> &'static str {
-        "Trigger a full re-index of the codebase. \
-         Scans all files, extracts symbols, and updates the search index. \
-         Use after major file changes or when search results seem stale."
+        "Trigger a full re-index of the codebase. Scans all files, extracts \
+         symbols, and updates the search index. No parameters are required. Use \
+         after major file changes or when search results seem stale; this may take \
+         a while on large repositories."
     }
 
     fn parameters_schema(&self) -> Value {

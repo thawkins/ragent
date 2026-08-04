@@ -16,12 +16,18 @@ impl Tool for GitLogTool {
     }
 
     fn description(&self) -> &'static str {
-        "Show the commit history. Optional: limit, branch, oneline, author, since."
+        "Show the git commit history for the current branch or a specified ref. \
+         No required parameters. 'limit' (integer, default 20) caps the number of commits returned; \
+         'branch' (string, default current branch/HEAD) selects the ref to log; \
+         'oneline' (boolean, default true) toggles compact one-line formatting; \
+         'author' (string) filters commits by author name or email; 'since' (string, e.g. '2024-01-01' or '1.week') shows only newer commits. \
+         Common gotcha: invalid ref names in 'branch' cause git to fail; use a branch name, tag, or full commit hash."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "limit": {
                     "type": "integer",

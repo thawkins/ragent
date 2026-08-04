@@ -17,7 +17,11 @@ impl Tool for SpecReadTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read a specification by ID. Returns the full SPEC.md content, requirements, tasks, and current status."
+        "Read a specification by ID. REQUIRED parameter: 'spec_id' (string, e.g. \
+         'testspec' or 'auth-refactor'). Returns the full SPEC.md content, requirements, \
+         tasks, and current status. Use this to inspect a spec before updating tasks or \
+         transitioning its status. Common gotcha: spec_id must contain only alphanumeric, \
+         hyphen, or underscore characters."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -26,7 +30,7 @@ impl Tool for SpecReadTool {
             "properties": {
                 "spec_id": {
                     "type": "string",
-                    "description": "The spec identifier (e.g. 'testspec', 'auth-refactor')"
+                    "description": "The spec identifier, e.g. 'testspec', 'auth-refactor' (required)"
                 }
             },
             "required": ["spec_id"],

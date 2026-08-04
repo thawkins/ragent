@@ -16,14 +16,18 @@ impl Tool for GitCloneTool {
     }
 
     fn description(&self) -> &'static str {
-        "Clone a git repository into a new directory. \
-         The clone is created inside the working directory. \
-         Optional: specify branch, shallow clone depth, or create a bare clone."
+        "Clone a git repository into a new directory inside the working directory. \
+         Required parameter: 'url' (string) - the repository URL to clone. \
+         Optional: 'directory' (string) target folder name (defaults to the repository name inferred from the URL), \
+         'branch' (string) to checkout a specific branch (--branch), 'depth' (integer) for a shallow clone, \
+         and 'bare' (boolean) to create a bare repository. \
+         Common gotcha: if the destination directory already exists git will refuse to clone; specify a fresh directory name."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "url": {
                     "type": "string",

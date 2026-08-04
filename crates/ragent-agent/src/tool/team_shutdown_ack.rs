@@ -16,9 +16,11 @@ impl Tool for TeamShutdownAckTool {
     }
 
     fn description(&self) -> &'static str {
-        "Acknowledge a shutdown request from the team lead. \
-         Call this after receiving a shutdown_request via team_read_messages. \
-         The teammate session will terminate after this call."
+        "Acknowledge a shutdown request from the team lead. REQUIRED parameter: \
+             'team_name' (string). Call this after receiving a shutdown_request via \
+             team_read_messages; the teammate session will terminate after this call. \
+             Common gotcha: this only marks the teammate as stopped — it does not free \
+             the team directory; call team_cleanup after all members have acknowledged."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -27,13 +29,13 @@ impl Tool for TeamShutdownAckTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

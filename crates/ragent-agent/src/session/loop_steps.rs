@@ -871,37 +871,37 @@ impl SessionProcessor {
             });
             llm_recorder.record_request(&turn.model_ref.model_id, &turn.model_ref.provider_id);
 
-                          // H4: surface provider progress so long `create_stream` waits do not
-                          // feel like hangs. A background task publishes an AgentNotice every 30s
-                          // after the first 30s, until the first stream event arrives.
-                          let first_event_arrived = Arc::new(AtomicBool::new(false));
-                          let notice_handle = {
-                              let event_bus = Arc::clone(&self.event_bus);
-                              let session_id = session_id.to_string();
-                              let first_event_arrived = Arc::clone(&first_event_arrived);
-                              let provider_id = turn.model_ref.provider_id.clone();
-                              tokio::spawn(async move {
-                                  let interval = std::time::Duration::from_secs(30);
-                                  let mut elapsed = 0u64;
-                                  loop {
-                                      tokio::time::sleep(interval).await;
-                                      elapsed += 30;
-                                      if first_event_arrived.load(Ordering::Relaxed) {
-                                          break;
-                                      }
-                                      let message = if elapsed == 30 && provider_id == "ollama" {
-                                          "Waiting for model response (Ollama may be loading the model)..."
-                                              .to_string()
-                                      } else {
-                                          format!("Waiting for model response... ({elapsed}s)")
-                                      };
-                                      event_bus.publish(Event::AgentNotice {
-                                          session_id: session_id.clone(),
-                                          message,
-                                      });
-                                  }
-                              })
-                          };
+            // H4: surface provider progress so long `create_stream` waits do not
+            // feel like hangs. A background task publishes an AgentNotice every 30s
+            // after the first 30s, until the first stream event arrives.
+            let first_event_arrived = Arc::new(AtomicBool::new(false));
+            let notice_handle = {
+                let event_bus = Arc::clone(&self.event_bus);
+                let session_id = session_id.to_string();
+                let first_event_arrived = Arc::clone(&first_event_arrived);
+                let provider_id = turn.model_ref.provider_id.clone();
+                tokio::spawn(async move {
+                    let interval = std::time::Duration::from_secs(30);
+                    let mut elapsed = 0u64;
+                    loop {
+                        tokio::time::sleep(interval).await;
+                        elapsed += 30;
+                        if first_event_arrived.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        let message = if elapsed == 30 && provider_id == "ollama" {
+                            "Waiting for model response (Ollama may be loading the model)..."
+                                .to_string()
+                        } else {
+                            format!("Waiting for model response... ({elapsed}s)")
+                        };
+                        event_bus.publish(Event::AgentNotice {
+                            session_id: session_id.clone(),
+                            message,
+                        });
+                    }
+                })
+            };
             let mut stream = {
                 let _scope = profiler.scope("loop.llm.create_stream");
                 match turn.client.chat(attempt_request).await {

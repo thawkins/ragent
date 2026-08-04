@@ -36,13 +36,18 @@ impl Tool for GithubListIssuesTool {
     }
 
     fn description(&self) -> &'static str {
-        "List GitHub issues for the current repository. \
-         Optional: state (open/closed/all), labels (comma-separated), limit (default 20)."
+        "List GitHub issues in the repository detected from the current working directory. \
+         No required parameters. 'state' (enum 'open', 'closed', 'all', default 'open') filters by issue state; \
+         'labels' (string) is a comma-separated list of label names to filter by; \
+         'limit' (integer, default 20, max 100) caps the number of issues returned. \
+         Requires a configured GitHub authentication (see /github login). \
+         Common gotcha: this only works when the working directory is inside a git repo with a GitHub remote; labels must already exist in the repository."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "state": {
                     "type": "string",
@@ -125,12 +130,16 @@ impl Tool for GithubGetIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Get details of a specific GitHub issue including body, comments, and labels."
+        "Get full details of a specific GitHub issue including title, body, state, labels, assignees, and the first 10 comments. \
+         Required parameter: 'number' (integer) - the issue number. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo in the working directory. \
+         Common gotcha: pull requests also appear in the issues endpoint but their details may be incomplete; use github_get_pr for PR-specific data."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",
@@ -230,12 +239,18 @@ impl Tool for GithubCreateIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Create a new GitHub issue in the current repository."
+        "Create a new GitHub issue in the repository detected from the working directory. \
+         Required parameter: 'title' (string) - the issue title. \
+         Optional: 'body' (string) is the issue description in markdown; 'labels' (string) is a comma-separated list of label names to apply; \
+         'assignees' (string) is a comma-separated list of GitHub usernames to assign. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: labels and assignees must already exist in the repository; unknown labels cause the API call to fail."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "title": {
                     "type": "string",
@@ -314,12 +329,16 @@ impl Tool for GithubCommentIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Add a comment to a GitHub issue."
+        "Add a comment to an existing GitHub issue. \
+         Required parameters: 'number' (integer) - the issue number, and 'body' (string) - the comment text (markdown supported). \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: 'number' is the repository-scoped issue number shown in the issue URL, not the global GitHub node ID."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",
@@ -382,12 +401,17 @@ impl Tool for GithubCloseIssueTool {
     }
 
     fn description(&self) -> &'static str {
-        "Close a GitHub issue (optionally with a comment)."
+        "Close an open GitHub issue, optionally posting a closing comment first. \
+         Required parameter: 'number' (integer) - the issue number. \
+         Optional: 'comment' (string) - a closing note posted before the issue is closed. \
+         Requires a configured GitHub authentication and a GitHub-backed git repo. \
+         Common gotcha: closing an already-closed issue is a no-op but still returns success; only repository collaborators can close issues."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "number": {
                     "type": "integer",

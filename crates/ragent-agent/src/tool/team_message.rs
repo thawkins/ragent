@@ -21,8 +21,11 @@ impl Tool for TeamMessageTool {
 
     fn description(&self) -> &'static str {
         "Send a direct message to one team member (teammate or lead) by agent ID or name. \
-         The recipient must be an active member of the team; messages to Stopped or Failed \
-         teammates are rejected."
+             The recipient must be an active member of the team; messages to Stopped or Failed \
+             teammates are rejected. REQUIRED parameters: 'team_name' (string), 'to' (string, \
+             agent ID e.g. 'tm-001' or 'lead'), and 'content' (string, message text). Common \
+             gotcha: use the exact agent ID or 'lead' for the lead; nicknames that do not match \
+             team membership will fail."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -31,21 +34,21 @@ impl Tool for TeamMessageTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "to": {
                     "type": "string",
-                    "description": "Recipient agent ID (e.g. 'tm-001') or 'lead'"
+                    "description": "Recipient agent ID (e.g. 'tm-001') or 'lead' (required)"
                 },
                 "content": {
                     "type": "string",
-                    "description": "Message text to send"
+                    "description": "Message text to send (required)"
                 }
             },
-            "required": ["team_name", "to", "content"]
+            "required": ["team_name", "to", "content"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

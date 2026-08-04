@@ -29,9 +29,12 @@ impl Tool for MemoryStoreTool {
 
     fn description(&self) -> &'static str {
         "Store a structured memory with a category, tags, and confidence score. \
-         Categories: fact, pattern, preference, insight, error, workflow. \
-         Stored memories can be searched with memory_recall and deleted with memory_forget. \
-         Confidence ranges from 0.0 (uncertain) to 1.0 (certain), default 0.7."
+             Categories: fact, pattern, preference, insight, error, workflow. REQUIRED \
+             parameters: 'content' (string, the memory content) and 'category' (string, one \
+             of fact/pattern/preference/insight/error/workflow). Optional: 'tags' (array of \
+             strings), 'confidence' (number 0.0–1.0, default 0.7), and 'source' (string). \
+             Stored memories can be searched with memory_recall and deleted with memory_forget. \
+             Common gotcha: confidence must be between 0.0 and 1.0."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -40,12 +43,12 @@ impl Tool for MemoryStoreTool {
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The memory content — a fact, pattern, insight, etc."
+                    "description": "The memory content — a fact, pattern, insight, etc. (required)"
                 },
                 "category": {
                     "type": "string",
                     "enum": MEMORY_CATEGORIES,
-                    "description": "Category of the memory"
+                    "description": "Category of the memory (required)"
                 },
                 "tags": {
                     "type": "array",
@@ -61,10 +64,10 @@ impl Tool for MemoryStoreTool {
                     "description": "Source of the memory (e.g., 'manual', 'auto-extract', tool name)"
                 }
             },
-            "required": ["content", "category"]
+            "required": ["content", "category"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:write"
     }
@@ -159,8 +162,12 @@ impl Tool for MemoryRecallTool {
 
     fn description(&self) -> &'static str {
         "Search structured memories using full-text search with optional category, \
-         tag, and confidence filters. Returns the most relevant results. \
-         Access counts are incremented for returned memories."
+             tag, and confidence filters. REQUIRED parameter: 'query' (string, \
+             space-separated terms, all must match). Optional: 'categories' (array of \
+             allowed category strings), 'tags' (array, all must match), 'limit' (integer, \
+             default 5), and 'min_confidence' (number 0.0–1.0, default 0.5). Returns the most \
+             relevant results; access counts are incremented. Common gotcha: keyword \
+             terms are combined with AND, so broadening a search may require fewer terms."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -169,7 +176,7 @@ impl Tool for MemoryRecallTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Full-text search query (space-separated terms, all must match)"
+                    "description": "Full-text search query (space-separated terms, all must match) (required)"
                 },
                 "categories": {
                     "type": "array",
@@ -190,10 +197,10 @@ impl Tool for MemoryRecallTool {
                     "description": "Minimum confidence threshold 0.0–1.0 (default: 0.5)"
                 }
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:read"
     }
@@ -305,9 +312,11 @@ impl Tool for MemoryForgetTool {
     }
 
     fn description(&self) -> &'static str {
-        "Delete structured memories by ID or by filter criteria. \
-         At least one criterion (id, older_than_days, max_confidence, category, or tags) \
-         is required. Returns the count of deleted memories."
+        "Delete structured memories by ID or by filter criteria. At least one \
+             criterion is required as a safety measure: 'id' (integer), 'older_than_days' \
+             (integer), 'max_confidence' (number 0.0–1.0), 'category' (string), or 'tags' \
+             (array of strings). Returns the count of deleted memories. Common gotcha: \
+             calls with no criteria fail; be explicit about which memories to remove."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -336,10 +345,10 @@ impl Tool for MemoryForgetTool {
                     "items": { "type": "string" },
                     "description": "Delete memories that have ALL of these tags"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "file:write"
     }

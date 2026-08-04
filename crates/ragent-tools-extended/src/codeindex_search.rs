@@ -19,11 +19,11 @@ impl Tool for CodeIndexSearchTool {
 
     fn description(&self) -> &'static str {
         "Search the codebase index for symbols, functions, types, and documentation. \
-         Uses full-text search with optional filters by kind, language, and file path. \
-         USE THIS instead of `grep` or `search` when looking for named code entities \
-         (functions, structs, enums, traits, variables). The index is faster, returns \
-         structured results with file/line/signature, and understands symbol kinds. \
-         Only use `grep`/`search` for arbitrary text patterns, comments, or non-symbol content."
+         Required parameter: 'query' (symbol name, keyword, or phrase). Optional \
+         filters: 'kind' (function/struct/enum/trait/etc.), 'language' (e.g. rust), \
+         'file_pattern' (path substring), and 'max_results' (default 20, max 100). \
+         USE THIS instead of `grep` or `search` when looking for named code entities; \
+         use `grep` only for arbitrary text patterns, comments, or non-symbol content."
     }
 
     fn parameters_schema(&self) -> Value {

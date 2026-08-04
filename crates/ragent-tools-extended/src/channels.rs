@@ -218,11 +218,14 @@ impl Tool for SendChannelMessageTool {
 
     fn description(&self) -> &'static str {
         "Send a message to a configured external messaging channel (Telegram bot \
-         or Discord webhook). Channels are configured in ragent.json under the \
-         \"channels\" block; set channels.enabled=true to allow delivery. Use \
-         action=\"send\" with a message (optionally targeting a specific channel \
-         via the channel parameter), action=\"list\" to see configured channels, \
-         and action=\"status\" to check readiness."
+             or Discord webhook). Channels are configured in ragent.json under the \
+             'channels' block; set channels.enabled=true to allow delivery. REQUIRED \
+             parameter: 'action' (string enum send/list/status, default send). For \
+             action='send', 'message' (string, max 4096 bytes) is required. Optional: \
+             'channel' (telegram/discord/all) to target a specific channel instead of \
+             the first configured one. Use action='list' to see configured channels and \
+             action='status' to check readiness. Common gotcha: no action parameter \
+             defaults to send, but 'message' is still required for that action."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -240,15 +243,13 @@ impl Tool for SendChannelMessageTool {
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Channel targeting: a specific kind (telegram/discord), \
-                                    \"all\" for every configured channel, or omit for the first \
-                                    configured channel",
+                    "description": "Channel targeting: a specific kind (telegram/discord), 'all' for every configured channel, or omit for the first configured channel",
                     "enum": ["telegram", "discord", "all"]
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "network:send"
     }

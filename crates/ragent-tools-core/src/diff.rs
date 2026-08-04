@@ -21,9 +21,12 @@ impl Tool for DiffFilesTool {
     }
 
     fn description(&self) -> &'static str {
-        "Show a unified diff between two files. Provide 'path_a' and 'path_b' \
-         to compare files on disk. Alternatively, provide 'text_a' and 'text_b' \
-         to diff inline strings. Returns a unified-diff style output."
+        "Show a unified diff between two files or two inline text strings. \
+         Provide either `path_a` + `path_b` (file paths) or `text_a` + `text_b` \
+         (inline strings); do not mix files and text for the same side. \
+         Optional: `context_lines` (integer, default 3) controls how many \
+         unchanged lines surround each change. Returns unified-diff style \
+         output with `---` / `+++` headers and `@@` hunk markers."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -38,7 +41,8 @@ impl Tool for DiffFilesTool {
                     "type": "integer",
                     "description": "Number of context lines around changes (default: 3)"
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
 

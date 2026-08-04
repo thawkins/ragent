@@ -35,8 +35,9 @@ impl Tool for WebSearchTool {
 
     fn description(&self) -> &'static str {
         "Search the web and return results with titles, URLs, and snippets. \
-                 Requires a TAVILY_API_KEY environment variable or 'tavily_api_key' \
-                 in ragent.json config to be set."
+         Required parameter: 'query'. Optional 'num_results' (default 5, max 20). \
+         By default uses the keyless mf_search pipeline (DuckDuckGo, Brave); \
+         optional Tavily/LangSearch API keys improve quality but are not required."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -51,7 +52,8 @@ impl Tool for WebSearchTool {
                     "description": "Number of results to return (default: 5, max: 20)"
                 }
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": false
         })
     }
 

@@ -222,14 +222,12 @@ impl Tool for MfSearchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Local keyless web search. Multiple backends run in parallel (DuckDuckGo, \
-                 Brave, and optional LangSearch / Tavily when their API keys are \
-                 configured; use `langsearch_api_key` or `tavily_api_key` in config), \
-                 merges + ranks with cross-engine consensus. Tavily and LangSearch \
-                 require API keys; the keyless backends do not. Each result carries \
-                 `relevance_score`, `fetch_relevance` (high/med/low), and \
-                 `engines_consensus`. Supports `site`, `exclude_sites`, `freshness`, \
-                 `max_results`, and `page` filters."
+        "Local keyless web search. Required parameter: 'query'. Multiple backends \
+             run in parallel (DuckDuckGo, Brave, optional LangSearch / Tavily when \
+             configured via 'langsearch_api_key' or 'tavily_api_key'). Keyless backends \
+             do not require API keys. Optional 'site', 'exclude_sites', 'freshness' \
+             (day/week/month/year), 'max_results' (1-50, default 6), and 'page' (0-10). \
+             Each result carries relevance_score, fetch_relevance, and engines_consensus."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -262,10 +260,10 @@ impl Tool for MfSearchTool {
                     "description": "Result page (0-10, default: 0)"
                 }
             },
-            "required": ["query"]
+            "required": ["query"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "web"
     }

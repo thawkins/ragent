@@ -19,9 +19,11 @@ impl Tool for TeamMemoryReadTool {
     }
 
     fn description(&self) -> &'static str {
-        "Read structured memories stored for your team. \
-         The optional `path` parameter selects a labelled memory bucket (default: MEMORY.md). \
-         Use it to recall prior context, decisions, and notes."
+        "Read structured memories stored for your team. REQUIRED parameter: 'team_name' \
+             (string). Optional: 'path' (string) selects a labelled memory bucket, defaulting \
+             to MEMORY.md. Use it to recall prior context, decisions, and notes. Common \
+             gotcha: the path is relative to the team's storage directory; an absent file \
+             returns an empty result rather than an error."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -30,17 +32,17 @@ impl Tool for TeamMemoryReadTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "path": {
                     "type": "string",
                     "description": "Optional memory bucket/path to read (default: MEMORY.md)"
                 }
             },
-            "required": ["team_name"]
+            "required": ["team_name"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

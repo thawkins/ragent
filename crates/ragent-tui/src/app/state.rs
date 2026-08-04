@@ -1487,6 +1487,10 @@ pub struct App {
     /// Pending autopilot continuation: when Some, the next render tick will
     /// auto-send this text to the agent to continue processing.
     pub autopilot_pending_continue: Option<String>,
+    /// Set to `true` inside a single event-loop wake once an autopilot
+    /// continuation has been dispatched, so multiple events arriving in the
+    /// same drain cannot re-enter `dispatch_user_message`.
+    pub autopilot_continued_this_wake: bool,
     /// Timestamp of the last `TaskCompleted` event received for this session.
     /// Used to suppress the autopilot auto-continue when the agent already
     /// signalled completion during the current turn.
@@ -1523,6 +1527,9 @@ pub struct App {
     // ── Memory status (M7-T3) ─────────────────────────────────────────────────
     /// Cached count of structured memories (SQLite).
     pub memory_entry_count: u64,
+    /// Atomic cache updated by the off-thread refresh query.
+    /// The TUI main loop copies this into `memory_entry_count` once per tick.
+    pub memory_entry_count_pending: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// Timestamp of the last memory update event (for relative time display).
     pub memory_last_updated: Option<std::time::Instant>,
     /// When the cached memory stats were last refreshed.

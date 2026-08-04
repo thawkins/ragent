@@ -532,13 +532,10 @@ impl Tool for GmailTool {
 
     fn description(&self) -> &'static str {
         "Search, read, draft, and send Gmail messages using the Gmail REST API. \
-         Actions: search (query + max_results), read (id), draft (to, subject, \
-         body, cc, bcc), send (to, subject, body, cc, bcc), auth (store OAuth2 \
-         access_token or refresh_token + client credentials in encrypted local \
-         storage), status (check authentication), logout (remove stored tokens). \
-         Requires prior authentication via the auth action: obtain an OAuth2 \
-         token (scope https://mail.google.com/) from the Google OAuth2 Playground \
-         and store it with gmail action=\"auth\" access_token=\"...\"."
+             Required parameter: 'action' (search, read, draft, send, auth, status, logout). \
+             'query' is required for search; 'id' for read; 'to', 'subject', and 'body' for \
+             draft/send; 'access_token' or 'refresh_token' (with client_id/secret) for auth. \
+             Requires prior OAuth2 authentication via the auth action."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -599,10 +596,10 @@ impl Tool for GmailTool {
                     "description": "OAuth2 client secret stored for refresh-token exchange (auth)"
                 }
             },
-            "required": ["action"]
+            "required": ["action"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "network:send"
     }

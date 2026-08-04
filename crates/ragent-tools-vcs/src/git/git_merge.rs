@@ -16,16 +16,16 @@ impl Tool for GitMergeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Merge a branch into the current branch. \
-         If there are conflicts, the tool reports the conflicted files and \
-         suggests running git_status next. \
-         Options: 'no_ff' to always create a merge commit, 'ff_only' to abort \
-         if not fast-forward, 'squash' to squash all changes into a single commit."
+        "Merge another branch into the current branch. Required parameter: 'branch' (string) - the branch to merge in. \
+         Optional: 'message' (string) sets a custom merge commit message; 'no_ff' (boolean, default false) always creates a merge commit; \
+         'ff_only' (boolean, default false) aborts unless the merge is a fast-forward; 'squash' (boolean, default false) squashes all incoming changes into one commit. \
+         Common gotcha: 'no_ff' and 'ff_only' are mutually exclusive; if the merge produces conflicts, run git_status to see conflicted files."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "branch": {
                     "type": "string",

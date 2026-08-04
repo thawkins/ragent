@@ -18,7 +18,9 @@ impl Tool for CodeIndexStatusTool {
 
     fn description(&self) -> &'static str {
         "Show the current status and statistics of the codebase index — \
-         files indexed, symbols extracted, languages, index size, and timestamps."
+         files indexed, symbols extracted, languages, index size, and timestamps. \
+         No parameters are required. Use this to check whether the index is ready \
+         before running other codeindex tools."
     }
 
     fn parameters_schema(&self) -> Value {

@@ -101,7 +101,21 @@ pub(crate) fn history_version_of(messages: &[Message]) -> u64 {
 }
 
 /// Converts message history to chat messages, handling images asynchronously.
+/// Convert a slice of [`Message`] into provider-facing [`ChatMessage`]s.
+///
+/// This is async because image attachments require a blocking read of the
+/// source file. For sessions without images (the common coder-agent case)
+/// it uses a synchronous fast path that avoids a per-turn yield point.
 pub async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
+    let needs_async = messages.iter().any(|m| {
+        m.parts
+            .iter()
+            .any(|p| matches!(p, MessagePart::Image { .. }))
+    });
+    if !needs_async {
+        return history_to_chat_messages_sync(messages);
+    }
+
     let mut chat_messages = Vec::new();
 
     for msg in messages {
@@ -109,16 +123,7 @@ pub async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> 
             Role::User => "user",
             Role::Assistant | Role::Compaction => "assistant",
         };
-        let content = if msg.parts.len() == 1 {
-            match &msg.parts[0] {
-                MessagePart::Text { text } => ChatContent::Text(text.clone()),
-                // Image parts must go through Parts() to get the image_url block.
-                MessagePart::Image { .. } => parts_to_chat_content(&msg.parts).await,
-                _ => parts_to_chat_content(&msg.parts).await,
-            }
-        } else {
-            parts_to_chat_content(&msg.parts).await
-        };
+        let content = parts_to_chat_content(&msg.parts).await;
 
         chat_messages.push(ChatMessage {
             role: role.to_string(),
@@ -128,6 +133,73 @@ pub async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> 
         // If this assistant message contains tool calls, emit a follow-up
         // user message with the corresponding tool results so the LLM sees
         // matching tool_use / tool_result pairs.
+        if msg.role == Role::Assistant {
+            let tool_results: Vec<ContentPart> = msg
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    MessagePart::ToolCall {
+                        tool,
+                        call_id,
+                        state,
+                    } => {
+                        let result_text = state
+                            .output
+                            .as_ref()
+                            .and_then(|v| {
+                                v.as_str()
+                                    .map(std::string::ToString::to_string)
+                                    .or_else(|| {
+                                        v.get("content")
+                                            .and_then(Value::as_str)
+                                            .map(std::string::ToString::to_string)
+                                    })
+                            })
+                            .or_else(|| state.error.clone())
+                            .unwrap_or_default();
+                        Some(ContentPart::ToolResult {
+                            tool_use_id: call_id.clone(),
+                            content: tool_result_content_for_llm(
+                                tool,
+                                &result_text,
+                                state.output.as_ref(),
+                            ),
+                        })
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if !tool_results.is_empty() {
+                chat_messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Parts(tool_results),
+                });
+            }
+        }
+    }
+
+    chat_messages
+}
+
+/// Synchronous fast path of [`history_to_chat_messages`] for sessions that do
+/// not contain any image attachments. Avoids a per-turn async yield point
+/// while producing the same provider-facing representation.
+fn history_to_chat_messages_sync(messages: &[Message]) -> Vec<ChatMessage> {
+    let mut chat_messages = Vec::new();
+
+    for msg in messages {
+        let role = match msg.role {
+            Role::User => "user",
+            Role::Assistant | Role::Compaction => "assistant",
+        };
+        let content = parts_to_chat_content_sync(&msg.parts);
+
+        chat_messages.push(ChatMessage {
+            role: role.to_string(),
+            content,
+        });
+
         if msg.role == Role::Assistant {
             let tool_results: Vec<ContentPart> = msg
                 .parts
@@ -468,6 +540,40 @@ pub fn should_retry_stream_error(
 
 /// Converts message parts to chat content, handling images asynchronously.
 /// This is async because image files may need to be read from disk.
+/// Convert message parts into provider-facing [`ChatContent`] without any
+/// blocking I/O. Panics if called on an [`Image`] part; callers must first
+/// verify the session has no images (see [`history_to_chat_messages`]).
+fn parts_to_chat_content_sync(parts: &[MessagePart]) -> ChatContent {
+    let mut content_parts: Vec<ContentPart> = Vec::new();
+
+    for part in parts {
+        match part {
+            MessagePart::Text { text } => {
+                content_parts.push(ContentPart::Text { text: text.clone() });
+            }
+            MessagePart::ToolCall {
+                tool,
+                call_id,
+                state,
+            } => {
+                content_parts.push(ContentPart::ToolUse {
+                    id: call_id.clone(),
+                    name: tool.clone(),
+                    input: state.input.clone(),
+                });
+            }
+            MessagePart::Reasoning { .. } => {
+                // Reasoning is not forwarded to the provider.
+            }
+            MessagePart::Image { .. } => {
+                unreachable!("parts_to_chat_content_sync must not be called for image sessions")
+            }
+        }
+    }
+
+    ChatContent::Parts(content_parts)
+}
+
 pub(crate) async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
     let mut content_parts: Vec<ContentPart> = Vec::new();
 

@@ -51,7 +51,17 @@ pub(crate) fn build_codeindex_guidance_section_active() -> String {
             is NOT a code symbol, use grep with the `pattern` parameter.\n\n\
             **CRITICAL — grep parameter requirement:**\n\
             The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
-            Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n"
+            Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n\
+            **Codeindex options and limits:**\n\n\
+            - `codeindex_search` and `codeindex_symbols` both accept `max_results` (default 20, maximum 100). \
+              If you expect many results, raise the limit explicitly.\n\n\
+            - `codeindex_symbols` accepts `kind` to filter by symbol type. Valid values are: \
+              `function`, `struct`, `enum`, `trait`, `impl`, `const`, `static`, `type_alias`, \
+              `module`, `macro`, `field`, `variant`, `interface`, `class`, `method`. \
+              The value must be in snake_case, e.g. `kind: \"function\"`.\n\n\
+            - `codeindex_references` finds every use of a symbol by name across the indexed codebase.\n\n\
+            - `codeindex_dependencies` returns what a file imports and what other files depend on it.\n\n\
+            - `codeindex_reindex` is safe to call after large file changes; it rebuilds the index in the background.\n\n"
         .to_string()
 }
 

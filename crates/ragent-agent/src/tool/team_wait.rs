@@ -29,11 +29,14 @@ impl Tool for TeamWaitTool {
     }
 
     fn description(&self) -> &'static str {
-        "Block until all teammates (or specific ones) in the active team finish their current work \
-         and become idle. Use this after team_spawn so the lead does not race ahead and duplicate \
-         the teammates' work. Returns a summary of each teammate's completion status. \
-         Optionally specify `agent_ids` to wait for a subset; if omitted, waits for ALL \
-         non-failed members. Specify `timeout_secs` (default 300) as the maximum wait time."
+        "Block until all teammates (or specific ones) in the active team finish their \
+             current work and become idle. REQUIRED parameter: 'team_name' (string) is \
+             recommended; the active team is used if omitted. Optional: 'agent_ids' (array \
+             of strings) to wait for a subset, and 'timeout_secs' (number, default 300). Use \
+             this after team_spawn so the lead does not race ahead and duplicate the \
+             teammates' work. Returns a summary of each teammate's completion status. \
+             Common gotcha: this is for team members only; do NOT use wait_tasks for \
+             teammates (it is for new_task sub-agents)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -53,10 +56,10 @@ impl Tool for TeamWaitTool {
                     "type": "number",
                     "description": "Maximum seconds to wait before returning partial results. Default: 300."
                 }
-            }
+            },
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }

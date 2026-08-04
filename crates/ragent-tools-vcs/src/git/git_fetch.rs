@@ -16,13 +16,16 @@ impl Tool for GitFetchTool {
     }
 
     fn description(&self) -> &'static str {
-        "Fetch from a remote repository without merging. \
-         Use 'prune' to remove deleted remote branches. Use 'all' to fetch all remotes."
+        "Fetch updates from a remote git repository without merging them into the current branch. \
+         No required parameters. 'remote' (string, default 'origin') selects the remote; 'branch' (string) fetches a specific ref. \
+         'prune' (boolean, default false) removes stale remote-tracking branches, and 'all' (boolean, default false) fetches every remote. \
+         Common gotcha: when 'all' is true the 'remote' and 'branch' parameters are ignored because all remotes are fetched."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "remote": {
                     "type": "string",

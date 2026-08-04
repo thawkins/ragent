@@ -4487,6 +4487,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.autopilot_pending_continue = None;
                         self.append_assistant_text("From: /autopilot\n⚡ **Autopilot OFF** — returning to interactive mode.");
                         self.status = "ready".to_string();
+                        self.status_set_at = None;
                         self.push_log_no_agent(LogLevel::Info, "autopilot disabled".to_string());
                     }
                     "status" => {

@@ -95,14 +95,16 @@ impl Tool for EditTool {
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
-        "Replace exactly one occurrence of old_string with new_string in a file. \
-         old_string must match exactly once in the file, but common whitespace \
-         differences (indentation, trailing/leading spaces, CRLF vs LF) are \
-         tolerated. Use an empty old_string with a non-existent file to create it; \
-         an empty new_string deletes the matched text. Include 3–5 lines of context \
-         around the change point so the match is unique. The result includes a \
-         line-numbered snippet of the edited region. Pass dry_run: true to preview \
-         the change without writing to disk."
+        "Replace exactly one occurrence of `old_string` with `new_string` in a \
+         single file. Required parameters: `file_path` (string), `old_string` \
+         (string), and `new_string` (string). The old_string must match exactly \
+         once; common whitespace differences (indentation, trailing/leading \
+         spaces, CRLF vs LF) are tolerated. Include 3–5 lines of context around \
+         the change point so the match is unique. Use an empty `old_string` on \
+         a non-existent file to create it; use an empty `new_string` to delete \
+         the matched text. Optional: `dry_run` (boolean) previews the change \
+         without writing. Legacy aliases `path`/`old_str`/`new_str` are accepted \
+         but deprecated."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -111,15 +113,15 @@ impl Tool for EditTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file to edit"
+                    "description": "REQUIRED. Absolute path to the file to edit"
                 },
                 "old_string": {
                     "type": "string",
-                    "description": "String to find and replace (must match exactly once in the file; common whitespace and line-ending differences are tolerated). Empty string creates a new file."
+                    "description": "REQUIRED. String to find and replace (must match exactly once in the file; common whitespace and line-ending differences are tolerated). Empty string creates a new file."
                 },
                 "new_string": {
                     "type": "string",
-                    "description": "Replacement string. Empty string deletes the matched text."
+                    "description": "REQUIRED. Replacement string. Empty string deletes the matched text."
                 },
                 "dry_run": {
                     "type": "boolean",
@@ -138,7 +140,8 @@ impl Tool for EditTool {
                     "description": "Legacy alias for new_string (deprecated)"
                 }
             },
-            "required": ["file_path", "old_string", "new_string"]
+            "required": ["file_path", "old_string", "new_string"],
+            "additionalProperties": false
         })
     }
 

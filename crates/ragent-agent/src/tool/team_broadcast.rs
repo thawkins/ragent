@@ -30,7 +30,10 @@ impl Tool for TeamBroadcastTool {
 
     fn description(&self) -> &'static str {
         "Send a message to all active (non-stopped) teammates in the team simultaneously. \
-         Returns a per-recipient summary so partial failures are visible."
+             Returns a per-recipient summary so partial failures are visible. REQUIRED \
+             parameters: 'team_name' (string) and 'content' (string, the broadcast message \
+             text). Common gotcha: stopped teammates will not receive the broadcast; check \
+             team_status if a recipient appears missing."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -39,17 +42,17 @@ impl Tool for TeamBroadcastTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "Name of the team"
+                    "description": "Name of the team (required)"
                 },
                 "content": {
                     "type": "string",
-                    "description": "Broadcast message text"
+                    "description": "Broadcast message text (required)"
                 }
             },
-            "required": ["team_name", "content"]
+            "required": ["team_name", "content"],
+            "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:communicate"
     }

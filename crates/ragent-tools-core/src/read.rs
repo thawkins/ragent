@@ -98,13 +98,13 @@ impl Tool for ReadTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Read file contents. For large files (>100 lines) called without a line range, \
-                                   returns the first 100 lines plus a section map of the file's structure. \
-                                   Use start_line + num_lines to read a specific range. \
-                                   start_line is the 1-based absolute line number where reading begins. \
-                                   num_lines is the COUNT of lines to read from start_line \
-                                   (e.g. start_line=201, num_lines=100 reads lines 201-300). \
-                                   If both end_line and num_lines are provided, end_line takes precedence."
+        "Read the contents of a file. Required parameter: `path` (string). For \
+         large files (>100 lines) called without a line range, returns the \
+         first 100 lines plus a section map. Optional range parameters: \
+         `start_line` (1-based absolute line number) + `num_lines` (count of \
+         lines to read). If both `end_line` and `num_lines` are provided, \
+         `end_line` takes precedence. Use `start_line`/`num_lines` rather than \
+         `end_line` to avoid the common off-by-one mistake."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -112,7 +112,7 @@ impl Tool for ReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the file to read"
+                    "description": "REQUIRED. Path to the file to read"
                 },
                 "start_line": {
                     "type": "integer",

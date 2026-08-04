@@ -18,15 +18,16 @@ impl Tool for TeamTaskCompleteTool {
     }
 
     fn description(&self) -> &'static str {
-        "Mark a TEAM task as completed (used inside a team session). \
-         The task must be currently assigned to the caller. \
-         Completing a task automatically unblocks any tasks that depend on it. \
-         \n\n\
-         ⚠️ DO NOT confuse with `task_complete` (a different tool used OUTSIDE teams to \
-         signal the end of the autonomous loop, which takes `summary` as its only parameter). \
-         This tool takes `team_name` + `task_id` — NOT `summary`. \
-         \n\n\
-         Example: team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")"
+        "Mark a TEAM task as completed (used inside a team session). REQUIRED \
+             parameters: 'team_name' (string) and 'task_id' (string, the ID of the task \
+             you claimed via team_task_claim, e.g. 'task-001'). The task must be currently \
+             assigned to the caller; completing it unblocks any dependent tasks. \
+             \\\n\\\n\
+             WARNING: DO NOT confuse with `task_complete` (a different tool used OUTSIDE teams to \
+             signal the end of the autonomous loop, which takes `summary` as its only parameter). \
+             This tool takes `team_name` + `task_id` — NOT `summary`. \
+             \\\n\\\n\
+             Example: team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -35,21 +36,17 @@ impl Tool for TeamTaskCompleteTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "REQUIRED. Name of the team. \
-                                   If you are NOT inside a team session, this tool will fail — \
-                                   use `task_complete(summary: ...)` instead to end the autonomous loop."
+                    "description": "REQUIRED. Name of the team. If you are NOT inside a team session, this tool will fail — use `task_complete(summary: ...)` instead to end the autonomous loop."
                 },
                 "task_id": {
                     "type": "string",
-                    "description": "REQUIRED. ID of the task to mark as completed (e.g. 'task-001'). \
-                                   This must be a task ID you claimed via `team_task_claim`."
+                    "description": "REQUIRED. ID of the task to mark as completed (e.g. 'task-001'). This must be a task ID you claimed via `team_task_claim`."
                 }
             },
             "required": ["team_name", "task_id"],
             "additionalProperties": false
         })
     }
-
     fn permission_category(&self) -> &'static str {
         "team:tasks"
     }
