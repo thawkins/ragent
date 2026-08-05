@@ -59,7 +59,7 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## Agent Guidelines for Rust apps
+## Agent Acknowledgement
 
 - First when you startup say "Hi I'm RAgent and I have read Agents.md"
 
@@ -91,13 +91,9 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `think` — Record a short reasoning note without changing project state.
 - `todo_read` — List TODO items for the current session.
 - `todo_write` — Add, update, remove, or clear TODO items.
-- `memory_read` — Read the contents of a memory file.
-- `memory_write` — Persist notes or learnings to memory files.
-- `memory_replace` — Replace a specific string in a named memory block.
-- `memory_search` — Search memories using semantic similarity or keyword matching.
 - `memory_store` — Store a structured memory with category, tags, and confidence score.
+- `memory_recall` — Search structured memories using full-text query with optional category/tag filters.
 - `memory_forget` — Delete structured memories by ID or filter criteria.
-- `memory_migrate` — Analyse a flat MEMORY.md file and propose splitting it into named blocks.
 - `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
 - `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
 - `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
@@ -106,6 +102,10 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `codeindex_status` — Show the current status and statistics of the codebase index.
 - `codeindex_reindex` — Trigger a full re-index of the codebase.
 - `ask_user` — Ask the user a question and get feedback from user.
+
+### Tool Use — Critical Instructions
+
+When you need to take any action, call the appropriate tool IMMEDIATELY. Do NOT write text describing what you are going to do — just call the tool.
 
 ### Code Intelligence Decision Flow
 
@@ -193,7 +193,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - For each project crate, migrate related tests into suitable subfolders within that crate's `tests/` directory. Review both inline and external tests for migration candidates, and relocate inline tests from `.rs` files into separate files under the appropriate `tests/` subfolder where practical.
 - **Migration strategies** (see `docs/reports/testconsolidate-completion.md` for the full migration report):
   - **Public-API tests**: use `use ragent_<crate>::module::Item;` — no source changes needed.
-  - **Private-item tests**: widen the tested items to `pub(crate)` (FR-007) and re-import the source module via `#[path = "../src/<module>.rs"] mod <module>;` (FR-008). Provide shims for `super::` and `crate::` references at the test file root.
+  - **Private-item tests**: widen the tested items to `pub(crate)` where necessary and re-import the source module via `#[path = "../src/<module>.rs"] mod <module>;`. Provide shims for `super::` and `crate::` references at the test file root.
   - **Complex cases** (`//!` doc comments + `crate::` cross-module deps): use `#[cfg(test)] #[path = "../../tests/test_<module>.rs"] mod test_<module>;` in the source file to compile the external test within the crate's module tree.
 - **Do not add new inline `#[cfg(test)]` modules** to library source files. All new tests go in `tests/`.
 
@@ -231,7 +231,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 
 - For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`,`STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
+- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
 - Do not create explainer documents or other `.md` files unless specifically asked to.
 
 ## Code Style Guidelines
@@ -280,8 +280,9 @@ team_status                        ← read what they found
 ## Temporary Files
 
 1. Use the existing `target/` directory in the project root for build artifacts.
-2. Create and use a `target/temp` directory for temporary files, scripts, and other ephemeral items that would normally be placed in `/tmp`.
-3. Ensure that the `target/temp/` path is present in `.gitignore`.
+2. Do NOT use `/tmp` for tempoary storage, this folder is outside of the workspace and access is not permitted.
+3. Create and use a `target/temp` directory for temporary files, scripts, and other ephemeral items that would normally be placed in `/tmp`.
+4. Ensure that the `target/temp/` path is present in `.gitignore`.
 
 ## Priorities
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## Version: 0.1.0-beta.37
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.37.
+- Reviewed and cleaned up project guidelines in `AGENTS.md`:
+  - Renamed the agent acknowledgement section and removed legacy memory tool names (`memory_read`, `memory_write`, `memory_replace`, `memory_search`, `memory_migrate`) from the available-tools list.
+  - Added an explicit "Tool Use — Critical Instructions" callout instructing immediate tool invocation without narrative preamble.
+  - Added `RELEASE.md` to the approved root documentation exceptions list.
+  - Removed project-specific requirement identifiers from the test migration guidance.
+- Deleted the stale `assets/config/AGENTS.md` copy to eliminate drift from the canonical root guidelines.
+
 ## Version: 0.1.0-beta.36
 
 ### Changed
