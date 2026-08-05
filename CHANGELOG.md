@@ -1,5 +1,16 @@
 # Changelog
 
+## Version: 1.0.5
+
+### Fixed
+
+- Windows release build in `.github/workflows/release.yml`:
+  - Added a separate `cargo wix init --package ragent` step to generate the WiX `wix/main.wxs` source file before building the `.msi` package.
+
+### Changed
+
+- Incremented workspace version to 1.0.5.
+
 ## Version: 1.0.4
 
 ### Fixed

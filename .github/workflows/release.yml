@@ -106,6 +106,10 @@ jobs:
           Copy-Item "target\x86_64-pc-windows-msvc\release\ragent.exe" "target\release\ragent.exe" -Force
         shell: powershell
 
+      - name: Create WiX source files
+        run: cargo wix init --package ragent
+        shell: powershell
+
       - name: Build .msi package
         run: |
           cargo wix --no-build --package ragent --target x86_64-pc-windows-msvc --output "ragent-${{ github.ref_name }}-windows-x86_64.msi"
