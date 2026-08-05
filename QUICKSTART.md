@@ -1109,10 +1109,18 @@ See [`docs/research.md`](docs/research.md) for the full workflow guide.
 ### Mouse Support
 
 The TUI supports mouse interaction:
-- **Scroll wheel** — scrolls the message pane or log panel
-- **Scrollbar drag** — click-and-drag the scrollbar track on either pane
-- **Text selection** — click-and-drag to select text in any pane
-- **Right-click** — copies the current text selection to the clipboard
+
+- **Scroll wheel** — scrolls the message pane or log panel.
+- **Scrollbar drag** — click-and-drag the scrollbar track on either pane.
+- **Text selection** — click-and-drag to select text in any pane.
+- **Right-click** — opens a context menu for the current selection. Use it to
+  **Copy**, **Cut**, or **Paste** in the input pane. In provider-setup dialogs
+  right-click pastes into the active field.
+
+Pasting via right-click, **`Ctrl+V`**, or a terminal bracketed-paste event all
+behave the same way: carriage returns are stripped and any active selection is
+replaced by the pasted text. Press **`Alt+V`** to paste an image from the
+clipboard as an attachment.
 
 ### Slash Commands
 

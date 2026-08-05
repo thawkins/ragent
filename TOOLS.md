@@ -172,7 +172,7 @@ Show a unified diff between two files. Provide 'path_a' and 'path_b' to compare 
 **Output:** Human-readable result string (and optional structured metadata).
 
 ### `edit` (file:write)
-Replace exactly one occurrence of old_string with new_string in a file. old_string must match exactly once in the file, but common whitespace differences (indentation, trailing/leading spaces, CRLF vs LF) are tolerated. Use an empty old_string with a non-existent file_path to create it; an empty new_string deletes the matched text. Include 3–5 lines of context around the change point so the match is unique. The result includes a line-numbered snippet of the edited region. Pass dry_run: true to preview the change without writing to disk.
+Replace exactly one occurrence of old_string with new_string in a file. old_string must occur exactly once in the file, byte-for-byte — whitespace, indentation, and line endings must match precisely (no CRLF vs LF or trailing-space tolerance). Use an empty old_string with a non-existent file_path to create it; an empty new_string deletes the matched text. Include 3–5 lines of context around the change point so the match is unique. The result includes a line-numbered snippet of the edited region. Pass dry_run: true to preview the change without writing to disk.
 
 **Input schema:**
 ```json
@@ -185,8 +185,7 @@ Replace exactly one occurrence of old_string with new_string in a file. old_stri
     },
     "old_string": {
       "type": "string",
-      "description": "String to find and replace (must match exactly once in the file; common whitespace and line-ending differences are tolerated). Empty string creates a new file."
-    },
+              "description": "String to find and replace (must occur exactly once in the file, byte-for-byte; whitespace and line endings must match precisely). Empty string creates a new file."    },
     "new_string": {
       "type": "string",
       "description": "Replacement string. Empty string deletes the matched text."
@@ -384,7 +383,7 @@ Move or rename a file or directory. Uses an atomic OS rename so the operation is
 **Output:** Human-readable result string (and optional structured metadata).
 
 ### `multi_edit` (file:write)
-Apply multiple edits to one or more files atomically. Each edit replaces exactly one occurrence of old_string with new_string. All edits are validated before any files are written — if any match fails, no files are modified. Edits to the same file are overlap-checked and applied highest-offset-first so input order does not matter. Each edit object uses file_path, old_string, and new_string.
+Apply multiple edits to one or more files atomically. Each edit replaces exactly one occurrence of old_string with new_string; matching is strict exact-byte (whitespace and line endings must match precisely). All edits are validated before any files are written — if any match fails, no files are modified. Edits to the same file are overlap-checked and applied highest-offset-first so input order does not matter. Each edit object uses file_path, old_string, and new_string.
 
 **Input schema:**
 ```json
@@ -528,7 +527,7 @@ Write content to a file. Creates parent directories if needed.
 **Output:** Human-readable result string (and optional structured metadata).
 
 ### `apply_patch` (file:write)
-Apply a Codex-style patch to one or more files. The patch must be wrapped in `*** Begin Patch` / `*** End Patch` and contain `*** Add File:`, `*** Delete File:`, or `*** Update File:` operations. Update operations use `@@` hunks with ` ` (context), `+` (add), and `-` (remove) lines. All operations are validated before any file is written.
+Apply a Codex-style patch to one or more files. The patch must be wrapped in `*** Begin Patch` / `*** End Patch` and contain `*** Add File:`, `*** Delete File:`, or `*** Update File:` operations. Update operations use `@@` hunks with ` ` (context), `+` (add), and `-` (remove) lines. Hunk context lines must match the file byte-for-byte (no CRLF/trailing-whitespace tolerance). All operations are validated before any file is written.
 
 **Input schema:**
 ```json

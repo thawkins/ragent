@@ -5,6 +5,11 @@
 //! contain hunks introduced by `@@` with ` ` (context), `+` (add), and `-`
 //! (remove) lines. All operations are validated before any file is written.
 //!
+//! Update hunks are matched with **strict exact-byte matching**: the hunk
+//! context must occur exactly once, byte-for-byte, in the target file. There
+//! is no CRLF, trailing-whitespace, or indentation tolerance — this mirrors
+//! upstream Codex `apply_patch` behaviour (exact context matching).
+//!
 //! This tool complements the existing unified-diff `patch` tool by supporting
 //! the patch dialect emitted by OpenAI Codex agents.
 
@@ -15,7 +20,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::path_util::resolve_path;
-use super::replace::find_replacement_range;
+use super::replace::find_exact_replacement_range;
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies a Codex-style patch to one or more files.
@@ -450,7 +455,7 @@ fn apply_update_hunks(content: &str, hunks: &[Hunk], path: &Path) -> Result<Stri
         let old_text = hunk_context(hunk);
         let new_text = hunk_replacement(hunk);
 
-        match find_replacement_range(&result, &old_text, &new_text) {
+        match find_exact_replacement_range(&result, &old_text, &new_text) {
             Ok((start, end, replacement)) => {
                 result.replace_range(start..end, &replacement);
             }

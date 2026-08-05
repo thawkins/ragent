@@ -1068,6 +1068,7 @@ impl SessionProcessor {
                             batch_entries.push(ragent_types::event::ToolCallBatchEntry {
                                 call_id: tc.id.clone(),
                                 tool: tc.name.clone(),
+                                args: tc.args_json.clone(),
                                 error: error.clone(),
                                 duration_ms,
                                 content: batch_content,
@@ -1412,6 +1413,32 @@ impl SessionProcessor {
                         } else {
                             ToolCallStatus::Error
                         };
+                        // Recovery for a message-window display race: when a
+                        // tool call fails with a permission error, the TUI
+                        // drains the event queue in the same wake as the
+                        // `PermissionReplied` handler and re-renders the
+                        // chat — removing the in-flight ToolCall part that
+                        // `ToolCallStart` created (the pending prompt is
+                        // gone, so the part is no longer protected). The
+                        // already-queued `ToolCallArgs` then finds no part
+                        // and is buffered in `pending_tool_args`, while the
+                        // re-created part from `ToolCallEnd` renders with an
+                        // empty input. Republish the args now, after the
+                        // part has been re-created, so the buffered args are
+                        // applied and the tool's parameters/category icon
+                        // appear in the message window.
+                        if result.is_err()
+                            && error.as_deref().is_some_and(|e| {
+                                e.contains("Permission denied") || e.contains("Blocked by hook")
+                            })
+                        {
+                            event_bus.publish(Event::ToolCallArgs {
+                                session_id: session_id_str.clone(),
+                                call_id: tc_clone.id.clone(),
+                                tool: tc_clone.name.clone(),
+                                args: tc_clone.args_json.clone(),
+                            });
+                        }
                         let success = status == ToolCallStatus::Completed;
                         event_bus.publish(Event::ToolCallEnd {
                             session_id: session_id_str.clone(),

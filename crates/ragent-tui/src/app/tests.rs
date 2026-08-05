@@ -549,6 +549,7 @@ mod app_tests {
             calls: vec![ToolCallBatchEntry {
                 call_id: "c1".to_string(),
                 tool: "read".to_string(),
+                args: "{}".to_string(),
                 error: None,
                 duration_ms: 10,
                 content: "42 lines".to_string(),
@@ -606,6 +607,7 @@ mod app_tests {
             calls: vec![ToolCallBatchEntry {
                 call_id: "c1".to_string(),
                 tool: "read".to_string(),
+                args: "{}".to_string(),
                 error: None,
                 duration_ms: 10,
                 content: "42 lines".to_string(),

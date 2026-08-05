@@ -3,8 +3,8 @@
 //! This crate provides the extracted Milestone 4 tool set together with the
 //! minimal shared tool abstractions those moved implementations require.
 
-// Shared whitespace-tolerant replacement matcher (used by edit, multiedit,
-// and the legacy memory_replace tool; now retained for edit/multiedit).
+// Shared exact-byte replacement matcher (used by edit, multi_edit,
+// apply_patch) plus the match-failure diagnostics formatter.
 // Extracted in WSPLAN Milestone 2.
 pub mod replace;
 

@@ -308,6 +308,22 @@ Add unit tests for the bash permission command-name extraction logic
 - Press **`Alt+V`** to paste an image from the clipboard as an attachment.
 - Pending attachments appear above the input box before you send.
 
+### Clipboard and selections
+
+- **Text selection** — click-and-drag (or hold Shift and use arrow keys) to
+  select text in the input, message, log, or side panels.
+- **`Ctrl+C`** — copy the current selection to the clipboard.
+- **`Ctrl+X`** — cut the current selection from the input.
+- **`Ctrl+V`** — paste at the cursor, replacing any active selection. Carriage
+  returns (`\r`) are stripped so Windows-copied text behaves consistently.
+- **Terminal bracketed paste** — if your terminal emits a bracketed-paste event,
+  it behaves exactly like `Ctrl+V`: it strips `\r` and replaces the active
+  selection.
+- **Right-click** — opens a context menu for the current selection. In the input
+  pane it offers **Copy**, **Cut**, and **Paste**. In provider-setup dialogs
+  (EnterKey, GitLabSetup, TelemetrySetup) it pastes the clipboard into the
+  active field.
+
 ### Permission prompts
 
 When ragent wants to run a shell command, write a file, or perform another

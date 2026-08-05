@@ -165,6 +165,8 @@ When reading files with the `read` tool:
 
 ## Build Commands
 
+Use the `Bash` tool to run the following cargo commands:
+
 - `cargo build` — Build debug binary; allow up to 600 seconds.
 - `cargo build --release` — Build optimized release binary; allow up to 600 seconds.
 - `cargo check` — Check code without building.
@@ -173,6 +175,8 @@ When reading files with the `read` tool:
 Builds can take a long time, so allow up to 600 seconds for a rebuild.
 
 ## Test Commands
+
+Use the Bash tool to run the following `cargo` commands 
 
 - `cargo test` — Run all tests
 - `cargo test <test_function_name>` — Run specific test function
@@ -198,6 +202,8 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - **Do not add new inline `#[cfg(test)]` modules** to library source files. All new tests go in `tests/`.
 
 ## Lint & Format Commands
+
+Use the `Bash` tool to run the following cargo commands:
 
 - `cargo clippy` — Run linter with clippy
 - `cargo fmt` — Format code with rustfmt, always use this to fix indentation
@@ -231,7 +237,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 
 - For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
+- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
 - Do not create explainer documents or other `.md` files unless specifically asked to.
 
 ## Code Style Guidelines

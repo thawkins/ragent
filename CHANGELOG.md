@@ -2,6 +2,20 @@
 
 ## Version: 0.1.0-beta.37
 
+### Added
+
+- TUI clipboard remediation (CUTPLAN.md Milestones 1–5):
+  - New `crates/ragent-tui/src/clipboard.rs` module is the single source of truth for `arboard` text and image clipboard operations.
+  - `InputField::paste_text_from_clipboard` (with `paste_clipboard` alias) and `App::{get,set}_clipboard` now delegate to shared helpers.
+  - Device-flow user-code copy in `input.rs` uses the shared helper.
+  - `App::handle_paste_text` strips `\r` and replaces active keyboard/mouse selections; used by Ctrl+V, terminal bracketed paste, and context-menu Paste.
+  - Context-menu Paste in provider setup now supports `TelemetrySetup` alongside `EnterKey` and `GitLabSetup`.
+  - Clipboard image temp files are written under `<cwd>/target/temp/` as `ragent_paste_*.png` with Unix permissions `0o600`, encoded directly from the borrowed pixel buffer (no `to_vec()` copy).
+  - TUI startup prunes orphaned `ragent_paste_*.png` files older than 24 hours.
+  - `App::paste_image_from_clipboard` is now `pub(crate)`; it warns when a clipboard-resolved image path lies outside the working directory or home directory while still attaching the file.
+  - User-facing docs (`QUICKSTART.md` and `TUI-QUICKSTART.md`) updated to describe text selection, Copy/Cut/Paste, right-click context menu, terminal bracketed paste, and `Alt+V` image paste.
+  - Tests added in `crates/ragent-tui/tests/test_clipboard.rs` and extended in `tests/test_clipboard_tempfile.rs` and `tests/test_slash_commands.rs`.
+
 ### Changed
 
 - Incremented workspace version to 0.1.0-beta.37.

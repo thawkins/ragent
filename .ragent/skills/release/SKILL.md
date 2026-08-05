@@ -14,9 +14,10 @@ Perform a release of the ragent project by following these steps **in order**:
    - For a version like `0.1.0-beta.2`, increment → `0.1.0-beta.3`.
 3. **Update `Cargo.toml`** with the new version string (the workspace-level `version` field only).
 4. **Run `cargo check`** to ensure the version change doesn't break the build.
-5. **Update **`CHANGELOG.md` with the new version number and any recent changes.
-6. **Stage all modified files** with `git add -A`.
-7. **Commit** with the message: `Version: <new-version>` followed by any additional message the user provided via $ARGUMENTS.
-8. **Push** to the remote with `git push`.
-9. **Tag** the commit with `v<new-version>` (e.g. `v0.1.0-beta.10`) and push the tag with `git push origin v<new-version>`.
-10. **Report** the old version, new version, and the tag that was pushed.
+5. **Run `cargo audit`** to ensure that there are no new security issues introduced, stop if there are security issues..
+6. **Update **`CHANGELOG.md` with the new version number and any recent changes.
+7. **Stage all modified files** with `git add -A`.
+8. **Commit** with the message: `Version: <new-version>` followed by any additional message the user provided via $ARGUMENTS.
+9. **Push** to the remote with `git push`.
+10. **Tag** the commit with `v<new-version>` (e.g. `v0.1.0-beta.10`) and push the tag with `git push origin v<new-version>`.
+11. **Report** the old version, new version, and the tag that was pushed.

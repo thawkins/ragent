@@ -1,4 +1,10 @@
 //! Integration tests for the `apply_patch` Codex-style patch tool.
+//!
+//! Following EDITPLAN Milestone 1 (T4), hunk context matching is **strict
+//! exact-byte** (`find_exact_replacement_range`), matching upstream Codex
+//! `apply_patch` behaviour. A hunk whose context differs from the target file
+//! only in CRLF line endings or trailing whitespace fails cleanly and leaves
+//! the target unmodified.
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -51,7 +57,7 @@ async fn test_apply_patch_update_file() {
     let out = tool
         .execute(
             json!({
-                "patch": "*** Begin Patch\n*** Update File: app.rs\n@@ fn main\n fn main() {\n-    println!(\"hi\");\n+    println!(\"hello, world!\");\n }\n*** End Patch"
+                "patch": "*** Begin Patch\n*** Update File: app.rs\n@@\n fn main() {\n-    println!(\"hi\");\n+    println!(\"hello, world!\");\n }\n*** End Patch"
             }),
             &test_ctx(root.to_path_buf()),
         )
@@ -110,23 +116,24 @@ async fn test_apply_patch_move_file() {
 async fn test_apply_patch_multi_file() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    let a = root.join("a.rs");
-    let b = root.join("b.rs");
-    std::fs::write(&a, "fn a() { 1 }\n").unwrap();
-    std::fs::write(&b, "fn b() { 2 }\n").unwrap();
+    let first = root.join("a.txt");
+    let second = root.join("sub/b.txt");
+    std::fs::write(&first, "a\n").unwrap();
+    std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+    std::fs::write(&second, "b\n").unwrap();
 
     let tool = ApplyPatchTool;
     tool.execute(
         json!({
-            "patch": "*** Begin Patch\n*** Update File: a.rs\n@@ fn a\n-fn a() { 1 }\n+fn a() { 10 }\n*** Update File: b.rs\n@@ fn b\n-fn b() { 2 }\n+fn b() { 20 }\n*** End Patch"
+            "patch": "*** Begin Patch\n*** Update File: a.txt\n@@\n-a\n+A\n*** Update File: sub/b.txt\n@@\n-b\n+B\n*** End Patch"
         }),
         &test_ctx(root.to_path_buf()),
     )
     .await
     .expect("execute");
 
-    assert!(std::fs::read_to_string(&a).unwrap().contains("10"));
-    assert!(std::fs::read_to_string(&b).unwrap().contains("20"));
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "A\n");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "B\n");
 }
 
 #[tokio::test]
@@ -139,10 +146,11 @@ async fn test_apply_patch_dry_run_does_not_write() {
     let tool = ApplyPatchTool;
     let out = tool
         .execute(
-                          json!({
-                              "patch": "*** Begin Patch\n*** Update File: keep.rs\n@@ fn keep\n-fn keep() {}\n+fn keep() { 1 }\n*** End Patch",
-                              "dry_run": true
-                          }),            &test_ctx(root.to_path_buf()),
+            json!({
+                "patch": "*** Begin Patch\n*** Update File: keep.rs\n@@\n-fn keep() {}\n+fn keep() { 1 }\n*** End Patch",
+                "dry_run": true
+            }),
+            &test_ctx(root.to_path_buf()),
         )
         .await
         .expect("execute");
@@ -182,7 +190,7 @@ async fn test_apply_patch_invalid_hunk_prefix_fails() {
     let err = tool
         .execute(
             json!({
-                "patch": "*** Begin Patch\n*** Update File: x.rs\n@@ fn x\nfn x() {}\n*** End Patch"
+                "patch": "*** Begin Patch\n*** Update File: x.rs\n@@\nfn x() {}\n*** End Patch"
             }),
             &test_ctx(root.to_path_buf()),
         )
@@ -190,4 +198,50 @@ async fn test_apply_patch_invalid_hunk_prefix_fails() {
         .expect_err("invalid hunk should fail");
 
     assert!(format!("{err:?}").contains("Invalid hunk line prefix"));
+}
+
+#[tokio::test]
+async fn test_apply_patch_rejects_crlf_context_mismatch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let path = root.join("crlf.txt");
+    std::fs::write(&path, "alpha\nbeta\ngamma\n").unwrap();
+
+    let tool = ApplyPatchTool;
+    let out = tool
+        .execute(
+            json!({
+                "patch": "*** Begin Patch\n*** Update File: crlf.txt\n@@\n-alpha\n+omega\n*** End Patch"
+            }),
+            &test_ctx(root.to_path_buf()),
+        )
+        .await
+        .expect("initial LF patch should apply");
+    assert!(out.content.contains("Applied"));
+
+    // Convert the file to CRLF — the bytes no longer match the LF-only context.
+    let lf = std::fs::read_to_string(&path).unwrap();
+    let crlf = lf.replace('\n', "\r\n");
+    std::fs::write(&path, &crlf).unwrap();
+
+    let err = tool
+        .execute(
+            json!({
+                "patch": "*** Begin Patch\n*** Update File: crlf.txt\n@@\n-omega beta\n+delta\n*** End Patch"
+            }),
+            &test_ctx(root.to_path_buf()),
+        )
+        .await
+        .expect_err("LF hunk context against CRLF file must fail cleanly");
+
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("could not be applied"),
+        "expected a hunk-application error: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        crlf,
+        "file must be unmodified after the failed patch"
+    );
 }

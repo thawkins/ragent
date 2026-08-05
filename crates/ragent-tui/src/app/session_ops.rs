@@ -1348,7 +1348,7 @@ impl App {
     /// attachments. Checks the text clipboard first for a `file://` URI or
     /// path, then falls back to raw pixel data which is saved to
     /// `target/temp/` with restrictive permissions.
-    pub fn paste_image_from_clipboard(&mut self) {
+    pub(crate) fn paste_image_from_clipboard(&mut self) {
         // --- Phase 1: look for a file reference in the text clipboard ---
         if let Some(text) = Self::get_clipboard() {
             let trimmed = text.trim();
@@ -1365,6 +1365,7 @@ impl App {
 
             if let Some(path) = candidate {
                 if path.exists() && is_image_path(&path) {
+                    self.warn_if_path_outside_safe_scope(&path);
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("📎 Image attached from clipboard path: {}", path.display()),
@@ -1396,6 +1397,32 @@ impl App {
             self.push_log_no_agent(
                 LogLevel::Info,
                 "No image data found in clipboard".to_string(),
+            );
+        }
+    }
+
+    /// Log a warning when a clipboard-resolved image path lies outside the
+    /// current working directory or the user's home directory. The file is
+    /// still attached (the user may intentionally want a screenshot or asset
+    /// from elsewhere), but the warning provides a visible security nudge.
+    fn warn_if_path_outside_safe_scope(&mut self, path: &std::path::Path) {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let home = dirs::home_dir().unwrap_or_default();
+        let inside_cwd = path.strip_prefix(&cwd).is_ok();
+        let inside_home = path.strip_prefix(&home).is_ok();
+        if !inside_cwd && !inside_home {
+            tracing::warn!(
+                path = %path.display(),
+                cwd = %cwd.display(),
+                "clipboard image path is outside the working directory and home directory"
+            );
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!(
+                    "⚠ Clipboard image path is outside the working directory and home: {}. \
+                     Attaching anyway.",
+                    path.display()
+                ),
             );
         }
     }

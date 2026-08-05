@@ -38,6 +38,13 @@ pub struct ToolCallBatchEntry {
     pub call_id: String,
     /// Name of the tool that was invoked.
     pub tool: String,
+    /// Raw JSON arguments for the call, as sent by the provider.
+    ///
+    /// Carried in the batch so the TUI can populate the ToolCall part's input
+    /// summary even when the per-call `ToolCallArgs` event was never delivered
+    /// (e.g. when the broadcast `Lagged` race hit the permission-prompt
+    /// subscriber and the TUI bridge task aborted before forwarding).
+    pub args: String,
     /// Error message if the tool call failed, or `None` on success.
     pub error: Option<String>,
     /// Wall-clock execution time in milliseconds.

@@ -386,6 +386,12 @@ impl App {
                     if let Some(args_json) = self.pending_tool_args.remove(&entry.call_id) {
                         let _ = self.update_tool_call_input(&entry.call_id, &args_json);
                     }
+                    // The batch entry now carries the call's raw JSON args, so
+                    // apply them as a fallback when the per-call ToolCallArgs
+                    // event never arrived (e.g. the broadcast→mpsc bridge task
+                    // aborted after a Lagged error racing a permission prompt).
+                    // Pending args already applied above take precedence.
+                    let _ = self.update_tool_call_input(&entry.call_id, &entry.args);
                     self.update_tool_call_status(
                         &entry.call_id,
                         entry.success,
@@ -2144,7 +2150,14 @@ impl App {
                     } = part
                         && cid == call_id
                     {
-                        state.input = input;
+                        // Never overwrite an input that was already populated
+                        // (e.g. by the per-call ToolCallArgs event). A later
+                        // ToolCallBatch fallback carrying the same args would
+                        // otherwise clobber it — and batch entries built by
+                        // older code paths may carry a placeholder `{}`.
+                        if state.input.is_null() {
+                            state.input = input;
+                        }
                         return true;
                     }
                 }

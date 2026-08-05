@@ -86,6 +86,7 @@ fn test_tool_call_batch_updates_status_and_duration() {
         calls: vec![ToolCallBatchEntry {
             call_id: "c2".to_string(),
             tool: "bash".to_string(),
+            args: "{}".to_string(),
             error: None,
             duration_ms: 999,
             content: "ok".to_string(),
@@ -114,6 +115,7 @@ fn test_tool_call_batch_creates_missing_part() {
         calls: vec![ToolCallBatchEntry {
             call_id: "c3".to_string(),
             tool: "write".to_string(),
+            args: "{}".to_string(),
             error: None,
             duration_ms: 42,
             content: "written".to_string(),
@@ -148,6 +150,7 @@ fn test_tool_call_batch_marks_error() {
         calls: vec![ToolCallBatchEntry {
             call_id: "c4".to_string(),
             tool: "read".to_string(),
+            args: "{}".to_string(),
             error: Some("not found".to_string()),
             duration_ms: 7,
             content: "not found".to_string(),
@@ -245,4 +248,45 @@ fn test_pending_args_drained_by_next_lifecycle_event() {
         panic!("expected ToolCall part");
     };
     assert_eq!(state.input["path"], "src/main.rs");
+}
+
+#[test]
+fn test_tool_call_batch_args_populate_missing_input() {
+    let mut app = app_with_session();
+
+    // The per-call ToolCallStart fired (part exists with null input), but the
+    // ToolCallArgs event was never delivered — exactly the case where the
+    // batch entry's carried args must restore the input summary.
+    app.handle_event(Event::ToolCallStart {
+        session_id: "sess-1".to_string(),
+        call_id: "c5".to_string(),
+        tool: "read".to_string(),
+    });
+
+    app.handle_event(Event::ToolCallBatch {
+        session_id: "sess-1".to_string(),
+        step: 1,
+        calls: vec![ToolCallBatchEntry {
+            call_id: "c5".to_string(),
+            tool: "read".to_string(),
+            args: r#"{"path":"src/lib.rs"}"#.to_string(),
+            error: None,
+            duration_ms: 5,
+            content: "ok".to_string(),
+            content_line_count: 1,
+            metadata: None,
+            success: true,
+        }],
+    });
+
+    let part = app.messages[0].parts[0].clone();
+    let MessagePart::ToolCall { state, .. } = part else {
+        panic!("expected ToolCall part");
+    };
+    assert_eq!(
+        state.input.get("path").and_then(|v| v.as_str()),
+        Some("src/lib.rs"),
+        "batch-carried args must populate a missing input"
+    );
+    assert_eq!(state.status, ToolCallStatus::Completed);
 }

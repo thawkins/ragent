@@ -2,7 +2,7 @@
 //!
 //! Covers: two edits in one file, edits across two files, overlap detection,
 //! JSON-order independence (edits applied highest-offset-first), and
-//! whitespace-tolerant batch edits via the shared seven-pass matcher.
+//! strict exact-byte batch edits (EDITPLAN).
 
 use std::sync::Arc;
 
@@ -168,25 +168,48 @@ async fn test_json_order_independence() {
 /// the file byte-for-byte (here: the file has trailing spaces and CRLF that
 /// the needle omits) must be rejected, and no files may be modified.
 #[tokio::test]
-async fn test_batch_normalization_accepts_crlf_and_trailing_space_mismatch() {
+async fn test_batch_exact_rejects_crlf_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File has trailing spaces the needle omits, and uses CRLF for one line.
-    let path = write_file(tmp.path(), "a.rs", "fn a() {  \r\n    bar  \n}\n");
+    let path = write_file(
+        tmp.path(),
+        "a.rs",
+        "fn a() {  
+    bar  
+}
+",
+    );
 
     let input = json!({
         "edits": [
-            { "file_path": "a.rs", "old_string": "fn a() {\n    bar\n}\n", "new_string": "fn a() {\n    baz\n}\n" }
+            { "file_path": "a.rs", "old_string": "fn a() {
+    bar
+}
+", "new_string": "fn a() {
+    baz
+}
+" }
         ]
     });
 
-    let out = MultiEditTool
+    let err = MultiEditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect("batch normalization should accept CRLF/trailing-space mismatch");
-    assert_eq!(out.content, "Applied 1 edit across 1 file");
+        .expect_err("batch exact-byte matching should reject CRLF/trailing-whitespace mismatch");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "error should mention not found: {msg}"
+    );
 
-    let result = std::fs::read_to_string(&path).unwrap();
-    assert!(result.contains("baz"), "replacement should apply: {result}");
+    let file_content = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        file_content,
+        "fn a() {  
+    bar  
+}
+",
+        "file must be unmodified"
+    );
 }
 
 #[tokio::test]
@@ -220,9 +243,8 @@ async fn test_batch_dry_run_previews_without_writing() {
 #[tokio::test]
 async fn test_batch_indentation_mismatch_still_rejected() {
     let tmp = TempDir::new().unwrap();
-    // File uses 4-space indentation; needle omits indentation for the inner
-    // line. Batch normalization does NOT adjust leading whitespace, so this
-    // edit should fail.
+    // File uses 4-space indentation; needle omits indentation for the inner line.
+    // Strict exact-byte matching rejects the mismatch.
     let path = write_file(tmp.path(), "a.rs", "fn a() {\n    bar\n}\n");
     let original = std::fs::read_to_string(&path).unwrap();
 

@@ -74,58 +74,81 @@ async fn test_edit_exact_match_baseline() {
     .await;
 }
 
-// ── Tolerant matching: common whitespace/line-ending mismatches are accepted ───
+// ── Exact-byte matching: reject mismatches in line endings/whitespace ────────
 
 #[tokio::test]
-async fn test_edit_tolerant_accepts_crlf_mismatch() {
+async fn test_edit_exact_rejects_crlf_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File uses CRLF; needle is LF-only — tolerant CRLF pass should still match.
-    // The replacement itself uses new_string verbatim, so only the matched
-    // substring changes; surrounding CRLF lines are preserved.
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n");
     let input = json!({
         "file_path": "a.rs",
-        "old_string": "bar",
-        "new_string": "baz",
+        "old_string": "fn foo() {\n    bar\n}\n",
+        "new_string": "fn foo() {\n    baz\n}\n",
     });
-    let _ = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("exact-byte matcher must reject LF vs CRLF mismatch");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "error should say not found: {msg}"
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\r\n    baz\r\n}\r\n"
+        "fn foo() {\r\n    bar\r\n}\r\n",
+        "file must be unmodified"
     );
 }
 
 #[tokio::test]
-async fn test_edit_tolerant_accepts_trailing_space_mismatch() {
+async fn test_edit_exact_rejects_trailing_space_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File has no trailing spaces; needle includes them — trailing-whitespace
-    // pass should strip the needle's trailing spaces and match.
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
     let input = json!({
         "file_path": "a.rs",
         "old_string": "    bar  \n",
         "new_string": "    baz\n",
     });
-    let _ = EditTool.execute(input, &ctx(tmp.path())).await.unwrap();
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("exact-byte matcher must reject trailing-whitespace mismatch");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "error should say not found: {msg}"
+    );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\n    baz\n}\n"
+        "fn foo() {\n    bar\n}\n",
+        "file must be unmodified"
     );
 }
 
 #[tokio::test]
-async fn test_edit_tolerant_accepts_indentation_mismatch() {
+async fn test_edit_exact_rejects_indentation_mismatch() {
     let tmp = TempDir::new().unwrap();
-    // File uses 4-space indentation; model provides 2-space indentation — still unique.
-    assert_edit(
-        tmp.path(),
-        "a.rs",
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "\tbar\n",
+        "new_string": "\tbaz\n",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("exact-byte matcher must reject indentation mismatch");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "error should say not found: {msg}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
         "fn foo() {\n    bar\n}\n",
-        "  bar\n",
-        "  baz\n",
-        "fn foo() {\n    baz\n}\n",
-    )
-    .await;
+        "file must be unmodified"
+    );
 }
 
 #[tokio::test]
@@ -175,10 +198,6 @@ async fn test_edit_not_found_includes_pass_hint() {
     assert!(
         msg.contains("not found"),
         "error should say not found: {msg}"
-    );
-    assert!(
-        msg.contains("pass:") || msg.contains("Last attempted match pass"),
-        "error should mention the last attempted pass: {msg}"
     );
 }
 

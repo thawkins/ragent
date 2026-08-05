@@ -5873,6 +5873,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "dirs 6.0.0",
+ "filetime",
  "fs2",
  "futures",
  "html2text",

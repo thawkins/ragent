@@ -6,13 +6,11 @@
 //!
 //! # Matching (editrenewal FR-004 / FR-009, amended)
 //!
-//! Each edit first attempts **strict exact-match** replacement
-//! ([`find_exact_replacement_range`]). If the strict match fails with
-//! `NotFound`, a controlled batch normalization fallback strips CRLF and
-//! trailing whitespace per line and tries again. Indentation and internal
-//! whitespace are preserved so batch edits remain deterministic and easy to
-//! reason about. If the fallback also fails, the edit is rejected and no files
-//! are modified.
+//! Each edit is resolved with **strict exact-byte matching**
+//! ([`find_exact_replacement_range`]). `old_string` must match exactly once,
+//! byte-for-byte; there is no CRLF, trailing-whitespace, or indentation
+//! tolerance. If the match fails, the edit is rejected and no files are
+//! modified.
 //!
 //! # Dry-run mode
 //!
@@ -42,10 +40,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::path_util::resolve_path;
-use super::replace::{
-    FindDiag, FindError, find_batch_normalized_replacement_range, find_exact_replacement_range,
-    format_match_failure,
-};
+use super::replace::{FindDiag, find_exact_replacement_range, format_match_failure};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
@@ -77,8 +72,7 @@ struct EditOp {
 }
 
 /// A resolved edit: the original input index, the byte range against the
-/// original file content, and the effective replacement text (which may have
-/// indentation re-applied by the shared matcher).
+/// original file content, and the replacement text.
 ///
 /// `#[allow(dead_code)]` — used by the lib build but not by the test target that
 /// re-imports this source via `#[path]`.
@@ -90,8 +84,7 @@ struct ResolvedEdit {
     start: usize,
     /// Exclusive end byte offset against the original file content.
     end: usize,
-    /// Effective replacement text (may differ from `new_str` when indentation
-    /// was re-applied by a leading-whitespace or collapsed-whitespace match).
+    /// Replacement text (inserted verbatim — never re-indented).
     effective_new: String,
     /// Original `old_str` line count (for stats).
     old_lines: usize,
@@ -135,7 +128,7 @@ impl Tool for MultiEditTool {
                             },
                             "old_string": {
                                 "type": "string",
-                                "description": "REQUIRED. String to find (must match exactly once; CRLF and trailing-whitespace differences are tolerated after strict exact match fails)"
+                                "description": "REQUIRED. String to find (must match exactly once, byte-for-byte)"
                             },
                             "new_string": {
                                 "type": "string",
@@ -246,9 +239,7 @@ impl Tool for MultiEditTool {
             }
         }
         // Phase 2: Resolve every edit against the original file content and
-        // group resolved edits by file path. Uses the strict exact-match
-        // matcher first, then a controlled CRLF/trailing-whitespace fallback
-        // if the strict match returns NotFound.
+        // group resolved edits by file path. Uses the strict exact-byte matcher.
         let mut resolved_by_file: HashMap<PathBuf, Vec<ResolvedEdit>> = HashMap::new();
         for (i, op) in ops.iter().enumerate() {
             let original = file_contents
@@ -256,7 +247,11 @@ impl Tool for MultiEditTool {
                 .expect("file content must exist for every op path");
 
             let (start, end, effective_new) =
-                resolve_batch_edit(original, &op.old_str, &op.new_str).map_err(|diag| {
+                find_exact_replacement_range(original, &op.old_str, &op.new_str).map_err(|e| {
+                    let diag = match e {
+                        super::replace::FindError::NotFound => FindDiag::not_found(),
+                        super::replace::FindError::MultipleMatches(n) => FindDiag::multiple(n),
+                    };
                     anyhow::anyhow!("Edit {}: {}", i, format_match_failure(&diag, &op.path))
                 })?;
 
@@ -400,32 +395,6 @@ impl Tool for MultiEditTool {
                 "file_stats": per_file,
             })),
         })
-    }
-}
-
-/// Resolve a single batch edit against the original file content.
-///
-/// First tries a strict exact match. If that returns [`FindError::NotFound`],
-/// falls back to the controlled batch normalization (CRLF → LF, trailing
-/// whitespace stripped per line). On failure returns a [`FindDiag`] so the
-/// caller can produce an actionable error message.
-pub fn resolve_batch_edit(
-    content: &str,
-    old_str: &str,
-    new_str: &str,
-) -> Result<(usize, usize, String), FindDiag> {
-    match find_exact_replacement_range(content, old_str, new_str) {
-        Ok(range) => return Ok(range),
-        Err(FindError::MultipleMatches(n)) => {
-            return Err(FindDiag::multiple("exact", n, None));
-        }
-        Err(FindError::NotFound) => {}
-    }
-
-    match find_batch_normalized_replacement_range(content, old_str, new_str) {
-        Ok(range) => Ok(range),
-        Err(FindError::MultipleMatches(n)) => Err(FindDiag::multiple("batch-normalized", n, None)),
-        Err(FindError::NotFound) => Err(FindDiag::not_found("batch-normalized", None)),
     }
 }
 
