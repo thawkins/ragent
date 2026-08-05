@@ -176,7 +176,7 @@ Builds can take a long time, so allow up to 600 seconds for a rebuild.
 
 ## Test Commands
 
-Use the Bash tool to run the following `cargo` commands 
+Use the Bash tool to run the following `cargo` commands
 
 - `cargo test` — Run all tests
 - `cargo test <test_function_name>` — Run specific test function
