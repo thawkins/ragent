@@ -906,6 +906,7 @@ impl App {
 
     /// Detect whether the router virtual provider has been enabled by reading
     /// the [`RouterProvider`] state from the provider registry, if present.
+    #[allow(dead_code)]
     pub(crate) fn is_router_enabled(
         provider_registry: &ragent_llm::provider::ProviderRegistry,
     ) -> bool {

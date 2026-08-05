@@ -735,6 +735,11 @@ Usage: `/telemetry help|on|off|setup|counters`",
         );
     }
 
+    /// Execute the slash command already parsed from `raw`.
+    ///
+    /// This is the inner entry point for slash-command dispatch. The caller is
+    /// responsible for updating the UI mode and input buffer if needed; this
+    /// method handles command-specific side effects and logging.
     pub fn execute_slash_command_inner(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();

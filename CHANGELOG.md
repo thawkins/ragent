@@ -1,5 +1,18 @@
 # Changelog
 
+## Version: 0.1.0-beta.40
+
+### Fixed
+
+- Resolved build/clippy warnings in `ragent-tui`:
+  - Added `#[allow(dead_code)]` to `App::is_router_enabled` and the unused status helper methods (`set_status_info`, `set_status_success`, `set_status_warning`, `set_status_error`).
+  - Added a doc comment to `App::execute_slash_command_inner`.
+  - Changed redundant `pub(crate)` visibility to `pub` in the private `app::helpers` module to satisfy `clippy::redundant-pub-crate`.
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.40.
+
 ## Version: 0.1.0-beta.39
 
 ### Changed

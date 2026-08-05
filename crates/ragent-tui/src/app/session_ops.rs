@@ -229,6 +229,7 @@ impl App {
     }
 
     /// Set the status line to an informational message and record it in history.
+    #[allow(dead_code)]
     pub(crate) fn set_status_info(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Info.format(&msg);
@@ -236,6 +237,7 @@ impl App {
     }
 
     /// Set the status line to a success message and record it in history.
+    #[allow(dead_code)]
     pub(crate) fn set_status_success(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Success.format(&msg);
@@ -243,6 +245,7 @@ impl App {
     }
 
     /// Set the status line to a warning message and record it in history.
+    #[allow(dead_code)]
     pub(crate) fn set_status_warning(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Warning.format(&msg);
@@ -250,6 +253,7 @@ impl App {
     }
 
     /// Set the status line to an error message and record it in history.
+    #[allow(dead_code)]
     pub(crate) fn set_status_error(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Error.format(&msg);
