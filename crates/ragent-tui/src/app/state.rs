@@ -4,8 +4,6 @@
 //! and small helpers used by the TUI renderer and input handler.
 
 use anyhow::Result;
-use arboard::ImageData;
-use image::{ImageBuffer, Rgba};
 use lru::LruCache;
 use ratatui::layout::Rect;
 use std::collections::{HashMap, VecDeque};
@@ -143,62 +141,14 @@ fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
-/// Maximum raw pixel buffer size we accept from the clipboard (50 MB).
-const MAX_CLIPBOARD_IMAGE_BYTES: usize = 50 * 1024 * 1024;
-
-/// Maximum dimension (width or height) we accept from the clipboard.
-const MAX_CLIPBOARD_IMAGE_DIM: u32 = 16_384;
-
 /// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a
 /// securely-created temp file.
 ///
-/// Returns the path of the written file.  The file is persisted (not
-/// auto-deleted) so the caller can attach it to a message.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The image exceeds the maximum allowed size or dimensions
-/// - The image dimensions don't match the pixel buffer size
-/// - The temporary file cannot be created or written
-pub fn save_clipboard_image_to_temp(img_data: &ImageData<'_>) -> Result<std::path::PathBuf> {
-    let buf_len = img_data.bytes.len();
-    if buf_len > MAX_CLIPBOARD_IMAGE_BYTES {
-        anyhow::bail!(
-            "clipboard image too large ({:.1} MB, limit {:.0} MB)",
-            buf_len as f64 / (1024.0 * 1024.0),
-            MAX_CLIPBOARD_IMAGE_BYTES as f64 / (1024.0 * 1024.0),
-        );
-    }
-
-    let width = img_data.width as u32;
-    let height = img_data.height as u32;
-    if width > MAX_CLIPBOARD_IMAGE_DIM || height > MAX_CLIPBOARD_IMAGE_DIM {
-        anyhow::bail!(
-            "clipboard image dimensions too large ({width}×{height}, max {MAX_CLIPBOARD_IMAGE_DIM}×{MAX_CLIPBOARD_IMAGE_DIM})"
-        );
-    }
-
-    let bytes = img_data.bytes.as_ref().to_vec();
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, bytes)
-        .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions mismatch pixel buffer"))?;
-
-    // Create a secure temporary file (O_EXCL, restrictive permissions).
-    let tmp_file = tempfile::Builder::new()
-        .prefix("ragent_paste_")
-        .suffix(".png")
-        .tempfile()
-        .map_err(|e| anyhow::anyhow!("failed to create secure temp file: {e}"))?;
-
-    img.save(tmp_file.path())?;
-
-    // Prevent auto-deletion — the caller owns the file lifecycle.
-    let path = tmp_file
-        .into_temp_path()
-        .keep()
-        .map_err(|_| anyhow::anyhow!("failed to persist temp image file"))?;
-
-    Ok(path)
+/// This is a backward-compatible wrapper around [`crate::clipboard::clipboard_image_to_temp`].
+pub fn save_clipboard_image_to_temp(
+    img_data: &arboard::ImageData<'_>,
+) -> Result<std::path::PathBuf> {
+    crate::clipboard::clipboard_image_to_temp(img_data)
 }
 
 /// Severity level for a log entry displayed in the log panel.

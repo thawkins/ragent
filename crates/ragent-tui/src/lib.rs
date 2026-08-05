@@ -5,6 +5,7 @@
 //! reacts to real-time events from the ragent [`EventBus`](ragent_agent::event::EventBus).
 
 pub mod app;
+pub mod clipboard;
 pub mod input;
 pub mod input_field;
 pub mod layout;
@@ -653,10 +654,10 @@ pub async fn run_tui(
                                 app.handle_mouse_event(mouse); got_input = true;
                             }
                         CtEvent::Paste(text) => {
-                            // Insert pasted text as a single operation
-                            // Strip carriage returns but preserve newlines
-                            let clean: String = text.chars().filter(|&c| c != '\r').collect();
-                            app.insert_text_at_cursor(&clean);
+                            // Insert pasted text as a single operation.
+                            // Strip carriage returns but preserve newlines,
+                            // and replace any active input selection.
+                            app.handle_paste_text(&text);
                             got_input = true;
                         }
                         _ => {}

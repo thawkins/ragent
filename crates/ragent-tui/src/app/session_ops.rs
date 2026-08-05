@@ -655,14 +655,33 @@ impl App {
 
     pub(crate) fn paste_text_from_clipboard(&mut self) {
         if let Some(text) = Self::get_clipboard() {
-            // Replace selection if one is active.
-            if let Some((start, end)) = self.kb_selection_char_range() {
-                self.remove_input_char_range(start, end);
-                self.kb_select_anchor = None;
-            }
-            let clean: String = text.chars().filter(|&c| c != '\r').collect();
-            self.insert_text_at_cursor(&clean);
+            self.handle_paste_text(&text);
         }
+    }
+
+    /// Insert pasted text at the cursor, stripping `\r` and replacing any
+    /// active keyboard or mouse selection.
+    pub fn handle_paste_text(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|&c| c != '\r').collect();
+        if clean.is_empty() {
+            return;
+        }
+
+        // Replace a mouse-driven selection first.
+        if let Some(sel) = self.text_selection.clone() {
+            if let Some((start, end)) = self.input_selection_char_range(&sel) {
+                self.remove_input_char_range(start, end);
+            }
+            self.text_selection = None;
+        }
+
+        // Replace the keyboard-driven selection, if any.
+        if let Some((start, end)) = self.kb_selection_char_range() {
+            self.remove_input_char_range(start, end);
+            self.kb_select_anchor = None;
+        }
+
+        self.insert_text_at_cursor(&clean);
     }
 
     pub(crate) fn clear_kb_selection(&mut self) {
@@ -1318,26 +1337,11 @@ impl App {
     }
 
     pub(crate) fn set_clipboard(text: &str) {
-        let text = text.to_owned();
-        std::thread::spawn(move || {
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                #[cfg(target_os = "linux")]
-                {
-                    use arboard::SetExtLinux;
-                    let _ = clipboard.set().wait().text(&text);
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let _ = clipboard.set_text(&text);
-                }
-            }
-        });
+        crate::clipboard::set_clipboard_text(text);
     }
 
     pub(crate) fn get_clipboard() -> Option<String> {
-        arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut cb| cb.get_text().ok())
+        crate::clipboard::get_clipboard_text()
     }
 
     /// Paste an image (or image file path) from the clipboard into the pending
@@ -1371,11 +1375,7 @@ impl App {
         }
 
         // --- Phase 2: try raw pixel data ---
-        let img_result = arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut cb| cb.get_image().ok());
-
-        if let Some(img_data) = img_result {
+        if let Some(img_data) = crate::clipboard::get_clipboard_image() {
             match save_clipboard_image_to_temp(&img_data) {
                 Ok(path) => {
                     self.push_log_no_agent(
@@ -1426,18 +1426,12 @@ impl App {
                     self.provider_setup,
                     Some(ProviderSetupStep::EnterKey { .. })
                         | Some(ProviderSetupStep::GitLabSetup { .. })
+                        | Some(ProviderSetupStep::TelemetrySetup { .. })
                 ) {
                     self.paste_provider_setup_from_clipboard();
                 } else if matches!(pane, Some(SelectionPane::Input)) {
                     if let Some(text) = Self::get_clipboard() {
-                        // Strip carriage returns but keep newlines (multiline input supported).
-                        let clean: String = text.chars().filter(|&c| c != '\r').collect();
-                        if let Some(sel) = selection.as_ref()
-                            && let Some((start, end)) = self.input_selection_char_range(sel)
-                        {
-                            self.remove_input_char_range(start, end);
-                        }
-                        self.insert_text_at_cursor(&clean);
+                        self.handle_paste_text(&text);
                     }
                 }
             }
@@ -1453,7 +1447,6 @@ impl App {
             ScrollbarDragPane::Memory => (self.memory_area, self.memory_max_scroll),
             ScrollbarDragPane::Telemetry => (self.telemetry_area, self.telemetry_max_scroll),
         };
-
         if area.height <= 1 || max_scroll == 0 {
             return;
         }

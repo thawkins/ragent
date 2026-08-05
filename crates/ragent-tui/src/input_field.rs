@@ -265,7 +265,7 @@ impl InputField {
     /// Copy the current selection to the system clipboard.
     pub fn copy_selection(&self) {
         if let Some(txt) = self.selected_text() {
-            Self::set_clipboard(&txt);
+            crate::clipboard::set_clipboard_text(&txt);
         }
     }
 
@@ -273,7 +273,7 @@ impl InputField {
     pub fn cut_selection(&mut self) {
         if let Some((s, e)) = self.selection_range() {
             let txt: String = self.text.chars().skip(s).take(e - s).collect();
-            Self::set_clipboard(&txt);
+            crate::clipboard::set_clipboard_text(&txt);
             self.remove_range(s, e);
             self.anchor = None;
         }
@@ -281,38 +281,16 @@ impl InputField {
 
     /// Paste text from the system clipboard at the cursor, replacing the
     /// selection if one is active.
-    pub fn paste_clipboard(&mut self) {
-        if let Some(text) = Self::get_clipboard() {
+    pub fn paste_text_from_clipboard(&mut self) {
+        if let Some(text) = crate::clipboard::get_clipboard_text() {
             let clean: String = text.chars().filter(|&c| c != '\r').collect();
             self.insert_str(&clean);
         }
     }
 
-    // ── Clipboard helpers (same implementation as App) ────────────────────
-
-    #[cfg(target_os = "linux")]
-    fn get_clipboard() -> Option<String> {
-        arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut cb| cb.get_text().ok())
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn get_clipboard() -> Option<String> {
-        arboard::Clipboard::new()
-            .ok()
-            .and_then(|mut cb| cb.get_text().ok())
-    }
-
-    #[cfg(target_os = "linux")]
-    fn set_clipboard(text: &str) {
-        use arboard::SetExtLinux;
-        let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set().wait().text(text.to_string()));
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn set_clipboard(text: &str) {
-        let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text));
+    /// Backwards-compatible alias for [`Self::paste_text_from_clipboard`].
+    pub fn paste_clipboard(&mut self) {
+        self.paste_text_from_clipboard();
     }
 
     // ── Key event handler ───────────────────────────────────────────────

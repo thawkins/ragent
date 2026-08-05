@@ -1136,6 +1136,89 @@ fn test_provider_setup_paste_text_into_key_field() {
     }
 }
 
+#[test]
+fn test_telemetry_setup_context_menu_paste_writes_active_field() {
+    use ragent_tui::app::{ContextAction, ContextMenuState, SelectionPane};
+    use ragent_tui::clipboard::set_clipboard_text_sync;
+
+    let mut app = make_app();
+    let endpoint_field = ragent_tui::input_field::InputField::new();
+    let interval_field = ragent_tui::input_field::InputField::new();
+    let timeout_field = ragent_tui::input_field::InputField::new();
+    let port_field = ragent_tui::input_field::InputField::new();
+    app.provider_setup = Some(ProviderSetupStep::TelemetrySetup {
+        endpoint_field,
+        protocol: ragent_config::telemetry::OtelProtocol::Http,
+        interval_field,
+        timeout_field,
+        port_field,
+        active_field: 0,
+        error: None,
+    });
+    app.context_menu = Some(ContextMenuState {
+        x: 0,
+        y: 0,
+        pane: SelectionPane::Input,
+        selected: 2,
+        items: vec![
+            (ContextAction::Cut, false),
+            (ContextAction::Copy, false),
+            (ContextAction::Paste, true),
+        ],
+    });
+
+    set_clipboard_text_sync("http://otel:4318").expect("clipboard write");
+    app.execute_context_action(ContextAction::Paste);
+
+    match app.provider_setup.as_ref().expect("provider setup present") {
+        ProviderSetupStep::TelemetrySetup { endpoint_field, .. } => {
+            assert_eq!(endpoint_field.text(), "http://otel:4318");
+            assert_eq!(endpoint_field.cursor(), 16);
+        }
+        _ => panic!("expected TelemetrySetup"),
+    }
+    assert!(
+        app.context_menu.is_none(),
+        "context menu should be dismissed"
+    );
+}
+
+#[test]
+fn test_paste_text_replaces_keyboard_selection() {
+    let mut app = make_app();
+    app.input = "hello world".to_string();
+    app.input_cursor = 5;
+    app.kb_select_anchor = Some(0);
+
+    app.handle_paste_text("pasted");
+
+    assert_eq!(app.input, "pasted world");
+    assert_eq!(app.input_cursor, 6);
+    assert!(app.kb_select_anchor.is_none());
+}
+
+#[test]
+fn test_paste_text_replaces_mouse_selection() {
+    use ragent_tui::app::{SelectionPane, TextSelection};
+    use ratatui::layout::Rect;
+
+    let mut app = make_app();
+    app.input = "hello world".to_string();
+    app.input_cursor = 0;
+    app.kb_select_anchor = None;
+    app.input_area = Rect::new(0, 0, 12, 10);
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Input,
+        anchor: (2, 1),
+        endpoint: (8, 1),
+    });
+
+    app.handle_paste_text("pasted");
+
+    assert_eq!(app.input, "pastedworld");
+    assert!(app.text_selection.is_none());
+}
+
 // ── unknown command ─────────────────────────────────────────────────
 
 #[test]

@@ -1172,7 +1172,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT)
                 {
-                    target.paste_clipboard();
+                    target.paste_text_from_clipboard();
                 }
                 app.provider_setup = Some(ProviderSetupStep::EnterKey {
                     provider_id,
@@ -1193,22 +1193,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = None;
             }
             KeyCode::Char('c') => {
-                let code = user_code.clone();
-                std::thread::spawn(move || {
-                    let mut cb = match arboard::Clipboard::new() {
-                        Ok(cb) => cb,
-                        Err(_) => return,
-                    };
-                    #[cfg(target_os = "linux")]
-                    {
-                        use arboard::SetExtLinux;
-                        let _ = cb.set().wait().text(code);
-                    }
-                    #[cfg(not(target_os = "linux"))]
-                    {
-                        let _ = cb.set_text(code);
-                    }
-                });
+                crate::clipboard::set_clipboard_text(&user_code);
                 app.status = "✔ Device code copied to clipboard".to_string();
                 app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
                     flow,
