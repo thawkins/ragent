@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 0.1.0-beta.39
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.39.
+
 ## Version: 0.1.0-beta.38
 
 ### Added
