@@ -10,6 +10,16 @@
   - Added `test_edit_smoke.rs` automated smoke test (T-014) covering exact-match success and failure paths.
   - Added `EDITPLAN.md` and completion report `docs/reports/editplan-m1-completion.md` tracking milestones M1–M3.
 
+### Fixed
+
+- Fixed flaky TUI test `test_telemetry_setup_context_menu_paste_writes_active_field` that failed in GitHub Actions CI with `X11 server connection timed out`.
+  - Added a thread-local test-only clipboard override (`ClipboardTestOverrideGuard`) in `crates/ragent-tui/src/clipboard.rs` so paste tests can run on headless runners without a display server.
+  - Updated the telemetry paste test to use the override instead of writing to the real system clipboard.
+- Hardened YOLO-mode test isolation to remove parallel-test races in `test_alt_y_toggles_yolo_mode_and_status_bar_indicator` and `test_slash_yolo_toggles_and_persists`.
+  - `enter_temp_config_dir()` now primes a project-local `.ragent/ragent.json` with a known `yolo: false` state before toggling.
+  - Decoupled the in-memory YOLO flag from `Config::load()`; added `ragent_config::yolo::sync_from_config()` for explicit startup sync and called it from `src/main.rs`. This prevents unrelated config reloads from racing with an in-flight toggle during parallel tests.
+  - Updated `ragent-config/tests/test_yolo_persistence.rs` to call the new explicit sync helper.
+
 ### Changed
 
 - Incremented workspace version to 0.1.0-beta.38.

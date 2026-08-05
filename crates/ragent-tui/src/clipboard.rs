@@ -47,13 +47,61 @@ pub fn get_clipboard_image() -> Option<arboard::ImageData<'static>> {
         })
 }
 
+use std::cell::RefCell;
+
+thread_local! {
+    /// Thread-local test override for the system clipboard text.
+    ///
+    /// When set, [`get_clipboard_text`] returns this value on the same thread instead
+    /// of touching the real clipboard. This lets headless CI tests exercise paste
+    /// paths without a display server, and avoids cross-thread contamination when
+    /// tests run in parallel.
+    static CLIPBOARD_TEXT_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
 /// Read plain text from the system clipboard.
 ///
 /// Returns `None` if the clipboard is unavailable or does not contain text.
+/// During tests the result may be overridden via [`set_clipboard_text_test_override`].
 pub fn get_clipboard_text() -> Option<String> {
+    let override_text = CLIPBOARD_TEXT_OVERRIDE.with(|o| o.borrow().clone());
+    if let Some(text) = override_text {
+        return Some(text);
+    }
     arboard::Clipboard::new()
         .ok()
         .and_then(|mut cb| cb.get_text().ok())
+}
+
+/// Set (or clear) the thread-local test override for the system clipboard.
+///
+/// Use `Some(...)` to have [`get_clipboard_text`] return that value, or `None`
+/// to remove the override. Prefer [`ClipboardTestOverrideGuard`] for automatic
+/// cleanup.
+#[doc(hidden)]
+pub fn set_clipboard_text_test_override(text: Option<String>) {
+    CLIPBOARD_TEXT_OVERRIDE.with(|o| *o.borrow_mut() = text);
+}
+
+/// Guard that installs a thread-local clipboard override and clears it when
+/// dropped.
+///
+/// Use this in tests so the override is removed even if the test panics.
+#[doc(hidden)]
+pub struct ClipboardTestOverrideGuard;
+
+impl ClipboardTestOverrideGuard {
+    /// Install `text` as the clipboard override for the current thread.
+    pub fn new(text: impl Into<String>) -> Self {
+        set_clipboard_text_test_override(Some(text.into()));
+        Self
+    }
+}
+
+impl Drop for ClipboardTestOverrideGuard {
+    fn drop(&mut self) {
+        set_clipboard_text_test_override(None);
+    }
 }
 
 /// Synchronous, deterministic version of [`get_clipboard_text`] used by tests.

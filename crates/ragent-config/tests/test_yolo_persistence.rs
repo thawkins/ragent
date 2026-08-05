@@ -30,6 +30,7 @@ fn test_yolo_round_trips_through_config() {
     let config = Config::load().expect("load config");
 
     assert!(config.yolo);
+    ragent_config::yolo::sync_from_config();
     assert!(ragent_config::yolo::is_enabled());
 }
 

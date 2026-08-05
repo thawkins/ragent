@@ -135,7 +135,12 @@ fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
 fn enter_temp_config_dir() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("tempdir");
     std::env::set_current_dir(temp.path()).expect("set cwd");
-    std::fs::create_dir_all(temp.path().join(".ragent")).expect("create .ragent");
+    let ragent_dir = temp.path().join(".ragent");
+    std::fs::create_dir_all(&ragent_dir).expect("create .ragent");
+    // Prime a project-local config with a known YOLO state so persistence tests
+    // do not race on Config::load's default-config creation path.
+    std::fs::write(ragent_dir.join("ragent.json"), r#"{"yolo": false}"#)
+        .expect("write project config");
     temp
 }
 
@@ -1139,7 +1144,7 @@ fn test_provider_setup_paste_text_into_key_field() {
 #[test]
 fn test_telemetry_setup_context_menu_paste_writes_active_field() {
     use ragent_tui::app::{ContextAction, ContextMenuState, SelectionPane};
-    use ragent_tui::clipboard::set_clipboard_text_sync;
+    use ragent_tui::clipboard::ClipboardTestOverrideGuard;
 
     let mut app = make_app();
     let endpoint_field = ragent_tui::input_field::InputField::new();
@@ -1167,7 +1172,9 @@ fn test_telemetry_setup_context_menu_paste_writes_active_field() {
         ],
     });
 
-    set_clipboard_text_sync("http://otel:4318").expect("clipboard write");
+    // Avoid requiring a real display server in headless CI; drive the paste
+    // path with a thread-local test-only clipboard override.
+    let _guard = ClipboardTestOverrideGuard::new("http://otel:4318");
     app.execute_context_action(ContextAction::Paste);
 
     match app.provider_setup.as_ref().expect("provider setup present") {

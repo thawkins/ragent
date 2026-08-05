@@ -55,11 +55,24 @@ pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Load the current config and update the runtime YOLO flag from its value.
+///
+/// This is intentionally separate from [`Config::load`](crate::config::Config::load)
+/// so that config reloads used only to read settings do not race with an in-flight
+/// toggle in multi-threaded contexts (e.g. parallel tests).
+pub fn sync_from_config() {
+    let enabled = crate::config::Config::load()
+        .map(|c| c.yolo)
+        .unwrap_or_default();
+    set_enabled(enabled);
+}
+
 /// Toggle YOLO mode, persist the new state, and return it.
 ///
 /// This is the recommended path for UI toggles (`Alt+Y`, `/yolo`) because
-/// `Config::load()` syncs the runtime flag from the saved config value.  Using
-/// plain [`toggle()`] would change the flag only until the next config reload.
+/// `Config::load()` no longer syncs the runtime flag automatically. Using
+/// plain [`toggle()`] would change the flag only until the next explicit sync
+/// or persistence call.
 pub fn toggle_persist() -> anyhow::Result<bool> {
     let new_state = !is_enabled();
     persist_yolo(new_state)?;

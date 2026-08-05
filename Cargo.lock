@@ -5435,6 +5435,7 @@ dependencies = [
  "futures",
  "parking_lot",
  "ragent-agent",
+ "ragent-config",
  "ragent-llm",
  "ragent-research",
  "ragent-server",

@@ -25,6 +25,7 @@ use ragent_agent::{
     telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
+use ragent_config::yolo::sync_from_config;
 
 mod cli;
 
@@ -345,6 +346,11 @@ async fn main() -> Result<()> {
         Config::load()?
     };
     startup.record("Config load", t0.elapsed());
+    // Keep the in-memory YOLO flag in sync with the loaded config. This is done
+    // explicitly here rather than inside Config::load so that config reloads
+    // triggered elsewhere do not race with an in-flight toggle in multi-threaded
+    // contexts (e.g. parallel tests).
+    sync_from_config();
     tracing::info!("Configuration loaded successfully");
 
     let auto_extract_config = config.memory.auto_extract.clone();

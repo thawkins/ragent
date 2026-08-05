@@ -134,6 +134,7 @@ unsafe_code = "deny"
 [workspace.dependencies]
 # ── Internal crates ───────────────────────────────────────────────────────
 ragent-agent = { path = "crates/ragent-agent" }
+ragent-config = { path = "crates/ragent-config" }
 ragent-llm = { path = "crates/ragent-llm" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
@@ -287,6 +288,7 @@ opt-level = "z"
 
 [dependencies]
 ragent-agent = { workspace = true }
+ragent-config = { workspace = true }
 ragent-llm = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }

@@ -1209,9 +1209,6 @@ impl Config {
             config = Self::merge(config, overlay);
         }
 
-        // Sync the in-memory YOLO flag with the loaded config value.
-        crate::yolo::set_enabled(config.yolo);
-
         Ok(config)
     }
 
