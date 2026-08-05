@@ -1,5 +1,17 @@
 # Changelog
 
+## Version: 0.1.0-beta.41
+
+### Fixed
+
+- Fixed CI failures after the v0.1.0-beta.40 release:
+  - Restored pub(crate) visibility in ragent-tui/src/app/helpers.rs and added #![allow(clippy::redundant_pub_crate)] so it passes both the -D unreachable_pub dead-code lint and Clippy.
+  - Added RUSTSEC-2026-0235 (rkyv) to deny.toml and .github/workflows/security-audit.yml ignores, matching existing transitive-dependency treatment.
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.41.
+
 ## Version: 0.1.0-beta.40
 
 ### Fixed

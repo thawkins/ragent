@@ -1,19 +1,23 @@
 //! Free-standing helper functions for the TUI app module.
+// Clippy complains about `pub(crate)` inside this private module, but CI's
+// dead-code lint runs with `-D unreachable_pub`, so `pub` items here fail CI.
+// Keep `pub(crate)` and suppress the clippy nursery lint.
+#![allow(clippy::redundant_pub_crate)]
 
 #[derive(Debug, Clone, Copy)]
-pub struct MentionSpan {
-    pub at_start: usize,
-    pub token_start: usize,
-    pub token_end: usize,
+pub(crate) struct MentionSpan {
+    pub(crate) at_start: usize,
+    pub(crate) token_start: usize,
+    pub(crate) token_end: usize,
 }
 
 impl MentionSpan {
-    pub fn query<'a>(&self, input: &'a str) -> &'a str {
+    pub(crate) fn query<'a>(&self, input: &'a str) -> &'a str {
         &input[self.token_start..self.token_end]
     }
 }
 
-pub fn try_extract_research_code_block(text: &str) -> Option<String> {
+pub(crate) fn try_extract_research_code_block(text: &str) -> Option<String> {
     if !text.starts_with("From: /") {
         return None;
     }
@@ -31,7 +35,7 @@ pub fn try_extract_research_code_block(text: &str) -> Option<String> {
     Some(format!("{}\n\n{}", prefix.trim_end(), body))
 }
 
-pub fn parse_swarm_args(args: &str) -> (String, Option<String>) {
+pub(crate) fn parse_swarm_args(args: &str) -> (String, Option<String>) {
     let mut agent_type: Option<String> = None;
     let mut parts = Vec::new();
     let mut tokens = args.split_whitespace().peekable();
@@ -48,12 +52,12 @@ pub fn parse_swarm_args(args: &str) -> (String, Option<String>) {
     (prompt, agent_type)
 }
 
-pub fn short_session_id(session_id: &str) -> String {
+pub(crate) fn short_session_id(session_id: &str) -> String {
     let start = session_id.len().saturating_sub(8);
     session_id[start..].to_string()
 }
 
-pub fn summarise_error(raw: &str) -> String {
+pub(crate) fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
     let cleaned = raw.trim().strip_prefix("LLM call failed: ").unwrap_or(raw);
@@ -76,7 +80,7 @@ pub fn summarise_error(raw: &str) -> String {
     }
 }
 
-pub fn is_discovery_notice(message: &str) -> bool {
+pub(crate) fn is_discovery_notice(message: &str) -> bool {
     message.starts_with("📋 Instruction File Discovery")
 }
 
