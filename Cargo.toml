@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -36,6 +36,9 @@ assets = [
     { source = "LICENSE", dest = "/usr/share/doc/ragent/LICENSE", mode = "644" },
     { source = "CHANGELOG.md", dest = "/usr/share/doc/ragent/CHANGELOG.md", mode = "644" },
 ]
+
+[package.metadata.wix]
+upgrade-guid = "C2B8F5A0-3F6C-4B9E-9C7D-1E8A4F2B5D6A"
 
 [workspace.lints.clippy]
 # Groups must have higher priority than individual overrides

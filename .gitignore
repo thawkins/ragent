@@ -20,6 +20,9 @@ Thumbs.db
 # Temporary build artifacts
 target/temp/
 
+# Generated WiX installer sources
+/wix/
+
 # Coverage artifacts
 *.profraw
 default.profraw

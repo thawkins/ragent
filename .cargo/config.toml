@@ -1,3 +1,9 @@
 # Build environment configuration for ragent.
-# No special environment variables are required; callm is pure Rust and
+# No special environment variables are required; ragent is pure Rust and
 # does not use bindgen or LLVM.
+
+# Statically link the Microsoft C runtime on Windows so the installed binary
+# runs without requiring the Visual C++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+

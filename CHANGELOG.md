@@ -1,5 +1,20 @@
 # Changelog
 
+## Version: 1.0.3
+
+### Added
+
+- Windows x86_64 build and `.msi` installer packaging added to the release pipeline (`.github/workflows/release.yml`).
+  - New `build-windows` job builds `ragent.exe` and creates a WiX-based MSI.
+  - Release job now combines Linux and Windows artifacts for GitHub Releases.
+  - Added `[package.metadata.wix]` section in `Cargo.toml` with a stable upgrade GUID.
+  - Added Windows MSVC static C-runtime flags in `.cargo/config.toml` so the installed binary does not require the VC++ redistributable.
+  - Added `/wix/` to `.gitignore` for generated WiX source files.
+
+### Changed
+
+- Incremented workspace version to 1.0.3.
+
 ## Version: 1.0.2
 
 ### Changed

@@ -12,19 +12,24 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build-linux:
     name: Build - Linux-x86_64
     runs-on: ubuntu-latest
+
+    outputs:
+      version: ${{ steps.set-asset.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set asset name
+        id: set-asset
         shell: bash
         run: |
           echo "ASSET_NAME=ragent-${{ github.ref_name }}-linux-x86_64" >> "$GITHUB_ENV"
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Install system dependencies
         run: |
@@ -58,11 +63,86 @@ jobs:
         run: |
           cargo generate-rpm --target x86_64-unknown-linux-gnu --output "ragent-${{ github.ref_name }}-linux-x86_64.rpm"
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragent-${{ github.ref_name }}-linux-x86_64
+          path: |
+            ${{ env.ASSET_NAME }}
+            *.deb
+            *.rpm
+          if-no-files-found: error
+
+  build-windows:
+    name: Build - Windows-x86_64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set asset name
+        shell: bash
+        run: |
+          echo "ASSET_NAME=ragent-${{ github.ref_name }}-windows-x86_64.exe" >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        run: |
+          cargo build --release --target x86_64-pc-windows-msvc
+          cp "target/x86_64-pc-windows-msvc/release/ragent.exe" "$env:ASSET_NAME"
+        shell: powershell
+
+      - name: Install WiX packaging tool
+        run: cargo install cargo-wix
+
+      - name: Create WiX source files and build .msi package
+        run: |
+          cargo wix init --no-build
+          cargo wix --no-build --target x86_64-pc-windows-msvc --output "ragent-${{ github.ref_name }}-windows-x86_64.msi"
+        shell: powershell
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ragent-${{ github.ref_name }}-windows-x86_64
+          path: |
+            ${{ env.ASSET_NAME }}
+            *.msi
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs:
+      - build-linux
+      - build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ragent-${{ github.ref_name }}-linux-x86_64
+          path: linux
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ragent-${{ github.ref_name }}-windows-x86_64
+          path: windows
+
       - name: Extract release notes from CHANGELOG.md
         id: changelog
         shell: bash
         run: |
-          version="${{ env.VERSION }}"
+          version="${{ needs.build-linux.outputs.version }}"
           python3 -c '
           import re, sys
           ver = sys.argv[1]
@@ -78,24 +158,13 @@ jobs:
             echo "No CHANGELOG section found for version $version; release body will be empty."
           fi
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ragent-${{ github.ref_name }}-linux-x86_64
-          path: |
-            ${{ env.ASSET_NAME }}
-            *.deb
-            *.rpm
-          if-no-files-found: error
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.md
           files: |
-            ${{ env.ASSET_NAME }}
-            *.deb
-            *.rpm
+            linux/*
+            windows/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
