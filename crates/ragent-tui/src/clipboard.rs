@@ -4,18 +4,30 @@
 //! saving raw RGBA clipboard image data to a PNG temp file.  All TUI clipboard
 //! operations should route through these helpers so behaviour (e.g. the Linux
 //! `wait()` threading workaround) lives in a single place.
+//!
+//! # Clipboard image lifecycle
+//!
+//! Pasted images are persisted under `<cwd>/target/temp/` as `ragent_paste_*.png`
+//! so they stay inside the project tree and are already covered by `.gitignore`.
+//! On Unix the files are created with mode `0o600`.  On TUI startup any orphaned
+//! `ragent_paste_*.png` files in that directory that are older than
+//! [`CLIPBOARD_TEMP_MAX_AGE`] are removed.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Result;
 use arboard::ImageData;
-use image::{ImageBuffer, Rgba};
+use image::{ExtendedColorType, ImageEncoder};
 
 /// Maximum raw pixel buffer size we accept from the clipboard (50 MB).
 const MAX_CLIPBOARD_IMAGE_BYTES: usize = 50 * 1024 * 1024;
 
 /// Maximum dimension (width or height) we accept from the clipboard.
 const MAX_CLIPBOARD_IMAGE_DIM: u32 = 16_384;
+
+/// Orphaned clipboard temp files older than this are pruned on TUI startup.
+pub const CLIPBOARD_TEMP_MAX_AGE: Duration = Duration::from_hours(24);
 
 /// Read raw image data from the system clipboard.
 ///
@@ -112,8 +124,90 @@ where
     f(cb)
 }
 
+/// Return the project `target/temp/` directory, creating it if necessary.
+///
+/// Falls back to the OS temp directory if the project directory cannot be
+/// created (for example, when running outside a writable project tree).
+pub fn project_temp_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let dir = cwd.join("target").join("temp");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!(path=%dir.display(), error=%e, "failed to create project temp dir; falling back to OS temp");
+        return std::env::temp_dir();
+    }
+    dir
+}
+
+/// Delete orphaned `ragent_paste_*.png` files in the project temp directory that
+/// are older than `max_age`.
+///
+/// Returns the number of files removed.  Errors for individual files are logged
+/// and do not abort the scan.
+pub fn prune_clipboard_temp_files(max_age: Duration) -> std::io::Result<usize> {
+    prune_clipboard_temp_files_in(&project_temp_dir(), max_age)
+}
+
+/// Delete orphaned `ragent_paste_*.png` files in `dir` that are older than
+/// `max_age`.
+///
+/// This is the testable implementation; [`prune_clipboard_temp_files`] uses the
+/// project `target/temp/` directory.
+pub fn prune_clipboard_temp_files_in(
+    dir: &std::path::Path,
+    max_age: Duration,
+) -> std::io::Result<usize> {
+    let mut removed = 0usize;
+    let now = std::time::SystemTime::now();
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::debug!(path=%dir.display(), error=%e, "cannot read clipboard temp dir");
+            return Ok(0);
+        }
+    };
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name_str) = name.to_str() else {
+            continue;
+        };
+        if !name_str.starts_with("ragent_paste_")
+            || !name_str.to_ascii_lowercase().ends_with(".png")
+        {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(path=%entry.path().display(), error=%e, "cannot stat clipboard temp file");
+                continue;
+            }
+        };
+        let modified = match meta.modified() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(path=%entry.path().display(), error=%e, "cannot read modification time");
+                continue;
+            }
+        };
+        let age = now.duration_since(modified).unwrap_or(Duration::ZERO);
+        if age < max_age {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(entry.path()) {
+            tracing::warn!(path=%entry.path().display(), error=%e, "failed to remove orphaned clipboard temp file");
+        } else {
+            removed += 1;
+            tracing::debug!(path=%entry.path().display(), age=?age, "removed orphaned clipboard temp file");
+        }
+    }
+
+    Ok(removed)
+}
+
 /// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a
-/// securely-created temp file.
+/// securely-created temp file under `target/temp/`.
 ///
 /// Returns the path of the written file.  The file is persisted (not
 /// auto-deleted) so the caller can attach it to a message.
@@ -142,18 +236,38 @@ pub fn clipboard_image_to_temp(img_data: &ImageData<'_>) -> Result<PathBuf> {
         );
     }
 
-    let bytes = img_data.bytes.as_ref().to_vec();
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, bytes)
-        .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions mismatch pixel buffer"))?;
+    // Encode directly from the borrowed pixel buffer to avoid a `to_vec()` copy.
+    // We must still validate that the buffer size matches the declared dimensions
+    // before handing it to the PNG encoder.
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions overflow"))?;
+    if buf_len != expected {
+        anyhow::bail!("clipboard image dimensions mismatch pixel buffer");
+    }
 
-    // Create a secure temporary file (O_EXCL, restrictive permissions).
+    let temp_dir = project_temp_dir();
     let tmp_file = tempfile::Builder::new()
         .prefix("ragent_paste_")
         .suffix(".png")
-        .tempfile()
+        .tempfile_in(&temp_dir)
         .map_err(|e| anyhow::anyhow!("failed to create secure temp file: {e}"))?;
 
-    img.save(tmp_file.path())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = tmp_file.as_file().metadata()?;
+        let mut perms = meta.permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(tmp_file.path(), perms)?;
+    }
+
+    let mut file = tmp_file.as_file();
+    let encoder = image::codecs::png::PngEncoder::new(&mut file);
+    encoder
+        .write_image(&img_data.bytes, width, height, ExtendedColorType::Rgba8)
+        .map_err(|e| anyhow::anyhow!("failed to encode clipboard image: {e}"))?;
 
     // Prevent auto-deletion — the caller owns the file lifecycle.
     let path = tmp_file

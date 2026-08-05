@@ -59,6 +59,7 @@ telemetry = []
 tempfile = "3.5"
 criterion = { workspace = true }
 parking_lot = { workspace = true }
+filetime = "0.2"
 
 [[bench]]
 name = "bench_markdown"

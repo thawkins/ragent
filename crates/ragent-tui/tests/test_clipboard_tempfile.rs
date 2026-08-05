@@ -152,6 +152,27 @@ fn test_save_clipboard_image_creates_file() {
         "file should have .png extension"
     );
 
+    // Must live under the project's target/temp/ directory.
+    let cwd = std::env::current_dir().expect("current dir");
+    let expected_parent = cwd.join("target").join("temp");
+    assert!(
+        path.strip_prefix(&expected_parent).is_ok(),
+        "temp file should be under {} (got {})",
+        expected_parent.display(),
+        path.display()
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::metadata(&path).unwrap().permissions();
+        assert_eq!(
+            perms.mode() & 0o777,
+            0o600,
+            "clipboard temp file should be readable only by owner"
+        );
+    }
+
     // Verify the file starts with a PNG magic number.
     let header = std::fs::read(&path).unwrap();
     assert!(header.len() >= 8);
@@ -163,7 +184,7 @@ fn test_save_clipboard_image_creates_file() {
 
 #[test]
 fn test_save_clipboard_image_unique_paths() {
-    let pixels: Vec<u8> = vec![0u8; 4 * 4]; // 1×1 RGBA
+    let pixels: Vec<u8> = vec![0u8; 4]; // 1×1 RGBA
     let img = arboard::ImageData {
         width: 1,
         height: 1,
@@ -234,6 +255,52 @@ fn test_save_clipboard_image_dimension_mismatch() {
         msg.contains("mismatch"),
         "error should mention mismatch: {msg}"
     );
+}
+
+// =========================================================================
+// prune_clipboard_temp_files
+// =========================================================================
+
+#[test]
+fn test_prune_clipboard_temp_files_removes_old_files() {
+    use ragent_tui::clipboard::prune_clipboard_temp_files_in;
+    use std::io::Write;
+    use std::time::{Duration, SystemTime};
+
+    let dir = tempfile::tempdir().unwrap().keep();
+    let path = dir.join("ragent_paste_prune_old.png");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"fake").unwrap();
+    }
+
+    // Set modification time far in the past so the file is considered orphaned.
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+    filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(old)).unwrap();
+
+    let removed = prune_clipboard_temp_files_in(&dir, Duration::from_mins(1)).unwrap();
+    assert!(!path.exists(), "orphaned file should be removed");
+    assert_eq!(removed, 1, "pruner should report one removed file");
+}
+
+#[test]
+fn test_prune_clipboard_temp_files_keeps_recent_files() {
+    use ragent_tui::clipboard::prune_clipboard_temp_files_in;
+    use std::io::Write;
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().unwrap().keep();
+    let path = dir.join("ragent_paste_keep_recent.png");
+    {
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"fake").unwrap();
+    }
+
+    let removed = prune_clipboard_temp_files_in(&dir, Duration::from_hours(1)).unwrap();
+    assert!(path.exists(), "recent file should be kept");
+    assert_eq!(removed, 0, "pruner should not remove recent files");
+
+    let _ = std::fs::remove_file(&path);
 }
 
 // =========================================================================

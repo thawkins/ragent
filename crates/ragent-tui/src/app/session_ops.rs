@@ -1346,7 +1346,8 @@ impl App {
 
     /// Paste an image (or image file path) from the clipboard into the pending
     /// attachments. Checks the text clipboard first for a `file://` URI or
-    /// path, then falls back to raw pixel data which is saved to `target/temp`.
+    /// path, then falls back to raw pixel data which is saved to
+    /// `target/temp/` with restrictive permissions.
     pub fn paste_image_from_clipboard(&mut self) {
         // --- Phase 1: look for a file reference in the text clipboard ---
         if let Some(text) = Self::get_clipboard() {

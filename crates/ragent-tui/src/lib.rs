@@ -217,12 +217,15 @@ pub async fn run_tui(
     );
     let app_new_elapsed = t0.elapsed();
 
+    // Clean up orphaned clipboard image temp files before the session starts.
+    // This is a one-time, best-effort sweep; individual errors are logged.
+    let _ = crate::clipboard::prune_clipboard_temp_files(crate::clipboard::CLIPBOARD_TEMP_MAX_AGE);
+
     // Merge sub-stages recorded inside App::new() into the main timings.
     if let Some(ref mut app_sub) = app.startup_timings {
         startup.merge_stages(app_sub);
     }
     startup.record("App::new() (total)", app_new_elapsed);
-
     // Attach the event bus to providers that publish lifecycle events
     // (e.g. local model download progress).
     provider_registry.set_event_bus_all(Some(event_bus.clone()));
