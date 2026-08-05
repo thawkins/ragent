@@ -75,9 +75,11 @@ fn test_disabled_subsystem_has_no_instruments() {
 #[cfg(feature = "telemetry")]
 #[test]
 fn test_disabled_with_endpoint_still_no_provider() {
-    let mut config = OtelConfig::default();
-    config.enabled = false;
-    config.endpoint = "http://localhost:4318".to_string();
+    let config = OtelConfig {
+        enabled: false,
+        endpoint: "http://localhost:4318".to_string(),
+        ..Default::default()
+    };
 
     let sub = TelemetrySubsystem::new(config).expect("disabled subsystem");
     assert_eq!(sub.state(), TelemetryState::Disabled);
@@ -230,9 +232,11 @@ mod disabled_zero_traffic {
     /// instruments (AC-2).
     #[test]
     fn test_disabled_from_config_instruments_is_none() {
-        let mut config = OtelConfig::default();
-        config.enabled = false;
-        config.endpoint = "http://localhost:4318".to_string();
+        let config = OtelConfig {
+            enabled: false,
+            endpoint: "http://localhost:4318".to_string(),
+            ..Default::default()
+        };
 
         let sub = TelemetrySubsystem::new(config).expect("disabled subsystem");
         assert!(sub.instruments().is_none());

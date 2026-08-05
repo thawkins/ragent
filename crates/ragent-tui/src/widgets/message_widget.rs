@@ -16,6 +16,7 @@ use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use crate::theme;
 
 /// Helper to build a ternary for pluralization (e.g., "1 item" vs "2 items").
+/// Return the singular or plural form based on `count`.
 pub fn pluralize(count: usize, singular: &str, plural: &str) -> String {
     if count == 1 {
         format!("{} {}", count, singular)
@@ -77,6 +78,7 @@ fn summarize_tool_args(input: &serde_json::Value, max_str_len: usize) -> String 
 }
 
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
+/// Capitalise the first letter of a tool name, leaving the rest unchanged.
 pub fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();
     match chars.next() {
@@ -146,6 +148,8 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 ///   github_comment_issue, github_close_issue, github_list_prs,
 ///   github_get_pr, github_create_pr, github_merge_pr, github_review_pr
 /// - ✨ Utility: format, metadata, truncate, read_line_range
+///
+/// Summarise a tool's input for display in the TUI log panel.
 pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
     // Resolve alias tool names to their canonical equivalents so aliases get
     // the same rich display as canonical tools.

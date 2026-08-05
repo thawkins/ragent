@@ -30,8 +30,10 @@ fn test_disabled_subsystem_has_zero_overhead() {
 
 #[test]
 fn test_enabled_without_feature_errors_gracefully() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
+    let config = OtelConfig {
+        enabled: true,
+        ..Default::default()
+    };
 
     #[cfg(not(feature = "telemetry"))]
     {

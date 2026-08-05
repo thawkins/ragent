@@ -75,7 +75,7 @@ async fn test_bg_service_notify_fires_on_completion() {
         .expect("spawn");
 
     // The notify should fire once the task completes. Await with a timeout.
-    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(10), notify.notified())
+    tokio::time::timeout(tokio::time::Duration::from_secs(10), notify.notified())
         .await
         .expect("notify should fire before timeout");
 

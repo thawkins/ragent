@@ -30,9 +30,11 @@ fn build_subsystem() -> (
     InMemoryMetricExporter,
     tokio::runtime::Runtime,
 ) {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let exporter = InMemoryMetricExporter::default();

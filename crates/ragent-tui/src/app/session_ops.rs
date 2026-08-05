@@ -229,35 +229,35 @@ impl App {
     }
 
     /// Set the status line to an informational message and record it in history.
-    pub fn set_status_info(&mut self, message: impl Into<String>) {
+    pub(crate) fn set_status_info(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Info.format(&msg);
         self.status_history.push(StatusMessage::info(msg));
     }
 
     /// Set the status line to a success message and record it in history.
-    pub fn set_status_success(&mut self, message: impl Into<String>) {
+    pub(crate) fn set_status_success(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Success.format(&msg);
         self.status_history.push(StatusMessage::success(msg));
     }
 
     /// Set the status line to a warning message and record it in history.
-    pub fn set_status_warning(&mut self, message: impl Into<String>) {
+    pub(crate) fn set_status_warning(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Warning.format(&msg);
         self.status_history.push(StatusMessage::warning(msg));
     }
 
     /// Set the status line to an error message and record it in history.
-    pub fn set_status_error(&mut self, message: impl Into<String>) {
+    pub(crate) fn set_status_error(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Error.format(&msg);
         self.status_history.push(StatusMessage::error(msg));
     }
 
     /// Set the status line to a working/in-progress message and record it in history.
-    pub fn set_status_working(&mut self, message: impl Into<String>) {
+    pub(crate) fn set_status_working(&mut self, message: impl Into<String>) {
         let msg = message.into();
         self.status = StatusCategory::Working.format(&msg);
         self.status_history.push(StatusMessage::working(msg));
@@ -265,7 +265,7 @@ impl App {
 
     /// Return whether user input is currently blocked (agent is processing,
     /// compression is running, or a post-compact send is pending).
-    pub fn is_input_blocked(&self) -> bool {
+    pub(crate) fn is_input_blocked(&self) -> bool {
         self.is_processing
             || self.compact_in_progress
             || self.auto_compact_in_progress
@@ -500,7 +500,7 @@ impl App {
 
     /// Return the byte offset in `self.input` corresponding to the current
     /// cursor character index.
-    pub fn cursor_byte_pos(&self) -> usize {
+    pub(crate) fn cursor_byte_pos(&self) -> usize {
         self.cursor_byte_pos_at_char_index(self.input_cursor)
     }
 
@@ -625,7 +625,7 @@ impl App {
 
     /// Return the `(start, end)` character range of the current keyboard
     /// selection, or `None` when the anchor and cursor coincide.
-    pub fn kb_selection_char_range(&self) -> Option<(usize, usize)> {
+    pub(crate) fn kb_selection_char_range(&self) -> Option<(usize, usize)> {
         let anchor = self.kb_select_anchor?;
         let cursor = self.input_cursor;
         if anchor == cursor {
@@ -704,13 +704,13 @@ impl App {
     }
 
     /// Set the active code index handle and trigger stats refresh.
-    pub fn set_code_index(&mut self, code_index: Option<Arc<ragent_codeindex::CodeIndex>>) {
+    pub(crate) fn set_code_index(&mut self, code_index: Option<Arc<ragent_codeindex::CodeIndex>>) {
         self.code_index = code_index;
     }
 
     /// Refresh cached code-index stats (file/symbol counts and busy flag)
     /// on a throttled interval (1s while busy, 5s otherwise).
-    pub fn refresh_code_index_stats(&mut self) {
+    pub(crate) fn refresh_code_index_stats(&mut self) {
         let interval = if self.code_index_busy {
             std::time::Duration::from_secs(1)
         } else {
@@ -752,7 +752,7 @@ impl App {
     }
 
     /// Refresh cached structured-memory stats on a throttled 5s interval.
-    pub fn refresh_memory_stats(&mut self) {
+    pub(crate) fn refresh_memory_stats(&mut self) {
         if self.memory_stats_last_refresh.elapsed() < std::time::Duration::from_secs(5) {
             return;
         }
@@ -768,7 +768,7 @@ impl App {
         });
     }
     /// Map the primary session's short id to the current agent name for log display.
-    pub fn register_primary_session_mapping(&mut self) {
+    pub(crate) fn register_primary_session_mapping(&mut self) {
         if let Some(ref sid) = self.session_id {
             let short_sid = short_session_id(sid);
             self.sid_to_display_name
@@ -778,7 +778,7 @@ impl App {
 
     /// Persist a discovered MCP server into `ragent.json`. Returns an error
     /// message when the server is already configured.
-    pub fn enable_discovered_mcp_server(
+    pub(crate) fn enable_discovered_mcp_server(
         &self,
         server: &DiscoveredMcpServer,
     ) -> Result<String, String> {
@@ -848,7 +848,7 @@ impl App {
     /// copying session ids, status, and current task ids so the UI reflects the
     /// authoritative persisted state. Also registers session_id → teammate
     /// name mappings for log display.
-    pub fn refresh_team_member_session_ids(&mut self) {
+    pub(crate) fn refresh_team_member_session_ids(&mut self) {
         let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
         };
@@ -1002,7 +1002,7 @@ impl App {
     /// Compute an [`LlmStatsSummary`] (averages of elapsed time, prompt and
     /// output tokens/sec) for samples belonging to the currently active model.
     /// Returns `None` when no samples are recorded for that model.
-    pub fn llm_stats_summary(&self) -> Option<LlmStatsSummary> {
+    pub(crate) fn llm_stats_summary(&self) -> Option<LlmStatsSummary> {
         let model_ref = self.active_model_ref_string()?;
         let samples: Vec<&LlmRequestStat> = self
             .llm_request_stats
@@ -1102,7 +1102,7 @@ impl App {
 
     /// Build the `"pct usedK/contextK"` context-window usage display, or
     /// `None` when no model context window is configured.
-    pub fn context_window_display(&self) -> Option<String> {
+    pub(crate) fn context_window_display(&self) -> Option<String> {
         let ctx_window = self.selected_model_context_window()?;
         let pct = (self.last_input_tokens as f32 / ctx_window as f32 * 100.0).min(100.0);
         Some(format!(
@@ -1536,7 +1536,7 @@ impl App {
 
     /// Push a log entry at the given level, tagging it with an optional agent id
     /// and the current session id.
-    pub fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
+    pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
         self.log_entries.push(LogEntry {
             timestamp: chrono::Utc::now(),
             level,
@@ -1547,7 +1547,7 @@ impl App {
     }
 
     /// Convenience wrapper for [`push_log`](Self::push_log) with no agent id.
-    pub fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
+    pub(crate) fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
         self.push_log(level, message, None);
     }
 

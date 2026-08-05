@@ -3,7 +3,7 @@
 //! The adapter lives in the agent crate so the TUI, HTTP server, and CLI can all
 //! build research sessions with the same web/local gathering wiring.
 
-pub use ragent_agent::research_adapter::*;
+pub(crate) use ragent_agent::research_adapter::*;
 
 use std::sync::Arc;
 
@@ -17,12 +17,12 @@ use ragent_agent::event::{Event, EventBus};
 /// [`ResearchProgress`](crate::research_progress::ResearchProgress) log list
 /// rendered in the message window.
 pub(crate) struct TuiResearchObserver {
-    pub app_event_bus: Arc<EventBus>,
-    pub session_id: String,
+    pub(crate) app_event_bus: Arc<EventBus>,
+    pub(crate) session_id: String,
     /// Research item name, captured at spawn time so progress events carry it.
-    pub name: String,
+    pub(crate) name: String,
     /// Research topic, captured at spawn time so progress events carry it.
-    pub topic: String,
+    pub(crate) topic: String,
 }
 
 impl ragent_research::SessionObserver for TuiResearchObserver {
@@ -42,10 +42,10 @@ impl ragent_research::SessionObserver for TuiResearchObserver {
 /// the configured provider, sending the system+user message pair, and collecting
 /// the streaming `TextDelta` events into a single `String`.
 pub(crate) struct RagentCompleter {
-    pub registry: Arc<ragent_agent::provider::ProviderRegistry>,
-    pub storage: Arc<ragent_agent::storage::Storage>,
-    pub provider_id: String,
-    pub model_id: String,
+    pub(crate) registry: Arc<ragent_agent::provider::ProviderRegistry>,
+    pub(crate) storage: Arc<ragent_agent::storage::Storage>,
+    pub(crate) provider_id: String,
+    pub(crate) model_id: String,
 }
 
 #[async_trait::async_trait]

@@ -61,13 +61,14 @@ fn build_subsystem(config: OtelConfig) -> TelemetrySubsystem {
 
 /// Build an `OtelConfig` with the given `resource_attributes`.
 fn config_with_resource_attrs(attrs: HashMap<String, String>) -> OtelConfig {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.export_interval_seconds = 3600;
-    config.resource_attributes = attrs;
-    config
+    OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        export_interval_seconds: 3600,
+        resource_attributes: attrs,
+        ..Default::default()
+    }
 }
 
 /// Build an in-memory provider with the resource attributes from the given

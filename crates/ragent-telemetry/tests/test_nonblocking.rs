@@ -40,16 +40,17 @@ use ragent_telemetry::{
 /// Build an `OtelConfig` pointing at an unreachable endpoint with a 1-second
 /// export timeout.
 fn unreachable_config() -> OtelConfig {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    // Port 1 is reserved and refuses connections immediately (ECONNREFUSED).
-    config.endpoint = "http://127.0.0.1:1".to_string();
-    config.protocol = OtelProtocol::Http;
-    // 1 second — the minimum allowed. Clamped by build_metric_exporter.
-    config.export_timeout_seconds = 1;
-    // Long interval so no background export fires during the test.
-    config.export_interval_seconds = 3600;
-    config
+    OtelConfig {
+        enabled: true,
+        // Port 1 is reserved and refuses connections immediately (ECONNREFUSED).
+        endpoint: "http://127.0.0.1:1".to_string(),
+        protocol: OtelProtocol::Http,
+        // 1 second — the minimum allowed. Clamped by build_metric_exporter.
+        export_timeout_seconds: 1,
+        // Long interval so no background export fires during the test.
+        export_interval_seconds: 3600,
+        ..Default::default()
+    }
 }
 
 // ── 1. Recording is non-blocking ──────────────────────────────────────────
@@ -424,9 +425,11 @@ fn test_noop_recorder_methods_never_panic() {
 /// An invalid endpoint returns an `Err` rather than panicking (FR-033).
 #[test]
 fn test_invalid_endpoint_returns_err_not_panic() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "not-a-url".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "not-a-url".to_string(),
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(result.is_err(), "invalid endpoint should error, not panic");
@@ -435,9 +438,11 @@ fn test_invalid_endpoint_returns_err_not_panic() {
 /// An empty endpoint returns an `Err` rather than panicking (FR-033).
 #[test]
 fn test_empty_endpoint_returns_err_not_panic() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = String::new();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: String::new(),
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(result.is_err(), "empty endpoint should error, not panic");
@@ -446,9 +451,11 @@ fn test_empty_endpoint_returns_err_not_panic() {
 /// A non-HTTP protocol endpoint returns an `Err` rather than panicking.
 #[test]
 fn test_non_http_endpoint_returns_err_not_panic() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "ftp://bad:1234".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "ftp://bad:1234".to_string(),
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(result.is_err(), "non-HTTP endpoint should error, not panic");

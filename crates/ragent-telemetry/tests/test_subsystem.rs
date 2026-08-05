@@ -24,8 +24,10 @@ fn test_new_disabled_from_config() {
 
 #[test]
 fn test_new_enabled_without_feature_returns_error() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
+    let config = OtelConfig {
+        enabled: true,
+        ..Default::default()
+    };
 
     #[cfg(not(feature = "telemetry"))]
     {
@@ -58,8 +60,10 @@ fn test_default_is_disabled() {
 
 #[test]
 fn test_config_accessor() {
-    let mut config = OtelConfig::default();
-    config.service_name = "test-agent".to_string();
+    let config = OtelConfig {
+        service_name: "test-agent".to_string(),
+        ..Default::default()
+    };
     let sub = TelemetrySubsystem::new(config).expect("disabled subsystem");
     assert_eq!(sub.config().service_name, "test-agent");
 }
@@ -77,9 +81,11 @@ fn test_debug_format_includes_state() {
 #[cfg(feature = "telemetry")]
 #[test]
 fn test_enabled_subsystem_has_provider() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        ..Default::default()
+    };
 
     // The PeriodicReader needs a Tokio runtime context.
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -94,9 +100,11 @@ fn test_enabled_subsystem_has_provider() {
 #[cfg(feature = "telemetry")]
 #[test]
 fn test_enabled_subsystem_shutdown_succeeds() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("enabled subsystem") });
@@ -107,9 +115,11 @@ fn test_enabled_subsystem_shutdown_succeeds() {
 #[cfg(feature = "telemetry")]
 #[test]
 fn test_invalid_endpoint_returns_error() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "ftp://bad".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "ftp://bad".to_string(),
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(result.is_err(), "invalid endpoint should error");
@@ -118,9 +128,11 @@ fn test_invalid_endpoint_returns_error() {
 #[cfg(feature = "telemetry")]
 #[test]
 fn test_empty_endpoint_returns_error() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = String::new();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: String::new(),
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(result.is_err(), "empty endpoint should error");
@@ -131,10 +143,12 @@ fn test_empty_endpoint_returns_error() {
 fn test_http_protocol_builds_successfully() {
     // FR-023: OTLP/HTTP exporter wiring must construct without error
     // when a valid HTTP endpoint is provided.
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = ragent_config::OtelProtocol::Http;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: ragent_config::OtelProtocol::Http,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async {
@@ -151,10 +165,12 @@ fn test_http_protocol_builds_successfully() {
 #[test]
 fn test_https_endpoint_builds_successfully() {
     // FR-023: HTTPS endpoints are also valid for OTLP/HTTP.
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "https://collector.example.com:4318".to_string();
-    config.protocol = ragent_config::OtelProtocol::Http;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "https://collector.example.com:4318".to_string(),
+        protocol: ragent_config::OtelProtocol::Http,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async {
@@ -169,10 +185,12 @@ fn test_grpc_protocol_builds_successfully() {
     // FR-024: OTLP/gRPC exporter wiring must construct without error
     // when a valid gRPC endpoint is provided. Tonic uses connect_lazy(),
     // so no actual connection is made at construction time.
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4317".to_string();
-    config.protocol = ragent_config::OtelProtocol::Grpc;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4317".to_string(),
+        protocol: ragent_config::OtelProtocol::Grpc,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async {
@@ -189,10 +207,12 @@ fn test_grpc_protocol_builds_successfully() {
 #[test]
 fn test_http_exporter_with_custom_endpoint() {
     // Verify the exporter uses the configured endpoint, not a default.
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://my-collector:9999".to_string();
-    config.protocol = ragent_config::OtelProtocol::Http;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://my-collector:9999".to_string(),
+        protocol: ragent_config::OtelProtocol::Http,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub =

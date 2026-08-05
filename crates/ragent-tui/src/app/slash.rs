@@ -735,7 +735,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         );
     }
 
-    pub(crate) fn execute_slash_command_inner(&mut self, raw: &str) {
+    pub fn execute_slash_command_inner(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
         self.input_cursor = 0;

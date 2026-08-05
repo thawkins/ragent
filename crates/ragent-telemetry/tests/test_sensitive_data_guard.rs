@@ -370,11 +370,13 @@ fn test_custom_resource_attribute_with_api_key_is_redacted() {
     );
     resource_attrs.insert("deployment.env".to_string(), "production".to_string());
 
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.resource_attributes = resource_attrs;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        resource_attributes: resource_attrs,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });

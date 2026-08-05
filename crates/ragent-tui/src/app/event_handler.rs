@@ -30,7 +30,7 @@ use crate::app::helpers::{is_discovery_notice, short_session_id, summarise_error
 impl App {
     /// Poll the pending swarm decomposition result and, if ready, render the
     /// team summary (or surface an error) into the chat log.
-    pub fn poll_pending_swarm(&mut self) {
+    pub(crate) fn poll_pending_swarm(&mut self) {
         let outcome = {
             let mut guard = match self.swarm_result.lock() {
                 Ok(g) => g,
@@ -2011,7 +2011,7 @@ impl App {
     /// Append assistant streaming text to the chat log, reusing the last
     /// assistant message when possible (and starting a new Text part after a
     /// tool call so ordering is preserved).
-    pub fn append_assistant_text(&mut self, text: &str) {
+    pub(crate) fn append_assistant_text(&mut self, text: &str) {
         let rendered = self.render_markdown_to_ascii(text);
         if !self.force_new_message {
             if let Some(last) = self.messages.last_mut()
@@ -2261,7 +2261,7 @@ impl App {
     /// as the next user turn. Clears the pending continue when the agent is
     /// busy, when autopilot is disabled, or when the task was already marked
     /// as completed by the agent (TaskCompleted consumed before or after us).
-    pub fn poll_autopilot_continue(&mut self) {
+    pub(crate) fn poll_autopilot_continue(&mut self) {
         if self.autopilot_continued_this_wake {
             return;
         }

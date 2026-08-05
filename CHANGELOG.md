@@ -12,6 +12,16 @@
 
 ### Fixed
 
+- Fixed GitHub Actions Clippy failures caused by the stable toolchain upgrading to Rust 1.97.0.
+  - Removed redundant `Arc::from(client)` wrapping and closure-style `Arc::clone` in `crates/ragent-agent/src/session/loop_steps.rs`.
+  - Replaced `needless_collect` and `filter().next()` patterns in `crates/ragent-agent/tests/inline/skill_loader.rs` with `!any(...)`.
+  - Removed `let _ =` on unit timeout await in `crates/ragent-agent/tests/test_bg_service.rs`.
+  - Switched single-character `contains` checks to `char` patterns in `crates/ragent-agent/tests/test_instruction_includes.rs`.
+  - Replaced `Default::default()` followed by field assignment with struct-expression initialization in `ragent-telemetry` tests and `src/instruments.rs`.
+  - Removed unnecessary `to_path_buf()` in `crates/ragent-tools-core/tests/test_open.rs`.
+  - Removed clone-to-slice in `crates/ragent-llm/src/providers/tool_cache.rs`.
+  - Added missing blank line before top-level doc comment in `crates/ragent-tui/src/widgets/message_widget.rs`.
+  - Restored public visibility for API symbols used by external integration tests (TUI `App` methods, `MessageWidget`, and message-widget helpers) that became private after a previous pub(crate) sweep.
 - Fixed flaky TUI test `test_telemetry_setup_context_menu_paste_writes_active_field` that failed in GitHub Actions CI with `X11 server connection timed out`.
   - Added a thread-local test-only clipboard override (`ClipboardTestOverrideGuard`) in `crates/ragent-tui/src/clipboard.rs` so paste tests can run on headless runners without a display server.
   - Updated the telemetry paste test to use the override instead of writing to the real system clipboard.

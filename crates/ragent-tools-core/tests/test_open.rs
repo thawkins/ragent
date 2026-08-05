@@ -37,12 +37,9 @@ async fn test_open_accepts_https_url() {
     let _tool = OpenTool;
     // We do not actually launch a browser in CI; just ensure validation passes
     // by checking the command builder.
-    let (program, args) = ragent_tools_core::open::build_command(
-        "https://example.com",
-        "url",
-        &tmp.path().to_path_buf(),
-    )
-    .expect("build_command");
+    let (program, args) =
+        ragent_tools_core::open::build_command("https://example.com", "url", tmp.path())
+            .expect("build_command");
     assert!(!program.is_empty());
     assert!(args.iter().any(|a| a.contains("example.com")));
 }
@@ -55,9 +52,8 @@ async fn test_open_reveals_parent_directory() {
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(&file, "fn main() {}\n").unwrap();
 
-    let (program, args) =
-        ragent_tools_core::open::build_command("src/main.rs", "reveal", &root.to_path_buf())
-            .expect("build_command");
+    let (program, args) = ragent_tools_core::open::build_command("src/main.rs", "reveal", root)
+        .expect("build_command");
 
     assert!(!program.is_empty());
     assert!(args.iter().any(|a| a.contains("src")));
@@ -71,8 +67,7 @@ async fn test_open_resolves_relative_path() {
     std::fs::write(&file, "# readme\n").unwrap();
 
     let (program, args) =
-        ragent_tools_core::open::build_command("readme.md", "open", &root.to_path_buf())
-            .expect("build_command");
+        ragent_tools_core::open::build_command("readme.md", "open", root).expect("build_command");
 
     assert!(!program.is_empty());
     assert!(args.iter().any(|a| a.contains("readme.md")));

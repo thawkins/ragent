@@ -91,10 +91,12 @@ fn test_default_export_interval_is_30_seconds() {
 /// A custom export interval is preserved in the config accessor.
 #[test]
 fn test_custom_export_interval_preserved() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.export_interval_seconds = 60;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        export_interval_seconds: 60,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });
@@ -267,9 +269,11 @@ fn test_flush_then_shutdown_succeeds() {
 /// panic (FR-031, FR-033: exporter errors must not crash the process).
 #[test]
 fn test_subsystem_flush_does_not_panic_without_collector() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async { TelemetrySubsystem::new(config).expect("should construct") });
@@ -295,10 +299,12 @@ fn test_subsystem_flush_does_not_panic_without_collector() {
 /// zero-duration interval (which would cause a tight loop).
 #[test]
 fn test_zero_interval_clamped_in_build_provider() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.export_interval_seconds = 0;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        export_interval_seconds: 0,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let result = rt.block_on(async { TelemetrySubsystem::new(config) });

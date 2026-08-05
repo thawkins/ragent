@@ -73,8 +73,8 @@ fn test_cycle_mutual_include() {
     fs::write(dir.path().join("AGENTS.md"), "@a.md\n").unwrap();
 
     let content = load(dir.path());
-    assert!(content.contains("A"));
-    assert!(content.contains("B"));
+    assert!(content.contains('A'));
+    assert!(content.contains('B'));
     // The second include of a.md (from within b.md) is skipped.
     assert!(content.contains("include cycle skipped"));
 }

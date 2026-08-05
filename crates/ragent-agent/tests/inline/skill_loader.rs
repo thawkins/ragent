@@ -346,11 +346,7 @@ fn test_discover_skills_empty_working_dir() {
     std::fs::create_dir_all(&tmp).expect("create temp dir");
 
     let skills = discover_skills(&tmp, &[]);
-    let project_skills: Vec<_> = skills
-        .into_iter()
-        .filter(|s| s.scope == SkillScope::Project)
-        .collect();
-    assert!(project_skills.is_empty());
+    assert!(!skills.into_iter().any(|s| s.scope == SkillScope::Project));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
@@ -358,11 +354,7 @@ fn test_discover_skills_empty_working_dir() {
 #[test]
 fn test_discover_skills_nonexistent_dir() {
     let skills = discover_skills(Path::new("/nonexistent/path/that/should/not/exist"), &[]);
-    let project_skills: Vec<_> = skills
-        .into_iter()
-        .filter(|s| s.scope == SkillScope::Project)
-        .collect();
-    assert!(project_skills.is_empty());
+    assert!(!skills.into_iter().any(|s| s.scope == SkillScope::Project));
 }
 
 #[test]
@@ -570,11 +562,7 @@ fn test_discover_skills_extra_dirs_nonexistent() {
 
     let extra = vec!["/nonexistent/skill/dir/12345".to_string()];
     let skills = discover_skills(&tmp, &extra);
-    let project_skills: Vec<_> = skills
-        .into_iter()
-        .filter(|s| s.scope == SkillScope::Project)
-        .collect();
-    assert!(project_skills.is_empty());
+    assert!(!skills.into_iter().any(|s| s.scope == SkillScope::Project));
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

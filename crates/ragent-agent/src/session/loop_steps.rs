@@ -279,12 +279,7 @@ impl SessionProcessor {
             // `create_client` is amortised over the whole session instead of
             // being re-created on every turn.
             let cache_key = format!("{}/{}", model_ref.provider_id, model_ref.model_id);
-            if let Some(cached) = self
-                .llm_client_cache
-                .read()
-                .get(&cache_key)
-                .map(|c| Arc::clone(c))
-            {
+            if let Some(cached) = self.llm_client_cache.read().get(&cache_key).map(Arc::clone) {
                 cached
             } else {
                 match provider
@@ -368,7 +363,7 @@ impl SessionProcessor {
 
         Ok(TurnClient {
             model_ref,
-            client: Arc::from(client),
+            client,
             session_config,
             parsed_hook_configs,
             working_dir,

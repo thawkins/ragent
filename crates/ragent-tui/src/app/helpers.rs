@@ -86,6 +86,7 @@ pub(crate) fn is_discovery_notice(message: &str) -> bool {
 /// Fetched page titles, error messages, and URL body previews may contain
 /// arbitrary bytes from the network. Stripping them prevents garbage glyphs
 /// such as `%???` from appearing at the start of rendered lines.
+/// Sanitize raw text so it is safe to render as Markdown/ANSI in the TUI.
 pub fn sanitize_for_display(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -116,6 +117,7 @@ pub fn sanitize_for_display(text: &str) -> String {
 /// be inspected, or `[Image: alt text (path)]` otherwise. Terminal TUI panels
 /// cannot render bitmaps directly, so this placeholder keeps the layout useful.
 #[must_use]
+/// Render an image reference as placeholder text showing dimensions.
 pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::path::Path) -> String {
     let resolved = if src.starts_with("http://") || src.starts_with("https://") {
         src.to_string()

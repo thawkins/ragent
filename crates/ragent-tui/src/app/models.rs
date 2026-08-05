@@ -284,7 +284,7 @@ impl App {
     }
 
     /// Return the short display label for a [`ThinkingLevel`] (e.g. `"Med"`).
-    pub fn thinking_level_short(level: ThinkingLevel) -> &'static str {
+    pub(crate) fn thinking_level_short(level: ThinkingLevel) -> &'static str {
         match level {
             ThinkingLevel::Auto => "Auto",
             ThinkingLevel::Off => "Off",
@@ -906,7 +906,9 @@ impl App {
 
     /// Detect whether the router virtual provider has been enabled by reading
     /// the [`RouterProvider`] state from the provider registry, if present.
-    pub fn is_router_enabled(provider_registry: &ragent_llm::provider::ProviderRegistry) -> bool {
+    pub(crate) fn is_router_enabled(
+        provider_registry: &ragent_llm::provider::ProviderRegistry,
+    ) -> bool {
         provider_registry
             .get_as_any("router")
             .and_then(|p| p.downcast_ref::<ragent_llm::providers::router::RouterProvider>())
@@ -915,7 +917,7 @@ impl App {
     }
 
     /// Re-detect the configured provider and update `configured_provider`.
-    pub fn refresh_provider(&mut self) {
+    pub(crate) fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
     }
 
@@ -1422,7 +1424,7 @@ impl App {
     /// Kick off async model discovery for the given provider, emitting
     /// `ProviderLoadingStarted` / `ProviderLoadingFinished` events so the UI
     /// can show a spinner and populate the picker when results arrive.
-    pub fn start_model_discovery(&self, provider_id: String, provider_name: String) {
+    pub(crate) fn start_model_discovery(&self, provider_id: String, provider_name: String) {
         let registry = self.provider_registry.clone();
         let event_bus = self.event_bus.clone();
         event_bus.publish(Event::ProviderLoadingStarted {
@@ -1703,7 +1705,7 @@ impl App {
     /// exists (FR-026). The resulting `provider.router` value is the serialised
     /// [`RouterConfig`] itself, matching the format expected by `/router reload`
     /// (FR-008, FR-009, FR-014).
-    pub fn save_router_config(
+    pub(crate) fn save_router_config(
         &self,
         draft: &ragent_llm::providers::router_config::RouterConfig,
     ) -> Result<(), String> {
@@ -1751,7 +1753,7 @@ impl App {
 
     /// Return a human-readable cost estimate for a provider/model pair, if the
     /// registry advertises pricing information for the model.
-    pub fn estimate_entry_cost(&self, provider_id: &str, model_id: &str) -> Option<String> {
+    pub(crate) fn estimate_entry_cost(&self, provider_id: &str, model_id: &str) -> Option<String> {
         let model = self
             .provider_registry
             .resolve_model(provider_id, model_id)?;
@@ -1797,7 +1799,7 @@ impl App {
 
     /// Render a detailed `/provider show` report for a single configured
     /// provider: id, name, source, configured models, and thinking settings.
-    pub fn provider_config_report(&self, prov: &ConfiguredProvider) -> String {
+    pub(crate) fn provider_config_report(&self, prov: &ConfiguredProvider) -> String {
         let mut report = format!(
             "From: /provider show\n\n# Provider: {}\n\n- **ID:** `{}`\n- **Name:** {}\n- **Source:** {}\n",
             prov.name,
@@ -1894,7 +1896,7 @@ impl App {
     /// Summarize accumulated LLM request stats (input/output tokens, samples,
     /// and estimated USD cost) grouped by provider. Returns `None` when no
     /// requests have been recorded.
-    pub fn cost_summary(&self) -> Option<String> {
+    pub(crate) fn cost_summary(&self) -> Option<String> {
         if self.llm_request_stats.is_empty() {
             return None;
         }
@@ -1998,7 +2000,7 @@ impl App {
     /// The Copilot token resolution (which may spawn `gh auth token` as a
     /// subprocess) is performed **inside** the spawned async task so it does
     /// not block the TUI render loop during startup.
-    pub fn check_provider_health(&mut self) {
+    pub(crate) fn check_provider_health(&mut self) {
         let provider = match &self.configured_provider {
             Some(p) => p.clone(),
             None => {
@@ -2048,7 +2050,7 @@ impl App {
 
     /// Return the last known provider health state, or `None` if no check
     /// has completed yet.
-    pub fn provider_health_status(&self) -> Option<bool> {
+    pub(crate) fn provider_health_status(&self) -> Option<bool> {
         match self.provider_health.load(Ordering::Relaxed) {
             1 => Some(true),
             2 => Some(false),

@@ -137,12 +137,14 @@ fn build_subsystem_with_toggles(
     // to verify the `is_metric_enabled` guard. The recorder methods are
     // tested for short-circuit behaviour via the `is_metric_enabled`
     // assertion tests below.
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.metrics = toggles;
-    config.export_interval_seconds = 3600;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        metrics: toggles,
+        export_interval_seconds: 3600,
+        ..Default::default()
+    };
 
     let sub = rt.block_on(async {
         ragent_telemetry::TelemetrySubsystem::new(config).expect("should construct")
@@ -299,12 +301,14 @@ fn test_subsystem_instruments_wires_toggles_from_config() {
     toggles.insert("ragent.llm.requests".to_string(), false);
     toggles.insert("ragent.tokens.input".to_string(), true);
 
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.metrics = toggles;
-    config.export_interval_seconds = 3600;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        metrics: toggles,
+        export_interval_seconds: 3600,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt.block_on(async {
@@ -325,11 +329,13 @@ fn test_subsystem_instruments_wires_toggles_from_config() {
 fn test_subsystem_no_toggles_all_enabled() {
     use ragent_telemetry::{OtelConfig, OtelProtocol};
 
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://localhost:4318".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.export_interval_seconds = 3600;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://localhost:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        export_interval_seconds: 3600,
+        ..Default::default()
+    };
     // No `metrics` map — defaults to empty.
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");

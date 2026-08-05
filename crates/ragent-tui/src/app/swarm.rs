@@ -349,7 +349,7 @@ impl App {
     /// Periodically (every 2s) check whether any swarm teammate is waiting on
     /// a permission prompt and, if so, surface the unblock UI so the lead can
     /// approve/deny without leaving the swarm view.
-    pub fn poll_swarm_unblock(&mut self) {
+    pub(crate) fn poll_swarm_unblock(&mut self) {
         if self.swarm_unblock_last_poll.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }
@@ -499,7 +499,7 @@ impl App {
 
     /// Periodically (every 2s) check the active swarm's overall completion
     /// status and update the status line / log panel accordingly.
-    pub fn poll_swarm_completion(&mut self) {
+    pub(crate) fn poll_swarm_completion(&mut self) {
         if self.swarm_completion_last_poll.elapsed() < std::time::Duration::from_secs(2) {
             return;
         }

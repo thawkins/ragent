@@ -271,8 +271,10 @@ fn test_different_hrefs_not_deduplicated() {
 #[test]
 fn test_primary_source_from_canonical() {
     let html = r#"<article><a href="/ref">Ref</a></article>"#;
-    let mut md = PageMetadata::default();
-    md.canonical = Some("https://original.com/source".to_string());
+    let md = PageMetadata {
+        canonical: Some("https://original.com/source".to_string()),
+        ..Default::default()
+    };
     let links = classify_links(html, "https://example.com", &md);
     assert_eq!(
         links.primary_source.as_deref(),
@@ -322,8 +324,10 @@ fn test_primary_source_canonical_takes_priority() {
     let html = r#"<article>
 <a href="https://github.com/user/repo">GitHub</a>
 </article>"#;
-    let mut md = PageMetadata::default();
-    md.canonical = Some("https://canonical.com/page".to_string());
+    let md = PageMetadata {
+        canonical: Some("https://canonical.com/page".to_string()),
+        ..Default::default()
+    };
     let links = classify_links(html, "https://example.com", &md);
     assert_eq!(
         links.primary_source.as_deref(),

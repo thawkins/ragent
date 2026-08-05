@@ -23,10 +23,12 @@ use ragent_telemetry::{OtelConfig, OtelProtocol, TelemetrySubsystem};
 /// A URL with an invalid transport is rejected gracefully without panicking.
 #[test]
 fn test_malformed_endpoint_invalid_protocol_does_not_panic() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "not-a-url".to_string();
-    config.protocol = OtelProtocol::Http;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "not-a-url".to_string(),
+        protocol: OtelProtocol::Http,
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(
@@ -39,10 +41,12 @@ fn test_malformed_endpoint_invalid_protocol_does_not_panic() {
 /// gracefully without panicking.
 #[test]
 fn test_malformed_endpoint_bad_url_syntax_does_not_panic() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http:///no-host:4318".to_string();
-    config.protocol = OtelProtocol::Http;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http:///no-host:4318".to_string(),
+        protocol: OtelProtocol::Http,
+        ..Default::default()
+    };
 
     let result = TelemetrySubsystem::new(config);
     assert!(
@@ -56,12 +60,14 @@ fn test_malformed_endpoint_bad_url_syntax_does_not_panic() {
 /// on the next interval (FR-033).
 #[test]
 fn test_unreachable_endpoint_does_not_panic_on_flush_or_shutdown() {
-    let mut config = OtelConfig::default();
-    config.enabled = true;
-    config.endpoint = "http://[::1]:1".to_string();
-    config.protocol = OtelProtocol::Http;
-    config.export_timeout_seconds = 1;
-    config.export_interval_seconds = 3600;
+    let config = OtelConfig {
+        enabled: true,
+        endpoint: "http://[::1]:1".to_string(),
+        protocol: OtelProtocol::Http,
+        export_timeout_seconds: 1,
+        export_interval_seconds: 3600,
+        ..Default::default()
+    };
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     let sub = rt

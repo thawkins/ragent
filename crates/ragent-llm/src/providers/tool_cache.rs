@@ -426,8 +426,8 @@ mod tests {
     #[test]
     fn cached_tools_reuses_same_buffer() {
         let t = sample_tool("read");
-        let a = cached_tools(ToolFormat::OpenAi, &[t.clone()]);
-        let b = cached_tools(ToolFormat::OpenAi, &[t.clone()]);
+        let a = cached_tools(ToolFormat::OpenAi, std::slice::from_ref(&t));
+        let b = cached_tools(ToolFormat::OpenAi, std::slice::from_ref(&t));
         assert!(Arc::ptr_eq(&a, &b));
     }
 }
