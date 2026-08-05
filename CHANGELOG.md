@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 1.0.0
+
+### Changed
+
+- Removed pre-release beta label and reset stable version to 1.0.0.
+- Future releases will increment the patch (last) digit.
+
 ## Version: 0.1.0-beta.41
 
 ### Fixed
