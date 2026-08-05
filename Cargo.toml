@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.5"
+version = "1.0.6"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -15,6 +15,7 @@ description = "An AI coding agent for the terminal, built in Rust."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
 
 [package.metadata.deb]
 maintainer = "Tim Hawkins <tim.thawkins@gmail.com>"

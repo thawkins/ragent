@@ -1,5 +1,16 @@
 # Changelog
 
+## Version: 1.0.6
+
+### Fixed
+
+- Added `authors.workspace = true` to the root `ragent` package in `Cargo.toml` so the per-package manifest inherits the workspace authors. This fixes the `cargo wix` step of the Windows release build, which requires an `authors` field.
+- Removed the temporary `$env:CARGO_PKG_AUTHORS` override from `.github/workflows/release.yml`; the workflow now relies on the corrected Cargo.toml manifest.
+
+### Changed
+
+- Incremented workspace version to 1.0.6.
+
 ## Version: 1.0.5
 
 ### Fixed
