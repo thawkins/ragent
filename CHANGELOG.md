@@ -1,5 +1,19 @@
 # Changelog
 
+## Version: 0.1.0-beta.38
+
+### Added
+
+- Strict exact-byte matching for `edit`, `multi_edit`, and `apply_patch` tools (EDITPLAN.md):
+  - Replaced whitespace-tolerant/line-normalized replacement logic in `ragent-tools-core` with exact-byte `find_exact_replacement_range` and `find_exact_batch_edit` helpers.
+  - Removed fallback heuristic replace in `replace.rs`; tools now return a clear single error listing the first non-matching old_string.
+  - Added `test_edit_smoke.rs` automated smoke test (T-014) covering exact-match success and failure paths.
+  - Added `EDITPLAN.md` and completion report `docs/reports/editplan-m1-completion.md` tracking milestones M1–M3.
+
+### Changed
+
+- Incremented workspace version to 0.1.0-beta.38.
+
 ## Version: 0.1.0-beta.37
 
 ### Added
