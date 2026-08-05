@@ -1,5 +1,18 @@
 # Changelog
 
+## Version: 1.0.4
+
+### Fixed
+
+- Windows release build fixed in `.github/workflows/release.yml`:
+  - Removed unsupported `cargo wix init --no-build` call (cargo-wix 0.3.9 does not accept `--no-build` on the `init` subcommand).
+  - Added `--package ragent` so `cargo wix` works inside a Cargo workspace.
+  - Stage the already-built `target/x86_64-pc-windows-msvc/release/ragent.exe` at `target/release/ragent.exe` before invoking `cargo wix --no-build`, matching the layout that cargo-wix expects.
+
+### Changed
+
+- Incremented workspace version to 1.0.4.
+
 ## Version: 1.0.3
 
 ### Added

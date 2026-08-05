@@ -100,10 +100,15 @@ jobs:
       - name: Install WiX packaging tool
         run: cargo install cargo-wix
 
-      - name: Create WiX source files and build .msi package
+      - name: Stage binary for WiX
         run: |
-          cargo wix init --no-build
-          cargo wix --no-build --target x86_64-pc-windows-msvc --output "ragent-${{ github.ref_name }}-windows-x86_64.msi"
+          New-Item -ItemType Directory -Force -Path target\release | Out-Null
+          Copy-Item "target\x86_64-pc-windows-msvc\release\ragent.exe" "target\release\ragent.exe" -Force
+        shell: powershell
+
+      - name: Build .msi package
+        run: |
+          cargo wix --no-build --package ragent --target x86_64-pc-windows-msvc --output "ragent-${{ github.ref_name }}-windows-x86_64.msi"
         shell: powershell
 
       - name: Upload build artifacts
