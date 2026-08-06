@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 1.0.12
+
+### Changed — update security audits
+
+- Incremental release bump; security audit clean via `.cargo/audit.toml`
+  suppressions for advisories blocked by upstream compatibility.
+
 ## Version: 1.0.11
 
 ### Changed — update research system
