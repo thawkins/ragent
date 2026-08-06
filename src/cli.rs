@@ -53,6 +53,7 @@ pub async fn run_orchestration_example() -> anyhow::Result<()> {
 }
 
 #[derive(clap::Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum ResearchCommands {
     /// Run a gathering session and create a research item.
     Create {

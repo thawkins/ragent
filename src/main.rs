@@ -87,6 +87,7 @@ struct Cli {
 
 /// Available top-level sub-commands.
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Execute agent with prompt
     Run {
@@ -136,7 +137,7 @@ enum Commands {
     /// Manage research items under `research/`
     Research {
         #[command(subcommand)]
-        command: cli::ResearchCommands,
+        command: Box<cli::ResearchCommands>,
     },
 }
 
@@ -983,7 +984,7 @@ Use the TUI Memory panel (Alt+M or /memory) to browse entries."
             }
         }
         Some(Commands::Research { command }) => {
-            cli::handle_research_command(command, resolved_agent.model.clone()).await?;
+            cli::handle_research_command(*command, resolved_agent.model.clone()).await?;
         }
     }
     Ok(())

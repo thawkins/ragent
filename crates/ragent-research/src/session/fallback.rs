@@ -397,6 +397,8 @@ pub(crate) fn cross_references_from(sources: &[Source]) -> Vec<CrossReference> {
         .collect()
 }
 
+// reason: only exercised when a cross-referenced local source carries
+// the `Extra` kind; the simpler `InProject` path is taken in practice.
 #[allow(dead_code)]
 fn format_with_kind(relevance: &str, kind: LocalSourceKind) -> String {
     match kind {
