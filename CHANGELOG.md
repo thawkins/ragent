@@ -1,6 +1,17 @@
 # Changelog
 
-## Version: 1.0.6
+## Version: 1.0.8
+
+### Added
+
+- macOS Apple Silicon (M-series) packaging support.
+  - New `scripts/macos-pkg.sh` builds a flat `.pkg` installer from an `aarch64-apple-darwin` release binary.
+  - New `packaging/macos/scripts/preinstall` and `postinstall` scripts install the binary to `/usr/local/lib/ragent/ragent` and symlink it to `/usr/local/bin/ragent` so `ragent` is on the default PATH.
+  - New `build-macos-arm64` job in `.github/workflows/release.yml` runs on `macos-15`, builds the arm64 binary, creates `ragent-{version}-macos-arm64.pkg`, and uploads the binary and package as release artifacts.
+  - Release job now downloads and publishes the macOS artifacts alongside Linux and Windows assets.
+  - The `.pkg` is intentionally unsigned; it is suitable for local installation and enterprise distribution. Apple Developer ID signing and notarization can be added later if required.
+
+## Version: 1.0.7
 
 ### Fixed
 

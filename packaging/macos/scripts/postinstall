@@ -1,0 +1,21 @@
+#!/bin/sh
+# Post-installation script for the ragent macOS installer package.
+# Adds a symlink into /usr/local/bin so that `ragent` is available on PATH.
+
+set -e
+
+BIN_DIR="/usr/local/bin"
+INSTALL_DIR="/usr/local/lib/ragent"
+BINARY="${INSTALL_DIR}/ragent"
+LINK="${BIN_DIR}/ragent"
+
+# Ensure the target bin directory exists.
+mkdir -p "${BIN_DIR}"
+
+# Create or replace the symlink.
+if [ -L "${LINK}" ] || [ -e "${LINK}" ]; then
+    rm -f "${LINK}"
+fi
+ln -sf "${BINARY}" "${LINK}"
+
+exit 0

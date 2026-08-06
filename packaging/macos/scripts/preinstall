@@ -1,0 +1,13 @@
+#!/bin/sh
+# Pre-installation script for the ragent macOS installer package.
+# Removes an existing symlink before the payload is laid down.
+
+set -e
+
+LINK="/usr/local/bin/ragent"
+
+if [ -L "${LINK}" ] || [ -e "${LINK}" ]; then
+    rm -f "${LINK}"
+fi
+
+exit 0
