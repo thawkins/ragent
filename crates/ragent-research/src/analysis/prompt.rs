@@ -1,5 +1,6 @@
 //! Synthesis prompt construction — build the LLM prompt that asks for the
-//! four required sections (Summary, Findings, Cross-References, Open Questions).
+//! five required sections (Executive Summary, Top 5 Implications, Findings,
+//! In-Project Cross-References, Open Questions).
 //!
 //! These helpers were previously inline in `analysis.rs`.
 
@@ -100,7 +101,7 @@ impl<'a> SynthesisPromptBuilder<'a> {
             );
         } else {
             prompt.push_str(&format!(
-                "{count} source(s) were captured. Read them and produce a structured markdown response with exactly these four top-level sections (in this order):\n\n",
+                "{count} source(s) were captured. Read them and produce a structured markdown response with exactly these five top-level sections (in this order):\n\n",
                 count = self.sources.len()
             ));
             prompt.push_str(&render_output_template(&self.config));
@@ -122,21 +123,29 @@ pub(crate) fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> S
     )
 }
 
-/// Render the four mandatory top-level section instructions plus the
+/// Render the mandatory top-level section instructions plus the
 /// per-finding labeled-paragraph template. With the default config this is
 /// byte-identical to the legacy middle of `build_synthesis_prompt`.
 ///
+/// The prompt asks the model for the same raw sections regardless of the final
+/// output format: Executive Summary, Top 5 Implications, Findings,
+/// In-Project Cross-References, and Open Questions. The document assembler
+/// reorders these sections to match the selected `OutputFormat`.
+///
 /// The `IMRaD` output format (FR-012 / specs/imradreport) is handled specially:
-/// the model is still asked for the same four raw sections (Summary, Findings,
-/// In-Project Cross-References, Open Questions) so the parser remains unchanged,
-/// and an extra paragraph encourages results-oriented phrasing so the final
-/// `IMRaD` layout reads naturally in the `## Results` section.
+/// the model is still asked for the same raw sections so the parser remains
+/// unchanged, and an extra paragraph encourages results-oriented phrasing so
+/// the final `IMRaD` layout reads naturally in the `## Results` section.
 pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
         Some(OutputFormat::ExecutiveSummary) => {
-            out.push_str("## Summary\n");
+            out.push_str("## Executive Summary\n");
             out.push_str("A very concise executive summary in 2-3 sentences.\n\n");
+            out.push_str("## Top 5 Implications\n");
+            out.push_str(
+                "Rank the top 5 practical consequences implied by the evidence. Output a numbered list `1.`..`5.` ordered by importance. Each entry must be one or two sentences. If fewer than 5 are justified, list only those.\n\n",
+            );
             out.push_str("## Findings\n");
             out.push_str(
                 "At most 5 high-level findings. Keep each finding to one compact paragraph per required label. \
@@ -144,14 +153,14 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the topic.\n\n\
+                 **Analysis:** Explain why the observation matters for the topic. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize the practical consequence or follow-up action.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
             );
         }
         Some(OutputFormat::ComparisonTable) => {
-            out.push_str("## Summary\n");
+            out.push_str("## Executive Summary\n");
             out.push_str("One-paragraph overview of the entities being compared.\n\n");
             out.push_str("## Comparison Table\n");
             out.push_str(
@@ -165,14 +174,14 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the comparison.\n\n\
+                 **Analysis:** Explain why the observation matters for the comparison. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast the entities being compared, discuss trade-offs and causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation for the comparison. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize the practical consequence or follow-up action.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
             );
         }
         Some(OutputFormat::SourceBibliography) => {
-            out.push_str("## Summary\n");
+            out.push_str("## Executive Summary\n");
             out.push_str("One paragraph summarizing the corpus.\n\n");
             out.push_str("## Findings\n");
             out.push_str(
@@ -181,16 +190,20 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
                  Each entry must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
                  **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                  **Observation:** State the concrete evidence or fact from the source, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain the source's contribution to the topic.\n\n\
+                 **Analysis:** Explain the source's contribution to the topic. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the source: cite concrete data points, quote relevant passages using `[#N]` references, assess the source's methodology and credibility, discuss how it supports or contradicts other sources, and explore the broader implications of the source's contribution. When the source provides enough detail, write a longer analysis covering multiple angles, limitations of the evidence, and connections to the broader topic. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
                  **Cross-reference / Dependencies:** Name any other source or finding this one relates to, or write \"No direct dependencies.\"\n\n\
                  **Implication:** Summarize how this source should influence conclusions.\n\n\
                  Put each label on its own line, and separate every paragraph with a blank line.\n\n",
             );
         }
         _ => {
-            out.push_str("## Summary\n");
+            out.push_str("## Executive Summary\n");
             out.push_str(
-                "A concise one-paragraph summary of what the sources collectively say about the topic.\n\n",
+                "A concise one-paragraph executive summary of what the sources collectively say about the topic.\n\n",
+            );
+            out.push_str("## Top 5 Implications\n");
+            out.push_str(
+                "Rank the top 5 practical consequences implied by the evidence. Output a numbered list `1.`..`5.` ordered by importance. Each entry must be one or two sentences. If fewer than 5 are justified, list only those.\n\n",
             );
             out.push_str("## Findings\n");
             out.push_str(
@@ -198,7 +211,7 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
                       **five markdown paragraphs** with these bold labels, in this order:\n\n\
                       **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
                       **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation. You may cite multiple sources in a finding if several support the same point.\n\n\
-                      **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question.\n\n\
+                      **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question. This paragraph must be substantive — write more than 512 characters (several detailed sentences). Draw on specific evidence from the sources: cite concrete data points, quote relevant passages using `[#N]` references, compare or contrast with other findings, discuss causal mechanisms, weigh supporting and contradicting evidence, and explore the broader implications of the observation. When the sources provide enough detail, write a longer analysis covering multiple angles, limitations of the evidence, alternative interpretations, and connections to the broader research question. Every sentence should carry analytical weight — do not pad with filler or repetition.\n\n\
                       **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, contradicts, or is prerequisite to, using `Finding N` references. If there are no dependencies, write \"No direct dependencies.\"\n\n\
                       **Implication:** Summarize the practical consequence, open risk, or recommended follow-up action.\n\n\
                       Put each label on its own line, and separate every paragraph with a blank line. \
@@ -209,8 +222,8 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             );
         }
     }
-    // FR-012 / specs/imradreport: IMRaD format uses the same four raw sections,
-    // but the model should phrase findings as results-oriented statements.
+    // FR-012 / specs/imradreport: IMRaD format uses the same raw sections, but
+    // the model should phrase findings as results-oriented statements.
     if config.output_format == Some(OutputFormat::Imrad) {
         out.push_str(
             "\nThe final report will be restructured into IMRaD order by the document assembler, \
@@ -242,6 +255,14 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             - When ranking evidence quality, prefer sources with clear publication dates and structured metadata; down-weight anonymous forums and undated pages unless they provide unique empirical signal.\n\n"
         );
     }
+    out.push_str("## Top 5 Implications\n");
+    out.push_str(
+        "Analyze the practical consequences of the evidence and rank the top 5 implications. \
+         Output a numbered list `1.`..`5.` ordered by importance or practicality. Each entry must be one \
+         or two sentences: state the consequence, why it matters for the topic, and (when relevant) \
+         cite the finding or source `[#N]` that supports it. If fewer than 5 distinct implications are \
+         justified by the evidence, list only the justified ones — do not pad with speculation.\n\n",
+    );
     out.push_str("## In-Project Cross-References\n");
     out.push_str(
                 "A bullet list of relevant in-project files, formatted as `* `path` — note`. Only include files that are actually mentioned in the local sources.\n\n"
@@ -271,7 +292,7 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             (Headline, Observation, Analysis, Cross-reference / Dependencies, Implication) \
             and, when requested, the sixth **Sources Cited / Date Spread** \
             paragraph. Treat template sections as additional output, not as a \
-            substitute for the structured findings.\n\n",
+            substitute for the structured findings or the Top 5 Implications section.\n\n",
         );
     }
     // T-007 (FR-008): append few-shot exemplar findings so the model can
@@ -340,13 +361,15 @@ pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bo
 pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     out.push_str(
-        "\nNow produce only the four sections above. Do not include a title or any other preamble. ",
+        "\nNow produce only the five sections above: Executive Summary, Top 5 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
     );
     out.push_str(
         "Within Findings, always begin with a **Headline:** paragraph (maximum 15 words) and include the four required paragraphs (Observation, Analysis, ",
     );
     out.push_str(
-        "Cross-reference / Dependencies, Implication) after it. Feel free to add more labeled paragraphs if the sources support it.",
+        "Cross-reference / Dependencies, Implication) after it. Feel free to add more labeled paragraphs if the sources support it. \
+         The **Analysis** paragraph in every finding must be substantive — write more than 512 characters, drawing on all available source data. \
+         When the sources are rich, write a longer analysis that covers multiple angles, evidence limitations, and connections to the broader topic.",
     );
     out
 }

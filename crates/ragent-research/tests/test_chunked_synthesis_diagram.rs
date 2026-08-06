@@ -27,6 +27,7 @@ fn chunk_result(
     AnalysisResult {
         summary: summary.to_string(),
         findings,
+        top_implications: Vec::new(),
         cross_references: cross_refs,
         open_questions: Vec::new(),
     }
@@ -106,6 +107,7 @@ fn merged_chunk_results_produce_valid_diagram_and_cross_references() {
             merged.summary
         },
         findings: merged.findings,
+        top_implications: merged.top_implications,
         cross_references: merged.cross_references,
         open_questions: merged.open_questions,
         template_body: None,

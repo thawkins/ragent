@@ -1264,6 +1264,7 @@ impl ResearchSession {
         }
         let llm_produced_summary = !analysis.summary.is_empty()
             || !analysis.findings.is_empty()
+            || !analysis.top_implications.is_empty()
             || !analysis.cross_references.is_empty()
             || !analysis.open_questions.is_empty();
         use crate::item::truncate_title;
@@ -1304,6 +1305,18 @@ impl ResearchSession {
                 }
             } else {
                 analysis.open_questions
+            },
+            top_implications: if analysis.top_implications.is_empty() {
+                if llm_produced_summary {
+                    Vec::new()
+                } else {
+                    // Surface ranked implications from the mechanical
+                    // fallback so the section is never empty when no LLM
+                    // analysis was available.
+                    default_top_implications(&analysis.top_implications, &topic)
+                }
+            } else {
+                analysis.top_implications
             },
             template_body,
             decomposed_queries: web_queries.clone(),
@@ -1533,7 +1546,10 @@ async fn load_template(research_root: &Path, template: Option<&str>) -> Option<S
     }
 }
 
-use fallback::{cross_references_from, default_findings, default_open_questions, default_summary};
+use fallback::{
+    cross_references_from, default_findings, default_open_questions, default_summary,
+    default_top_implications,
+};
 use topic::{clean_site_title, derive_topic_from_url_body};
 
 #[cfg(test)]

@@ -10,7 +10,8 @@
 //!
 //!    ## Topic
 //!    ## Search Queries
-//!    ## Summary
+//!    ## Executive Summary
+//!    ## Top 5 Implications
 //!    ## Findings
 //!    ## Findings Relationship Diagram
 //!    ## In-Project Cross-References
@@ -41,11 +42,12 @@ use regex::Regex;
 /// (NFR-006 + the size-cap risk in the PLAN.md Risks table).
 pub const MAX_SOURCE_BODY_BYTES: usize = 256 * 1024;
 
-/// The 9 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
+/// The 10 sections that appear in every `RESEARCH.md`, in order (FR-010 + FR-012).
 pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
     "Search Queries",
-    "Summary",
+    "Executive Summary",
+    "Top 5 Implications",
     "Findings",
     "Findings Relationship Diagram",
     "In-Project Cross-References",
@@ -61,12 +63,17 @@ pub const REQUIRED_SECTIONS: &[&str] = &[
 pub struct ResearchDocument {
     /// The item this document belongs to.
     pub item: ResearchItem,
-    /// Optional human-written summary; falls back to a placeholder when
-    /// empty so the section is never blank.
+    /// Rendered under `## Executive Summary` in the report layout. In the
+    /// IMRaD layout the same text is rendered under `## Abstract`.
     pub summary: String,
     /// Numbered findings — each entry is the body of one bullet under
     /// `## Findings`. References inside the body use the form `[#N]`.
     pub findings: Vec<String>,
+    /// Top 5 implications — one numbered entry per implication, in rank order.
+    /// In the report layout this section now appears directly under
+    /// `## Executive Summary`; in the IMRaD layout it is rendered under
+    /// `## Discussion`.
+    pub top_implications: Vec<String>,
     /// In-project cross-references (FR-009). Each entry is one bullet under
     /// `## In-Project Cross-References`.
     pub cross_references: Vec<CrossReference>,
@@ -186,8 +193,9 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 ///
 /// * [`OutputFormat::Report`](crate::run_config::OutputFormat::Report)
 ///   (default) and all other existing formats emit the legacy multi-section
-///   layout: Topic, Search Queries, Summary, Findings, Findings Relationship
-///   Diagram, In-Project Cross-References, Open Questions, References Index.
+///   layout: Topic, Search Queries, Executive Summary, Top 5 Implications,
+///   Findings, Findings Relationship Diagram, In-Project Cross-References,
+///   Open Questions, References Index.
 /// * [`OutputFormat::Imrad`](crate::run_config::OutputFormat::Imrad) emits
 ///   the `IMRaD` layout required by specs/imradreport: Abstract, Introduction,
 ///   Methods, Results, Discussion, References Index. The same `summary`,
@@ -240,9 +248,9 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 
 /// Build the body of a legacy multi-section `RESEARCH.md` report.
 ///
-/// This preserves the original section order: Topic, Search Queries, Summary,
-/// Findings, Findings Relationship Diagram, In-Project Cross-References,
-/// Open Questions, References Index.
+/// This preserves the original section order: Topic, Search Queries, Executive
+/// Summary, Top 5 Implications, Findings, Findings Relationship Diagram,
+/// In-Project Cross-References, Open Questions, References Index.
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
@@ -264,15 +272,30 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
-    // ── Summary ──────────────────────────────────────────────────────────
-    body.push_str("## Summary\n\n");
+    // ── Executive Summary ─────────────────────────────────────────────────
+    body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
-        body.push_str("(no summary recorded yet — run a gathering pass to populate)\n");
+        body.push_str("_(no executive summary recorded yet — run a gathering pass to populate)_\n");
     } else {
         body.push_str(&strip_control_chars(doc.summary.trim()));
         body.push('\n');
     }
     body.push('\n');
+
+    // ── Top 5 Implications ──────────────────────────────────────────────
+    body.push_str("## Top 5 Implications\n\n");
+    if doc.top_implications.is_empty() {
+        body.push_str(
+            "_(no ranked implications yet — the synthesis pass will populate this section)_\n\n",
+        );
+    } else {
+        for (idx, imp) in doc.top_implications.iter().enumerate() {
+            let n = idx + 1;
+            let cleaned = strip_control_chars(imp).trim().to_string();
+            body.push_str(&format!("{n}. {cleaned}\n"));
+        }
+        body.push('\n');
+    }
 
     // -- Findings ---------------------------------------------------------
     body.push_str("## Findings\n\n");
@@ -388,13 +411,6 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
 
     // -- Results (FR-008) -----------------------------------------------
     body.push_str("## Results\n\n");
-    body.push_str("### Summary\n\n");
-    if doc.summary.trim().is_empty() {
-        body.push_str("_(no summary recorded yet — run a gathering pass to populate)_\n\n");
-    } else {
-        body.push_str(&strip_control_chars(doc.summary.trim()));
-        body.push_str("\n\n");
-    }
     body.push_str("### Findings\n\n");
     if doc.findings.is_empty() {
         body.push_str("_(no findings yet — the gathering pass will populate this section)_\n\n");
@@ -418,6 +434,7 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
 
     // ── Discussion (FR-009) ────────────────────────────────────────────────
     body.push_str("## Discussion\n\n");
+
     body.push_str("### In-Project Cross-References\n\n");
     if doc.cross_references.is_empty() {
         body.push_str(
@@ -478,6 +495,7 @@ pub fn render_skeleton(
         item: placeholder,
         summary: String::new(),
         findings: Vec::new(),
+        top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
@@ -918,6 +936,134 @@ pub fn mark_complete(item: &mut ResearchItem) {
     item.set_status(ResearchStatus::Complete);
 }
 
+/// Lazy-initialized regexes used to strip inline text attributes from the
+/// **Analysis:** body so that HTML tags and strikethrough markers do not bleed
+/// into the rendered `RESEARCH.md`.
+static HTML_TAG_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+static STRIKE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+
+/// Remove inline text attributes (HTML tags and `~~...~~` strikethrough) from a
+/// paragraph so raw formatting does not leak into the report.
+///
+/// The content between tags/markers is preserved; only the wrapping markers are
+/// removed. This handles crossed-out text (`<s>`, `<del>`, `~~...~~`) and any
+/// inline HTML styling attributes (`<span class="...">`, etc.).
+fn strip_inline_text_attributes(text: &str) -> String {
+    let html = HTML_TAG_RE.get_or_init(|| {
+        // HTML/XML-style tags, case-insensitive, preserving inner text.
+        Regex::new(r"(?i)</?[a-z][a-z0-9]*(?:\s[^>]*)?/?>").expect("valid regex")
+    });
+    let strike = STRIKE_RE.get_or_init(|| {
+        // Markdown strikethrough: ~~...~~
+        Regex::new(r"~~(.+?)~~").expect("valid regex")
+    });
+    let mut out = html.replace_all(text, "").to_string();
+    out = strike.replace_all(&out, "$1").to_string();
+    out
+}
+
+/// Known abbreviations whose trailing period should not be treated as a
+/// sentence boundary (e.g. "e.g.", "i.e.", "etc."). Compared case-insensitively
+/// against the token immediately preceding the terminator.
+const SENTENCE_ABBREVIATIONS: &[&str] = &[
+    "e.g", "i.e", "etc", "vs", "versus", "cf", "approx", "fig", "no", "vol", "pp", "ch", "sec",
+    "ref", "eq", "al", "inc", "ltd", "co", "st", "dr", "mr", "mrs", "ms", "prof", "sr", "jr",
+];
+
+/// Split the body of an **Analysis:** paragraph into sentences and place each
+/// sentence on its own line using a blank line separator. Whitespace in the
+/// input — including any embedded newlines — is collapsed to single spaces before
+/// splitting so the output is stable regardless of how the analysis was
+/// generated.
+///
+/// Only the **Analysis:** label receives this treatment; other finding labels
+/// keep their original (single-paragraph) body. Sentences are split after a
+/// `.`, `!`, or `?` that is followed by whitespace and a capital letter or digit,
+/// skipping common abbreviations so mid-sentence periods do not create spurious
+/// breaks. Single-letter uppercase initials (e.g. "J. P. Morgan") are treated as
+/// part of the same sentence when the word after the period is another
+/// uppercase initial or capitalized name.
+fn split_analysis_sentences(body: &str) -> String {
+    // Remove raw HTML tags and markdown emphasis/strikethrough markers first.
+    let body = strip_inline_text_attributes(body);
+
+    // Collapse all whitespace (including embedded newlines) to single spaces.
+    let collapsed: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = collapsed.trim();
+    if collapsed.is_empty() {
+        return String::new();
+    }
+
+    // Walk the text collecting sentence boundaries. A boundary occurs after a
+    // terminator character when the following non-whitespace char starts a new
+    // sentence (uppercase ASCII letter or digit) and the token ending at the
+    // terminator is not a known abbreviation.
+    let chars: Vec<char> = collapsed.chars().collect();
+    let mut sentences: Vec<String> = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '.' || c == '!' || c == '?' {
+            // Look ahead past whitespace for the next non-space char.
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            // End of string or a capital letter / digit means a likely boundary.
+            let next_starts_sentence =
+                j >= chars.len() || chars[j].is_ascii_uppercase() || chars[j].is_ascii_digit();
+            if next_starts_sentence {
+                // Extract the token immediately preceding the terminator to
+                // check against the abbreviation list.
+                let mut tok_start = i;
+                while tok_start > start && !chars[tok_start - 1].is_whitespace() {
+                    tok_start -= 1;
+                }
+                let token: String = chars[tok_start..=i].iter().collect();
+                let lower = token.trim_end_matches(['.', '!', '?']);
+
+                // Single uppercase initials followed by another uppercase word
+                // or initial should stay attached (e.g. "J. P. Morgan").
+                let is_initial = lower.len() == 1
+                    && lower
+                        .chars()
+                        .next()
+                        .is_some_and(|ch| ch.is_ascii_uppercase());
+                let next_is_uppercase = j < chars.len() && chars[j].is_ascii_uppercase();
+                let skip_boundary = is_initial && next_is_uppercase;
+
+                if !skip_boundary
+                    && !SENTENCE_ABBREVIATIONS.contains(&lower.to_lowercase().as_str())
+                {
+                    let sentence: String = chars[start..=i].iter().collect();
+                    let trimmed = sentence.trim();
+                    if !trimmed.is_empty() {
+                        sentences.push(trimmed.to_string());
+                    }
+                    start = j;
+                    i = j;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    // Trailing fragment after the last terminator (no final period, etc.).
+    let tail: String = chars[start..].iter().collect();
+    let tail = tail.trim();
+    if !tail.is_empty() {
+        sentences.push(tail.to_string());
+    }
+
+    if sentences.len() <= 1 {
+        // Zero or one sentence: nothing to break apart.
+        return sentences.into_iter().collect::<String>();
+    }
+    // Separate sentences with a blank line so each one stands alone.
+    sentences.join("\n\n")
+}
+
 fn normalize_finding_labels(finding: &str) -> String {
     let mut text = finding.trim().replace("\n\n\n", "\n\n");
 
@@ -984,10 +1130,17 @@ fn normalize_finding_labels(finding: &str) -> String {
         } else {
             // Put the label on its own line, then the body indented as the
             // next paragraph so each labeled paragraph is clearly separated.
+            // The **Analysis:** body is further split into one line per
+            // sentence for readability (see split_analysis_sentences).
+            let rendered_body = if label == "**Analysis:**" {
+                split_analysis_sentences(body)
+            } else {
+                body.to_string()
+            };
             out.push_str(&label);
-            if !body.is_empty() {
+            if !rendered_body.is_empty() {
                 out.push('\n');
-                out.push_str(body);
+                out.push_str(&rendered_body);
             }
         }
     }
@@ -1055,6 +1208,7 @@ mod tests {
             item,
             summary: String::new(),
             findings: Vec::new(),
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,
@@ -1064,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn assemble_document_includes_all_eight_sections() {
+    fn assemble_document_includes_all_ten_sections() {
         let doc = sample_doc(sample_item());
         let assembled = assemble_document(&doc);
         for section in REQUIRED_SECTIONS {
@@ -1081,6 +1235,23 @@ mod tests {
             assembled.body.contains("# Title:"),
             "missing H1 Title heading"
         );
+    }
+
+    #[test]
+    fn assemble_document_renders_top_implications() {
+        let mut doc = sample_doc(sample_item());
+        doc.top_implications = vec![
+            "Adopt async/await for I/O-bound concurrency.".into(),
+            "Profile blocking calls before migration.".into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let body = &assembled.body;
+        assert!(
+            body.contains("## Top 5 Implications"),
+            "section heading must be present"
+        );
+        assert!(body.contains("1. Adopt async/await for I/O-bound concurrency."));
+        assert!(body.contains("2. Profile blocking calls before migration."));
     }
 
     #[test]
@@ -1734,6 +1905,92 @@ mod tests {
         assert_eq!(
             linkify_urls(input),
             "URL: [https://example.com](https://example.com)"
+        );
+    }
+
+    #[test]
+    fn split_analysis_sentences_places_each_sentence_on_its_own_line() {
+        let body = "This is the first sentence. This is the second one! And a third?";
+        let out = split_analysis_sentences(body);
+        // Three sentences, separated by blank lines.
+        assert_eq!(
+            out,
+            "This is the first sentence.\n\nThis is the second one!\n\nAnd a third?"
+        );
+    }
+
+    #[test]
+    fn split_analysis_sentences_single_sentence_has_no_break() {
+        let body = "Only one sentence here.";
+        let out = split_analysis_sentences(body);
+        assert_eq!(out, "Only one sentence here.");
+    }
+
+    #[test]
+    fn split_analysis_sentences_collapses_embedded_newlines() {
+        let body = "First sentence.\n\nSecond sentence that\nspans lines. Third.";
+        let out = split_analysis_sentences(body);
+        assert_eq!(
+            out,
+            "First sentence.\n\nSecond sentence that spans lines.\n\nThird."
+        );
+    }
+
+    #[test]
+    fn split_analysis_sentences_skips_abbreviation_periods() {
+        let body = "Use e.g. short examples. Then move on. See i.e. the next part.";
+        let out = split_analysis_sentences(body);
+        // "e.g." and "i.e." should not create sentence breaks; only the real
+        // sentence terminators after "examples" and "on" should split.
+        assert_eq!(
+            out,
+            "Use e.g. short examples.\n\nThen move on.\n\nSee i.e. the next part."
+        );
+    }
+
+    #[test]
+    fn split_analysis_sentences_keeps_initials_together() {
+        let body = "J. P. Morgan founded the firm. Later he expanded it.";
+        let out = split_analysis_sentences(body);
+        assert_eq!(
+            out,
+            "J. P. Morgan founded the firm.\n\nLater he expanded it."
+        );
+    }
+
+    #[test]
+    fn split_analysis_sentences_strips_html_and_strikethrough_attributes() {
+        let body = "The claim <del>was wrong</del> is plausible. ~~Crossed out~~ text remains.";
+        let out = split_analysis_sentences(body);
+        assert_eq!(
+            out,
+            "The claim was wrong is plausible.\n\nCrossed out text remains."
+        );
+    }
+
+    #[test]
+    fn assemble_document_splits_analysis_sentences_onto_separate_lines() {
+        let mut doc = sample_doc(sample_item());
+        doc.findings = vec![
+            "**Headline:** Observation summary\n\n\
+             **Observation:** First observation. [#1]\n\n\
+             **Analysis:** Sentence one. Sentence two. Sentence three.\n\n\
+             **Cross-reference / Dependencies:** none\n\n\
+             **Implication:** do something."
+                .into(),
+        ];
+        let assembled = assemble_document(&doc);
+        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        // Each sentence of the Analysis body must be on its own paragraph.
+        assert!(
+            finding.contains("**Analysis:**\nSentence one.\n\nSentence two.\n\nSentence three."),
+            "analysis sentences should be split onto separate lines: {finding}"
+        );
+        // The next label should still be separated from the analysis by a blank
+        // line, preserving the existing label separation.
+        assert!(
+            finding.contains("Sentence three.\n\n**Cross-reference / Dependencies:**"),
+            "cross-reference label should remain separated by a blank line: {finding}"
         );
     }
 }

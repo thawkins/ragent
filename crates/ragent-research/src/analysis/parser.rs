@@ -13,11 +13,18 @@ pub(crate) fn parse_analysis_response(text: &str) -> AnalysisResult {
     let mut result = AnalysisResult::default();
     let sections = split_sections(text);
     for (title, body) in sections {
-        match title.to_lowercase().as_str() {
-            "summary" => result.summary = body.trim().to_string(),
+        let lower = title.to_lowercase();
+        match lower.as_str() {
+            "summary" | "executive summary" => result.summary = body.trim().to_string(),
             "findings" => {
                 let raw = parse_numbered_list(&body);
                 result.findings = reorder_findings_by_dependency(&raw);
+            }
+            "top 5 implications"
+            | "top five implications"
+            | "top implications"
+            | "implications" => {
+                result.top_implications = parse_numbered_list(&body);
             }
             "in-project cross-references" | "cross-references" | "cross references" => {
                 result.cross_references = parse_cross_reference_list(&body);
@@ -88,6 +95,11 @@ pub(crate) fn parse_analysis_response_with_outcome(
             *finding = strip_control_chars(finding);
         }
         validated.summary = strip_control_chars(&validated.summary);
+        validated.top_implications = validated
+            .top_implications
+            .iter()
+            .map(|imp| strip_control_chars(imp))
+            .collect();
         validated.open_questions = validated
             .open_questions
             .iter()

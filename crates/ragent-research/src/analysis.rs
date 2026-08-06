@@ -2,10 +2,11 @@
 //! `AnalysisResult` using an LLM.
 //!
 //! The default [`LlmAnalysisEngine`] sends a single synthesis prompt to the
-//! configured provider/model. The prompt asks for four sections that map
+//! configured provider/model. The prompt asks for five sections that map
 //! directly to the `RESEARCH.md` structure:
 //!
-//! - Summary
+//! - Executive Summary
+//! - Top 5 Implications
 //! - Findings
 //! - In-Project Cross-References
 //! - Open Questions
@@ -64,6 +65,10 @@ pub struct AnalysisResult {
     pub summary: String,
     /// Numbered findings. Each entry is the markdown body of one finding.
     pub findings: Vec<String>,
+    /// Top-ranked practical implications derived from the findings. The LLM
+    /// is asked to produce exactly five numbered entries; fewer may be present
+    /// when the model output is malformed or the mechanical fallback is used.
+    pub top_implications: Vec<String>,
     /// In-project files that are relevant, with one-line notes.
     pub cross_references: Vec<CrossReference>,
     /// Bulleted open questions for further investigation.
@@ -728,6 +733,17 @@ pub fn merge_chunk_results(parts: &[AnalysisResult]) -> AnalysisResult {
         }
     }
 
+    // Merge top implications: concatenate, dedup exact matches, preserve rank.
+    let mut seen_implications: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut top_implications = Vec::new();
+    for part in parts {
+        for imp in &part.top_implications {
+            if seen_implications.insert(imp.clone()) {
+                top_implications.push(imp.clone());
+            }
+        }
+    }
+
     // Merge open questions: concatenate, dedup exact matches.
     let mut seen_questions: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut open_questions = Vec::new();
@@ -742,6 +758,7 @@ pub fn merge_chunk_results(parts: &[AnalysisResult]) -> AnalysisResult {
     AnalysisResult {
         summary,
         findings,
+        top_implications,
         cross_references,
         open_questions,
     }
@@ -778,10 +795,14 @@ mod tests {
 
     #[test]
     fn parse_analysis_response_extracts_all_sections() {
-        let text = "## Summary\n\nThis is the summary.\n\n## Findings\n\n1. First finding.\n2. Second finding.\n\n## In-Project Cross-References\n\n* `src/lib.rs` — main entry\n* `src/foo.rs` — helper\n\n## Open Questions\n\n* What about X?\n* How does Y work?\n";
+        let text = "## Executive Summary\n\nThis is the executive summary.\n\n## Findings\n\n1. First finding.\n2. Second finding.\n\n## Top 5 Implications\n\n1. Implication A.\n2. Implication B.\n\n## In-Project Cross-References\n\n* `src/lib.rs` — main entry\n* `src/foo.rs` — helper\n\n## Open Questions\n\n* What about X?\n* How does Y work?\n";
         let result = parse_analysis_response(text);
-        assert_eq!(result.summary, "This is the summary.");
+        assert_eq!(result.summary, "This is the executive summary.");
         assert_eq!(result.findings, vec!["First finding.", "Second finding."]);
+        assert_eq!(
+            result.top_implications,
+            vec!["Implication A.", "Implication B."]
+        );
         assert_eq!(result.cross_references.len(), 2);
         assert_eq!(result.cross_references[0].path, "src/lib.rs");
         assert_eq!(result.cross_references[0].relevance, "main entry");
@@ -979,20 +1000,23 @@ mod tests {
     }
 
     #[test]
-    fn builder_default_is_byte_identical_to_legacy() {
-        // The default-config builder must produce the same bytes the legacy
-        // build_synthesis_prompt produced — this is the backward-compat
-        // guarantee that lets existing callers upgrade without behavior change.
+    fn builder_default_includes_top_5_implications_section() {
         let sources = vec![src_body(1, None), src_body(2, None)];
         let legacy = build_synthesis_prompt("topic", &sources);
         let builder = SynthesisPromptBuilder::new("topic")
             .sources(&sources)
             .build();
-        assert_eq!(legacy, builder);
+        // The default-config builder now asks for the Top 5 Implications
+        // section, so it is no longer byte-identical to the legacy four-section
+        // prompt. Both the legacy wrapper and the builder must include it.
+        assert!(legacy.contains("## Top 5 Implications"));
+        assert!(builder.contains("## Top 5 Implications"));
+        assert!(legacy.contains("## In-Project Cross-References"));
+        assert!(builder.contains("## Open Questions"));
     }
 
     #[test]
-    fn builder_emits_five_required_labels() {
+    fn builder_emits_five_required_finding_labels() {
         let sources = vec![src_body(1, None)];
         let prompt = SynthesisPromptBuilder::new("topic")
             .sources(&sources)
@@ -1002,6 +1026,16 @@ mod tests {
         assert!(prompt.contains("**Analysis:**"));
         assert!(prompt.contains("**Cross-reference / Dependencies:**"));
         assert!(prompt.contains("**Implication:**"));
+    }
+
+    #[test]
+    fn builder_emits_top_5_implications_section() {
+        let sources = vec![src_body(1, None)];
+        let prompt = SynthesisPromptBuilder::new("topic")
+            .sources(&sources)
+            .build();
+        assert!(prompt.contains("## Top 5 Implications"));
+        assert!(prompt.contains("rank the top 5 implications"));
     }
 
     #[test]
@@ -1107,7 +1141,7 @@ mod tests {
 
     #[test]
     fn parse_with_outcome_clean_response_returns_llm() {
-        let text = "## Summary\n\nA summary.\n\n## Findings\n\n\
+        let text = "## Executive Summary\n\nAn executive summary.\n\n## Findings\n\n\
              1. **Headline:** Observation summary\n\n**Observation:** obs [#1].\n\n\
              **Analysis:** a.\n\n\
              **Cross-reference / Dependencies:** No direct dependencies.\n\n\
@@ -1136,7 +1170,7 @@ mod tests {
     #[test]
     fn parse_with_outcome_no_findings_section_falls_back() {
         // A response that only has a summary (no ## Findings) is malformed.
-        let text = "## Summary\n\nOnly a summary, no findings section.\n";
+        let text = "## Executive Summary\n\nOnly an executive summary, no findings section.\n";
         let sources = vec![src_body(1, None)];
         let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
         assert_eq!(outcome, AnalysisOutcome::FallbackEmpty);
@@ -1162,7 +1196,7 @@ mod tests {
         for input in [
             "",
             "   \n\n  ",
-            "## Summary\n\nonly summary",
+            "## Executive Summary\n\nonly executive summary",
             "no headings at all",
         ] {
             let findings = mechanical_fallback_findings(input);
@@ -1300,10 +1334,10 @@ mod tests {
 
     #[test]
     fn parse_with_outcome_preserves_valid_summary_on_fallback() {
-        // A response with a valid ## Summary but malformed findings (no
+        // A response with a valid ## Executive Summary but malformed findings (no
         // required bold labels) must preserve the parsed summary rather
         // than discarding it for a diagnostic placeholder.
-        let text = "## Summary\n\nThis is a valid summary that must be preserved.\n\n\
+        let text = "## Executive Summary\n\nThis is a valid executive summary that must be preserved.\n\n\
              ## Findings\n\n1. Just a plain finding with no labels and no citation.\n";
         let sources = vec![src_body(1, None)];
         let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
@@ -1311,8 +1345,8 @@ mod tests {
         assert!(
             result
                 .summary
-                .contains("This is a valid summary that must be preserved."),
-            "valid summary must be preserved on fallback, got: {}",
+                .contains("This is a valid executive summary that must be preserved."),
+            "valid executive summary must be preserved on fallback, got: {}",
             result.summary
         );
     }
@@ -1321,12 +1355,13 @@ mod tests {
     fn parse_with_outcome_strips_control_chars_from_clean_parse() {
         // A clean response that contains C0 control characters (e.g. 0x01)
         // must have them stripped from findings and summary.
-        let text = "## Summary\n\nSummary with \x01 control char.\n\n\
+        let text = "## Executive Summary\n\nExecutive summary with \x01 control char.\n\n\
              ## Findings\n\n\
              1. **Headline:** Obs\x02summary\n\n**Observation:** obs [#1].\x03\n\n\
              **Analysis:** a.\n\n\
              **Cross-reference / Dependencies:** No direct dependencies.\n\n\
-             **Implication:** i.\n";
+             **Implication:** i.\n\n\
+             ## Top 5 Implications\n\n1. \x04Implication.\n";
         let sources = vec![src_body(1, None)];
         let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
         assert_eq!(outcome, AnalysisOutcome::Llm);
@@ -1339,6 +1374,11 @@ mod tests {
             !result.findings[0].contains('\x02') && !result.findings[0].contains('\x03'),
             "control chars must be stripped from findings, got: {:?}",
             result.findings[0]
+        );
+        assert!(
+            !result.top_implications[0].contains('\x04'),
+            "control chars must be stripped from top implications, got: {:?}",
+            result.top_implications[0]
         );
     }
 
@@ -1494,6 +1534,7 @@ mod tests {
                 "1. **Headline:** A\n\n**Observation:** obs [#1].\n\n**Analysis:** a.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** i.".to_string(),
                 "2. **Headline:** B\n\n**Observation:** obs [#2].\n\n**Analysis:** b.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** j.".to_string(),
             ],
+            top_implications: vec!["Adopt A.".to_string()],
             cross_references: Vec::new(),
             open_questions: vec!["Q1?".to_string()],
         };
@@ -1502,6 +1543,7 @@ mod tests {
             findings: vec![
                 "1. **Headline:** C\n\n**Observation:** obs [#3].\n\n**Analysis:** c.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** k.".to_string(),
             ],
+            top_implications: vec!["Adopt A.".to_string(), "Consider C.".to_string()],
             cross_references: Vec::new(),
             open_questions: vec!["Q2?".to_string()],
         };
@@ -1514,6 +1556,11 @@ mod tests {
         // Summaries should be joined.
         assert!(merged.summary.contains("Summary 1"));
         assert!(merged.summary.contains("Summary 2"));
+        // Top implications merged and deduped.
+        assert_eq!(
+            merged.top_implications,
+            vec!["Adopt A.".to_string(), "Consider C.".to_string()]
+        );
         // Open questions merged.
         assert_eq!(merged.open_questions, vec!["Q1?", "Q2?"]);
     }
@@ -1527,12 +1574,14 @@ mod tests {
         let part1 = AnalysisResult {
             summary: String::new(),
             findings: Vec::new(),
+            top_implications: Vec::new(),
             cross_references: vec![cr.clone()],
             open_questions: Vec::new(),
         };
         let part2 = AnalysisResult {
             summary: String::new(),
             findings: Vec::new(),
+            top_implications: Vec::new(),
             cross_references: vec![
                 cr.clone(),
                 CrossReference {
@@ -1553,6 +1602,7 @@ mod tests {
         let part = AnalysisResult {
             summary: "Only".to_string(),
             findings: vec!["1. Finding.".to_string()],
+            top_implications: vec!["Only implication.".to_string()],
             cross_references: Vec::new(),
             open_questions: Vec::new(),
         };

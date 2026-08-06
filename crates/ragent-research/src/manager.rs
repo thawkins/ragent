@@ -132,7 +132,7 @@ pub struct SearchIndexEntry {
     /// future use).
     #[serde(default)]
     pub tags: Vec<String>,
-    /// One-line summary extracted from the `## Summary` section of
+    /// One-line summary extracted from the `## Executive Summary` section of
     /// `RESEARCH.md`. Empty when no summary has been recorded yet.
     #[serde(default)]
     pub summary: String,
@@ -158,12 +158,12 @@ pub struct SearchIndex {
 
 /// Extract a one-line summary from the body of a `RESEARCH.md`.
 ///
-/// Looks for the `## Summary` section and returns the first non-empty,
+/// Looks for the `## Executive Summary` section and returns the first non-empty,
 /// non-placeholder line. Returns an empty string when the section is absent
 /// or contains only the default placeholder text.
 fn extract_one_line_summary(body: &str) -> String {
-    // Find the `## Summary` heading.
-    let summary_marker = "## Summary";
+    // Find the `## Executive Summary` heading.
+    let summary_marker = "## Executive Summary";
     let summary_start = match body.find(summary_marker) {
         Some(pos) => pos,
         None => return String::new(),
@@ -185,7 +185,7 @@ fn extract_one_line_summary(body: &str) -> String {
             continue;
         }
         // Skip the default placeholder.
-        if trimmed.starts_with("(no summary recorded yet") {
+        if trimmed.starts_with("(no executive summary recorded yet") {
             continue;
         }
         // Strip leading markdown list markers / formatting.
@@ -896,6 +896,7 @@ pub fn render_document_for(
         item,
         summary: summary.to_string(),
         findings: Vec::new(),
+        top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
@@ -1208,6 +1209,7 @@ mod tests {
             item,
             summary: "Tokio is the dominant async runtime for Rust.".into(),
             findings: vec!["Finding A".into()],
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,
@@ -1343,13 +1345,13 @@ mod tests {
 
     #[test]
     fn extract_one_line_summary_returns_first_non_placeholder_line() {
-        let body = "## Summary\n\nThis is the real summary.\n\n## Findings\n\n...";
+        let body = "## Executive Summary\n\nThis is the real summary.\n\n## Findings\n\n...";
         assert_eq!(extract_one_line_summary(body), "This is the real summary.");
     }
 
     #[test]
     fn extract_one_line_summary_skips_placeholder() {
-        let body = "## Summary\n\n(no summary recorded yet — run a gathering pass to populate)\n\n## Findings\n\n";
+        let body = "## Executive Summary\n\n(no executive summary recorded yet — run a gathering pass to populate)\n\n## Top 5 Implications\n\n";
         assert_eq!(extract_one_line_summary(body), "");
     }
     #[test]
@@ -1457,6 +1459,7 @@ mod tests {
             item,
             summary: "Found one good link".into(),
             findings: vec!["Finding A".into()],
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,
@@ -1507,6 +1510,7 @@ mod frontmatter_tests {
             item,
             summary: "summary".into(),
             findings: Vec::new(),
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
             template_body: None,

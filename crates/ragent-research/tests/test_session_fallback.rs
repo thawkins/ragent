@@ -9,7 +9,10 @@ pub use ragent_research::source;
 #[path = "../src/session/fallback.rs"]
 mod fallback;
 
-use fallback::{body_excerpt, default_findings, default_open_questions, default_summary};
+use fallback::{
+    body_excerpt, default_findings, default_open_questions, default_summary,
+    default_top_implications,
+};
 use ragent_research::source::{LocalSourceKind, Source};
 use std::path::PathBuf;
 
@@ -158,6 +161,82 @@ fn default_findings_emits_per_source_with_excerpts() {
     assert!(out[2].contains("Finding 2"));
 }
 
+/// Extract the text between `**Analysis:**` and the next bold label.
+fn extract_analysis_paragraph(finding: &str) -> String {
+    let start = finding
+        .find("**Analysis:**")
+        .map(|p| p + "**Analysis:**".len())
+        .unwrap_or(0);
+    let rest = &finding[start..];
+    let end = rest
+        .find("**Cross-reference / Dependencies:**")
+        .unwrap_or(rest.len());
+    rest[..end].trim().to_string()
+}
+
+#[test]
+fn default_findings_analysis_exceeds_512_chars_for_web_source() {
+    let s = vec![web_source(
+        "Article A",
+        "https://example.com/article-a",
+        "Body of article A — talks about cargo workspaces and lockfiles in detail.",
+    )];
+    let out = default_findings(&s, "research topic");
+    assert_eq!(out.len(), 1);
+    let analysis = extract_analysis_paragraph(&out[0]);
+    assert!(
+        analysis.chars().count() > 512,
+        "web-source analysis must exceed 512 chars, got {} chars: {analysis}",
+        analysis.chars().count()
+    );
+}
+
+#[test]
+fn default_findings_analysis_exceeds_512_chars_for_local_source() {
+    let s = vec![local_source(
+        "src/main.rs",
+        "keyword match",
+        "fn main() { println!(\"hello\"); }",
+    )];
+    let out = default_findings(&s, "research topic");
+    assert_eq!(out.len(), 1);
+    let analysis = extract_analysis_paragraph(&out[0]);
+    assert!(
+        analysis.chars().count() > 512,
+        "local-source analysis must exceed 512 chars, got {} chars: {analysis}",
+        analysis.chars().count()
+    );
+}
+
+#[test]
+fn default_findings_analysis_exceeds_512_chars_for_spec_source() {
+    let s = vec![Source::Spec {
+        spec_id: "test-spec".into(),
+        captured_at: chrono::Utc::now(),
+        relevance: "relevant to topic".into(),
+    }];
+    let out = default_findings(&s, "research topic");
+    assert_eq!(out.len(), 1);
+    let analysis = extract_analysis_paragraph(&out[0]);
+    assert!(
+        analysis.chars().count() > 512,
+        "spec-source analysis must exceed 512 chars, got {} chars: {analysis}",
+        analysis.chars().count()
+    );
+}
+
+#[test]
+fn default_findings_analysis_exceeds_512_chars_for_empty_sources() {
+    let out = default_findings(&[], "research topic");
+    assert_eq!(out.len(), 1);
+    let analysis = extract_analysis_paragraph(&out[0]);
+    assert!(
+        analysis.chars().count() > 512,
+        "empty-source analysis must exceed 512 chars, got {} chars: {analysis}",
+        analysis.chars().count()
+    );
+}
+
 #[test]
 fn body_excerpt_respects_max_chars_and_counts_ellipsis() {
     let body = "word ".repeat(50);
@@ -242,4 +321,47 @@ fn default_open_questions_handles_empty_source_list() {
     let out = default_open_questions(&[], "topic");
     assert_eq!(out.len(), 1);
     assert!(out[0].contains("Why was nothing captured"));
+}
+
+#[test]
+fn default_top_implications_extracts_from_findings() {
+    let findings = default_findings(
+        &[
+            web_source(
+                "Article A",
+                "https://a",
+                "Body of article A — talks about cargo workspaces and lockfiles.",
+            ),
+            web_source(
+                "Article B",
+                "https://b",
+                "Body of article B — talks about tokio runtime.",
+            ),
+        ],
+        "topic",
+    );
+    let out = default_top_implications(&findings, "topic");
+    assert_eq!(
+        out.len(),
+        5,
+        "mechanical fallback should always produce 5 implications: {out:?}"
+    );
+    // First two entries should come from the explicit **Implication:** paragraphs.
+    assert!(
+        out[0].to_lowercase().contains("corroborated")
+            || out[0].to_lowercase().contains("referenced"),
+        "first implication should derive from web-source finding: {}",
+        out[0]
+    );
+}
+
+#[test]
+fn default_top_implications_pads_with_generics_when_fewer_than_five() {
+    let findings = vec![
+        "**Headline:** H\n\n**Observation:** obs.\n\n**Analysis:** a.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** One explicit implication.".to_string(),
+    ];
+    let out = default_top_implications(&findings, "topic");
+    assert_eq!(out.len(), 5);
+    assert_eq!(out[0], "One explicit implication");
+    assert!(out[1].contains("topic"));
 }

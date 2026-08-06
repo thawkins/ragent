@@ -92,6 +92,7 @@ async fn write_document_persists_supports_files_and_index() {
         item,
         summary: "Captured one web source and one local cross-reference.".into(),
         findings: vec!["Finding 1".into()],
+        top_implications: Vec::new(),
         cross_references: vec![ragent_research::CrossReference {
             path: "src/lib.rs".into(),
             relevance: "anchor file".into(),
@@ -190,6 +191,7 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
             Ok(AnalysisResult {
                 summary: "LLM-generated summary of Rust async.".into(),
                 findings: vec!["Finding A: async/await is useful.".into()],
+                top_implications: Vec::new(),
                 cross_references: vec![CrossReference {
                     path: "src/lib.rs".into(),
                     relevance: "core async code".into(),

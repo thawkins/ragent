@@ -189,6 +189,7 @@ mod tests {
         AnalysisResult {
             summary: String::new(),
             findings: vec![finding.to_string()],
+            top_implications: Vec::new(),
             cross_references: vec![],
             open_questions: vec![],
         }

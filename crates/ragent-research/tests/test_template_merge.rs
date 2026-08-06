@@ -30,6 +30,7 @@ fn doc_with_template(template_body: Option<&str>) -> ResearchDocument {
         item,
         summary: "Template-merge summary.".to_string(),
         findings: vec![finding],
+        top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: vec!["Does the template survive alongside the standard sections?".into()],
         template_body: template_body.map(str::to_string),
@@ -71,7 +72,7 @@ fn template_is_merged_not_replacing_standard_sections() {
         "Topic section must survive merge"
     );
     assert!(
-        body.contains("## Summary"),
+        body.contains("## Executive Summary"),
         "Summary section must survive merge"
     );
     assert!(
@@ -104,7 +105,7 @@ fn no_template_preserves_standard_sections_unchanged() {
 
     assert!(!body.contains("Custom Template"));
     assert!(body.contains("## Topic"));
-    assert!(body.contains("## Summary"));
+    assert!(body.contains("## Executive Summary"));
     assert!(body.contains("## Findings"));
     assert!(body.contains("### Finding 1 — Observation summary"));
     assert!(body.contains("**Observation:**"));

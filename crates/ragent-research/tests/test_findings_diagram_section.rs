@@ -47,6 +47,7 @@ fn doc_with_findings() -> ResearchDocument {
         item,
         summary: "Three findings with a dependency graph.".to_string(),
         findings,
+        top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
@@ -158,7 +159,8 @@ fn all_required_sections_present_in_canonical_order() {
     for legacy in [
         "Topic",
         "Search Queries",
-        "Summary",
+        "Executive Summary",
+        "Top 5 Implications",
         "Findings",
         "In-Project Cross-References",
         "Open Questions",

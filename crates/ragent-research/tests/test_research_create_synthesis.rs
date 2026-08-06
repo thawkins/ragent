@@ -66,6 +66,7 @@ impl AnalysisEngine for MalformedMockEngine {
                  **Implication:** Re-run `/research create` or refine the topic."
                     .to_string(),
             ],
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
         };
@@ -102,6 +103,7 @@ impl AnalysisEngine for WellFormedMockEngine {
         let result = AnalysisResult {
             summary: "LLM-synthesized summary of Rust async.".into(),
             findings: vec![finding],
+            top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
         };
@@ -367,7 +369,7 @@ async fn executive_summary_format_writes_shorter_summary_instruction() {
         body.contains("requested_format: executive-summary"),
         "frontmatter should record requested format, got:\n{body}"
     );
-    assert!(body.contains("## Summary"));
+    assert!(body.contains("## Executive Summary"));
     assert!(body.contains("## Findings"));
 }
 
@@ -483,7 +485,12 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
     );
 
     // Legacy report H2 headings must not appear.
-    let forbidden = ["## Topic", "## Search Queries", "## Summary", "## Findings"];
+    let forbidden = [
+        "## Topic",
+        "## Search Queries",
+        "## Executive Summary",
+        "## Findings",
+    ];
     for heading in forbidden {
         assert!(
             !h2.contains(&heading),
@@ -525,15 +532,16 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "Methods section must contain Research Configuration sub-section, got:\n{body}"
     );
 
-    // FR-008: Results has Summary, Findings, and Findings Relationship Diagram.
+    // FR-008: Results has Findings and Findings Relationship Diagram (summary
+    // now lives in Abstract).
     let results_idx = body.find("## Results").expect("Results section exists");
     let discussion_idx = body
         .find("## Discussion")
         .expect("Discussion section exists");
     let results_section = &body[results_idx..discussion_idx];
     assert!(
-        results_section.contains("### Summary"),
-        "Results must contain Summary sub-section, got:\n{results_section}"
+        !results_section.contains("### Summary"),
+        "Results must no longer contain a Summary sub-section (moved to Abstract), got:\n{results_section}"
     );
     assert!(
         results_section.contains("### Findings"),

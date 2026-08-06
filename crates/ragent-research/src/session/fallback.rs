@@ -9,6 +9,7 @@
 
 use crate::document::CrossReference;
 use crate::source::{LocalSourceKind, Source};
+use regex::Regex;
 
 /// Build a mechanical summary string listing how many sources of each kind
 /// were captured, plus the top-3 titles/paths/spec-ids.
@@ -172,12 +173,24 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                 "No direct dependencies.".to_string()
             };
             let headline = crate::document::make_headline_from_observation(&observation);
+            let analysis = format!(
+                "This evidence relates directly to the topic '{topic}', providing public context that can be compared against project-local material. \
+                 The web source **{label}** from <{url}> contributes an external perspective that may confirm, contradict, or extend what the local codebase reveals. \
+                 Because this is a publicly available source, its authority and recency should be weighed against any in-project evidence: a web source that \
+                 predates a recent code change may describe stale behavior, while a freshly published source may capture the current state more accurately. \
+                 The excerpt captured from the source — \"{excerpt}\" — is a snapshot at fetch time and may not reflect subsequent edits; treat it as a point-in-time \
+                 observation rather than a permanent truth. When {web_count} web source(s) were gathered, this finding should be read alongside the others \
+                 to identify areas of agreement and disagreement, and to triangulate the most reliable account. If no in-project file corroborates this \
+                 web source, the finding should be treated as background context only and flagged as an open question for follow-up verification.",
+                label = label,
+                url = url,
+                excerpt = excerpt,
+                web_count = web.len(),
+            );
             let finding = finding_template(
                 &headline,
                 &observation,
-                &format!(
-                    "This evidence relates directly to the topic '{topic}', providing public context that can be compared against project-local material."
-                ),
+                &analysis,
                 &previous,
                 "The source should be treated as background unless it is corroborated by an in-project reference or a later finding; if no corroboration exists, flag it as an open question.",
             );
@@ -226,12 +239,25 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                 (None, None) => "No direct dependencies.".to_string(),
             };
             let headline = crate::document::make_headline_from_observation(&observation);
+            let analysis = format!(
+                "This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance. \
+                 The file `{path}` was matched with relevance note `{relevance}`, meaning the local gatherer identified it as directly connected to the research topic. \
+                 Unlike web sources, which provide external context, this local file is part of the project under investigation and its contents reflect the \
+                 actual implementation, configuration, or documentation as it exists right now. The excerpt — \"{excerpt}\" — is a verbatim snapshot from \
+                 the file, so it can be trusted as a primary source for the current state of the codebase. However, the excerpt is limited to the matching \
+                 lines and their immediate context; the full file may contain additional relevant material outside the captured region. When {local_count} \
+                 local file(s) were gathered, this finding should be cross-referenced with the others to build a complete picture of how the topic \
+                 manifests across the project. If web sources were also captured, compare the local implementation against the external descriptions to \
+                 identify gaps, drift, or contradictions — these are the most actionable findings because they point to concrete changes that may be needed.",
+                path = path,
+                relevance = relevance,
+                excerpt = excerpt,
+                local_count = local.len(),
+            );
             let finding = finding_template(
                 &headline,
                 &observation,
-                &format!(
-                    "This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance."
-                ),
+                &analysis,
                 &dependencies,
                 "The referenced path is a concrete place to start implementation or further investigation; consider opening it as a cross-reference and verifying the excerpt against the latest source.",
             );
@@ -274,10 +300,24 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
                 "Prior spec `{spec_id}` is relevant to '{topic}' ({note}) [#{n}].",
                 n = spec_offset + idx + 1,
             );
+            let analysis = format!(
+                "This specification establishes requirements or decisions that pre-date the current research, and should constrain or guide any conclusions \
+                 drawn from newer sources. The spec `{spec_id}` (noted as: {note}) represents a deliberate design decision made by the project team, \
+                 and its requirements carry more authority than a single web source because it reflects the project's intended direction. When evaluating \
+                 newer evidence from web or local sources, any conclusion that conflicts with this spec should be treated as a potential deviation that \
+                 needs explicit resolution — either the spec should be updated to reflect the new reality, or the code should be brought back into \
+                 compliance. The spec may also define acceptance criteria, constraints, or non-functional requirements that are not visible in the \
+                 code excerpt alone, so it should be consulted alongside any implementation changes. When {spec_count} spec(s) were cross-referenced, \
+                 each one should be checked for overlap or conflict with the others; specs that address the same concern from different angles may \
+                 contain complementary or contradictory requirements that need to be reconciled before acting on the research findings.",
+                spec_id = spec_id,
+                note = note,
+                spec_count = specs.len(),
+            );
             let finding = finding_template(
                 &headline,
                 &observation,
-                "This specification establishes requirements or decisions that pre-date the current research, and should constrain or guide any conclusions drawn from newer sources.",
+                &analysis,
                 &dependencies,
                 "Before acting on later findings, verify that the project still honours this spec; conflicts between this spec and newer evidence should be escalated as an open question.",
             );
@@ -286,15 +326,67 @@ pub(crate) fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
     }
 
     if sources.is_empty() {
+        let analysis = format!(
+            "Without captured web pages, local files, or prior specs, the research cannot yet support a substantive conclusion. \
+             The gathering phase attempted to find relevant material for the topic '{topic}' but returned empty results from all source types: \
+             no web pages were fetched, no in-project files matched the search keywords, and no prior specifications were cross-referenced. \
+             This means the research is in an evidence vacuum — any conclusion drawn without sources would be speculation rather than analysis. \
+             There are several possible reasons for the empty result: the topic may be too narrow or use terminology that does not appear in the \
+             codebase or on the web; the web search tools may have failed to return results due to network issues or rate limits; the local file \
+             gatherer may not have found keyword matches because the relevant code uses different naming conventions; or there may genuinely be \
+             no prior work on this topic in the project or the public web. The recommended next step is to re-run the research with a broader \
+             or rephrased topic, ensure the web search tools are operational, and verify that the project directory contains files relevant to \
+             the research question. If the topic is genuinely novel with no existing material, consider whether the research question itself \
+             should be reframed or whether this is a greenfield area where the findings will be entirely forward-looking."
+        );
         out.push(finding_template(
             "No sources captured",
             &format!("No sources were captured for '{topic}'."),
-            "Without captured web pages, local files, or prior specs, the research cannot yet support a substantive conclusion.",
+            &analysis,
             "No direct dependencies.",
             "Consider re-running with a more specific topic, or run inside a project with relevant files and specs so gathering has something to work with.",
         ));
     }
     out
+}
+
+pub(crate) fn default_top_implications(findings: &[String], topic: &str) -> Vec<String> {
+    // Try to extract the first sentence from each finding's **Implication:** paragraph.
+    let re = Regex::new(r"(?i)\*\*Implication:\*\*\s*([^\n]+)").expect("valid implication regex");
+    let mut extracted: Vec<String> = findings
+        .iter()
+        .filter_map(|f| {
+            re.captures(f).and_then(|cap| {
+                let sentence = cap[1].trim().trim_end_matches('.').to_string();
+                if sentence.is_empty() {
+                    None
+                } else {
+                    Some(sentence)
+                }
+            })
+        })
+        .collect();
+
+    // Pad with generic implications if fewer than 5 were extracted.
+    let generics = [
+        format!(
+            "Further reading on '{topic}' is recommended before making architectural decisions."
+        ),
+        format!("Compare the gathered sources against current project constraints for '{topic}'."),
+        format!("Identify which findings about '{topic}' are supported by in-project evidence."),
+        format!("Re-run research on '{topic}' after collecting more targeted sources."),
+        format!("Validate any actionable conclusions about '{topic}' with domain experts."),
+    ];
+    while extracted.len() < 5 {
+        let next = generics[extracted.len() % generics.len()].clone();
+        if !extracted.contains(&next) {
+            extracted.push(next);
+        } else {
+            break;
+        }
+    }
+
+    extracted.into_iter().take(5).collect()
 }
 
 /// Build a per-source bullet title + short excerpt suitable for embedding

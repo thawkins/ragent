@@ -1,11 +1,13 @@
 # Changelog
 
-## Version: 1.0.9
+## Version: 1.0.10
 
 ### Changed — updated /research functionality
 
 - `ragent-research` crate updated with improved synthesis, gathering, and session
   pipeline changes (see details below).
+
+## Version: 1.0.9
 
 ### Added — Low-relevance web-source filter in `/research` gathering
 

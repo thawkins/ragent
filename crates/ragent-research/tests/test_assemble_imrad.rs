@@ -21,6 +21,7 @@ const fn sample_doc(item: ResearchItem) -> ResearchDocument {
         item,
         summary: String::new(),
         findings: Vec::new(),
+        top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
         template_body: None,
@@ -79,7 +80,12 @@ fn imrad_legacy_top_level_headings_absent() {
     let doc = sample_doc(sample_item());
     let assembled = assemble_document(&doc);
     let headings = h2_headings(&assembled.body);
-    let forbidden = ["## Topic", "## Search Queries", "## Summary", "## Findings"];
+    let forbidden = [
+        "## Topic",
+        "## Search Queries",
+        "## Executive Summary",
+        "## Findings",
+    ];
     for heading in forbidden {
         assert!(
             !headings.contains(&heading),
@@ -168,8 +174,8 @@ fn imrad_populated_fields_render_in_sections() {
     let discussion_idx = body.find("## Discussion").unwrap();
     let results_body = &body[results_idx..discussion_idx];
     assert!(
-        results_body.contains("### Summary"),
-        "Results must contain Summary sub-section: {results_body}"
+        results_body.contains("### Findings"),
+        "Results must contain Findings as its first sub-section: {results_body}"
     );
     assert!(
         results_body.contains("### Findings"),
@@ -291,7 +297,12 @@ fn imrad_skeleton_does_not_contain_legacy_top_level_headings() {
         OutputFormat::Imrad,
     );
     let headings = h2_headings(&skeleton);
-    let forbidden = ["## Topic", "## Search Queries", "## Summary", "## Findings"];
+    let forbidden = [
+        "## Topic",
+        "## Search Queries",
+        "## Executive Summary",
+        "## Findings",
+    ];
     for heading in forbidden {
         assert!(
             !headings.contains(&heading),
