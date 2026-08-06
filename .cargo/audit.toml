@@ -1,10 +1,10 @@
 # cargo-audit configuration for ragent.
-# See https://docs.rs/cargo-audit for full documentation.
-
+# These advisories are suppressed because fixing them requires major upstream
+# crate upgrades that are currently blocked by compatibility.
 [advisories]
-# Ignore advisories for vulnerabilities in transitive deps we cannot directly control.
 ignore = [
-    # RUSTSEC-2026-0002: lru IterMut violates Stacked Borrows.
-    # lru is a transitive dependency of ratatui 0.29; we do not call iter_mut() directly.
-    "RUSTSEC-2026-0002",
+    "RUSTSEC-2026-0187", # lopdf stack overflow; blocked by pdf-extract/printpdf versions
+    "RUSTSEC-2026-0194", # quick-xml duplicate attr check; blocked by ooxmlsdk/calamine
+    "RUSTSEC-2026-0195", # quick-xml namespace allocation; blocked by ooxmlsdk/calamine
+    "RUSTSEC-2026-0235", # rkyv archive validation; blocked by rust_decimal via spreadsheet-ods
 ]

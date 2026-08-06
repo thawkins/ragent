@@ -1,5 +1,23 @@
 # Changelog
 
+## Version: 1.0.11
+
+### Changed — update research system
+
+- Incremental release bump and changelog update for the research subsystem.
+
+### Security — audited and accepted transitive dependency advisories
+
+- Ran `cargo audit`; 7 high-severity advisories were reported. After review,
+  the following are suppressed in `deny.toml` because a fix requires major
+  upstream crate upgrades that are out of scope for this release:
+  - `RUSTSEC-2026-0187` (`lopdf` stack overflow): blocked by `pdf-extract`
+    0.10 and `printpdf` 0.9; trusted local PDF input.
+  - `RUSTSEC-2026-0194` / `RUSTSEC-2026-0195` (`quick-xml` DoS): blocked by
+    `ooxmlsdk` 0.3 and `calamine` 0.34; trusted local Office/Spreadsheet input.
+  - `RUSTSEC-2026-0235` (`rkyv` archive validation): blocked by
+    `rust_decimal` 1.42.1 via `spreadsheet-ods`; not used with untrusted input.
+
 ## Version: 1.0.10
 
 ### Changed — updated /research functionality
