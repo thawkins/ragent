@@ -129,6 +129,14 @@ impl ResearchIo {
         research_root.join("INDEX.md")
     }
 
+    /// Compute the path of the derived `research/.index.json` search cache
+    /// (Milestone G). This is a machine-readable cache regenerated alongside
+    /// `INDEX.md` on every mutation; it is **not** meant for human editing.
+    #[must_use]
+    pub fn cache_path(research_root: &Path) -> PathBuf {
+        research_root.join(".index.json")
+    }
+
     /// Write `content` to `path` atomically (write to `<path>.tmp`, then rename).
     pub async fn atomic_write(path: impl AsRef<Path>, content: &str) -> Result<()> {
         let path = path.as_ref();

@@ -25,6 +25,12 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+mod parser;
+mod prompt;
+
+use parser::parse_analysis_response_with_outcome;
+use prompt::SynthesisPromptBuilder;
+
 /// One captured source plus its body text, ready to be fed into the synthesis
 /// prompt. Web bodies are the fetched page text; local bodies are excerpts;
 /// spec bodies are the spec title.
@@ -158,6 +164,23 @@ pub struct LlmAnalysisEngine {
     persona: Option<String>,
     /// Optional output format requested via `--format`.
     output_format: Option<OutputFormat>,
+    /// Per-source character budget for the heuristic summarizer
+    /// (Milestone E-001). When `Some(n)`, each source body is collapsed to
+    /// at most `n` characters before entering the synthesis prompt. When
+    /// `None`, the default `truncate_body` limit (4000 chars) in
+    /// [`render_sources_block`] is the only truncation applied.
+    source_summary_budget: Option<usize>,
+    /// Total source-body character threshold that triggers chunked LLM
+    /// synthesis (Milestone E-002). When the sum of all source body
+    /// characters exceeds this value, sources are split into chunks and
+    /// sent in separate LLM calls; partial results are merged via
+    /// [`merge_chunk_results`]. When `None`, chunking is disabled and the
+    /// engine sends a single call regardless of corpus size.
+    synthesis_chunk_threshold: Option<usize>,
+    /// Maximum total source-body characters per chunk (Milestone E-002).
+    /// Defaults to 48_000 when `synthesis_chunk_threshold` is set but this
+    /// is `None`. Each chunk's total body chars stays at or below this value.
+    synthesis_chunk_size: Option<usize>,
 }
 
 impl std::fmt::Debug for LlmAnalysisEngine {
@@ -188,6 +211,9 @@ impl LlmAnalysisEngine {
             base_url: None,
             persona: None,
             output_format: None,
+            source_summary_budget: None,
+            synthesis_chunk_threshold: None,
+            synthesis_chunk_size: None,
         }
     }
 
@@ -221,13 +247,45 @@ impl LlmAnalysisEngine {
         self.output_format = fmt;
         self
     }
+
+    /// Set the per-source character budget for the heuristic summarizer
+    /// (Milestone E-001). When set, each source body is collapsed to at most
+    /// `budget` characters via [`HeuristicSummarizer`] before entering the
+    /// synthesis prompt.
+    #[must_use]
+    pub const fn with_source_summary_budget(mut self, budget: Option<usize>) -> Self {
+        self.source_summary_budget = budget;
+        self
+    }
+
+    /// Set the total source-body character threshold that triggers chunked
+    /// LLM synthesis (Milestone E-002). When the total body chars across all
+    /// sources exceeds `threshold`, sources are split into chunks and sent
+    /// in separate LLM calls; partial results are merged.
+    #[must_use]
+    pub const fn with_synthesis_chunk_threshold(mut self, threshold: Option<usize>) -> Self {
+        self.synthesis_chunk_threshold = threshold;
+        self
+    }
+
+    /// Set the maximum total source-body characters per chunk (Milestone
+    /// E-002). Defaults to 48_000 when chunking is enabled but this is not
+    /// set.
+    #[must_use]
+    pub const fn with_synthesis_chunk_size(mut self, size: Option<usize>) -> Self {
+        self.synthesis_chunk_size = size;
+        self
+    }
+
+    /// Default per-chunk body character budget (Milestone E-002).
+    const DEFAULT_CHUNK_SIZE: usize = 48_000;
 }
 
 #[async_trait::async_trait]
 impl AnalysisEngine for LlmAnalysisEngine {
     async fn analyze(&self, topic: &str, sources: &[SourceBody]) -> anyhow::Result<AnalysisResult> {
-        let text = self.stream_synthesis(topic, sources).await?;
-        Ok(parse_analysis_response(&text))
+        let (result, _) = self.analyze_with_outcome(topic, sources).await?;
+        Ok(result)
     }
 
     /// Override [`AnalysisEngine::analyze_with_outcome`] so the LLM engine
@@ -236,13 +294,69 @@ impl AnalysisEngine for LlmAnalysisEngine {
     /// ([`AnalysisOutcome::FallbackEmpty`]) — FR-005 / T-005. Provider
     /// errors still surface as `Err`, which `session.rs` maps to
     /// [`crate::session::SynthesizeOutcome::FallbackError`].
+    ///
+    /// **Milestone E-001/E-002:** Before sending the prompt, each source body
+    /// is collapsed to `source_summary_budget` chars (when configured) via
+    /// [`HeuristicSummarizer`]. When the total body volume exceeds
+    /// `synthesis_chunk_threshold`, sources are split into chunks and sent
+    /// in separate LLM calls; partial results are merged via
+    /// [`merge_chunk_results`]. The outcome is `Llm` when at least one chunk
+    /// produced a clean parse; `FallbackEmpty` when every chunk fell back.
     async fn analyze_with_outcome(
         &self,
         topic: &str,
         sources: &[SourceBody],
     ) -> anyhow::Result<(AnalysisResult, AnalysisOutcome)> {
-        let text = self.stream_synthesis(topic, sources).await?;
-        Ok(parse_analysis_response_with_outcome(&text, sources))
+        // E-001: collapse each source body to the configured budget.
+        let prepared: Vec<SourceBody> = if let Some(budget) = self.source_summary_budget {
+            let summarizer = HeuristicSummarizer;
+            summarize_source_bodies(sources, &summarizer, budget)
+        } else {
+            sources.to_vec()
+        };
+
+        // E-002: decide whether to chunk.
+        let threshold = self.synthesis_chunk_threshold;
+        let total = total_body_chars(&prepared);
+        let needs_chunking = threshold.is_some_and(|t| total > t);
+
+        if !needs_chunking {
+            // Single-call path (legacy behavior).
+            let text = self.stream_synthesis(topic, &prepared).await?;
+            return Ok(parse_analysis_response_with_outcome(&text, &prepared));
+        }
+
+        // Chunked path: split sources, send each chunk, merge results.
+        let chunk_size = self
+            .synthesis_chunk_size
+            .unwrap_or(Self::DEFAULT_CHUNK_SIZE);
+        let chunks = chunk_source_bodies(&prepared, chunk_size);
+        tracing::info!(
+            chunks = chunks.len(),
+            total_body_chars = total,
+            chunk_size,
+            "research: chunked synthesis enabled"
+        );
+
+        let mut parts: Vec<AnalysisResult> = Vec::with_capacity(chunks.len());
+        let mut all_clean = true;
+        // Collect all source bodies across chunks for citation validation.
+        for chunk in &chunks {
+            let text = self.stream_synthesis(topic, chunk).await?;
+            let (result, outcome) = parse_analysis_response_with_outcome(&text, chunk);
+            if outcome == AnalysisOutcome::FallbackEmpty {
+                all_clean = false;
+            }
+            parts.push(result);
+        }
+
+        let merged = merge_chunk_results(&parts);
+        let outcome = if all_clean && !merged.findings.is_empty() {
+            AnalysisOutcome::Llm
+        } else {
+            AnalysisOutcome::FallbackEmpty
+        };
+        Ok((merged, outcome))
     }
 }
 
@@ -420,929 +534,6 @@ fn parse_subject_summary(text: &str) -> Option<(String, String)> {
     Some((topic, title))
 }
 
-/// Configuration knobs for the synthesis prompt builder.
-///
-/// All fields are `Option`/default so the default-constructed builder
-/// reproduces the legacy `build_synthesis_prompt(topic, sources)` byte stream
-/// exactly. Later tasks (T-003..T-008) extend this with recency instructions,
-/// the **Sources Cited / Date Spread** paragraph, few-shot exemplars, and an
-/// optional persona.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SynthesisPromptConfig {
-    /// Optional audience/domain framing appended to the task preamble
-    /// (FR-009 / Finding 12). `None` preserves the legacy preamble.
-    #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
-    pub audience_scope: Option<String>,
-    /// When `true`, append the recency-weighting rule block (FR-004 / T-004).
-    pub recency_rule: bool,
-    /// When `true`, require the fifth **Sources Cited / Date Spread**
-    /// paragraph in every finding (FR-003 / T-003).
-    pub date_spread_paragraph: bool,
-    /// Optional few-shot exemplar findings appended after the template
-    /// instructions (FR-008 / T-007). Each entry is one finding body.
-    pub few_shot_examples: Vec<String>,
-    /// Optional override for the `system` message persona (FR-009 / T-008).
-    #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
-    pub persona: Option<String>,
-    /// Optional template body merged with the structured synthesis
-    /// requirements (FR-007 / T-006).
-    pub template_body: Option<String>,
-    /// Output artifact requested via `--format`. Governs the volume and
-    /// emphasis instructions in `render_output_template`.
-    pub output_format: Option<OutputFormat>,
-}
-
-/// Versioned, composable synthesis-prompt builder.
-///
-/// Introduced by `researchprompt` T-002 to replace the monolithic
-/// `build_synthesis_prompt` string concatenation with a builder whose parts
-/// (preamble, output-template, recency rule, few-shot, sources block) can be
-/// extended independently. The legacy free function is preserved as a thin
-/// wrapper that calls `SynthesisPromptBuilder::new(topic).sources(sources)
-/// .build()` so existing callers — including `LlmAnalysisEngine::analyze` —
-/// are unchanged.
-///
-/// ## Output stability
-///
-/// With the default [`SynthesisPromptConfig`], `build()` returns the exact
-/// bytes the legacy `build_synthesis_prompt` returned. Tasks T-003..T-008 opt
-/// in to additional prompt sections via the config; they never alter the
-/// default output.
-#[derive(Debug, Clone)]
-pub(crate) struct SynthesisPromptBuilder<'a> {
-    topic: &'a str,
-    sources: &'a [SourceBody],
-    config: SynthesisPromptConfig,
-}
-
-impl<'a> SynthesisPromptBuilder<'a> {
-    /// Begin building a synthesis prompt for `topic`.
-    pub(crate) fn new(topic: &'a str) -> Self {
-        Self {
-            topic,
-            sources: &[],
-            config: SynthesisPromptConfig::default(),
-        }
-    }
-
-    /// Attach the captured source corpus. Required before [`build`].
-    pub(crate) const fn sources(mut self, sources: &'a [SourceBody]) -> Self {
-        self.sources = sources;
-        self
-    }
-
-    /// Attach the full prompt configuration (T-003..T-008 knobs).
-    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
-    pub(crate) fn config(mut self, config: SynthesisPromptConfig) -> Self {
-        self.config = config;
-        self
-    }
-
-    /// Set the output artifact for this prompt (FR-012).
-    pub(crate) const fn output_format(mut self, fmt: OutputFormat) -> Self {
-        self.config.output_format = Some(fmt);
-        self
-    }
-
-    /// Borrow the active config immutably.
-    #[allow(dead_code)] // reserved for T-003..T-008 prompt configuration wiring
-    pub(crate) const fn cfg(&self) -> &SynthesisPromptConfig {
-        &self.config
-    }
-
-    /// Produce the final prompt string.
-    pub(crate) fn build(&self) -> String {
-        let mut prompt = String::new();
-        prompt.push_str(&render_preamble(self.topic, &self.config));
-        if self.sources.is_empty() {
-            prompt.push_str(
-                "No sources were captured. Write a brief note that no sources were available and suggest refining the topic.\n",
-            );
-        } else {
-            prompt.push_str(&format!(
-                "{count} source(s) were captured. Read them and produce a structured markdown response with exactly these four top-level sections (in this order):\n\n",
-                count = self.sources.len()
-            ));
-            prompt.push_str(&render_output_template(&self.config));
-            prompt.push_str(&render_sources_block(
-                self.sources,
-                self.config.date_spread_paragraph,
-            ));
-        }
-        prompt.push_str(&render_closing(&self.config));
-        prompt
-    }
-}
-
-/// Render the task preamble. With the default config this is byte-identical to
-/// the legacy opening of `build_synthesis_prompt`.
-fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
-    format!(
-        "You are writing the analysis section of a research report for the topic:\n\n{topic}\n\n"
-    )
-}
-
-/// Render the four mandatory top-level section instructions plus the
-/// per-finding labeled-paragraph template. With the default config this is
-/// byte-identical to the legacy middle of `build_synthesis_prompt`.
-///
-/// The `IMRaD` output format (FR-012 / specs/imradreport) is handled specially:
-/// the model is still asked for the same four raw sections (Summary, Findings,
-/// In-Project Cross-References, Open Questions) so the parser remains unchanged,
-/// and an extra paragraph encourages results-oriented phrasing so the final
-/// `IMRaD` layout reads naturally in the `## Results` section.
-fn render_output_template(config: &SynthesisPromptConfig) -> String {
-    let mut out = String::new();
-    match config.output_format {
-        Some(OutputFormat::ExecutiveSummary) => {
-            out.push_str("## Summary\n");
-            out.push_str("A very concise executive summary in 2-3 sentences.\n\n");
-            out.push_str("## Findings\n");
-            out.push_str(
-                "At most 5 high-level findings. Keep each finding to one compact paragraph per required label. \
-                 Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
-                 Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
-                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
-                 **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the topic.\n\n\
-                 **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
-                 **Implication:** Summarize the practical consequence or follow-up action.\n\n\
-                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
-            );
-        }
-        Some(OutputFormat::ComparisonTable) => {
-            out.push_str("## Summary\n");
-            out.push_str("One-paragraph overview of the entities being compared.\n\n");
-            out.push_str("## Comparison Table\n");
-            out.push_str(
-                "A markdown table with columns: Entity | Key strengths | Key weaknesses | Best for | Sources. \
-                 Cite web sources with `[#N]` in the Sources column.\n\n",
-            );
-            out.push_str("## Findings\n");
-            out.push_str(
-                "3-7 findings that explain the comparison and cite sources with `[#N]`. \
-                 Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
-                 Each finding must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
-                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
-                 **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain why the observation matters for the comparison.\n\n\
-                 **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, or write \"No direct dependencies.\"\n\n\
-                 **Implication:** Summarize the practical consequence or follow-up action.\n\n\
-                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
-            );
-        }
-        Some(OutputFormat::SourceBibliography) => {
-            out.push_str("## Summary\n");
-            out.push_str("One paragraph summarizing the corpus.\n\n");
-            out.push_str("## Findings\n");
-            out.push_str(
-                "An annotated bibliography: one entry per major source, describing its contribution and citing `[#N]`. \
-                 Begin each entry with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. \
-                 Each entry must contain at least **five markdown paragraphs** with these bold labels, in this order:\n\n\
-                 **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
-                 **Observation:** State the concrete evidence or fact from the source, including at least one `[#N]` citation.\n\n\
-                 **Analysis:** Explain the source's contribution to the topic.\n\n\
-                 **Cross-reference / Dependencies:** Name any other source or finding this one relates to, or write \"No direct dependencies.\"\n\n\
-                 **Implication:** Summarize how this source should influence conclusions.\n\n\
-                 Put each label on its own line, and separate every paragraph with a blank line.\n\n",
-            );
-        }
-        _ => {
-            out.push_str("## Summary\n");
-            out.push_str(
-                "A concise one-paragraph summary of what the sources collectively say about the topic.\n\n",
-            );
-            out.push_str("## Findings\n");
-            out.push_str(
-                "A numbered list of concrete findings. Aim for around 20 distinct findings when the sources have enough breadth and depth to support that many; for narrower topics, include every worthwhile point rather than padding. Begin each finding with a short **Headline:** paragraph (maximum 15 words) that summarizes the **Observation** paragraph. Each finding must contain at least \
-                      **five markdown paragraphs** with these bold labels, in this order:\n\n\
-                      **Headline:** A concise, no-more-than-15-word summary of the observation.\n\n\
-                      **Observation:** State the concrete evidence or fact observed in the sources, including at least one `[#N]` citation. You may cite multiple sources in a finding if several support the same point.\n\n\
-                      **Analysis:** Explain why the observation matters for the topic and how it connects to the broader research question.\n\n\
-                      **Cross-reference / Dependencies:** Name any other finding(s) this one builds on, contradicts, or is prerequisite to, using `Finding N` references. If there are no dependencies, write \"No direct dependencies.\"\n\n\
-                      **Implication:** Summarize the practical consequence, open risk, or recommended follow-up action.\n\n\
-                      Put each label on its own line, and separate every paragraph with a blank line. \
-                      You may add additional paragraphs after the five required ones (for example, \
-                      extra evidence, related work, caveats, or implementation notes). Each additional \
-                      paragraph must also begin with a bold label such as **Label:** so it is easy to \
-                      parse. Put each finding on its own line starting with `1. `, `2. `, etc.\n\n"
-            );
-        }
-    }
-    // FR-012 / specs/imradreport: IMRaD format uses the same four raw sections,
-    // but the model should phrase findings as results-oriented statements.
-    if config.output_format == Some(OutputFormat::Imrad) {
-        out.push_str(
-            "\nThe final report will be restructured into IMRaD order by the document assembler, \
-             so continue to use the section headings above. Phrase each finding as a results-oriented \
-             statement suitable for an IMRaD Results section: state the discovery, support it with \
-             `[#N]` citations, and reserve interpretation and broader implications for the \
-             Analysis and Implication paragraphs.\n\n"
-        );
-    }
-    // T-003 (FR-003): require a sixth **Sources Cited / Date Spread**
-    // paragraph in every finding. Gated on `config.date_spread_paragraph` so
-    // the default-config output stays byte-identical to the legacy prompt.
-    if config.date_spread_paragraph {
-        out.push_str(
-            "In addition to the five required paragraphs above, every finding must end with a sixth paragraph labeled:\n\n\
-            **Sources Cited / Date Spread:**\n\
-            List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). Add one sentence explaining how the date range — and the recency of the evidence — affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
-            Example: `**Sources Cited / Date Spread:** [#3] [#7] — published 2024-01-05..2026-04-07; the finding relies on 2026 sources, so recency weighting increases confidence in current behavior.`\n\n"
-        );
-    }
-    // T-004 (FR-004): recency-weighting rule. Gated on `config.recency_rule`
-    // so the default-config output stays byte-identical to the legacy prompt.
-    if config.recency_rule {
-        out.push_str(
-            "Recency-weighting rule (apply to every finding):\n\
-            - When two cited web sources disagree, prefer the more recently published source unless the older source is a primary/peer-reviewed publication and the newer one is not.\n\
-            - In the **Analysis** paragraph, explicitly note any conflict between older and newer sources and state which view you are following and why.\n\
-            - In the **Sources Cited / Date Spread** paragraph (when required), note when a finding relies primarily on older sources and explain how that affects confidence.\n\
-            - When ranking evidence quality, prefer sources with clear publication dates and structured metadata; down-weight anonymous forums and undated pages unless they provide unique empirical signal.\n\n"
-        );
-    }
-    out.push_str("## In-Project Cross-References\n");
-    out.push_str(
-                "A bullet list of relevant in-project files, formatted as `* `path` — note`. Only include files that are actually mentioned in the local sources.\n\n"
-            );
-    out.push_str("## Open Questions\n");
-    out.push_str(
-                "A bullet list of gaps, uncertainties, or follow-up questions that remain after reading the sources.\n\n"
-            );
-    // Allow T-006 to append template-merge guidance here without touching the
-    // default path. No-op for the default config.
-    if let Some(template) = &config.template_body {
-        // FR-007 / T-006: when a `--template` is supplied, instruct the model
-        // to populate the template's placeholder sections IN ADDITION to the
-        // four/five required finding paragraphs. The template never replaces
-        // the structured synthesis requirements — it only adds extra sections
-        // or tone guidance. Keep this instruction short so it does not blow
-        // up the context window when the template body is large; the full
-        // template body is not echoed here (the caller wires it into the
-        // document assembly separately).
-        let _ = template; // referenced for future expansion
-        out.push_str(
-            "A research template with extra placeholder sections is in effect. \
-            Populate every placeholder the template defines (for example \
-            {{title}}, {{topic}}, {{date}}, or any custom `{{section}}` markers), \
-            but do NOT let the template replace the required Findings structure: \
-            every finding must still contain the five required labeled paragraphs \
-            (Headline, Observation, Analysis, Cross-reference / Dependencies, Implication) \
-            and, when requested, the sixth **Sources Cited / Date Spread** \
-            paragraph. Treat template sections as additional output, not as a \
-            substitute for the structured findings.\n\n",
-        );
-    }
-    // T-007 (FR-008): append few-shot exemplar findings so the model can
-    // calibrate the exact label structure, `[#N]` citations, and (when
-    // enabled) the **Sources Cited / Date Spread** paragraph. Gated on
-    // `config.few_shot_examples` being non-empty so the default-config output
-    // stays byte-identical to the legacy prompt. Each entry is one finding
-    // body; we render up to two to keep the context-window cost low.
-    if !config.few_shot_examples.is_empty() {
-        out.push_str(
-            "Few-shot exemplar findings (for format calibration only — do NOT \\
-            copy their content into your answer; derive findings from the \\
-            supplied sources):\\n\\n",
-        );
-        for (idx, example) in config.few_shot_examples.iter().take(2).enumerate() {
-            out.push_str(&format!("### Exemplar Finding {}\\n\\n", idx + 1));
-            out.push_str(example.trim());
-            if !example.ends_with('\n') {
-                out.push('\n');
-            }
-            out.push('\n');
-        }
-    }
-    out
-}
-
-/// Render the per-source `### Sources` block.
-///
-/// With the default config (`include_published = false`) this is
-/// byte-identical to the legacy tail of `build_synthesis_prompt`. When T-003
-/// enables the **Sources Cited / Date Spread** paragraph, the caller passes
-/// `include_published = true` so each web source header gains a `Published`
-/// line the model can quote in its date-spread analysis.
-fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
-    let mut out = String::new();
-    out.push_str("---\n\n### Sources\n\n");
-    for src in sources {
-        let published_line = if include_published {
-            match src.published_at {
-                Some(dt) => format!("\nPublished (UTC): {d}", d = dt.format("%Y-%m-%d")),
-                None => "\nPublished (UTC): undated".to_string(),
-            }
-        } else {
-            String::new()
-        };
-        out.push_str(&format!(
-            "#### Source [#{index}] ({kind}) {title}\nPath/URL: {path}{published}\nRelevance: {rel}\n```text\n{body}\n```\n\n",
-            index = src.index,
-            kind = src.kind,
-            title = src.title,
-            path = src.path_or_url,
-            published = published_line,
-            rel = if src.relevance.is_empty() {
-                "—".to_string()
-            } else {
-                src.relevance.clone()
-            },
-            body = truncate_body(&src.body, 4000),
-        ));
-    }
-    out
-}
-
-/// Render the closing instruction line. With the default config this is
-/// byte-identical to the legacy final lines of `build_synthesis_prompt`.
-fn render_closing(_config: &SynthesisPromptConfig) -> String {
-    let mut out = String::new();
-    out.push_str(
-        "\nNow produce only the four sections above. Do not include a title or any other preamble. ",
-    );
-    out.push_str(
-        "Within Findings, always begin with a **Headline:** paragraph (maximum 15 words) and include the four required paragraphs (Observation, Analysis, ",
-    );
-    out.push_str(
-        "Cross-reference / Dependencies, Implication) after it. Feel free to add more labeled paragraphs if the sources support it.",
-    );
-    out
-}
-
-/// Build the synthesis prompt. Sources are listed with their index so the model
-/// can cite them as `[#N]`.
-///
-/// This free function is preserved as the stable, backward-compatible entry
-/// point. It delegates to [`SynthesisPromptBuilder`] with the default config,
-/// so its output is byte-identical to the pre-refactor implementation. Callers
-/// that need the extended knobs (T-003..T-008) should use the builder directly.
-#[allow(dead_code)] // preserved for backward-compat byte-identical tests
-fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
-    SynthesisPromptBuilder::new(topic)
-        .sources(sources)
-        .output_format(OutputFormat::Report)
-        .build()
-}
-
-/// Parse the LLM response into an [`AnalysisResult`]. We look for the four
-/// expected section headings and extract content underneath.
-fn parse_analysis_response(text: &str) -> AnalysisResult {
-    let mut result = AnalysisResult::default();
-    let sections = split_sections(text);
-    for (title, body) in sections {
-        match title.to_lowercase().as_str() {
-            "summary" => result.summary = body.trim().to_string(),
-            "findings" => {
-                let raw = parse_numbered_list(&body);
-                result.findings = reorder_findings_by_dependency(&raw);
-            }
-            "in-project cross-references" | "cross-references" | "cross references" => {
-                result.cross_references = parse_cross_reference_list(&body);
-            }
-            "open questions" => {
-                result.open_questions = parse_bullet_list(&body);
-            }
-            _ => {}
-        }
-    }
-    result
-}
-
-/// Parse the LLM response into an [`AnalysisResult`] paired with an
-/// [`AnalysisOutcome`] (FR-005 / T-005).
-///
-/// Runs [`parse_analysis_response`] first. If the result is malformed
-/// (see [`is_malformed_analysis_result`]), the mechanical fallback
-/// ([`mechanical_fallback_findings`] + a placeholder summary) rescues the
-/// raw text into structured findings and the outcome is
-/// [`AnalysisOutcome::FallbackEmpty`]; otherwise the outcome is
-/// [`AnalysisOutcome::Llm`]. Provider-level errors are surfaced by
-/// [`LlmAnalysisEngine::analyze_with_outcome`] as `Err`, which `session.rs`
-/// maps to [`crate::session::SynthesizeOutcome::FallbackError`].
-fn parse_analysis_response_with_outcome(
-    text: &str,
-    sources: &[SourceBody],
-) -> (AnalysisResult, AnalysisOutcome) {
-    let parsed = parse_analysis_response(text);
-    if is_malformed_analysis_result(&parsed) {
-        // Sanitize the raw model text before mechanical extraction so control
-        // characters (C0/C1) from model output don't corrupt the findings.
-        let sanitized = strip_control_chars(text);
-        let mut rescued = AnalysisResult::default();
-        rescued.findings = mechanical_fallback_findings(&sanitized);
-        // Preserve the model's own summary when it parsed successfully —
-        // discarding a valid summary along with malformed findings loses
-        // useful context. Only fall back to a diagnostic placeholder when
-        // the summary is also empty.
-        rescued.summary = if !parsed.summary.trim().is_empty() {
-            parsed.summary
-        } else if rescued.findings.is_empty() {
-            "(the model response could not be parsed into structured findings; \
-             see the raw response below)"
-                .to_string()
-        } else {
-            "(the model response was malformed; the following findings were \
-             extracted mechanically and may be incomplete)"
-                .to_string()
-        };
-        (rescued, AnalysisOutcome::FallbackEmpty)
-    } else {
-        // FR-010 / T-009: validate citations and dates even on a "clean" parse.
-        // Out-of-range `[#N]` citations and unsupported date claims are replaced
-        // inline with warning placeholders so hallucinated evidence is visible
-        // rather than silently propagated.
-        let mut validated = parsed;
-        let warnings = validate_citations_and_dates(&mut validated.findings, sources);
-        if !warnings.is_empty() {
-            for w in &warnings {
-                tracing::warn!(warning = %w, "research: citation/date validation");
-            }
-        }
-        // Sanitize control characters from the clean parse too — the model
-        // output may contain C0/C1 control chars that would corrupt the
-        // rendered RESEARCH.md if left in place.
-        for finding in &mut validated.findings {
-            *finding = strip_control_chars(finding);
-        }
-        validated.summary = strip_control_chars(&validated.summary);
-        validated.open_questions = validated
-            .open_questions
-            .iter()
-            .map(|q| strip_control_chars(q))
-            .collect();
-        validated.cross_references = validated
-            .cross_references
-            .iter()
-            .map(|cr| CrossReference {
-                path: strip_control_chars(&cr.path),
-                relevance: strip_control_chars(&cr.relevance),
-            })
-            .collect();
-        (validated, AnalysisOutcome::Llm)
-    }
-}
-
-/// Validate every `[#N]` citation and claimed publication date in `findings`
-/// against the actual `sources` corpus (FR-010 / T-009).
-///
-/// Mutates `findings` in place:
-/// - Out-of-range `[#N]` citations (N == 0 or N > `sources.len()`) are
-///   rewritten to `[#N?] (out of range — not in source list)`.
-/// - Explicit publication dates in a **Sources Cited / Date Spread** paragraph
-///   that do not match any cited source's `published_at` are rewritten to
-///   `(unsupported date)`.
-///
-/// Returns a list of human-readable warning strings (one per invalid claim)
-/// so the caller can log them. Findings that pass validation are left
-/// untouched.
-fn validate_citations_and_dates(findings: &mut [String], sources: &[SourceBody]) -> Vec<String> {
-    let mut warnings = Vec::new();
-    let citation_re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
-    // Match `published YYYY-MM-DD` or a bare `YYYY-MM-DD` inside a
-    // **Sources Cited / Date Spread** paragraph. We keep this conservative
-    // so we don't rewrite dates that appear in the Observation/Analysis
-    // prose (which may legitimately reference unrelated dates).
-    let date_re = Regex::new(r"(\d{4}-\d{2}-\d{2})").expect("valid date regex");
-    let valid_dates: Vec<String> = sources
-        .iter()
-        .filter_map(|s| s.published_at.map(|dt| dt.format("%Y-%m-%d").to_string()))
-        .collect();
-
-    for finding in findings.iter_mut() {
-        // ── Citation range validation ──────────────────────────────────────
-        let mut new_finding = String::with_capacity(finding.len());
-        let mut last_end = 0;
-        for cap in citation_re.captures_iter(finding) {
-            let m = cap.get(0).expect("full match");
-            new_finding.push_str(&finding[last_end..m.start()]);
-            let n: usize = cap[1].parse().unwrap_or(0);
-            if n == 0 || n > sources.len() {
-                let replacement = format!("[#{n}?] (out of range — not in source list)");
-                new_finding.push_str(&replacement);
-                warnings.push(format!(
-                    "finding cites [#{n}] but only {} source(s) were captured",
-                    sources.len()
-                ));
-            } else {
-                new_finding.push_str(m.as_str());
-            }
-            last_end = m.end();
-        }
-        new_finding.push_str(&finding[last_end..]);
-        *finding = new_finding;
-
-        // ── Date claim validation (only inside the Sources Cited / Date
-        // Spread paragraph, to avoid rewriting prose dates) ─────────────────
-        if let Some(spread_start) = finding.find("**Sources Cited / Date Spread:**") {
-            let spread = &finding[spread_start..];
-            let mut validated_spread = String::with_capacity(spread.len());
-            let mut last_end = 0;
-            for cap in date_re.captures_iter(spread) {
-                let m = cap.get(0).expect("full match");
-                validated_spread.push_str(&spread[last_end..m.start()]);
-                let claimed = &cap[1];
-                if valid_dates.iter().any(|d| d == claimed) {
-                    validated_spread.push_str(claimed);
-                } else {
-                    validated_spread.push_str("(unsupported date)");
-                    warnings.push(format!(
-                        "finding claims publication date {claimed} which is not among the captured sources' publication dates"
-                    ));
-                }
-                last_end = m.end();
-            }
-            validated_spread.push_str(&spread[last_end..]);
-            let prefix = &finding[..spread_start];
-            *finding = format!("{prefix}{validated_spread}");
-        }
-    }
-    warnings
-}
-
-/// Return `true` when `result` should be treated as a malformed LLM response
-/// (FR-005): empty findings, any finding missing one of the four required
-/// bold labels, or any finding that contains no `[#N]` citation.
-fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
-    if result.findings.is_empty() {
-        return true;
-    }
-    let required = [
-        "**Observation:**",
-        "**Analysis:**",
-        "**Cross-reference / Dependencies:**",
-        "**Implication:**",
-    ];
-    let citation_re = Regex::new(r"\[#\d+\]").expect("valid citation regex");
-    for finding in &result.findings {
-        if !required.iter().all(|label| finding.contains(label)) {
-            return true;
-        }
-        if !citation_re.is_match(finding) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Deterministic mechanical extraction (FR-005) that turns a raw model
-/// response into a list of findings, each carrying the four required bold
-/// labels. Missing labels are inserted as placeholders; existing labels and
-/// any `[#N]` citations are preserved verbatim.
-///
-/// **Non-empty guarantee (FR-011 / T-010):** this function ALWAYS returns at
-/// least one finding. When the raw response has no extractable candidate
-/// findings, a single placeholder finding is emitted whose **Observation**
-/// paragraph reads "(findings could not be structured — see below)" and
-/// includes the raw model output in a fenced code block so the research
-/// item remains usable. Callers can rely on `findings.is_empty()` never
-/// being true for the returned `Vec`.
-///
-/// Strategy:
-/// 1. If the response contains a `## Findings` section, split its numbered
-///    list items; each becomes a candidate finding.
-/// 2. Otherwise, fall back to splitting the whole response on blank-line
-///    paragraphs (or, if that yields a single blob, wrap the whole text as
-///    one finding).
-/// 3. For each candidate, ensure the four required labels are present,
-///    inserting `**Label:** (missing)` placeholders for any that are absent.
-/// 4. If no candidate text could be extracted, return a single placeholder
-///    finding that quotes the raw response (truncated) so the research item
-///    remains usable.
-fn mechanical_fallback_findings(text: &str) -> Vec<String> {
-    let candidates = extract_candidate_findings(text);
-    let required = [
-        "**Observation:**",
-        "**Analysis:**",
-        "**Cross-reference / Dependencies:**",
-        "**Implication:**",
-    ];
-    let mut findings = Vec::with_capacity(candidates.len());
-    for candidate in candidates {
-        let mut normalized = candidate.trim().to_string();
-        for label in required {
-            if !normalized.contains(label) {
-                let placeholder = format!("\n\n{label} (missing)");
-                normalized.push_str(&placeholder);
-            }
-        }
-        findings.push(normalized);
-    }
-    if findings.is_empty() {
-        // FR-011 / T-010: the model returned fewer than one valid finding.
-        // The fallback takes precedence — emit a single placeholder finding
-        // so RESEARCH.md is never left with an empty Findings section. The
-        // raw model output is preserved in a fenced code block for manual
-        // review.
-        let raw = text.trim();
-        if raw.is_empty() {
-            findings.push(
-                "**Headline:** Findings could not be structured\n\n\
-                 **Observation:** (findings could not be structured — see below)\n\n\
-                 (no model response was returned)\n\n\
-                 **Analysis:** (missing)\n\n\
-                 **Cross-reference / Dependencies:** No direct dependencies.\n\n\
-                 **Implication:** Re-run `/research create` with a configured \
-                 model; the model returned no content to analyze."
-                    .to_string(),
-            );
-        } else {
-            let truncated = truncate_body(raw, 2000);
-            findings.push(format!(
-                "**Headline:** Model response could not be parsed\n\n\
-                 **Observation:** (findings could not be structured — see below)\n\n\
-                 The raw model response (truncated) is preserved for manual review:\n\n\
-                 ```text\n{truncated}\n```\n\n\
-                 **Analysis:** (extracted mechanically — the model output did not \
-                 contain the four required labeled paragraphs)\n\n\
-                 **Cross-reference / Dependencies:** No direct dependencies.\n\n\
-                 **Implication:** Re-run `/research create` or refine the topic; \
-                 the raw model output is preserved above for manual review.",
-            ));
-        }
-    }
-    findings
-}
-
-/// Extract candidate finding bodies from a raw model response.
-///
-/// Prefers numbered items found under a `## Findings` heading; falls back
-/// to numbered items anywhere in the response; finally falls back to
-/// blank-line-separated paragraphs.
-fn extract_candidate_findings(text: &str) -> Vec<String> {
-    // 1. Prefer items under a `## Findings` heading.
-    let findings_body = split_sections(text)
-        .into_iter()
-        .find(|(title, _)| title.to_lowercase() == "findings")
-        .map(|(_, body)| body);
-    if let Some(body) = findings_body {
-        let items = parse_numbered_list(&body);
-        if !items.is_empty() {
-            return items;
-        }
-        // `## Findings` present but no numbered items — fall through to
-        // whole-response strategies.
-    }
-    // 2. Numbered items anywhere in the response.
-    let anywhere = parse_numbered_list(text);
-    if !anywhere.is_empty() {
-        return anywhere;
-    }
-    // 3. Blank-line-separated paragraphs (skip headings and rule lines).
-    let paragraphs: Vec<String> = text
-        .trim()
-        .split("\n\n")
-        .map(str::trim)
-        .filter(|p| !p.is_empty() && !p.starts_with('#') && !p.starts_with("---"))
-        .map(str::to_string)
-        .collect();
-    if paragraphs.is_empty() {
-        Vec::new()
-    } else {
-        paragraphs
-    }
-}
-
-/// Split a markdown response into (heading, body) pairs based on `## ` H2
-/// headings.
-fn split_sections(text: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let mut current_title = String::new();
-    let mut current_body = String::new();
-    for line in text.lines() {
-        if let Some(title) = line.strip_prefix("## ") {
-            if !current_title.is_empty() {
-                out.push((current_title.clone(), current_body.clone()));
-            }
-            current_title = title.trim().to_string();
-            current_body.clear();
-        } else {
-            current_body.push_str(line);
-            current_body.push('\n');
-        }
-    }
-    if !current_title.is_empty() {
-        out.push((current_title, current_body));
-    }
-    out
-}
-
-/// Parse a numbered markdown list (`1. ...`) into plain item strings.
-///
-/// Handles the common LLM output patterns:
-/// * `1. First finding.` — number, dot, space, content on the same line
-/// * `1.` followed by blank line and paragraphs — number on its own line,
-///   content starts on subsequent lines
-fn parse_numbered_list(body: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut current = String::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        let mut is_item = false;
-        let mut rest = "";
-        if let Some((num_part, after_dot)) = trimmed.split_once(". ") {
-            if num_part.parse::<usize>().is_ok() {
-                is_item = true;
-                rest = after_dot;
-            }
-        } else if let Some(num_part) = trimmed.strip_suffix('.')
-            && !num_part.is_empty()
-            && num_part.parse::<usize>().is_ok()
-        {
-            is_item = true;
-            rest = "";
-        }
-        if is_item {
-            if !current.is_empty() {
-                items.push(current.trim().to_string());
-            }
-            current = rest.to_string();
-            continue;
-        }
-        if !trimmed.is_empty() {
-            current.push('\n');
-            current.push_str(trimmed);
-        }
-    }
-    if !current.is_empty() {
-        items.push(current.trim().to_string());
-    }
-    items
-}
-
-/// Reorder findings so any finding that depends on another appears after its
-/// dependency, then renumber all internal `Finding N` references consistently.
-///
-/// The parser receives the raw numbered list in the order the LLM produced it.
-/// Often the model lists a child finding before its prerequisite, which makes
-/// the final document harder to read. This helper builds a directed graph from
-/// the **Cross-reference / Dependencies** paragraph of each finding, topologically
-/// sorts it, and rewrites dependency references so they point to the new
-/// positions.
-///
-/// Cycles (e.g. Finding 2 depends on Finding 3 and Finding 3 depends on
-/// Finding 2) are broken by falling back to the original order for the involved
-/// items.
-fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
-    if findings.len() <= 1 {
-        return findings.to_vec();
-    }
-
-    // Build an adjacency list: edge i -> j means finding i depends on finding j,
-    // so j must come before i.
-    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); findings.len()];
-    let finding_re = Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid regex");
-    for (idx, finding) in findings.iter().enumerate() {
-        for cap in finding_re.captures_iter(finding) {
-            let dep_num: usize = cap[1].parse().unwrap_or(0);
-            if dep_num == 0 || dep_num > findings.len() {
-                continue;
-            }
-            let dep_idx = dep_num - 1;
-            if dep_idx != idx && !adj[idx].contains(&dep_idx) {
-                adj[idx].push(dep_idx);
-            }
-        }
-    }
-
-    // Kahn's algorithm. `in_degree[i]` is the number of dependencies finding i
-    // has (the count of edges leaving node i toward its prerequisites).
-    let mut in_degree: Vec<usize> = adj.iter().map(std::vec::Vec::len).collect();
-
-    // Roots (no dependencies) keep their original relative order via a FIFO
-    // queue. Each queue item is placed before its dependants are released.
-    let mut queue: Vec<usize> = (0..findings.len()).filter(|&i| in_degree[i] == 0).collect();
-    let mut order = Vec::with_capacity(findings.len());
-    let mut processed = vec![false; findings.len()];
-    let mut front = 0usize;
-
-    // We built edges as dependant -> dependency. To apply Kahn's we need the
-    // reverse graph: dependency -> dependant, so we can decrement in-degrees of
-    // dependants once a dependency is placed.
-    let mut reverse: Vec<Vec<usize>> = vec![Vec::new(); findings.len()];
-    for (idx, deps) in adj.iter().enumerate() {
-        for &d in deps {
-            reverse[d].push(idx);
-        }
-    }
-
-    while front < queue.len() {
-        let node = queue[front];
-        front += 1;
-        if processed[node] {
-            continue;
-        }
-        processed[node] = true;
-        order.push(node);
-        for &dependant in &reverse[node] {
-            if processed[dependant] {
-                continue;
-            }
-            in_degree[dependant] -= 1;
-            if in_degree[dependant] == 0 {
-                queue.push(dependant);
-            }
-        }
-    }
-
-    // If we couldn't place everything, there is a cycle. Append the remaining
-    // nodes in original order so we still emit all findings.
-    for (i, was_processed) in processed.iter().enumerate() {
-        if !was_processed {
-            order.push(i);
-        }
-    }
-
-    // Remap old numbers (1-based, index+1) to new numbers.
-    let mut old_to_new = vec![0usize; findings.len()];
-    for (new_pos, &old_idx) in order.iter().enumerate() {
-        old_to_new[old_idx] = new_pos + 1;
-    }
-
-    // Rewrite each finding's Finding N references.
-    order
-        .into_iter()
-        .map(|old_idx| {
-            let text = &findings[old_idx];
-            let mut out = String::with_capacity(text.len());
-            let mut last_end = 0;
-            for cap in finding_re.captures_iter(text) {
-                let m = cap.get(0).expect("full match");
-                out.push_str(&text[last_end..m.start()]);
-                let old_num: usize = cap[1].parse().unwrap_or(0);
-                if old_num > 0 && old_num <= findings.len() {
-                    out.push_str(&format!("Finding {}", old_to_new[old_num - 1]));
-                } else {
-                    out.push_str(m.as_str());
-                }
-                last_end = m.end();
-            }
-            out.push_str(&text[last_end..]);
-            out
-        })
-        .collect()
-}
-
-/// Parse a bullet list (`* ...` or `- ...`) into plain item strings.
-fn parse_bullet_list(body: &str) -> Vec<String> {
-    let mut items = Vec::new();
-    let mut current = String::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("* ") || trimmed.starts_with("- ") {
-            if !current.is_empty() {
-                items.push(current.trim().to_string());
-            }
-            current = trimmed[2..].trim().to_string();
-        } else if !trimmed.is_empty() {
-            current.push('\n');
-            current.push_str(trimmed);
-        }
-    }
-    if !current.is_empty() {
-        items.push(current.trim().to_string());
-    }
-    items
-}
-
-/// Parse cross-reference bullets into [`CrossReference`] structs. Expected
-/// format: `* `path` — note` or `* path — note`.
-fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
-    let mut out = Vec::new();
-    for item in parse_bullet_list(body) {
-        let (path, relevance) = if let Some(idx) = item.find(" — ") {
-            let split_at = idx + " — ".len();
-            (
-                item[..idx].trim().to_string(),
-                item[split_at..].trim().to_string(),
-            )
-        } else {
-            (item.clone(), String::new())
-        };
-        let path = path.trim_matches('`').to_string();
-        out.push(CrossReference { path, relevance });
-    }
-    out
-}
-
-/// Truncate a source body to a character budget so the prompt fits in common
-/// context windows. The limit is approximate and errs on the side of inclusion.
-fn truncate_body(body: &str, max_chars: usize) -> String {
-    if body.chars().count() <= max_chars {
-        return body.to_string();
-    }
-    let mut out = String::with_capacity(max_chars);
-    for (count, ch) in body.chars().enumerate() {
-        if count >= max_chars {
-            out.push_str("\n\n… (truncated for prompt size)");
-            break;
-        }
-        out.push(ch);
-    }
-    out
-}
-
 /// Build [`SourceBody`] values from the gathered [`Source`] list and a function
 /// that can read each source's captured body text.
 pub fn build_source_bodies<S: AsRef<str>>(
@@ -1366,9 +557,224 @@ pub fn build_source_bodies<S: AsRef<str>>(
         .collect()
 }
 
+// ── E-001: SourceSummarizer trait + heuristic implementation ──────────────
+
+/// Trait for collapsing a source body to a fixed character budget before it
+/// enters the synthesis prompt (Milestone E-001).
+///
+/// The default [`HeuristicSummarizer`] keeps the leading portion of the body,
+/// snaps to a paragraph boundary when possible, and appends a truncation
+/// marker. Future implementations could use an LLM to produce a true summary;
+/// the trait abstraction lets callers swap summarizers without touching the
+/// synthesis pipeline.
+pub trait SourceSummarizer: Send + Sync {
+    /// Summarize `body` so the result fits within `budget_chars` characters.
+    fn summarize(&self, body: &str, budget_chars: usize) -> String;
+}
+
+/// Heuristic source-body summarizer (Milestone E-001).
+///
+/// Strategy:
+/// 1. If the body already fits the budget, return it unchanged.
+/// 2. Otherwise, take the first `budget_chars` characters, then back up to the
+///    last paragraph break (`\n\n`) within that window so the summary ends on a
+///    clean paragraph boundary.
+/// 3. If no paragraph break exists in the window, cut at the last sentence
+///    boundary (`.` followed by whitespace or end-of-line).
+/// 4. If no sentence boundary exists either, cut at the last whitespace.
+/// 5. Append a `\n\n… (summarized — see full source for remaining content)`
+///    marker so the model knows the body was condensed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HeuristicSummarizer;
+
+impl SourceSummarizer for HeuristicSummarizer {
+    fn summarize(&self, body: &str, budget_chars: usize) -> String {
+        if body.chars().count() <= budget_chars {
+            return body.to_string();
+        }
+        let mut window: String = body.chars().take(budget_chars).collect();
+        // Try to snap to the last paragraph boundary.
+        if let Some(pos) = window.rfind("\n\n") {
+            if pos > budget_chars / 4 {
+                window.truncate(pos);
+            }
+        } else if let Some(pos) = window
+            .char_indices()
+            .rev()
+            .find(|(i, c)| {
+                *c == '.'
+                    && window
+                        .get(*i + 1..)
+                        .and_then(|rest| rest.chars().next())
+                        .is_some_and(|next| next.is_whitespace() || next == '\n')
+            })
+            .map(|(i, _)| i)
+        {
+            if pos > budget_chars / 4 {
+                window.truncate(pos + 1);
+            }
+        } else if let Some(pos) = window.rfind(|c: char| c.is_whitespace())
+            && pos > budget_chars / 4
+        {
+            window.truncate(pos);
+        }
+        window.push_str("\n\n… (summarized — see full source for remaining content)");
+        window
+    }
+}
+
+/// Apply a [`SourceSummarizer`] to every body in `bodies`, returning new
+/// [`SourceBody`] values whose `body` field has been collapsed to
+/// `budget_chars`. Non-body fields (index, kind, title, etc.) are preserved
+/// verbatim (Milestone E-001).
+pub fn summarize_source_bodies(
+    bodies: &[SourceBody],
+    summarizer: &dyn SourceSummarizer,
+    budget_chars: usize,
+) -> Vec<SourceBody> {
+    bodies
+        .iter()
+        .map(|sb| SourceBody {
+            body: summarizer.summarize(&sb.body, budget_chars),
+            ..sb.clone()
+        })
+        .collect()
+}
+
+/// Compute the total character count of all source bodies in `bodies`.
+/// Used to decide whether chunked synthesis is needed (Milestone E-002).
+pub fn total_body_chars(bodies: &[SourceBody]) -> usize {
+    bodies.iter().map(|sb| sb.body.chars().count()).sum()
+}
+
+/// Split `bodies` into chunks whose total body character count does not exceed
+/// `max_chars_per_chunk`. Each chunk is a contiguous slice of the input;
+/// source indices are preserved so `[#N]` citations remain valid across
+/// chunks (Milestone E-002).
+///
+/// A single source whose body exceeds `max_chars_per_chunk` forms its own
+/// chunk (it will be summarized by the caller before reaching this function,
+/// so this is a defense-in-depth guard).
+pub fn chunk_source_bodies(
+    bodies: &[SourceBody],
+    max_chars_per_chunk: usize,
+) -> Vec<Vec<SourceBody>> {
+    let mut chunks: Vec<Vec<SourceBody>> = Vec::new();
+    let mut current: Vec<SourceBody> = Vec::new();
+    let mut current_chars: usize = 0;
+    for sb in bodies {
+        let body_chars = sb.body.chars().count();
+        if !current.is_empty() && current_chars + body_chars > max_chars_per_chunk {
+            chunks.push(std::mem::take(&mut current));
+            current_chars = 0;
+        }
+        current.push(sb.clone());
+        current_chars += body_chars;
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// Merge multiple partial [`AnalysisResult`]s from chunked LLM calls into a
+/// single combined result (Milestone E-002).
+///
+/// - **Summary**: the first non-empty summary is used. When multiple chunks
+///   produce summaries, they are concatenated with a separator so the model's
+///   per-chunk overviews are preserved.
+/// - **Findings**: all findings from all chunks are concatenated and
+///   renumbered sequentially (the `1.`, `2.` prefixes are rewritten so the
+///   final document has a contiguous numbering).
+/// - **Cross-references**: deduplicated by path (first occurrence wins).
+/// - **Open questions**: concatenated, removing exact duplicates.
+pub fn merge_chunk_results(parts: &[AnalysisResult]) -> AnalysisResult {
+    if parts.is_empty() {
+        return AnalysisResult::default();
+    }
+    if parts.len() == 1 {
+        return parts[0].clone();
+    }
+
+    // Merge summaries: collect non-empty ones and join.
+    let summaries: Vec<&str> = parts
+        .iter()
+        .map(|p| p.summary.as_str())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let summary = if summaries.is_empty() {
+        String::new()
+    } else if summaries.len() == 1 {
+        summaries[0].to_string()
+    } else {
+        summaries.join("\n\n---\n\n")
+    };
+
+    // Merge findings: concatenate, then renumber.
+    let mut all_findings: Vec<String> = Vec::new();
+    for part in parts {
+        all_findings.extend(part.findings.clone());
+    }
+    let findings = renumber_findings(&all_findings);
+
+    // Merge cross-references: dedup by path.
+    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut cross_references = Vec::new();
+    for part in parts {
+        for cr in &part.cross_references {
+            if seen_paths.insert(cr.path.clone()) {
+                cross_references.push(cr.clone());
+            }
+        }
+    }
+
+    // Merge open questions: concatenate, dedup exact matches.
+    let mut seen_questions: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut open_questions = Vec::new();
+    for part in parts {
+        for q in &part.open_questions {
+            if seen_questions.insert(q.clone()) {
+                open_questions.push(q.clone());
+            }
+        }
+    }
+
+    AnalysisResult {
+        summary,
+        findings,
+        cross_references,
+        open_questions,
+    }
+}
+
+/// Renumber the `1.`, `2.`, … prefixes in a list of findings so they are
+/// contiguous starting from 1. Findings without a numeric prefix are left
+/// unchanged (Milestone E-002).
+fn renumber_findings(findings: &[String]) -> Vec<String> {
+    let num_re = Regex::new(r"^(\d+)\.\s*").expect("valid renumber regex");
+    findings
+        .iter()
+        .enumerate()
+        .map(|(i, finding)| {
+            if num_re.is_match(finding) {
+                num_re.replace(finding, format!("{}. ", i + 1)).to_string()
+            } else {
+                finding.clone()
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    use super::parser::{
+        mechanical_fallback_findings, parse_analysis_response, parse_bullet_list,
+        parse_numbered_list, reorder_findings_by_dependency, truncate_body,
+        validate_citations_and_dates,
+    };
+    use super::prompt::SynthesisPromptConfig;
     use super::*;
+    use prompt::{SynthesisPromptBuilder, build_synthesis_prompt};
 
     #[test]
     fn parse_analysis_response_extracts_all_sections() {
@@ -1951,5 +1357,212 @@ mod tests {
                 finding
             );
         }
+    }
+
+    // ── Milestone E-001: SourceSummarizer / HeuristicSummarizer tests ────
+
+    #[test]
+    fn heuristic_summarizer_returns_body_unchanged_when_within_budget() {
+        let s = HeuristicSummarizer;
+        let body = "Short body.";
+        assert_eq!(s.summarize(body, 100), body);
+    }
+
+    #[test]
+    fn heuristic_summarizer_truncates_to_budget_chars() {
+        let s = HeuristicSummarizer;
+        let body = "a".repeat(500);
+        let summarized = s.summarize(&body, 100);
+        assert!(
+            summarized.chars().count() <= 160,
+            "summarized body must be approximately within budget, got {} chars",
+            summarized.chars().count()
+        );
+        assert!(
+            summarized.contains("… (summarized"),
+            "truncation marker must be present"
+        );
+    }
+
+    #[test]
+    fn heuristic_summarizer_snaps_to_paragraph_boundary() {
+        let s = HeuristicSummarizer;
+        let body = "First paragraph with enough text to fill the budget.\n\nSecond paragraph that should be cut.";
+        let summarized = s.summarize(body, 60);
+        assert!(
+            summarized.contains("First paragraph"),
+            "should keep the first paragraph"
+        );
+        assert!(
+            !summarized.contains("Second paragraph"),
+            "should cut at the paragraph boundary"
+        );
+    }
+
+    #[test]
+    fn summarize_source_bodies_preserves_metadata() {
+        let bodies = vec![SourceBody {
+            index: 5,
+            kind: "web".to_string(),
+            title: "Test".to_string(),
+            path_or_url: "https://example.com".to_string(),
+            relevance: "High".to_string(),
+            body: "a".repeat(500),
+            published_at: None,
+        }];
+        let summarizer = HeuristicSummarizer;
+        let summarized = summarize_source_bodies(&bodies, &summarizer, 100);
+        assert_eq!(summarized.len(), 1);
+        assert_eq!(summarized[0].index, 5);
+        assert_eq!(summarized[0].title, "Test");
+        assert_eq!(summarized[0].relevance, "High");
+        assert!(summarized[0].body.chars().count() < 200);
+    }
+
+    // ── Milestone E-002: chunking + merge tests ───────────────────────────
+
+    #[test]
+    fn total_body_chars_sums_all_bodies() {
+        let bodies = vec![
+            SourceBody {
+                index: 1,
+                kind: "web".to_string(),
+                title: "A".to_string(),
+                path_or_url: String::new(),
+                relevance: String::new(),
+                body: "hello".to_string(),
+                published_at: None,
+            },
+            SourceBody {
+                index: 2,
+                kind: "web".to_string(),
+                title: "B".to_string(),
+                path_or_url: String::new(),
+                relevance: String::new(),
+                body: "world!".to_string(),
+                published_at: None,
+            },
+        ];
+        assert_eq!(total_body_chars(&bodies), 11);
+    }
+
+    #[test]
+    fn chunk_source_bodies_splits_on_budget() {
+        let make = |i: usize, body: &str| SourceBody {
+            index: i,
+            kind: "web".to_string(),
+            title: format!("S{i}"),
+            path_or_url: String::new(),
+            relevance: String::new(),
+            body: body.to_string(),
+            published_at: None,
+        };
+        let bodies = vec![
+            make(1, &"a".repeat(40)),
+            make(2, &"b".repeat(40)),
+            make(3, &"c".repeat(40)),
+        ];
+        let chunks = chunk_source_bodies(&bodies, 50);
+        assert_eq!(
+            chunks.len(),
+            3,
+            "each source should be its own chunk at budget 50"
+        );
+    }
+
+    #[test]
+    fn chunk_source_bodies_groups_small_sources() {
+        let make = |i: usize, body: &str| SourceBody {
+            index: i,
+            kind: "web".to_string(),
+            title: format!("S{i}"),
+            path_or_url: String::new(),
+            relevance: String::new(),
+            body: body.to_string(),
+            published_at: None,
+        };
+        let bodies = vec![make(1, "small1"), make(2, "small2"), make(3, "small3")];
+        let chunks = chunk_source_bodies(&bodies, 100);
+        assert_eq!(chunks.len(), 1, "all small sources should fit in one chunk");
+    }
+
+    #[test]
+    fn merge_chunk_results_concatenates_findings_and_renumbers() {
+        let part1 = AnalysisResult {
+            summary: "Summary 1".to_string(),
+            findings: vec![
+                "1. **Headline:** A\n\n**Observation:** obs [#1].\n\n**Analysis:** a.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** i.".to_string(),
+                "2. **Headline:** B\n\n**Observation:** obs [#2].\n\n**Analysis:** b.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** j.".to_string(),
+            ],
+            cross_references: Vec::new(),
+            open_questions: vec!["Q1?".to_string()],
+        };
+        let part2 = AnalysisResult {
+            summary: "Summary 2".to_string(),
+            findings: vec![
+                "1. **Headline:** C\n\n**Observation:** obs [#3].\n\n**Analysis:** c.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** k.".to_string(),
+            ],
+            cross_references: Vec::new(),
+            open_questions: vec!["Q2?".to_string()],
+        };
+        let merged = merge_chunk_results(&[part1, part2]);
+        assert_eq!(merged.findings.len(), 3);
+        // Findings should be renumbered 1, 2, 3.
+        assert!(merged.findings[0].starts_with("1. "));
+        assert!(merged.findings[1].starts_with("2. "));
+        assert!(merged.findings[2].starts_with("3. "));
+        // Summaries should be joined.
+        assert!(merged.summary.contains("Summary 1"));
+        assert!(merged.summary.contains("Summary 2"));
+        // Open questions merged.
+        assert_eq!(merged.open_questions, vec!["Q1?", "Q2?"]);
+    }
+
+    #[test]
+    fn merge_chunk_results_dedup_cross_references() {
+        let cr = CrossReference {
+            path: "src/lib.rs".to_string(),
+            relevance: "main".to_string(),
+        };
+        let part1 = AnalysisResult {
+            summary: String::new(),
+            findings: Vec::new(),
+            cross_references: vec![cr.clone()],
+            open_questions: Vec::new(),
+        };
+        let part2 = AnalysisResult {
+            summary: String::new(),
+            findings: Vec::new(),
+            cross_references: vec![
+                cr.clone(),
+                CrossReference {
+                    path: "src/main.rs".to_string(),
+                    relevance: "entry".to_string(),
+                },
+            ],
+            open_questions: Vec::new(),
+        };
+        let merged = merge_chunk_results(&[part1, part2]);
+        assert_eq!(merged.cross_references.len(), 2);
+        assert_eq!(merged.cross_references[0].path, "src/lib.rs");
+        assert_eq!(merged.cross_references[1].path, "src/main.rs");
+    }
+
+    #[test]
+    fn merge_chunk_results_single_part_is_clone() {
+        let part = AnalysisResult {
+            summary: "Only".to_string(),
+            findings: vec!["1. Finding.".to_string()],
+            cross_references: Vec::new(),
+            open_questions: Vec::new(),
+        };
+        let merged = merge_chunk_results(std::slice::from_ref(&part));
+        assert_eq!(merged, part);
+    }
+
+    #[test]
+    fn merge_chunk_results_empty_returns_default() {
+        let merged = merge_chunk_results(&[]);
+        assert_eq!(merged, AnalysisResult::default());
     }
 }

@@ -23,7 +23,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 ragent-tools-extended = { path = "../ragent-tools-extended" }
-tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }
 similar = { workspace = true }
 regex = { workspace = true }
 
@@ -33,6 +33,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 ragent-specs = { path = "../ragent-specs" }
 tokio = { version = "1", features = ["full"] }
 async-trait = { workspace = true }
+proptest = "1"
 
 [build-dependencies]
 chrono = { workspace = true }
@@ -43,4 +44,8 @@ harness = false
 
 [[bench]]
 name = "researchext_bench"
+harness = false
+
+[[bench]]
+name = "gatherer_bench"
 harness = false

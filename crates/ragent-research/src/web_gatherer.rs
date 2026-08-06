@@ -35,12 +35,20 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
-use ragent_llm::provider::ProviderRegistry;
-use serde::Deserialize;
 
-use crate::document::fence_source_body;
+use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
 use crate::source::Source;
+use std::time::Duration;
+
+mod classify;
+mod decomposer;
+mod relevance;
+mod title;
+
+pub use classify::{WebSourceKind, classify_web_source};
+pub use decomposer::{HeuristicQueryDecomposer, LlmQueryDecomposer, QueryDecomposer};
+use relevance::compute_relevance_label;
+use title::clean_web_source_title;
 
 /// Maximum number of focused sub-queries the research decomposer will
 /// produce for a single topic. Increasing this raises the web-search
@@ -56,6 +64,11 @@ pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
 /// supply an explicit `max_web_results` (FR-011).
 pub const DEFAULT_MAX_WEB_RESULTS: usize = 250;
 
+/// Default per-fetch wall-clock timeout. Pages that take longer than this are
+/// treated as a fetch failure so a single slow URL cannot stall the whole
+/// gather pass (Milestone B-004).
+pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Default upper bound on the number of concurrent page fetches issued during
 /// the capture phase of [`WebGatherer::gather_with_observer`]. 10 is a safe
 /// middle ground: fast enough to keep wall-clock latency low when a search
@@ -64,6 +77,21 @@ pub const DEFAULT_MAX_WEB_RESULTS: usize = 250;
 /// `--fetch-concurrently N` CLI flag or [`WebGatherer::with_fetch_concurrency`].
 pub const DEFAULT_FETCH_CONCURRENCY: usize = 10;
 
+/// Default maximum number of retry attempts for a failed sub-query search
+/// (Milestone H-002). Retries use exponential backoff. `0` would disable
+/// retries entirely; 2 gives a short burst of retries before giving up.
+pub const DEFAULT_SEARCH_MAX_RETRIES: u32 = 2;
+
+/// Default base delay in milliseconds for the first search-retry backoff
+/// (Milestone H-002). Subsequent retries double this value (200 ms, 400 ms, …).
+pub const DEFAULT_SEARCH_RETRY_BASE_DELAY_MS: u64 = 200;
+
+/// Default number of consecutive search-tool failures after which the
+/// circuit-breaker opens (Milestone H-003). Once open, no further search
+/// calls are issued for the remainder of the gather pass. `0` disables the
+/// circuit-breaker entirely.
+pub const DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
+
 /// Cap a captured web body at the same byte budget used by the supporting
 /// file renderer so the body stored on the `Source` matches what ends up on
 /// disk. Keeps runaway pages from blowing up the synthesis prompt.
@@ -71,522 +99,11 @@ fn fence_captured_body(body: &str) -> String {
     fence_source_body(body)
 }
 
-/// Maximum length enforced for a stored web-source title. Longer titles are
-/// truncated at a word boundary with an ellipsis so the References Index and
-/// the per-finding `**Sources:**` bullets stay readable. Captured titles come
-/// from the page's readability-extracted `<title>`/heading or the search-hit
-/// title and frequently contain nav chrome ("Skip to main content") or consent
-/// banners ("We use essential cookies to make our site work..."); see
-/// [`clean_web_source_title`].
-const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
-
-/// Leading phrases that mark a captured title as page chrome rather than
-/// article content. When the cleaned title starts with one of these it is
-/// stripped; when the *entire* cleaned title is one of these (after markdown
-/// link syntax is removed) the title is discarded in favour of the fallback.
-const TITLE_NOISE_PHRASES: &[&str] = &[
-    "skip to main content",
-    "skip to content",
-    "skip navigation",
-    "skip to nav",
-    "jump to content",
-    "we use essential cookies",
-    "we use cookies",
-    "this site uses cookies",
-    "agree & join",
-    "agree and join",
-    "sign in",
-    "sign up",
-    "log in",
-    "join/login",
-    "join sign in",
-];
-
-/// Clean a page title captured from a fetch or search hit before it is stored
-/// on a [`Source::Web`], so the title shown in the References Index and the
-/// per-finding `**Sources:**` bullets is short and meaningful rather than nav
-/// chrome or a consent banner. This is a pure code transform — no LLM.
-///
-/// Steps:
-/// 1. Strip markdown reference-link (`[text][n]`) and inline-link
-///    (`[text](url)`) syntax, keeping the link text.
-/// 2. Drop a leading nav/cookie/consent phrase from [`TITLE_NOISE_PHRASES`].
-/// 3. Collapse internal whitespace and trim.
-/// 4. Truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary with an
-///    ellipsis.
-/// 5. When the cleaned primary is empty (or was pure noise), repeat on
-///    `fallback` (typically the search-hit title or the URL). When both are
-///    empty/noise, return the raw fallback so the title is never blank.
-#[must_use]
-fn clean_web_source_title(primary: &str, fallback: &str) -> String {
-    let cleaned = clean_title_text(primary);
-    if !cleaned.is_empty() {
-        return cleaned;
-    }
-    let cleaned_fallback = clean_title_text(fallback);
-    if !cleaned_fallback.is_empty() {
-        return cleaned_fallback;
-    }
-    // Both reduced to nothing — surface a non-empty raw value so the
-    // References Index never shows a blank title cell.
-    fallback.trim().to_string()
-}
-
-/// Strip markdown link syntax, leading nav/consent noise, collapse whitespace,
-/// and truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary.
-fn clean_title_text(s: &str) -> String {
-    let stripped = strip_markdown_link_text(s);
-    let stripped = strip_leading_noise(&stripped);
-    let collapsed = collapse_title_ws(&stripped);
-    truncate_title_words(&collapsed, MAX_WEB_SOURCE_TITLE_CHARS)
-}
-
-/// Replace markdown reference links (`[text][n]`, `[text][]`) and inline links
-/// (`[text](url)`) with just the link `text`, leaving non-link content intact.
-fn strip_markdown_link_text(s: &str) -> String {
-    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        // Match `[text]` immediately followed by either `[...]` or `(...)`.
-        regex::Regex::new(r"\[([^\]]*)\](?:\[[^\]]*\]|\([^)]*\))").expect("title link regex")
-    });
-    RE.replace_all(s, "$1").into_owned()
-}
-
-/// Remove a single leading nav/cookie/consent phrase (case-insensitive) from
-/// `s`, including any trailing separator punctuation. Returns `s` unchanged
-/// when no noise phrase matches the start.
-fn strip_leading_noise(s: &str) -> String {
-    let trimmed = s.trim_start();
-    let lower = trimmed.to_lowercase();
-    for phrase in TITLE_NOISE_PHRASES {
-        if lower.starts_with(phrase) {
-            // Map the matched prefix length back to the original slice so we
-            // keep the original casing of the remainder.
-            let kept = &trimmed[phrase.len()..];
-            let after = kept.trim_start_matches([' ', ',', ':', '|', '-', '—', '·']);
-            return after.trim().to_string();
-        }
-    }
-    trimmed.trim().to_string()
-}
-
-/// Collapse runs of whitespace into single spaces and trim the ends.
-fn collapse_title_ws(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Truncate `s` to at most `max_chars` Unicode scalar values, cutting at the
-/// last whitespace boundary at or before the limit so words are not split. An
-/// ellipsis is appended when truncation occurs.
-fn truncate_title_words(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        return s.to_string();
-    }
-    // Reserve two chars for the " …" suffix when possible.
-    let budget = max_chars.saturating_sub(2);
-    let mut end_byte = 0usize;
-    let mut last_space_byte = 0usize;
-    for (i, (byte_idx, ch)) in s.char_indices().enumerate() {
-        if i >= budget {
-            break;
-        }
-        end_byte = byte_idx + ch.len_utf8();
-        if ch.is_whitespace() {
-            last_space_byte = byte_idx;
-        }
-    }
-    // Prefer to cut at the last whitespace so we don't split a word.
-    let cut_byte = if last_space_byte > 0 {
-        last_space_byte
-    } else {
-        end_byte
-    };
-    // Walk back to a UTF-8 char boundary (last_space_byte is already on a
-    // boundary; end_byte is a char-end boundary by construction).
-    let mut out = s[..cut_byte].trim_end().to_string();
-    if !out.is_empty() {
-        out.push('…');
-    }
-    out
-}
-
-/// Trait abstracting the decomposition of a research topic into focused
-/// sub-queries.  A decomposer may be heuristic (cheap, no LLM) or LLM-backed
-/// (higher quality, costs one call).  When no decomposer is configured the
-/// gatherer falls back to searching the raw topic as a single query.
-#[async_trait]
-pub trait QueryDecomposer: Send + Sync {
-    /// Break `topic` into a list of search queries.  The gatherer runs each
-    /// query in parallel, deduplicates results by URL, and then fetches up
-    /// to the caller's `max_results` unique pages.
-    async fn decompose(&self, topic: &str) -> anyhow::Result<Vec<String>>;
-}
-
-/// Simple heuristic decomposer that splits a topic on conjunctions and
-/// commas, then also includes the original topic as a catch-all query.
-///
-/// Cheap and deterministic; requires no network calls.  Kept as a fallback
-/// for the LLM-backed decomposer and for callers that intentionally want
-/// heuristic splitting.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct HeuristicQueryDecomposer;
-
-#[async_trait]
-impl QueryDecomposer for HeuristicQueryDecomposer {
-    async fn decompose(&self, topic: &str) -> anyhow::Result<Vec<String>> {
-        let trimmed = topic.trim();
-        if trimmed.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // 1. Split on sentence boundaries first. Long prose topics often
-        //    contain commas inside a single sentence; splitting on those commas
-        //    first produces nonsensical fragments.
-        let mut queries: Vec<String> = Vec::new();
-        for sentence in split_into_sentence_chunks(trimmed) {
-            // 2. Within each sentence, split on explicit conjunctions of short
-            //    noun phrases (e.g. "Rust async and Tokio runtime"). Only split
-            //    when every resulting chunk is short enough to be a focused query.
-            let mut sentence_queries = split_short_conjunctions(&sentence);
-            queries.append(&mut sentence_queries);
-        }
-
-        // 3. If the whole topic is a short comma-separated list (no sentence
-        //    punctuation), treat the comma-separated items as distinct queries.
-        if queries.len() == 1
-            && let Some(list_queries) = split_comma_list(trimmed)
-        {
-            queries = list_queries;
-        }
-
-        // Deduplicate preserving order; keep the full topic last so it acts
-        // as a catch-all when earlier sub-queries returned nothing.
-        let mut seen = HashSet::new();
-        let mut deduped: Vec<String> = Vec::new();
-        for q in queries {
-            let normalized = collapse_whitespace(&q);
-            if normalized.is_empty() {
-                continue;
-            }
-            let lower = normalized.to_lowercase();
-            if seen.insert(lower) {
-                deduped.push(normalized);
-            }
-        }
-        let full_lower = trimmed.to_lowercase();
-        if seen.insert(full_lower) {
-            deduped.push(trimmed.to_string());
-        }
-
-        // Cap the number of sub-queries to avoid hammering the search
-        // provider while still giving broad topics enough coverage.
-        deduped.truncate(MAX_DECOMPOSED_QUERIES);
-        Ok(deduped)
-    }
-}
-
-/// Split a topic on sentence boundaries, keeping parenthesised text intact.
-fn split_into_sentence_chunks(topic: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth = 0usize;
-    let chars: Vec<char> = topic.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        current.push(c);
-        match c {
-            '(' | '[' | '{' => paren_depth += 1,
-            ')' | ']' | '}' if paren_depth > 0 => paren_depth -= 1,
-            _ => {}
-        }
-        if paren_depth == 0 && matches!(c, '.' | '?' | '!') {
-            // End of a sentence only if followed by whitespace or end of text.
-            if i + 1 == chars.len() || chars[i + 1].is_whitespace() {
-                let chunk = current.trim().to_string();
-                if !chunk.is_empty() {
-                    out.push(chunk);
-                }
-                current.clear();
-            }
-        }
-        i += 1;
-    }
-    let remainder = current.trim().to_string();
-    if !remainder.is_empty() {
-        out.push(remainder);
-    }
-    if out.is_empty() {
-        out.push(topic.to_string());
-    }
-    out
-}
-
-/// Split a sentence on " and ", " & ", " + " and "; " only when every
-/// resulting chunk is short enough to be a useful focused query. This keeps
-/// long prose sentences intact while expanding short conjunctions like
-/// "Rust async and Tokio runtime".
-fn split_short_conjunctions(sentence: &str) -> Vec<String> {
-    const MAX_CHUNK_WORDS: usize = 8;
-    let separators = [" and ", " & ", " + ", "; "];
-
-    // First try splitting on each separator.
-    let mut best: Option<Vec<String>> = None;
-    for sep in &separators {
-        let parts: Vec<String> = sentence
-            .split(sep)
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(collapse_whitespace)
-            .collect();
-        if parts.len() > 1
-            && parts
-                .iter()
-                .all(|p| p.split_whitespace().count() <= MAX_CHUNK_WORDS)
-            && best.as_ref().is_none_or(|b| parts.len() > b.len())
-        {
-            best = Some(parts);
-        }
-    }
-
-    if let Some(parts) = best {
-        return parts;
-    }
-    vec![collapse_whitespace(sentence)]
-}
-
-/// If `topic` looks like a short comma-separated list of distinct phrases,
-/// return those phrases. Returns `None` for long prose or single-sentence
-/// topics so they are not over-split.
-fn split_comma_list(topic: &str) -> Option<Vec<String>> {
-    let comma_chunks: Vec<&str> = topic
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
-    if comma_chunks.len() < 2 || comma_chunks.len() > 5 {
-        return None;
-    }
-    if topic.contains('.') || topic.contains('?') || topic.contains('!') || topic.contains(';') {
-        return None;
-    }
-    let total_words: usize = comma_chunks
-        .iter()
-        .map(|s| s.split_whitespace().count())
-        .sum();
-    if total_words > 25 {
-        return None;
-    }
-    Some(comma_chunks.into_iter().map(collapse_whitespace).collect())
-}
-
-/// Collapse runs of whitespace into a single space and trim.
-fn collapse_whitespace(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// LLM-backed query decomposer.
-///
-/// Sends the topic to the configured provider/model and asks it to return a
-/// JSON array of 1-10 focused web-search queries. The first query should be the
-/// most specific; the last query can be a broader catch-all. If the model
-/// response cannot be parsed, or the provider is unavailable, the decomposer
-/// falls back to the heuristic splitter so research always makes progress.
-#[derive(Clone)]
-pub struct LlmQueryDecomposer {
-    provider_registry: Arc<ProviderRegistry>,
-    provider_id: String,
-    model_id: String,
-    api_key: Option<String>,
-    base_url: Option<String>,
-    fallback: HeuristicQueryDecomposer,
-}
-
-impl std::fmt::Debug for LlmQueryDecomposer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LlmQueryDecomposer")
-            .field("provider_id", &self.provider_id)
-            .field("model_id", &self.model_id)
-            .field("has_api_key", &self.api_key.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl LlmQueryDecomposer {
-    /// Build a new LLM decomposer.
-    pub fn new(
-        provider_registry: Arc<ProviderRegistry>,
-        provider_id: impl Into<String>,
-        model_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            provider_registry,
-            provider_id: provider_id.into(),
-            model_id: model_id.into(),
-            api_key: None,
-            base_url: None,
-            fallback: HeuristicQueryDecomposer,
-        }
-    }
-
-    /// Provide an API key for the provider.
-    #[must_use]
-    pub fn with_api_key(mut self, api_key: Option<String>) -> Self {
-        self.api_key = api_key;
-        self
-    }
-
-    /// Override the API base URL.
-    #[must_use]
-    pub fn with_base_url(mut self, base_url: Option<String>) -> Self {
-        self.base_url = base_url;
-        self
-    }
-
-    async fn decompose_with_llm(&self, topic: &str) -> anyhow::Result<Vec<String>> {
-        let provider = self
-            .provider_registry
-            .get(&self.provider_id)
-            .ok_or_else(|| anyhow::anyhow!("unknown provider '{}'", self.provider_id))?;
-
-        let api_key = self.api_key.clone().unwrap_or_default();
-        let client = provider
-            .create_client(
-                &api_key,
-                self.base_url.as_deref(),
-                &std::collections::HashMap::new(),
-            )
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "failed to create LLM client for {}/{}: {e}",
-                    self.provider_id,
-                    self.model_id
-                )
-            })?;
-
-        let prompt = format!(
-            "You are decomposing a research topic into focused web-search queries.\n\nTopic: {topic}\n\nReturn a JSON object with exactly one key, \"queries\", whose value is an array of 1 to {MAX_DECOMPOSED_QUERIES} short search-engine queries that together cover the topic. Put the most specific query first and a broader catch-all query last. Each query must be a plain string with no markdown or explanation.\n\nExample response:\n{{\"queries\":[\"Rust async runtime internals\", \"Tokio runtime scheduling\", \"Rust async and Tokio runtime\"]}}\n\nNow produce only the JSON object:"
-        );
-
-        let request = ChatRequest {
-            model: self.model_id.clone(),
-            messages: Arc::new(vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text(prompt),
-            }]),
-            tools: Arc::new(vec![]),
-            temperature: Some(0.2),
-            top_p: Some(1.0),
-            max_tokens: Some(512),
-            system: Some(std::sync::Arc::from(
-                "You are a precise research assistant that returns only valid JSON.",
-            )),
-            options: std::collections::HashMap::new(),
-            session_id: None,
-            request_id: None,
-            stream_timeout_secs: Some(120),
-            thinking: None,
-        };
-
-        let mut stream = client.chat(request).await?;
-        let mut text = String::new();
-        while let Some(event) = stream.next().await {
-            match event {
-                StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
-                StreamEvent::Error { message } => anyhow::bail!("provider error: {message}"),
-                StreamEvent::Finish { .. } => break,
-                _ => {}
-            }
-        }
-
-        parse_query_decomposition(&text)
-    }
-}
-
-#[async_trait]
-impl QueryDecomposer for LlmQueryDecomposer {
-    async fn decompose(&self, topic: &str) -> anyhow::Result<Vec<String>> {
-        match self.decompose_with_llm(topic).await {
-            Ok(qs) if !qs.is_empty() => Ok(qs),
-            Ok(_) => {
-                tracing::warn!(
-                    topic,
-                    "research: LLM decomposer returned empty queries; falling back to heuristic"
-                );
-                self.fallback.decompose(topic).await
-            }
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    topic,
-                    "research: LLM query decomposition failed; falling back to heuristic"
-                );
-                self.fallback.decompose(topic).await
-            }
-        }
-    }
-}
-
-/// Parse the model's JSON response into a list of queries.
-///
-/// Accepts `{ "queries": [...] }`, markdown-fenced JSON, and strips trailing
-/// commas before delegating to `serde_json`.
-fn parse_query_decomposition(raw: &str) -> anyhow::Result<Vec<String>> {
-    let trimmed = raw.trim();
-    let json_str = if trimmed.starts_with("```") {
-        trimmed
-            .trim_start_matches("```json")
-            .trim_start_matches("```")
-            .trim_end_matches("```")
-            .trim()
-    } else {
-        trimmed
-    };
-
-    let cleaned = remove_trailing_commas(json_str);
-
-    #[derive(Deserialize)]
-    struct DecompResponse {
-        queries: Vec<String>,
-    }
-
-    let parsed: DecompResponse = serde_json::from_str(&cleaned).map_err(|e| {
-        anyhow::anyhow!("failed to parse decomposition JSON: {e}\n\nRaw response:\n{raw}")
-    })?;
-
-    let queries: Vec<String> = parsed
-        .queries
-        .into_iter()
-        .map(|q| q.trim().to_string())
-        .filter(|q| !q.is_empty())
-        .collect();
-
-    if queries.is_empty() {
-        anyhow::bail!("LLM decomposer returned no usable queries");
-    }
-
-    // Enforce the same cap used elsewhere.
-    Ok(queries.into_iter().take(MAX_DECOMPOSED_QUERIES).collect())
-}
-
-/// Remove trailing commas before `}` or `]` in JSON.
-fn remove_trailing_commas(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let chars: Vec<char> = s.chars().collect();
-    let len = chars.len();
-    for i in 0..len {
-        if chars[i] == ',' {
-            let mut j = i + 1;
-            while j < len && chars[j].is_whitespace() {
-                j += 1;
-            }
-            if j < len && (chars[j] == '}' || chars[j] == ']') {
-                continue;
-            }
-        }
-        result.push(chars[i]);
-    }
-    result
+/// Cap a captured web body to at most `max_bytes`. Kept for downstream
+/// callers that want an explicit cap helper (Milestone B-002).
+#[allow(dead_code)]
+fn truncate_captured_body(body: &str, max_bytes: usize) -> String {
+    truncate_body_to_bytes(body, max_bytes)
 }
 
 /// Result of a decomposed web-gathering pass.
@@ -668,52 +185,6 @@ pub struct WebFetchedPage {
     pub language: Option<String>,
 }
 
-/// Classified kind of a captured web source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WebSourceKind {
-    /// A normal web page (article, blog post, documentation, etc.).
-    Page,
-    /// A PDF document detected by `Content-Type` or URL extension.
-    Pdf,
-    /// A YouTube video URL. When the fetch layer extracts a transcript the
-    /// captured body contains the caption text; otherwise the body contains the
-    /// watch-page chrome and description.
-    YouTube,
-}
-
-/// Classify a web URL by its `Content-Type` and host.
-///
-/// PDFs are recognised by an `application/pdf` content type or by a `.pdf`
-/// path extension. YouTube URLs are recognised by host (`youtube.com` or
-/// `youtu.be`). Everything else is treated as a generic page.
-#[must_use]
-pub fn classify_web_source(url: &str, content_type: Option<&str>) -> WebSourceKind {
-    if content_type.is_some_and(|ct| ct.to_ascii_lowercase().contains("application/pdf"))
-        || url.to_ascii_lowercase().ends_with(".pdf")
-    {
-        return WebSourceKind::Pdf;
-    }
-    if let Ok(parsed) = url::Url::parse(url) {
-        let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
-        if host.contains("youtube.com") || host.contains("youtu.be") {
-            return WebSourceKind::YouTube;
-        }
-    }
-    WebSourceKind::Page
-}
-
-impl WebSourceKind {
-    /// Human-readable classifier used when serialising web sources.
-    #[must_use]
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Page => "page",
-            Self::Pdf => "pdf",
-            Self::YouTube => "youtube",
-        }
-    }
-}
-
 /// Trait abstracting the existing `websearch` tool.
 ///
 /// Production wiring delegates to the real tool from
@@ -729,6 +200,25 @@ pub trait WebSearchTool: Send + Sync {
 pub trait WebFetchTool: Send + Sync {
     /// Fetch `url` and return the rendered page body.
     async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage>;
+
+    /// Fetch `url` and cap the returned body at `max_bytes`.
+    ///
+    /// The default implementation delegates to [`Self::fetch`] and then
+    /// truncates the body, so implementations that already stream or cap data
+    /// can override this for better memory behaviour. The research gatherer
+    /// always calls this method to enforce [`MAX_SOURCE_BODY_BYTES`] at the
+    /// boundary (Milestone B-002).
+    async fn fetch_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> anyhow::Result<WebFetchedPage> {
+        let mut page = self.fetch(url).await?;
+        if page.body.len() > max_bytes {
+            page.body = truncate_body_to_bytes(&page.body, max_bytes);
+        }
+        Ok(page)
+    }
 }
 
 /// Errors emitted by [`WebGatherer`].
@@ -781,6 +271,26 @@ pub enum GatherEvent {
     },
     /// Search succeeded but returned zero hits.
     SearchReturnedNoHits,
+    /// A sub-query search failed and will be retried after a short backoff
+    /// (Milestone H-002). Emitted before each retry attempt so the retry
+    /// count is observable in the UI.
+    SearchRetrying {
+        /// Sub-query being retried.
+        query: String,
+        /// 1-based retry attempt number (1 = first retry after the initial
+        /// failure, 2 = second retry, …).
+        attempt: u32,
+        /// Error from the previous failed attempt.
+        error: String,
+    },
+    /// The search circuit-breaker has opened after too many consecutive
+    /// search-tool failures (Milestone H-003). No further search calls will
+    /// be issued for the remainder of this gather pass; the gatherer falls
+    /// back to no hits.
+    SearchCircuitOpen {
+        /// Number of consecutive failures that triggered the breaker.
+        consecutive_failures: u32,
+    },
 }
 
 /// Observer receiving [`GatherEvent`]s from [`WebGatherer`].
@@ -802,10 +312,28 @@ pub struct WebGatherer {
     /// capture phase of [`gather_with_observer`]. Defaults to
     /// [`DEFAULT_FETCH_CONCURRENCY`]; override via [`with_fetch_concurrency`].
     fetch_concurrency: usize,
+    /// Wall-clock timeout applied to each individual page fetch. Pages that
+    /// take longer are treated as a fetch failure (Milestone B-004).
+    fetch_timeout: Duration,
     /// When `true`, every fetched page is retained regardless of its
     /// relevance score, disabling the default filter that discards
     /// "Low"/"Very low" sources. Defaults to `false`.
     keep_low_relevance: bool,
+    /// Maximum number of retry attempts for a failed sub-query search
+    /// (Milestone H-002). Retries use exponential backoff with a base delay of
+    /// [`Self::search_retry_base_delay_ms`]. Defaults to
+    /// [`DEFAULT_SEARCH_MAX_RETRIES`] (2). `0` disables retries.
+    search_max_retries: u32,
+    /// Base delay in milliseconds for the first retry backoff
+    /// (Milestone H-002). Subsequent retries double the delay. Defaults to
+    /// [`DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms).
+    search_retry_base_delay_ms: u64,
+    /// Number of consecutive search-tool failures after which the
+    /// circuit-breaker opens (Milestone H-003). Once open, no further search
+    /// calls are issued for the remainder of the gather pass. Defaults to
+    /// [`DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3). `0` disables the
+    /// circuit-breaker entirely.
+    search_circuit_breaker_threshold: u32,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -813,7 +341,13 @@ impl std::fmt::Debug for WebGatherer {
         f.debug_struct("WebGatherer")
             .field("has_decomposer", &self.decomposer.is_some())
             .field("fetch_concurrency", &self.fetch_concurrency)
+            .field("fetch_timeout_ms", &self.fetch_timeout.as_millis())
             .field("keep_low_relevance", &self.keep_low_relevance)
+            .field("search_max_retries", &self.search_max_retries)
+            .field(
+                "search_circuit_breaker_threshold",
+                &self.search_circuit_breaker_threshold,
+            )
             .finish_non_exhaustive()
     }
 }
@@ -829,7 +363,11 @@ impl WebGatherer {
             fetch,
             decomposer: None,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
+            fetch_timeout: DEFAULT_FETCH_TIMEOUT,
             keep_low_relevance: false,
+            search_max_retries: DEFAULT_SEARCH_MAX_RETRIES,
+            search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
+            search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
         }
     }
 
@@ -855,6 +393,22 @@ impl WebGatherer {
         self
     }
 
+    /// Override the per-fetch wall-clock timeout.
+    ///
+    /// Pages that take longer than this are treated as a fetch failure and
+    /// skipped, so one slow URL cannot stall the whole gather pass. The default
+    /// is [`DEFAULT_FETCH_TIMEOUT`] (30 seconds). A zero duration is treated
+    /// as the default.
+    #[must_use]
+    pub fn with_fetch_timeout(mut self, timeout: Duration) -> Self {
+        self.fetch_timeout = if timeout.is_zero() {
+            DEFAULT_FETCH_TIMEOUT
+        } else {
+            timeout
+        };
+        self
+    }
+
     /// Keep low-relevance web sources instead of filtering them out.
     ///
     /// When enabled, [`gather_with_observer`] retains every fetched page
@@ -863,6 +417,40 @@ impl WebGatherer {
     #[must_use]
     pub fn with_keep_low_relevance(mut self, keep: bool) -> Self {
         self.keep_low_relevance = keep;
+        self
+    }
+
+    /// Override the maximum number of retry attempts for a failed sub-query
+    /// search (Milestone H-002). Retries use exponential backoff with a base
+    /// delay of [`Self::search_retry_base_delay_ms`]. Setting this to `0`
+    /// disables retries entirely (a single attempt is made). The default is
+    /// [`DEFAULT_SEARCH_MAX_RETRIES`] (2).
+    #[must_use]
+    pub fn with_search_max_retries(mut self, n: u32) -> Self {
+        self.search_max_retries = n;
+        self
+    }
+
+    /// Override the base delay in milliseconds for the first search-retry
+    /// backoff (Milestone H-002). Subsequent retries double this value
+    /// (e.g. 200 ms → 400 ms → 800 ms). The default is
+    /// [`DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms). A value of `0` makes
+    /// retries immediate with no delay.
+    #[must_use]
+    pub fn with_search_retry_base_delay_ms(mut self, ms: u64) -> Self {
+        self.search_retry_base_delay_ms = ms;
+        self
+    }
+
+    /// Override the number of consecutive search-tool failures after which
+    /// the circuit-breaker opens (Milestone H-003). Once open, no further
+    /// search calls are issued for the remainder of the gather pass and the
+    /// gatherer falls back to no hits. Setting this to `0` disables the
+    /// circuit-breaker entirely. The default is
+    /// [`DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3).
+    #[must_use]
+    pub fn with_search_circuit_breaker_threshold(mut self, n: u32) -> Self {
+        self.search_circuit_breaker_threshold = n;
         self
     }
 
@@ -880,7 +468,13 @@ impl WebGatherer {
     ///
     /// Returns the underlying fetch error when the page cannot be retrieved.
     pub async fn fetch_url_as_source(&self, url: &str) -> anyhow::Result<(Source, WebFetchedPage)> {
-        let page = self.fetch.fetch(url).await?;
+        let page = tokio::time::timeout(
+            self.fetch_timeout,
+            self.fetch.fetch_with_limit(url, MAX_SOURCE_BODY_BYTES),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("fetch timed out after {}s", self.fetch_timeout.as_secs()))?
+        .map_err(|e| anyhow::anyhow!("failed to fetch seed URL {url}: {e}"))?;
         let body = fence_captured_body(&page.body);
         let title = clean_web_source_title(&page.title, url);
         let media_type = classify_web_source(url, page.content_type.as_deref())
@@ -924,19 +518,36 @@ impl WebGatherer {
         Ok(result.sources)
     }
 
+    /// Decide whether a search hit is worth fetching, based only on the
+    /// query, title, snippet, and URL. Low-relevance hits are dropped before
+    /// any full-page fetch, saving bandwidth and prompt budget
+    /// (Milestone B-001). When `keep_low_relevance` is enabled the hit is
+    /// retained but its label is still computed for later reporting.
+    fn filter_hit(&self, query: &str, hit: &WebSearchHit) -> Option<(String, bool)> {
+        let (label, retained) = compute_relevance_label(query, &hit.title, &hit.snippet, &hit.url);
+        if retained || self.keep_low_relevance {
+            Some((label, retained))
+        } else {
+            None
+        }
+    }
+
     /// Gather web sources with an optional observer for diagnostic events.
     ///
     /// When a decomposer is configured the topic is first split into focused
     /// sub-queries; each sub-query is issued in parallel, results are
-    /// deduplicated by URL, and up to `max_results` unique pages are fetched
-    /// **concurrently** up to [`WebGatherer::fetch_concurrency`] at a time
-    /// (default [`DEFAULT_FETCH_CONCURRENCY`], 10).  [`GatherEvent`]
-    /// diagnostics (`SourceCaptured` / `FetchFailed`) fire in fetch-completion
-    /// order so the UI can render each page as soon as it arrives; the returned
-    /// `sources` vector is re-sorted into the original search-ranking order so
-    /// the `web-NN.md` supporting-file names track hit position.  The returned
-    /// [`GatherResult`] lists the sub-queries that were used so the caller can
-    /// persist them in `RESEARCH.md`.
+    /// deduplicated by URL, pre-filtered by title/snippet relevance, and up to
+    /// `max_results` unique pages are fetched **concurrently** up to
+    /// [`WebGatherer::fetch_concurrency`] at a time (default
+    /// [`DEFAULT_FETCH_CONCURRENCY`], 10). Each fetch is also bounded by
+    /// [`MAX_SOURCE_BODY_BYTES`] and [`WebGatherer::fetch_timeout`].
+    /// [`GatherEvent`] diagnostics (`SourceCaptured` / `FetchFailed`) fire in
+    /// fetch-completion order so the UI can render each page as soon as it
+    /// arrives; the returned `sources` vector is re-sorted into the original
+    /// search-ranking order so the `web-NN.md` supporting-file names track hit
+    /// position rather than completion timing. The returned [`GatherResult`]
+    /// lists the sub-queries that were used so the caller can persist them in
+    /// `RESEARCH.md`.
     pub async fn gather_with_observer(
         &self,
         topic: &str,
@@ -981,13 +592,75 @@ impl WebGatherer {
 
         // Run each sub-query in parallel with bounded concurrency. Each
         // future owns its query string so we don't borrow `queries`.
+        //
+        // Milestone H-002/H-003: each sub-query search is retried up to
+        // `search_max_retries` times with exponential backoff on transient
+        // failures. A circuit-breaker tracks consecutive failures across all
+        // sub-queries; once it opens, no further search calls are issued and
+        // the gatherer falls back to no hits.
+        //
+        // The retry/circuit-breaker state is shared across futures via
+        // `Arc<AtomicU32>` / `Arc<AtomicBool>` so it works correctly under
+        // `buffer_unordered` parallelism.
         let search_tool = self.search.clone();
+        let max_retries = self.search_max_retries;
+        let base_delay_ms = self.search_retry_base_delay_ms;
+        let circuit_threshold = self.search_circuit_breaker_threshold;
+        let consecutive_failures = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let circuit_tripped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let search_futures: Vec<_> = queries
             .iter()
             .map(|q| {
                 let q = q.clone();
                 let tool = search_tool.clone();
-                async move { tool.search(&q, max_results).await }
+                let cf = consecutive_failures.clone();
+                let ct = circuit_tripped.clone();
+                async move {
+                    // Circuit-breaker check: if already tripped, skip this
+                    // search entirely and return a marker error.
+                    if ct.load(std::sync::atomic::Ordering::Relaxed) {
+                        return SearchCallOutcome::CircuitOpen;
+                    }
+                    // Retry loop with exponential backoff.
+                    let mut attempt: u32 = 0;
+                    let mut last_error;
+                    loop {
+                        match tool.search(&q, max_results).await {
+                            Ok(hits) => {
+                                // Success: reset the consecutive-failure counter.
+                                cf.store(0, std::sync::atomic::Ordering::Relaxed);
+                                return SearchCallOutcome::Ok {
+                                    hits,
+                                    retries: attempt,
+                                };
+                            }
+                            Err(e) => {
+                                last_error = e.to_string();
+                                let count =
+                                    cf.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                                // Circuit-breaker: trip when threshold reached.
+                                if circuit_threshold > 0 && count >= circuit_threshold {
+                                    ct.store(true, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                if attempt >= max_retries {
+                                    return SearchCallOutcome::Err {
+                                        error: last_error.clone(),
+                                        retries: attempt,
+                                    };
+                                }
+                                attempt += 1;
+                                let delay_ms = base_delay_ms.saturating_mul(1u64 << (attempt - 1));
+                                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                                tracing::warn!(
+                                    query = %q,
+                                    attempt,
+                                    error = %last_error,
+                                    "research: retrying sub-query search after transient failure"
+                                );
+                            }
+                        }
+                    }
+                }
             })
             .collect();
         let mut results = futures::stream::iter(search_futures)
@@ -997,29 +670,90 @@ impl WebGatherer {
         let mut hits_by_url: Vec<(String, WebSearchHit)> = Vec::new();
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut any_search_error: Option<String> = None;
+        let mut excluded_count = 0usize;
+        let mut circuit_open_emitted = false;
 
-        while let Some((idx, result)) = results.next().await {
+        while let Some((idx, outcome)) = results.next().await {
             let query = queries
                 .get(idx)
                 .cloned()
                 .unwrap_or_else(|| topic.to_string());
-            match result {
-                Ok(hits) => {
+            match outcome {
+                SearchCallOutcome::Ok { hits, retries: _ } => {
                     for mut hit in hits {
                         let url_key = hit.url.to_lowercase();
-                        if seen_urls.insert(url_key) {
-                            hit.matched_query = query.clone();
+                        if !seen_urls.insert(url_key) {
+                            continue;
+                        }
+                        hit.matched_query = query.clone();
+                        // Pre-filter by title/snippet relevance before any
+                        // expensive full-page fetch (B-001).
+                        if let Some((label, retained)) = self.filter_hit(&query, &hit) {
+                            if !retained {
+                                // Retained because keep_low_relevance is on.
+                                tracing::info!(
+                                    query = %query,
+                                    url = %hit.url,
+                                    relevance = %label,
+                                    "research: retaining low-relevance hit due to --use-low-relevance"
+                                );
+                            }
+                            hit.matched_query = format!("{query} [{label}]");
                             hits_by_url.push((query.clone(), hit));
+                        } else {
+                            excluded_count += 1;
+                            tracing::info!(
+                                query = %query,
+                                url = %hit.url,
+                                "research: skipping search hit due to low title/snippet relevance"
+                            );
+                            if let Some(obs) = observer {
+                                obs.on_event(GatherEvent::FetchFailed {
+                                    url: hit.url.clone(),
+                                    error: format!(
+                                        "title/snippet relevance too low for query {query}"
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
-                Err(e) => {
+                SearchCallOutcome::Err { error, retries } => {
+                    // Emit retry events for each retry that was attempted.
+                    if let Some(obs) = observer {
+                        for r in 1..=retries {
+                            obs.on_event(GatherEvent::SearchRetrying {
+                                query: query.clone(),
+                                attempt: r,
+                                error: error.clone(),
+                            });
+                        }
+                    }
                     tracing::warn!(
                         query = %query,
-                        error = %e,
-                        "research: sub-query search failed"
+                        error = %error,
+                        retries,
+                        "research: sub-query search failed after retries"
                     );
-                    any_search_error = Some(format!("{query}: {e}"));
+                    any_search_error = Some(format!("{query}: {error}"));
+                }
+                SearchCallOutcome::CircuitOpen => {
+                    // The circuit-breaker tripped before this sub-query
+                    // started. Emit the circuit-open event once.
+                    if !circuit_open_emitted {
+                        let cf = consecutive_failures.load(std::sync::atomic::Ordering::Relaxed);
+                        if let Some(obs) = observer {
+                            obs.on_event(GatherEvent::SearchCircuitOpen {
+                                consecutive_failures: cf,
+                            });
+                        }
+                        circuit_open_emitted = true;
+                        tracing::warn!(
+                            consecutive_failures = cf,
+                            "research: search circuit-breaker open; skipping remaining sub-queries"
+                        );
+                    }
+                    any_search_error = Some(format!("{query}: search circuit-breaker open"));
                 }
             }
         }
@@ -1038,18 +772,21 @@ impl WebGatherer {
                 sources: Vec::new(),
                 pdf_count: 0,
                 youtube_count: 0,
-                excluded_count: 0,
+                excluded_count,
             });
         }
 
         // Fetch each unique candidate concurrently up to `fetch_concurrency`
-        // at a time.  `SourceCaptured` / `FetchFailed` events fire in
+        // at a time. `SourceCaptured` / `FetchFailed` events fire in
         // completion order (so the UI renders pages as they arrive); the
         // collected `(index, Option<Source>)` pairs are re-sorted into the
         // original search-ranking order afterwards so `web-NN.md` supporting
         // file names track hit position rather than completion timing.
         let fetch_concurrency = self.fetch_concurrency.max(1);
         let fetch_tool = self.fetch.clone();
+        let fetch_timeout = self.fetch_timeout;
+        // Renumber retained hits densely so the supporting-file names have no
+        // gaps, while preserving the original search-ranking order.
         let candidates: Vec<(usize, String, WebSearchHit)> = hits_by_url
             .into_iter()
             .take(max_results)
@@ -1059,16 +796,19 @@ impl WebGatherer {
         let fetch_futures = candidates.into_iter().map(|(index, query, hit)| {
             let fetch_tool = fetch_tool.clone();
             async move {
-                let result = fetch_tool.fetch(&hit.url).await;
+                let result = tokio::time::timeout(
+                    fetch_timeout,
+                    fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
+                )
+                .await;
                 (index, query, hit, result)
             }
         });
         let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
-        let mut excluded_count = 0usize;
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
         while let Some((index, query, hit, result)) = stream.next().await {
             match result {
-                Ok(page) => {
+                Ok(Ok(page)) => {
                     let title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
@@ -1132,7 +872,7 @@ impl WebGatherer {
                         }),
                     ));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     if let Some(obs) = observer {
                         obs.on_event(GatherEvent::FetchFailed {
                             url: hit.url.clone(),
@@ -1144,6 +884,21 @@ impl WebGatherer {
                         url = %hit.url,
                         error = %e,
                         "research: webfetch failed; skipping"
+                    );
+                    collected.push((index, None));
+                }
+                Err(_) => {
+                    let error = format!("fetch timed out after {}s", fetch_timeout.as_secs());
+                    if let Some(obs) = observer {
+                        obs.on_event(GatherEvent::FetchFailed {
+                            url: hit.url.clone(),
+                            error: error.clone(),
+                        });
+                    }
+                    tracing::warn!(
+                        query = %query,
+                        url = %hit.url,
+                        "research: webfetch timed out; skipping"
                     );
                     collected.push((index, None));
                 }
@@ -1187,6 +942,30 @@ impl WebGatherer {
     }
 }
 
+/// Outcome of a single sub-query search call, including retry/circuit-breaker
+/// state (Milestone H-002/H-003).
+enum SearchCallOutcome {
+    /// The search succeeded. `retries` records how many retries were needed
+    /// (0 = succeeded on the first attempt).
+    #[allow(dead_code)]
+    Ok {
+        /// Search hits returned by the tool.
+        hits: Vec<WebSearchHit>,
+        /// Number of retries before success.
+        retries: u32,
+    },
+    /// The search failed after all retries were exhausted.
+    Err {
+        /// Last error message.
+        error: String,
+        /// Number of retries attempted.
+        retries: u32,
+    },
+    /// The circuit-breaker was already open when this sub-query started, so no
+    /// search call was made.
+    CircuitOpen,
+}
+
 /// Compute a deterministic relevance note for a captured web source.
 ///
 /// The score is based only on the search query that produced the hit and the
@@ -1197,192 +976,13 @@ impl WebGatherer {
 /// - "Medium — snippet matches query"
 /// - "Low — weak match"
 /// - "Very high — exact title match"
-fn compute_relevance_label(query: &str, title: &str, snippet: &str, url: &str) -> (String, bool) {
-    let query_lc = query.to_lowercase();
-    let query_terms: Vec<String> = query_lc
-        .split_whitespace()
-        .filter(|t| !is_stopword(t))
-        .filter(|t| t.len() > 2 || t.chars().any(char::is_alphabetic))
-        .map(std::string::ToString::to_string)
-        .collect();
-    if query_terms.is_empty() {
-        return ("Match score unavailable".into(), true);
-    }
-
-    let hay = format!(
-        "{} {} {}",
-        title.to_lowercase(),
-        snippet.to_lowercase(),
-        url.to_lowercase()
-    );
-    let mut hits = 0usize;
-    let mut title_hits = 0usize;
-    let mut snippet_hits = 0usize;
-    let title_lc = title.to_lowercase();
-    let snippet_lc = snippet.to_lowercase();
-    for term in &query_terms {
-        if hay.contains(term) {
-            hits += 1;
-            if title_lc.contains(term) {
-                title_hits += 1;
-            }
-            if snippet_lc.contains(term) {
-                snippet_hits += 1;
-            }
-        }
-    }
-    let ratio = hits as f64 / query_terms.len() as f64;
-
-    let label = if !title.is_empty() && title_lc == query.to_lowercase() {
-        "Very high — exact title match"
-    } else if ratio >= 0.75 && title_hits > 0 && snippet_hits > 0 {
-        "High — title + snippet match query"
-    } else if ratio >= 0.6 && title_hits > 0 {
-        "High — title matches query"
-    } else if ratio >= 0.6 && snippet_hits > 0 {
-        "Medium-high — snippet matches query"
-    } else if ratio >= 0.45 {
-        "Medium — partial query match"
-    } else if ratio >= 0.2 {
-        "Low — weak query match"
-    } else {
-        "Very low — no clear query match"
-    };
-
-    let retained = !label.starts_with("Low") && !label.starts_with("Very low");
-    (label.into(), retained)
-}
-
-/// Returns true for common English stopwords that should not dilute the
-/// relevance ratio. Removing them prevents a question like "What is Rust?"
-/// from being scored as low relevance just because the auxiliary words do not
-/// appear in the title or snippet.
-fn is_stopword(word: &str) -> bool {
-    const STOPWORDS: &[&str] = &[
-        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-        "do", "does", "did", "will", "would", "could", "should", "may", "might", "must", "can",
-        "shall", "of", "in", "on", "at", "to", "for", "with", "from", "by", "about", "as", "and",
-        "or", "but", "not", "no", "yes", "what", "which", "who", "when", "where", "why", "how",
-        "this", "that", "these", "those", "i", "you", "he", "she", "it", "we", "they", "their",
-        "there", "them", "his", "her", "its", "our", "your", "my", "me", "him", "us",
-    ];
-    STOPWORDS.contains(&word.to_lowercase().as_str())
-}
-
+///
 /// Compute the zero-padded supporting-file path for the Nth web source.
 ///
 /// Index 0 → `web-01.md`, index 1 → `web-02.md`, etc. The path is
 /// relative to the research item directory (`research/<name>/`).
 fn web_body_path(index: usize) -> PathBuf {
     PathBuf::from(format!("sources/web-{:02}.md", index + 1))
-}
-
-#[cfg(test)]
-mod title_tests {
-    use super::*;
-
-    #[test]
-    fn clean_title_strips_markdown_reference_links() {
-        let out = clean_web_source_title("[Skip to main content][1]", "");
-        // The whole title was nav chrome → reduces to empty → fallback empty.
-        assert!(
-            out.is_empty(),
-            "pure-noise title with empty fallback should be empty, got {out:?}"
-        );
-    }
-
-    #[test]
-    fn clean_title_strips_markdown_links_but_keeps_text() {
-        let out = clean_web_source_title("[DeepSeek V4 Pro][1] model card", "");
-        assert_eq!(out, "DeepSeek V4 Pro model card");
-    }
-
-    #[test]
-    fn clean_title_strips_inline_markdown_links() {
-        let out = clean_web_source_title("[DeepSeek](https://deepseek.com) overview", "");
-        assert_eq!(out, "DeepSeek overview");
-    }
-
-    #[test]
-    fn clean_title_strips_leading_cookie_banner() {
-        let long = "We use essential cookies to make our site work. With your consent, we may also use non-essential cookies to improve your site for you and your experience";
-        let out = clean_web_source_title(long, "");
-        // Leading cookie phrase is stripped; remainder is truncated to the cap.
-        assert!(
-            out.chars().count() <= MAX_WEB_SOURCE_TITLE_CHARS,
-            "got {} chars: {out}",
-            out.chars().count()
-        );
-        assert!(!out.to_lowercase().contains("we use essential cookies"));
-        assert!(out.ends_with('…'));
-    }
-
-    #[test]
-    fn clean_title_truncates_long_title_at_word_boundary() {
-        let long = "This is a genuinely long and meaningful article title that goes well beyond the one hundred and twenty character cap so it must be truncated by the gatherer";
-        let out = clean_web_source_title(long, "");
-        assert!(
-            out.chars().count() <= MAX_WEB_SOURCE_TITLE_CHARS,
-            "got {} chars: {out}",
-            out.chars().count()
-        );
-        assert!(out.ends_with('…'));
-        // Should not split a word mid-way.
-        assert!(!out.ends_with("… "));
-    }
-
-    #[test]
-    fn clean_title_falls_back_when_primary_is_noise() {
-        // page.title is pure nav chrome; fallback (search-hit title) should win.
-        let out = clean_web_source_title("[Skip to main content][1]", "Real Article Title");
-        assert_eq!(out, "Real Article Title");
-    }
-
-    #[test]
-    fn clean_title_falls_back_when_primary_is_empty() {
-        let out = clean_web_source_title("", "Hit Title");
-        assert_eq!(out, "Hit Title");
-    }
-
-    #[test]
-    fn clean_title_preserves_short_meaningful_title() {
-        let out = clean_web_source_title("A — resolved", "fallback");
-        assert_eq!(out, "A — resolved");
-    }
-
-    #[test]
-    fn clean_title_returns_raw_fallback_when_both_reduce_to_empty() {
-        let out = clean_web_source_title("[Skip to content][2]", "");
-        assert!(
-            out.is_empty(),
-            "both-noise with empty fallback yields empty, got {out:?}"
-        );
-    }
-
-    #[test]
-    fn clean_title_url_fallback_is_preserved() {
-        // fetch_url_as_source passes the URL as fallback; a URL is not noise.
-        let out = clean_web_source_title("", "https://example.com/deepseek-v4");
-        assert_eq!(out, "https://example.com/deepseek-v4");
-    }
-
-    #[test]
-    fn strip_leading_noise_is_case_insensitive() {
-        let out = clean_title_text("SKIP TO MAIN CONTENT: DeepSeek V4 Pro");
-        assert_eq!(out, "DeepSeek V4 Pro");
-    }
-
-    #[test]
-    fn truncate_title_words_keeps_short_input_intact() {
-        let out = truncate_title_words("short title", 120);
-        assert_eq!(out, "short title");
-    }
-
-    #[test]
-    fn truncate_title_words_returns_empty_for_empty_input() {
-        let out = truncate_title_words("", 120);
-        assert!(out.is_empty());
-    }
 }
 
 #[cfg(test)]
@@ -1438,6 +1038,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn relevance_exact_title_match_unchanged() {
+        let (label, retained) = compute_relevance_label(
+            "Rust async runtime",
+            "Rust async runtime",
+            "some unrelated snippet",
+            "https://example.com/foo",
+        );
+        assert_eq!(label, "Very high — exact title match");
+        assert!(retained);
+    }
+
+    #[test]
+    fn relevance_low_when_no_terms_match() {
+        let (label, retained) = compute_relevance_label(
+            "quantum computing",
+            "Rust async runtime",
+            "tokio and futures",
+            "https://example.com/rust",
+        );
+        assert!(label.starts_with("Very low"));
+        assert!(!retained);
+    }
+
     fn gatherer_with(
         hits: Vec<WebSearchHit>,
         pages: std::collections::HashMap<String, WebFetchedPage>,
@@ -1454,6 +1078,258 @@ mod tests {
         });
         let g = WebGatherer::new(search.clone(), fetch.clone());
         (g, search, fetch)
+    }
+
+    #[tokio::test]
+    async fn gather_prefilters_low_relevance_hits_before_fetch() {
+        // Both hits will be fetched if we don't pre-filter, but the second has
+        // a title/snippet that does not match the query at all.
+        let hits = vec![
+            WebSearchHit {
+                url: "https://good.example".into(),
+                title: "Rust async runtime guide".into(),
+                snippet: " Tokio and async Rust performance".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+            WebSearchHit {
+                url: "https://bad.example".into(),
+                title: "completely unrelated shopping page".into(),
+                snippet: "buy shoes and gadgets here".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://good.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://good.example".into(),
+                title: "Rust async runtime guide".into(),
+                body: "body good".into(),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        pages.insert(
+            "https://bad.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://bad.example".into(),
+                title: "completely unrelated shopping page".into(),
+                body: "body bad".into(),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(
+            sources.len(),
+            1,
+            "low-relevance hit should be pre-filtered before fetch"
+        );
+        if let Source::Web { url, .. } = &sources[0] {
+            assert_eq!(url, "https://good.example");
+        }
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            !calls.contains(&"https://bad.example".to_string()),
+            "bad URL must not be fetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_keep_low_relevance_disables_prefilter() {
+        let hits = vec![WebSearchHit {
+            url: "https://bad.example".into(),
+            title: "completely unrelated page".into(),
+            snippet: "buy shoes".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://bad.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://bad.example".into(),
+                title: "completely unrelated page".into(),
+                body: "body".into(),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let g = g.with_keep_low_relevance(true);
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(sources.len(), 1, "--use-low-relevance keeps the hit");
+    }
+
+    #[tokio::test]
+    async fn gather_caps_huge_body_at_max_source_body_bytes() {
+        use crate::document::MAX_SOURCE_BODY_BYTES;
+        let hits = vec![WebSearchHit {
+            url: "https://huge.example".into(),
+            title: "Huge page".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://huge.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://huge.example".into(),
+                title: "Huge page".into(),
+                body: "x".repeat(MAX_SOURCE_BODY_BYTES + 1024),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(sources.len(), 1);
+        if let Source::Web { body, .. } = &sources[0] {
+            assert!(
+                body.len() <= MAX_SOURCE_BODY_BYTES + 128,
+                "body should be capped near MAX_SOURCE_BODY_BYTES, got {} bytes",
+                body.len()
+            );
+            assert!(body.contains("truncated"));
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_times_out_slow_fetch() {
+        struct SlowFetch;
+        #[async_trait]
+        impl WebFetchTool for SlowFetch {
+            async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: _url.to_string(),
+                    title: "slow".into(),
+                    body: "slow body".into(),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                })
+            }
+        }
+        let hits = vec![WebSearchHit {
+            url: "https://slow.example".into(),
+            title: "Slow".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let g = WebGatherer::new(
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            Arc::new(SlowFetch),
+        )
+        .with_fetch_timeout(std::time::Duration::from_millis(100));
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("Rust async runtime", 5, Some(&obs))
+            .await
+            .unwrap();
+        assert!(result.sources.is_empty(), "slow fetch should time out");
+        let events = obs.0.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                GatherEvent::FetchFailed { url, error } if url == "https://slow.example" && error.contains("timed out")
+            )),
+            "expected timeout FetchFailed event, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_preserves_search_ranking_order_with_prefilter_gap() {
+        // Three hits: the middle one is low relevance and should be dropped.
+        // The remaining two must still be numbered web-01 and web-02 in
+        // search-ranking order.
+        let hits = vec![
+            WebSearchHit {
+                url: "https://first.example".into(),
+                title: "First Rust async page".into(),
+                snippet: "Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+            WebSearchHit {
+                url: "https://low.example".into(),
+                title: "unrelated shopping".into(),
+                snippet: "buy shoes".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+            WebSearchHit {
+                url: "https://second.example".into(),
+                title: "Second Rust async page".into(),
+                snippet: "Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "test".into(),
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        for url in ["https://first.example", "https://second.example"] {
+            pages.insert(
+                url.into(),
+                WebFetchedPage {
+                    published_at: None,
+                    url: url.into(),
+                    title: format!("Title {url}"),
+                    body: "body".into(),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                },
+            );
+        }
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(sources.len(), 2);
+        assert_eq!(
+            sources[0].body_path(),
+            Some(PathBuf::from("sources/web-01.md").as_path())
+        );
+        assert_eq!(
+            sources[1].body_path(),
+            Some(PathBuf::from("sources/web-02.md").as_path())
+        );
+        if let Source::Web { url, .. } = &sources[0] {
+            assert_eq!(url, "https://first.example");
+        }
+        if let Source::Web { url, .. } = &sources[1] {
+            assert_eq!(url, "https://second.example");
+        }
     }
 
     #[tokio::test]
@@ -1742,7 +1618,8 @@ mod tests {
                 self.0.lock().unwrap().push(event);
             }
         }
-        let g = WebGatherer::new(Arc::new(FailSearch), Arc::new(OkFetch));
+        let g =
+            WebGatherer::new(Arc::new(FailSearch), Arc::new(OkFetch)).with_search_max_retries(0);
         let obs = CollectEvents::default();
         let result = g
             .gather_with_observer("topic", 5, Some(&obs))
@@ -2415,5 +2292,246 @@ mod tests {
         assert_eq!(result.pdf_count, 1);
         assert_eq!(result.youtube_count, 1);
         assert_eq!(result.sources.len(), 2);
+    }
+
+    // ── Milestone H-002: search retry tests ───────────────────────────
+
+    /// Search tool that fails the first N calls then succeeds.
+    struct FailNTimes {
+        fail_count: std::sync::atomic::AtomicU32,
+        n: u32,
+        hits: Vec<WebSearchHit>,
+    }
+
+    #[async_trait]
+    impl WebSearchTool for FailNTimes {
+        async fn search(&self, _query: &str, _max: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+            let count = self
+                .fail_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if count < self.n {
+                anyhow::bail!("transient failure #{count}");
+            }
+            Ok(self.hits.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn h002_search_retries_then_succeeds() {
+        let hits = vec![WebSearchHit {
+            url: "https://retry.example".into(),
+            title: "Rust async runtime".into(),
+            snippet: "Tokio and async Rust".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://retry.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://retry.example".into(),
+                title: "Rust async runtime".into(),
+                body: "body".into(),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let search = Arc::new(FailNTimes {
+            fail_count: std::sync::atomic::AtomicU32::new(0),
+            n: 2,
+            hits: hits.clone(),
+        });
+        let fetch = Arc::new(FakeFetch {
+            pages,
+            fail_urls: Vec::new(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let g = WebGatherer::new(search, fetch)
+            .with_search_max_retries(3)
+            .with_search_retry_base_delay_ms(0);
+        let result = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(result.len(), 1, "search should succeed after retries");
+    }
+
+    #[tokio::test]
+    async fn h002_search_retries_exhausted_emits_search_failed() {
+        struct AlwaysFail;
+        #[async_trait]
+        impl WebSearchTool for AlwaysFail {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                anyhow::bail!("persistent failure")
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: "u".into(),
+                    title: "t".into(),
+                    body: "b".into(),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                })
+            }
+        }
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let g = WebGatherer::new(Arc::new(AlwaysFail), Arc::new(OkFetch))
+            .with_search_max_retries(2)
+            .with_search_retry_base_delay_ms(0);
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("topic", 5, Some(&obs))
+            .await
+            .unwrap();
+        assert!(result.sources.is_empty());
+        let events = obs.0.lock().unwrap();
+        // Should have: QueriesDecomposed, SearchRetrying x2, SearchFailed.
+        let retry_count = events
+            .iter()
+            .filter(|e| matches!(e, GatherEvent::SearchRetrying { .. }))
+            .count();
+        assert_eq!(retry_count, 2, "expected 2 retry events");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                GatherEvent::SearchFailed { error } if error.contains("persistent failure")
+            )),
+            "expected SearchFailed event"
+        );
+    }
+
+    // ── Milestone H-003: circuit-breaker tests ────────────────────────
+
+    #[tokio::test]
+    async fn h003_circuit_breaker_opens_after_threshold_failures() {
+        struct AlwaysFail;
+        #[async_trait]
+        impl WebSearchTool for AlwaysFail {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                anyhow::bail!("circuit test failure")
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: "u".into(),
+                    title: "t".into(),
+                    body: "b".into(),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                })
+            }
+        }
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        // Use a decomposer that returns 5 sub-queries so the
+        // circuit-breaker has a chance to trip mid-stream.
+        struct FiveQueries;
+        #[async_trait]
+        impl QueryDecomposer for FiveQueries {
+            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
+                Ok((0..5).map(|i| format!("q{i}")).collect())
+            }
+        }
+        let g = WebGatherer::new(Arc::new(AlwaysFail), Arc::new(OkFetch))
+            .with_decomposer(Arc::new(FiveQueries))
+            .with_search_max_retries(0)
+            .with_search_circuit_breaker_threshold(3)
+            .with_search_retry_base_delay_ms(0);
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("topic", 5, Some(&obs))
+            .await
+            .unwrap();
+        assert!(result.sources.is_empty());
+        let events = obs.0.lock().unwrap();
+        // CircuitOpen should be emitted at least once.
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                GatherEvent::SearchCircuitOpen { consecutive_failures }
+                    if *consecutive_failures >= 3
+            )),
+            "expected SearchCircuitOpen event with failures >= 3, got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn h003_circuit_breaker_disabled_when_threshold_zero() {
+        struct AlwaysFail;
+        #[async_trait]
+        impl WebSearchTool for AlwaysFail {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                anyhow::bail!("no circuit failure")
+            }
+        }
+        struct OkFetch;
+        #[async_trait]
+        impl WebFetchTool for OkFetch {
+            async fn fetch(&self, _: &str) -> anyhow::Result<WebFetchedPage> {
+                Ok(WebFetchedPage {
+                    published_at: None,
+                    url: "u".into(),
+                    title: "t".into(),
+                    body: "b".into(),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                })
+            }
+        }
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        struct ThreeQueries;
+        #[async_trait]
+        impl QueryDecomposer for ThreeQueries {
+            async fn decompose(&self, _topic: &str) -> anyhow::Result<Vec<String>> {
+                Ok((0..3).map(|i| format!("q{i}")).collect())
+            }
+        }
+        let g = WebGatherer::new(Arc::new(AlwaysFail), Arc::new(OkFetch))
+            .with_decomposer(Arc::new(ThreeQueries))
+            .with_search_max_retries(0)
+            .with_search_circuit_breaker_threshold(0)
+            .with_search_retry_base_delay_ms(0);
+        let obs = CollectEvents::default();
+        let _result = g
+            .gather_with_observer("topic", 5, Some(&obs))
+            .await
+            .unwrap();
+        let events = obs.0.lock().unwrap();
+        // No circuit-open event should be emitted.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, GatherEvent::SearchCircuitOpen { .. })),
+            "circuit breaker should be disabled when threshold is 0"
+        );
     }
 }

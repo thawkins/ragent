@@ -62,6 +62,13 @@ impl App {
                 use_local,
                 use_specs,
                 use_low_relevance,
+                fetch_timeout_secs,
+                local_concurrency,
+                web_phase_timeout_secs,
+                local_phase_timeout_secs,
+                search_max_retries,
+                search_retry_base_delay_ms,
+                search_circuit_breaker_threshold,
             } => {
                 // Use the `⏳` prefix so the status is treated as
                 // async-in-progress and NOT auto-expired to "ready" by
@@ -116,6 +123,17 @@ impl App {
                         .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
                         .unwrap_or(OutputFormat::Report),
                     use_low_relevance,
+                    fetch_timeout_secs: fetch_timeout_secs.unwrap_or(30),
+                    local_concurrency: local_concurrency
+                        .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
+                    web_phase_timeout_secs,
+                    local_phase_timeout_secs,
+                    search_max_retries: search_max_retries
+                        .unwrap_or(ragent_research::DEFAULT_SEARCH_MAX_RETRIES),
+                    search_retry_base_delay_ms: search_retry_base_delay_ms
+                        .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
+                    search_circuit_breaker_threshold: search_circuit_breaker_threshold
+                        .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
                     ..SessionConfig::default()
                 };
                 let session = crate::research_adapter::build_research_session(

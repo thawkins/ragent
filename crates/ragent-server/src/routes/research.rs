@@ -121,6 +121,13 @@ struct CreateResearchRequest {
     /// during the web-gathering phase. When `None` the engine default
     /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
     fetch_concurrency: Option<usize>,
+    /// Override the per-page fetch timeout in seconds. When `None` the engine
+    /// default (30 seconds) is used.
+    fetch_timeout_secs: Option<u64>,
+    /// Override the maximum number of local candidate scoring/spec-scan tasks
+    /// run in parallel. When `None` the engine default
+    /// (`ragent_research::DEFAULT_LOCAL_CONCURRENCY`, 8) is used.
+    local_concurrency: Option<usize>,
     /// `--depth shallow|standard|deep`. When omitted the engine behaves as
     /// `Depth::Standard` and stays single-pass.
     #[serde(default)]
@@ -155,6 +162,10 @@ async fn create_research(
             OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
         }),
         use_low_relevance: req.use_low_relevance,
+        fetch_timeout_secs: req.fetch_timeout_secs.unwrap_or(30),
+        local_concurrency: req
+            .local_concurrency
+            .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
         ..SessionConfig::default()
     };
     let title = req.title.clone().unwrap_or_else(|| {

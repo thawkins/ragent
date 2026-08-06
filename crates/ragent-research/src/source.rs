@@ -280,11 +280,65 @@ impl Source {
         }
     }
 
+    /// Path to the supporting file for variants that have one.
+    #[must_use]
+    pub fn body_path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Web { body_path, .. }
+            | Self::Local { body_path, .. }
+            | Self::Other { body_path, .. } => Some(body_path.as_path()),
+            Self::Spec { .. } => None,
+        }
+    }
+
     /// `true` when the source has a non-empty captured body. Used by the
     /// synthesis engine to skip empty rows when computing prompt budgets.
     #[must_use]
     pub fn has_body(&self) -> bool {
         self.body().is_some_and(|b| !b.is_empty())
+    }
+
+    /// Numeric relevance rank used by the `max_synthesis_sources` cap
+    /// (Milestone E-003). Higher numbers = more relevant.
+    ///
+    /// The rank is derived from the relevance label string produced by
+    /// [`crate::web_gatherer::compute_relevance_label`]. Sources without a
+    /// relevance label (local, spec, other, or pre-relevance-field web
+    /// sources) receive a default rank of 5 so they are treated as
+    /// medium-relevance and are not unfairly excluded by the cap.
+    ///
+    /// | Label prefix                          | Rank |
+    /// |---------------------------------------|------|
+    /// | `Very high`                           |    8 |
+    /// | `High`                                |    7 |
+    /// | `Medium-high`                         |    6 |
+    /// | `Medium`                              |    5 |
+    /// | `Match score unavailable`             |    5 |
+    /// | `Low`                                 |    3 |
+    /// | `Very low`                            |    1 |
+    /// | (no relevance string)                 |    5 |
+    #[must_use]
+    pub fn relevance_rank(&self) -> u8 {
+        let label = match self.relevance() {
+            Some(r) if !r.is_empty() => r,
+            _ => return 5,
+        };
+        let lc = label.to_lowercase();
+        if lc.starts_with("very high") {
+            8
+        } else if lc.starts_with("high") {
+            7
+        } else if lc.starts_with("medium-high") {
+            6
+        } else if lc.starts_with("medium") || lc.starts_with("match score unavailable") {
+            5
+        } else if lc.starts_with("low") {
+            3
+        } else if lc.starts_with("very low") {
+            1
+        } else {
+            5
+        }
     }
 }
 
@@ -605,5 +659,120 @@ mod tests {
             language: None,
         };
         assert_eq!(s.relevance(), Some(""));
+    }
+
+    // ── Milestone E-003: relevance_rank tests ─────────────────────────────
+
+    #[test]
+    fn relevance_rank_very_high_is_8() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "text".into(),
+            relevance: "Very high — exact title match".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        };
+        assert_eq!(s.relevance_rank(), 8);
+    }
+
+    #[test]
+    fn relevance_rank_high_is_7() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "text".into(),
+            relevance: "High — title matches query".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        };
+        assert_eq!(s.relevance_rank(), 7);
+    }
+
+    #[test]
+    fn relevance_rank_medium_is_5() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "text".into(),
+            relevance: "Medium — partial query match".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        };
+        assert_eq!(s.relevance_rank(), 5);
+    }
+
+    #[test]
+    fn relevance_rank_low_is_3() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "text".into(),
+            relevance: "Low — weak query match".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        };
+        assert_eq!(s.relevance_rank(), 3);
+    }
+
+    #[test]
+    fn relevance_rank_very_low_is_1() {
+        let s = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "text".into(),
+            relevance: "Very low — no clear query match".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        };
+        assert_eq!(s.relevance_rank(), 1);
+    }
+
+    #[test]
+    fn relevance_rank_no_relevance_defaults_to_5() {
+        let s = Source::Local {
+            path: "src/lib.rs".into(),
+            kind: LocalSourceKind::InProject,
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/local-01.md"),
+            relevance: String::new(),
+            body: "fn main() {}".into(),
+        };
+        assert_eq!(s.relevance_rank(), 5);
     }
 }

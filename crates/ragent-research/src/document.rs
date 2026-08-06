@@ -150,7 +150,7 @@ fn extract_headline(finding: &str, finding_number: usize) -> (String, String) {
 /// The derivation strips citations and backticks, takes the first 15 words,
 /// and trims trailing punctuation. If there is no Observation paragraph, the
 /// entire finding body is used as a last resort.
-pub(crate) fn make_headline_from_observation(observation: &str) -> String {
+pub fn make_headline_from_observation(observation: &str) -> String {
     let cleaned = observation
         .replace("[#", " ")
         .replace([']', '`'], " ")
@@ -788,14 +788,23 @@ pub fn fence_source_body(body: &str) -> String {
     if bytes.len() <= MAX_SOURCE_BODY_BYTES {
         return trimmed.to_string();
     }
-    // Find a UTF-8 char boundary at or before the limit so we don't slice
-    // through a multi-byte sequence.
-    let mut cut = MAX_SOURCE_BODY_BYTES;
-    while cut > 0 && !trimmed.is_char_boundary(cut) {
+    truncate_body_to_bytes(trimmed, MAX_SOURCE_BODY_BYTES)
+}
+
+/// Truncate `body` to at most `max_bytes` UTF-8 bytes, cutting at the nearest
+/// char boundary, and append a marker so the reader knows content was capped.
+#[must_use]
+pub fn truncate_body_to_bytes(body: &str, max_bytes: usize) -> String {
+    let bytes = body.as_bytes();
+    if bytes.len() <= max_bytes {
+        return body.to_string();
+    }
+    let mut cut = max_bytes;
+    while cut > 0 && !body.is_char_boundary(cut) {
         cut -= 1;
     }
     let mut out = String::with_capacity(cut + 64);
-    out.push_str(&trimmed[..cut]);
+    out.push_str(&body[..cut]);
     out.push_str("\n\n… _(truncated — body exceeded the per-source size cap)_\n");
     out
 }

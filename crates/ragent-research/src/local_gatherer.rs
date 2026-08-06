@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Utc;
+use futures::stream::StreamExt;
 
 use crate::source::{LocalSourceKind, Source};
 
@@ -116,6 +117,9 @@ struct LocalCandidate {
     kind: LocalSourceKind,
 }
 
+/// Default number of concurrent local candidate scoring/spec-scan tasks.
+pub const DEFAULT_LOCAL_CONCURRENCY: usize = 8;
+
 /// Configuration knobs for [`LocalGatherer`].
 #[derive(Debug, Clone)]
 pub struct LocalGatherConfig {
@@ -130,6 +134,9 @@ pub struct LocalGatherConfig {
     /// When `true`, skip the spec cross-reference pass that produces
     /// [`Source::Spec`] entries. Defaults to `false`.
     pub skip_specs: bool,
+    /// Maximum number of concurrent candidate scoring or spec-scan tasks.
+    /// Defaults to [`DEFAULT_LOCAL_CONCURRENCY`] (8). `0` is clamped up to `1`.
+    pub local_concurrency: usize,
 }
 
 impl Default for LocalGatherConfig {
@@ -142,6 +149,7 @@ impl Default for LocalGatherConfig {
             max_local_sources: DEFAULT_MAX_LOCAL_SOURCES,
             terms: Vec::new(),
             skip_specs: false,
+            local_concurrency: DEFAULT_LOCAL_CONCURRENCY,
         }
     }
 }
@@ -208,7 +216,15 @@ impl LocalGatherer {
         candidates.retain(|c| seen.insert(c.path.clone()));
 
         // 2. Score candidates by grep hits and keep the top N.
-        let scored = self.score_candidates(&candidates, &terms).await;
+        let concurrency = config.local_concurrency.max(1);
+        tracing::info!(
+            candidate_count = candidates.len(),
+            concurrency,
+            "research: scoring local candidates with bounded concurrency"
+        );
+        let scored = self
+            .score_candidates(&candidates, &terms, concurrency)
+            .await;
         let mut sources = Vec::new();
         for (index, (candidate, matches, matched_terms)) in scored
             .into_iter()
@@ -259,7 +275,7 @@ impl LocalGatherer {
             );
             Vec::new()
         } else {
-            self.gather_specs(project_root, &terms, config.max_local_sources)
+            self.gather_specs(project_root, &terms, config.max_local_sources, concurrency)
                 .await
         };
         sources.extend(spec_sources);
@@ -302,29 +318,43 @@ impl LocalGatherer {
         }
         out
     }
+}
 
+/// A candidate paired with its grep matches and matched terms.
+type ScoredCandidate = (LocalCandidate, Vec<GrepMatch>, Vec<String>);
+
+impl LocalGatherer {
     async fn score_candidates(
         &self,
         candidates: &[LocalCandidate],
         terms: &[String],
-    ) -> Vec<(LocalCandidate, Vec<GrepMatch>, Vec<String>)> {
-        let mut scored = Vec::new();
-        for candidate in candidates {
-            match self.tool.grep(&candidate.path, terms).await {
-                Ok(matches) if !matches.is_empty() => {
-                    let matched_terms = collect_matched_terms(&matches, terms);
-                    scored.push((candidate.clone(), matches, matched_terms));
-                }
-                Ok(_) => { /* no match, skip */ }
-                Err(e) => {
-                    tracing::warn!(
-                        path = %candidate.path.display(),
-                        error = %e,
-                        "research: grep failed during local gathering; skipping file"
-                    );
-                }
-            }
-        }
+        concurrency: usize,
+    ) -> Vec<ScoredCandidate> {
+        let concurrency = concurrency.max(1);
+        let scored: Vec<Option<ScoredCandidate>> =
+            futures::stream::iter(candidates.iter().cloned())
+                .map(|candidate| async move {
+                    match self.tool.grep(&candidate.path, terms).await {
+                        Ok(matches) if !matches.is_empty() => {
+                            let matched_terms = collect_matched_terms(&matches, terms);
+                            Some((candidate, matches, matched_terms))
+                        }
+                        Ok(_) => None,
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %candidate.path.display(),
+                                error = %e,
+                                "research: grep failed during local gathering; skipping file"
+                            );
+                            None
+                        }
+                    }
+                })
+                .buffer_unordered(concurrency)
+                .collect()
+                .await;
+
+        let mut scored: Vec<ScoredCandidate> = scored.into_iter().flatten().collect();
         // Stable sort: highest match-count first, then by path for determinism.
         scored.sort_by(|a, b| {
             b.1.len()
@@ -339,6 +369,7 @@ impl LocalGatherer {
         project_root: &Path,
         terms: &[String],
         max_total: usize,
+        concurrency: usize,
     ) -> Vec<Source> {
         let spec_ids = match self.tool.list_specs(project_root).await {
             Ok(ids) => ids,
@@ -348,18 +379,30 @@ impl LocalGatherer {
             }
         };
 
+        let concurrency = concurrency.max(1);
+        let scored: Vec<(isize, String, String)> = futures::stream::iter(spec_ids)
+            .map(|spec_id| async move {
+                let title = self
+                    .tool
+                    .spec_title(project_root, &spec_id)
+                    .await
+                    .unwrap_or_default();
+                let haystack = format!("{} {}", spec_id.to_lowercase(), title.to_lowercase());
+                let score = terms
+                    .iter()
+                    .map(|term| if haystack.contains(term) { 1 } else { 0 })
+                    .sum::<isize>();
+                (score, spec_id, title)
+            })
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
+
         // Split specs into those matching a keyword and the rest.
         let mut matched = Vec::new();
         let mut rest = Vec::new();
-        for spec_id in spec_ids {
-            let title = self
-                .tool
-                .spec_title(project_root, &spec_id)
-                .await
-                .unwrap_or_default();
-            let haystack = format!("{} {}", spec_id.to_lowercase(), title.to_lowercase());
-            let is_relevant = terms.iter().any(|term| haystack.contains(term));
-            if is_relevant {
+        for (score, spec_id, title) in scored {
+            if score > 0 {
                 matched.push((spec_id, title));
             } else {
                 rest.push((spec_id, title));
@@ -987,7 +1030,9 @@ mod tests {
         let root = root();
 
         // Three or more relevant specs keep the filter and exclude unrelated specs.
-        let relevant = g.gather_specs(&root, &["auth".into()], 10).await;
+        let relevant = g
+            .gather_specs(&root, &["auth".into()], 10, DEFAULT_LOCAL_CONCURRENCY)
+            .await;
         assert_eq!(relevant.len(), 3);
         let ids: Vec<String> = relevant
             .iter()
@@ -1006,7 +1051,9 @@ mod tests {
 
         // A very narrow filter falls back to all specs so research still has
         // useful cross-references.
-        let fallback = g.gather_specs(&root, &["zzzz".into()], 10).await;
+        let fallback = g
+            .gather_specs(&root, &["zzzz".into()], 10, DEFAULT_LOCAL_CONCURRENCY)
+            .await;
         assert_eq!(fallback.len(), 4);
     }
 

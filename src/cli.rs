@@ -104,6 +104,35 @@ pub enum ResearchCommands {
         /// Keep low-relevance web sources instead of filtering them out.
         #[arg(long)]
         use_low_relevance: bool,
+        /// Override the maximum number of local scoring/spec-scan tasks that run
+        /// in parallel during the local-gathering phase (default 8).
+        #[arg(long, value_name = "N")]
+        local_concurrently: Option<usize>,
+        /// Override the per-page fetch timeout in seconds (default 30).
+        #[arg(long, value_name = "N")]
+        fetch_timeout_secs: Option<u64>,
+        /// Optional wall-clock timeout for the entire web-gathering phase in
+        /// seconds (Milestone H-001). When set, the phase is aborted if it
+        /// exceeds this duration and a diagnostic is emitted.
+        #[arg(long, value_name = "N")]
+        web_phase_timeout_secs: Option<u64>,
+        /// Optional wall-clock timeout for the entire local-gathering phase in
+        /// seconds (Milestone H-001).
+        #[arg(long, value_name = "N")]
+        local_phase_timeout_secs: Option<u64>,
+        /// Maximum retry attempts for a failed sub-query search (Milestone H-002).
+        /// Defaults to 2. `0` disables retries.
+        #[arg(long, value_name = "N")]
+        search_max_retries: Option<u32>,
+        /// Base delay in milliseconds for the first search-retry backoff
+        /// (Milestone H-002). Defaults to 200 ms.
+        #[arg(long, value_name = "N")]
+        search_retry_base_delay_ms: Option<u64>,
+        /// Number of consecutive search-tool failures after which the
+        /// circuit-breaker opens (Milestone H-003). `0` disables it.
+        /// Defaults to 3.
+        #[arg(long, value_name = "N")]
+        search_circuit_breaker_threshold: Option<u32>,
     },
     /// List research items
     List {
@@ -174,6 +203,13 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
+            local_concurrently,
+            fetch_timeout_secs,
+            web_phase_timeout_secs,
+            local_phase_timeout_secs,
+            search_max_retries,
+            search_retry_base_delay_ms,
+            search_circuit_breaker_threshold,
         } => {
             let topic = topic.join(" ");
             if topic.is_empty() && from_url.is_none() && from_file.is_none() {
@@ -196,6 +232,13 @@ pub async fn handle_research_command(
                 use_local,
                 use_specs,
                 use_low_relevance,
+                local_concurrency: local_concurrently,
+                fetch_timeout_secs,
+                web_phase_timeout_secs,
+                local_phase_timeout_secs,
+                search_max_retries,
+                search_retry_base_delay_ms,
+                search_circuit_breaker_threshold,
             }
         }
         ResearchCommands::List { all } => ResearchCliCommand::List { all },
@@ -298,6 +341,13 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
+            local_concurrency,
+            fetch_timeout_secs,
+            web_phase_timeout_secs,
+            local_phase_timeout_secs,
+            search_max_retries,
+            search_retry_base_delay_ms,
+            search_circuit_breaker_threshold,
         } => {
             // Wire the session through a streaming JSON observer so the
             // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
@@ -326,12 +376,24 @@ pub async fn handle_research_command(
                 disable_specs: !use_specs,
                 fetch_concurrency: fetch_concurrency
                     .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
+                local_concurrency: local_concurrency
+                    .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
+                fetch_timeout_secs: fetch_timeout_secs
+                    .unwrap_or(ragent_research::DEFAULT_FETCH_TIMEOUT.as_secs()),
                 depth: depth.as_deref().and_then(Depth::parse),
                 iterations,
                 output_format: format.as_deref().map_or(OutputFormat::Report, |s| {
                     OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
                 }),
                 use_low_relevance,
+                web_phase_timeout_secs,
+                local_phase_timeout_secs,
+                search_max_retries: search_max_retries
+                    .unwrap_or(ragent_research::DEFAULT_SEARCH_MAX_RETRIES),
+                search_retry_base_delay_ms: search_retry_base_delay_ms
+                    .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
+                search_circuit_breaker_threshold: search_circuit_breaker_threshold
+                    .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
                 ..SessionConfig::default()
             };
             // Build a full research session backed by the default tool

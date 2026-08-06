@@ -21,14 +21,12 @@ use crate::manager::{ResearchError, ResearchManager, Result};
 use crate::planner::{HeuristicPlanner, Planner};
 use crate::research_name::ResearchName;
 use crate::run_config::{Depth, OutputFormat};
-use crate::source::Source;
+use crate::source::{LocalSourceKind, Source};
 use crate::web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_MAX_WEB_RESULTS, GatherEvent, GatherObserver, WebGatherer,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
-use tracing::Instrument;
 use tracing::info;
 
 /// Forwards [`GatherEvent`]s from the [`WebGatherer`] into [`SessionEvent`]s
@@ -74,30 +72,6 @@ impl GatherObserver for GatherEventForwarder {
                     title,
                     search_tool,
                     search_engine,
-                });
-            }
-            // H-002/H-003: retry and circuit-breaker events are forwarded as
-            // WebSearchFailed diagnostics so the UI surfaces the transient
-            // failure and the circuit-open state transparently.
-            GatherEvent::SearchRetrying {
-                query,
-                attempt,
-                error,
-            } => {
-                tracing::info!(
-                    query = %query,
-                    attempt,
-                    error = %error,
-                    "research: web search retrying (forwarded to UI)"
-                );
-            }
-            GatherEvent::SearchCircuitOpen {
-                consecutive_failures,
-            } => {
-                self.observer.on_event(SessionEvent::WebSearchFailed {
-                    error: format!(
-                        "search circuit-breaker open after {consecutive_failures} consecutive failures"
-                    ),
                 });
             }
         }
@@ -166,58 +140,6 @@ pub struct SessionConfig {
     /// every fetched page regardless of its query-match relevance score,
     /// disabling the default filter that discards "Low"/"Very low" sources.
     pub use_low_relevance: bool,
-    /// Maximum wall-clock time in seconds for a single page fetch. Pages that
-    /// take longer are treated as a fetch failure so a slow URL cannot stall the
-    /// whole gather pass. Defaults to 30 seconds.
-    pub fetch_timeout_secs: u64,
-    /// Maximum number of concurrent candidate scoring/spec-scan tasks during
-    /// the local-gathering phase. Defaults to
-    /// [`ragent_research::local_gatherer::DEFAULT_LOCAL_CONCURRENCY`] (8).
-    /// Larger values reduce wall-clock latency on large projects at the cost
-    /// of more in-flight file handles; smaller values are gentler on the
-    /// filesystem.
-    pub local_concurrency: usize,
-    /// Maximum number of sources to send to the LLM synthesis engine
-    /// (Milestone E-003). When the total corpus exceeds this cap, the
-    /// highest-relevance sources are selected and the rest are dropped before
-    /// synthesis. When `None`, no cap is applied and all gathered sources are
-    /// sent. `--use-low-relevance` still controls whether low-relevance
-    /// sources are eligible: when `use_low_relevance` is `false`, low/very-low
-    /// sources are already filtered by the web gatherer; when `true`, they
-    /// remain in the pool and may be selected by the cap if their relevance
-    /// rank is high enough relative to the corpus.
-    pub max_synthesis_sources: Option<usize>,
-    /// Optional wall-clock timeout in seconds for the entire web-gathering
-    /// phase (Milestone H-001). When `Some(N)`, the web gather pass is wrapped
-    /// in a `tokio::time::timeout`; if it exceeds `N` seconds the phase is
-    /// aborted and a diagnostic event is emitted so a slow search/fetch
-    /// cannot stall the session. When `None`, no phase-level timeout is
-    /// applied (only the per-page [`Self::fetch_timeout_secs`] applies).
-    /// Defaults to `None`.
-    pub web_phase_timeout_secs: Option<u64>,
-    /// Optional wall-clock timeout in seconds for the entire local-gathering
-    /// phase (Milestone H-001). When `Some(N)`, the local gather pass is
-    /// wrapped in a `tokio::time::timeout`; if it exceeds `N` seconds the
-    /// phase is aborted and a diagnostic event is emitted so a slow filesystem
-    /// scan cannot stall the session. When `None`, no phase-level timeout is
-    /// applied. Defaults to `None`.
-    pub local_phase_timeout_secs: Option<u64>,
-    /// Maximum number of retry attempts for a failed sub-query search
-    /// (Milestone H-002). Retries use exponential backoff with a base delay of
-    /// [`Self::search_retry_base_delay_ms`]. Defaults to
-    /// [`crate::web_gatherer::DEFAULT_SEARCH_MAX_RETRIES`] (2). `0` disables
-    /// retries entirely.
-    pub search_max_retries: u32,
-    /// Base delay in milliseconds for the first search-retry backoff
-    /// (Milestone H-002). Subsequent retries double this value. Defaults to
-    /// [`crate::web_gatherer::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS`] (200 ms).
-    pub search_retry_base_delay_ms: u64,
-    /// Number of consecutive search-tool failures after which the
-    /// circuit-breaker opens (Milestone H-003). Once open, no further search
-    /// calls are issued for the remainder of the gather pass. Defaults to
-    /// [`crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3).
-    /// `0` disables the circuit-breaker entirely.
-    pub search_circuit_breaker_threshold: u32,
 }
 
 impl SessionConfig {
@@ -254,8 +176,8 @@ impl Default for SessionConfig {
             template: None,
             max_web_results: DEFAULT_MAX_WEB_RESULTS,
             max_local_sources: 10,
-            disable_local: false,
-            disable_specs: false,
+            disable_local: true,
+            disable_specs: true,
             from_url: None,
             from_file: None,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
@@ -263,15 +185,6 @@ impl Default for SessionConfig {
             iterations: None,
             output_format: OutputFormat::Report,
             use_low_relevance: false,
-            fetch_timeout_secs: 30,
-            local_concurrency: crate::local_gatherer::DEFAULT_LOCAL_CONCURRENCY,
-            max_synthesis_sources: None,
-            web_phase_timeout_secs: None,
-            local_phase_timeout_secs: None,
-            search_max_retries: crate::web_gatherer::DEFAULT_SEARCH_MAX_RETRIES,
-            search_retry_base_delay_ms: crate::web_gatherer::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
-            search_circuit_breaker_threshold:
-                crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
         }
     }
 }
@@ -639,8 +552,437 @@ impl ResearchSession {
     }
 }
 
-mod fallback;
-mod topic;
+/// Minimum number of words a page title or body fragment must have to be
+/// considered a usable research topic.
+const MIN_TOPIC_WORDS: usize = 3;
+
+/// Derive a concise but informative research topic from a `--from-url` page.
+///
+/// The `webfetch` tool already extracts a page title via `readability-rs`, so
+/// the title is tried first — site names and common chrome prefixes are
+/// stripped and glued-together words are split. When the title is available,
+/// the first substantive sentence of the cleaned body is appended as a short
+/// description (separated by an em dash) so the topic captures both *what* the
+/// page is about and *why* it matters. If the title is missing or unusable,
+/// the first substantive sentence of the body is used alone. Returns `None`
+/// only when neither source yields usable text, so the caller can abort cleanly
+/// instead of using a URL-only topic.
+fn derive_topic_from_url_body(src_body: &str, src_title: &str, _src_url: &str) -> Option<String> {
+    let title_topic = clean_site_title(src_title);
+    let body_description = derive_topic_description(src_body, title_topic.as_deref());
+    match (title_topic, body_description) {
+        (Some(title), Some(desc)) => {
+            let combined = format!("{title} — {desc}");
+            Some(truncate_at_char_boundary(
+                &combined,
+                MAX_DERIVED_TOPIC_CHARS,
+            ))
+        }
+        (Some(title), None) => Some(title),
+        (None, Some(desc)) => Some(desc),
+        (None, None) => {
+            let body_topic = derive_topic_from_body(src_body);
+            if body_topic.is_empty() {
+                None
+            } else {
+                Some(body_topic)
+            }
+        }
+    }
+}
+
+/// Maximum number of characters a derived topic may span.
+const MAX_DERIVED_TOPIC_CHARS: usize = 240;
+
+/// Maximum number of characters a body-derived description may span.
+const MAX_BODY_DESCRIPTION_CHARS: usize = 140;
+
+/// Pick the first substantive sentence from a cleaned page body to use as the
+/// research topic. This is intentionally lightweight because the `webfetch` tool
+/// already runs `readability-rs` to strip nav/cookie/footer chrome. If the
+/// extractor could not isolate the article text and the tool fell back to
+/// html2text, this helper skips link-only lines, headings of tables of contents,
+/// update banners, and other common page noise.
+fn derive_topic_from_body(cleaned_body: &str) -> String {
+    let trimmed = cleaned_body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    for raw in trimmed.split(['.', '?', '!', '\n']) {
+        let fragment = raw.trim();
+        if fragment.is_empty() {
+            continue;
+        }
+        let cleaned = clean_topic_fragment(fragment);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if is_topic_noise(&cleaned, fragment) {
+            continue;
+        }
+        let word_count = cleaned.split_whitespace().count();
+        // Headings ("# Introducing deep research") are valuable even when short.
+        let is_heading = fragment.starts_with('#');
+        if word_count >= 4 || (is_heading && word_count >= 3) {
+            return truncate_at_char_boundary(&cleaned, MAX_DERIVED_TOPIC_CHARS);
+        }
+    }
+
+    String::new()
+}
+
+/// Extract a short descriptive sentence from the cleaned page body to use as a
+/// subtitle for a title-derived topic. The sentence must be substantive (at
+/// least `MIN_BODY_DESCRIPTION_WORDS`), must not duplicate the page title, and
+/// is truncated to [`MAX_BODY_DESCRIPTION_CHARS`].
+fn derive_topic_description(cleaned_body: &str, title: Option<&str>) -> Option<String> {
+    const MIN_BODY_DESCRIPTION_WORDS: usize = 6;
+
+    let trimmed = cleaned_body.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let title_normalized = title.map(|t| collapse_whitespace(t).to_lowercase());
+
+    for raw in trimmed.split(['.', '?', '!', '\n']) {
+        let fragment = raw.trim();
+        if fragment.is_empty() {
+            continue;
+        }
+        let cleaned = clean_topic_fragment(fragment);
+        if cleaned.is_empty() {
+            continue;
+        }
+        if is_topic_noise(&cleaned, fragment) {
+            continue;
+        }
+        let word_count = cleaned.split_whitespace().count();
+        if word_count < MIN_BODY_DESCRIPTION_WORDS {
+            continue;
+        }
+        // Skip a sentence that is the same as (or contains/is contained by) the title.
+        if let Some(ref t) = title_normalized {
+            let cleaned_normalized = cleaned.to_lowercase();
+            if t.starts_with(&cleaned_normalized)
+                || cleaned_normalized.starts_with(t)
+                || fuzzy_contains(t, &cleaned_normalized)
+                || fuzzy_contains(&cleaned_normalized, t)
+            {
+                continue;
+            }
+        }
+        return Some(truncate_at_char_boundary(
+            &cleaned,
+            MAX_BODY_DESCRIPTION_CHARS,
+        ));
+    }
+
+    None
+}
+
+/// Return true when `needle` appears as a contiguous sequence of words inside
+/// `haystack`, after normalising whitespace. Used to avoid appending a body
+/// sentence that merely repeats the page title.
+fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
+    let hay_words: Vec<&str> = haystack.split_whitespace().collect();
+    let needle_words: Vec<&str> = needle.split_whitespace().collect();
+    if needle_words.is_empty() || hay_words.len() < needle_words.len() {
+        return false;
+    }
+    hay_words
+        .windows(needle_words.len())
+        .any(|window| window == needle_words.as_slice())
+}
+
+/// Strip markdown heading/list markers, split glued-together words, and remove
+/// leading site-chrome tokens from a candidate topic fragment.
+fn clean_topic_fragment(s: &str) -> String {
+    let mut out = s.trim().to_string();
+    while out.starts_with('#') {
+        out = out.trim_start_matches('#').trim_start().to_string();
+    }
+    for prefix in ["* ", "- ", "+ "] {
+        if let Some(rest) = out.strip_prefix(prefix) {
+            out = rest.to_string();
+        }
+    }
+    // Drop trailing markdown reference-link indices like "[12]".
+    if let Some(idx) = out.rfind('[') {
+        let tail = &out[idx..];
+        if tail.ends_with(']') && tail.chars().filter(char::is_ascii_digit).count() > 0 {
+            out.truncate(idx);
+            out = out.trim_end().to_string();
+        }
+    }
+    out = split_glued_words(&out);
+    out = remove_topic_nav_prefixes(&out);
+    collapse_whitespace(&out)
+}
+
+/// Characters used to separate article titles from site branding in HTML
+/// `<title>` tags and `OpenGraph` metadata.
+const TITLE_SEPARATORS: &[char] = &['|', '-', '—', '–', '/', '>', '»', '·'];
+
+/// Clean a page title so it can be used directly as the research topic.
+///
+/// Splits the title on common separator characters, evaluates each segment
+/// independently, and returns the longest usable segment. This handles both
+/// leading site-brand tokens ("`InfoQ` Homepage Articles ...") and trailing
+/// site names ("... | `InfoQ`"). Each segment has nav words, glued tokens, and
+/// short/generic noise removed. Returns `None` when no segment is meaningful.
+fn clean_site_title(title: &str) -> Option<String> {
+    let mut best: Option<String> = None;
+    let mut best_words = 0;
+
+    for raw_segment in title.split(TITLE_SEPARATORS) {
+        let segment = raw_segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if let Some(cleaned) = clean_site_title_segment(segment) {
+            let words = cleaned.split_whitespace().count();
+            if words > best_words {
+                best_words = words;
+                best = Some(cleaned);
+            }
+        }
+    }
+
+    best
+}
+
+/// Clean a single title segment: strip leading site nav words, drop a leading
+/// site-brand token when it is followed by a nav word, split glued tokens such
+/// as "`HomepageArticlesLarge`", and discard empty or short results.
+fn clean_site_title_segment(title: &str) -> Option<String> {
+    let mut out = title.trim().to_string();
+    if out.is_empty() {
+        return None;
+    }
+    out = collapse_whitespace(&out);
+    out = split_glued_words(&out);
+    out = remove_topic_nav_prefixes(&out);
+
+    // Drop a leading site-brand token when it is immediately followed by a
+    // nav word ("InfoQ Homepage Articles ..." -> "Articles ..." -> etc.).
+    let words: Vec<String> = out.split_whitespace().map(str::to_string).collect();
+    let mut i = 0;
+    while i < words.len() {
+        let lower = words[i].to_lowercase();
+        if TOPIC_NAV_PREFIXES.contains(&lower.as_str()) {
+            i += 1;
+            continue;
+        }
+        if i + 1 < words.len() && words[i].starts_with(|c: char| c.is_uppercase()) {
+            let next_lower = words[i + 1].to_lowercase();
+            if TOPIC_NAV_PREFIXES.contains(&next_lower.as_str()) {
+                i += 1;
+                continue;
+            }
+        }
+        break;
+    }
+    let kept: Vec<&str> = words[i..].iter().map(std::string::String::as_str).collect();
+    out = kept.join(" ");
+
+    out = collapse_whitespace(&out);
+    if out.is_empty() || is_topic_noise(&out, &out) {
+        return None;
+    }
+    if out.split_whitespace().count() < MIN_TOPIC_WORDS {
+        return None;
+    }
+    Some(truncate_at_char_boundary(&out, MAX_DERIVED_TOPIC_CHARS))
+}
+
+/// Tokens that, when they appear at the start of a title or fragment, indicate
+/// site navigation chrome rather than article content.
+const TOPIC_NAV_PREFIXES: &[&str] = &[
+    "home",
+    "homepage",
+    "articles",
+    "about",
+    "contact",
+    "login",
+    "sign in",
+    "sign up",
+    "menu",
+    "search",
+    "subscribe",
+    "share",
+    "sitemap",
+    "rss",
+    "feed",
+    "privacy",
+    "terms",
+];
+
+/// Remove leading nav/site tokens from a topic candidate, one pass at a time,
+/// so strings like "`InfoQ` Homepage Articles Large Concept Models..." collapse
+/// to "Large Concept Models...".
+fn remove_topic_nav_prefixes(s: &str) -> String {
+    let mut out = s.trim().to_string();
+    loop {
+        let lower = out.to_lowercase();
+        let mut changed = false;
+        for prefix in TOPIC_NAV_PREFIXES {
+            if lower.starts_with(prefix) {
+                let rest = &out[prefix.len()..]
+                    .trim_start_matches(|c: char| !c.is_alphanumeric())
+                    .trim_start();
+                if rest.len() < out.len() {
+                    out = rest.to_string();
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    out
+}
+
+/// Common page-chrome phrases that should never become a research topic.
+const TOPIC_NOISE_KEYWORDS: &[&str] = &[
+    "skip to main content",
+    "skip to content",
+    "skip navigation",
+    "cookie",
+    "subscribe",
+    "newsletter",
+    "sign in",
+    "sign up",
+    "log in",
+    "login",
+    "loading",
+    "share",
+    "all rights reserved",
+    "footer",
+    "update:",
+    "table of contents",
+    "try chatgpt",
+    "jump to content",
+    "copyright",
+    "©",
+    "posted",
+    "updated",
+    "min read",
+    "minutes to read",
+    "listen to this article",
+    "your browser does not support",
+    "audio element",
+    "key takeaways",
+    "like key takeaways",
+];
+
+/// Return true when a fragment is clearly page chrome rather than article prose.
+fn is_topic_noise(cleaned: &str, original: &str) -> bool {
+    let lower = cleaned.to_lowercase();
+    // Whole-phrase chrome strings anywhere in the fragment.
+    for kw in TOPIC_NOISE_KEYWORDS {
+        if lower.contains(kw) {
+            return true;
+        }
+    }
+    // Leading nav words (Home, Articles, Login, ...) are almost always chrome.
+    if let Some(first) = lower.split_whitespace().next()
+        && TOPIC_NAV_PREFIXES.contains(&first)
+    {
+        return true;
+    }
+    // Markdown reference-link lines like "[Skip to main content][1]" or
+    // "* [Foundation(opens in a new window)][7]" are nav links, not topics.
+    if original.contains("][") || original.contains("](") {
+        let stripped = remove_markdown_links(original);
+        let remaining_words = stripped.split_whitespace().count();
+        if remaining_words < 3 {
+            return true;
+        }
+    }
+    false
+}
+
+/// Split glued-together words such as "`HomepageArticlesLarge`" or "`AIReasoning`"
+/// into separate tokens so topic derivation and nav-prefix removal work on the
+/// individual words. Uses character-boundary heuristics instead of regex
+/// look-around, which the `regex` crate does not support.
+///
+/// Acronyms that end with a lowercase plural suffix (e.g. "LCMs", "APIs") are
+/// kept intact rather than split into "LC Ms".
+fn split_glued_words(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len() + chars.len());
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 {
+            let prev = chars[i - 1];
+            let next = chars.get(i + 1).copied();
+            let after_next = chars.get(i + 2).copied();
+            if should_split_topic_words(prev, *c, next, after_next) {
+                out.push(' ');
+            }
+        }
+        out.push(*c);
+    }
+    out
+}
+
+/// Decide whether to insert a word boundary between `prev` and `curr`.
+fn should_split_topic_words(
+    prev: char,
+    curr: char,
+    next: Option<char>,
+    after_next: Option<char>,
+) -> bool {
+    // "eA..." or "5A..." when the uppercase letter starts a new word.
+    if (prev.is_lowercase() || prev.is_ascii_digit())
+        && curr.is_uppercase()
+        && next.is_some_and(char::is_lowercase)
+    {
+        return true;
+    }
+    // "AIReasoning" -> split before the R because it starts a capitalised word.
+    // Do not split pluralised acronyms such as "LCMs" or "APIs": the split is
+    // only inserted when at least two lowercase letters follow the uppercase
+    // letter, i.e. a real word rather than a trailing "s" or a space/punctuation.
+    if prev.is_uppercase()
+        && curr.is_uppercase()
+        && next.is_some_and(char::is_lowercase)
+        && after_next.is_some_and(char::is_lowercase)
+    {
+        return true;
+    }
+    false
+}
+
+/// Collapse runs of whitespace into a single space and trim the result.
+fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Remove markdown reference and inline links, leaving only the surrounding text.
+fn remove_markdown_links(s: &str) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?s)\[[^\]]+\](?:\[[^\]]*\]|\([^)]+\))").unwrap()
+    });
+    RE.replace_all(s, "").into_owned()
+}
+
+/// Truncate `s` to at most `max_chars` characters on a UTF-8 char boundary.
+fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let end = s
+        .char_indices()
+        .take(max_chars)
+        .last()
+        .map_or(s.len(), |(i, _)| i);
+    s[..end].to_string()
+}
 
 impl ResearchSession {
     /// Run a complete research session end-to-end. The flow is:
@@ -973,16 +1315,12 @@ impl ResearchSession {
         let engine_cfg = config.engine_config();
         let use_iterative = config.iterations.is_some() || config.depth == Some(Depth::Deep);
         let mut excluded_count = 0usize;
-        let mut pdf_count = 0usize;
-        let mut youtube_count = 0usize;
-        let gather_start = Instant::now();
         if use_iterative && engine_cfg.max_iterations > 1 {
             observer.on_event(SessionEvent::Phase {
                 phase: SessionPhase::Web,
             });
             match self
                 .run_iterative_pass(&topic, config, observer.clone())
-                .instrument(tracing::info_span!("research_phase", phase = "web"))
                 .await
             {
                 Ok((iter_sources, iter_queries, iterations, iter_excluded)) => {
@@ -1005,210 +1343,130 @@ impl ResearchSession {
                 }
             }
         } else {
-            // ── Overlapped gather step (Milestone D-001) ─────────────────
-            //
-            // Web gathering and local/spec gathering do not depend on each
-            // other and can run concurrently up to the synthesis step. Both
-            // phases still emit their own diagnostic events so the UI shows
-            // progress separately. The combined result is the union of web,
-            // local, and spec sources.
+            // ── Web phase ───────────────────────────────────────��───────────
             observer.on_event(SessionEvent::Phase {
                 phase: SessionPhase::Web,
             });
-            observer.on_event(SessionEvent::Phase {
-                phase: SessionPhase::Local,
-            });
-
-            let web_fut = async {
-                if let Some(web) = &self.web {
-                    let web_budget = config.max_web_results.max(config.budget_web_results());
-                    let web = web
-                        .clone()
-                        .with_fetch_concurrency(config.fetch_concurrency)
-                        .with_fetch_timeout(std::time::Duration::from_secs(
-                            config.fetch_timeout_secs,
-                        ))
-                        .with_keep_low_relevance(config.use_low_relevance)
-                        .with_search_max_retries(config.search_max_retries)
-                        .with_search_retry_base_delay_ms(config.search_retry_base_delay_ms)
-                        .with_search_circuit_breaker_threshold(
-                            config.search_circuit_breaker_threshold,
-                        );
-                    let forwarder = GatherEventForwarder {
-                        observer: observer.clone(),
-                    };
-                    let gather = async {
-                        web.gather_with_observer(&topic, web_budget, Some(&forwarder))
-                            .instrument(tracing::info_span!("research_phase", phase = "web"))
-                            .await
-                    };
-                    // H-001: wrap the entire web phase in an optional
-                    // timeout so a slow search/fetch cannot stall the
-                    // session.
-                    let result = if let Some(secs) = config.web_phase_timeout_secs {
-                        match tokio::time::timeout(std::time::Duration::from_secs(secs), gather)
-                            .await
-                        {
-                            Ok(r) => r,
-                            Err(_) => {
-                                observer.on_event(SessionEvent::WebSearchFailed {
-                                    error: format!("web phase timed out after {secs}s"),
-                                });
-                                tracing::warn!(
-                                    timeout_secs = secs,
-                                    "research: web phase timed out; continuing with no web sources"
-                                );
-                                Ok(crate::web_gatherer::GatherResult::empty())
-                            }
-                        }
-                    } else {
-                        gather.await
-                    };
-                    match result {
-                        Ok(result) => Ok(result),
-                        Err(e) => {
-                            observer.on_event(SessionEvent::WebSearchFailed {
-                                error: e.to_string(),
-                            });
-                            tracing::warn!(error = %e, "research: web phase failed; continuing");
-                            Err(e)
-                        }
-                    }
-                } else {
-                    Ok(crate::web_gatherer::GatherResult {
-                        queries: Vec::new(),
-                        sources: Vec::new(),
-                        pdf_count: 0,
-                        youtube_count: 0,
-                        excluded_count: 0,
-                    })
-                }
-            };
-
-            let local_fut = async {
-                if config.disable_local {
-                    tracing::info!("research: local phase skipped (--no-local)");
-                    return Ok::<Vec<Source>, crate::local_gatherer::LocalGatherError>(Vec::new());
-                }
-                let Some(local) = &self.local else {
-                    return Ok::<Vec<Source>, crate::local_gatherer::LocalGatherError>(Vec::new());
+            if let Some(web) = &self.web {
+                let web_budget = config.max_web_results.max(config.budget_web_results());
+                // Apply the per-run fetch-concurrency override. `WebGatherer` is
+                // cheap to clone (Arc pair) so we rebuild a copy rather than
+                // mutating the shared instance.
+                let web = web
+                    .clone()
+                    .with_fetch_concurrency(config.fetch_concurrency)
+                    .with_keep_low_relevance(config.use_low_relevance);
+                let forwarder = GatherEventForwarder {
+                    observer: observer.clone(),
                 };
-                let local_budget = config.max_local_sources.max(config.budget_local_sources());
-                let cfg = LocalGatherConfig {
-                    max_local_sources: local_budget,
-                    skip_specs: config.disable_specs,
-                    local_concurrency: config.local_concurrency.max(1),
-                    ..LocalGatherConfig::default()
-                };
-                let gather = local
-                    .gather(&project_root, &topic, config.sources_dir.as_deref(), &cfg)
-                    .instrument(tracing::info_span!("research_phase", phase = "local"));
-                // H-001: wrap the entire local phase in an optional timeout so
-                // a slow filesystem scan cannot stall the session.
-                if let Some(secs) = config.local_phase_timeout_secs {
-                    match tokio::time::timeout(std::time::Duration::from_secs(secs), gather).await {
-                        Ok(r) => r,
-                        Err(_) => {
-                            tracing::warn!(
-                                timeout_secs = secs,
-                                "research: local phase timed out; continuing with no local sources"
-                            );
-                            Ok(Vec::new())
+                match web
+                    .gather_with_observer(&topic, web_budget, Some(&forwarder))
+                    .await
+                {
+                    Ok(result) => {
+                        let gathered_queries = result.queries;
+                        if !gathered_queries.is_empty() {
+                            web_queries.extend(gathered_queries);
                         }
+                        excluded_count += result.excluded_count;
+                        sources.extend(result.sources);
                     }
-                } else {
-                    gather.await
-                }
-            };
-
-            let (web_result, local_result) = tokio::join!(web_fut, local_fut);
-
-            if let Ok(result) = web_result {
-                web_queries.extend(result.queries);
-                excluded_count += result.excluded_count;
-                pdf_count += result.pdf_count;
-                youtube_count += result.youtube_count;
-                sources.extend(result.sources);
-            }
-
-            if let Ok(local_sources) = local_result {
-                for src in &local_sources {
-                    if let Source::Local {
-                        path, relevance, ..
-                    } = src
-                    {
-                        let score = relevance
-                            .split_whitespace()
-                            .next()
-                            .and_then(|n| n.parse::<usize>().ok())
-                            .unwrap_or(1);
-                        observer.on_event(SessionEvent::LocalCaptured {
-                            path: path.clone(),
-                            score,
+                    Err(e) => {
+                        observer.on_event(SessionEvent::WebSearchFailed {
+                            error: e.to_string(),
                         });
+                        tracing::warn!(error = %e, "research: web phase failed; continuing");
                     }
                 }
-                observer.on_event(SessionEvent::Phase {
-                    phase: SessionPhase::Specs,
-                });
-                for src in &local_sources {
-                    if let Source::Spec { spec_id, .. } = src {
-                        observer.on_event(SessionEvent::SpecCaptured {
-                            spec_id: spec_id.clone(),
-                        });
-                    }
-                }
-                sources.extend(local_sources);
-            } else if let Err(e) = local_result {
-                tracing::warn!(error = %e, "research: local phase failed; continuing");
             }
         }
-        tracing::info!(
-            phase = "gather",
-            elapsed_ms = gather_start.elapsed().as_millis(),
-            web_sources = sources
-                .iter()
-                .filter(|s| matches!(s, Source::Web { .. }))
-                .count(),
-            local_sources = sources
-                .iter()
-                .filter(|s| matches!(s, Source::Local { .. }))
-                .count(),
-            spec_sources = sources
+
+        // ── Local phase ───────────────────────────────────────────────────
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::Local,
+        });
+        let local_budget = config.max_local_sources.max(config.budget_local_sources());
+        let local_gathered = if config.disable_local {
+            tracing::info!(
+                name = %name,
+                "research: local phase skipped (--no-local)"
+            );
+            Vec::new()
+        } else if let Some(local) = &self.local {
+            let cfg = LocalGatherConfig {
+                max_local_sources: local_budget,
+                skip_specs: config.disable_specs,
+                ..LocalGatherConfig::default()
+            };
+            match local
+                .gather(&project_root, &topic, config.sources_dir.as_deref(), &cfg)
+                .await
+            {
+                Ok(s) => {
+                    for src in &s {
+                        if let Source::Local {
+                            path, relevance, ..
+                        } = src
+                        {
+                            let score = relevance
+                                .split_whitespace()
+                                .next()
+                                .and_then(|n| n.parse::<usize>().ok())
+                                .unwrap_or(1);
+                            observer.on_event(SessionEvent::LocalCaptured {
+                                path: path.clone(),
+                                score,
+                            });
+                        }
+                    }
+                    s
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "research: local phase failed; continuing");
+                    Vec::new()
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        sources.extend(local_gathered);
+
+        // ── Spec phase ────────────────────────────────────────────────────
+        observer.on_event(SessionEvent::Phase {
+            phase: SessionPhase::Specs,
+        });
+        if config.disable_specs {
+            tracing::info!(
+                name = %name,
+                "research: spec phase skipped (--no-specs)"
+            );
+        }
+        let spec_sources: Vec<Source> = if config.disable_specs {
+            Vec::new()
+        } else {
+            sources
                 .iter()
                 .filter(|s| matches!(s, Source::Spec { .. }))
-                .count(),
-            "research: gather phase complete"
-        );
+                .cloned()
+                .collect()
+        };
+        for src in &spec_sources {
+            if let Source::Spec { spec_id, .. } = src {
+                observer.on_event(SessionEvent::SpecCaptured {
+                    spec_id: spec_id.clone(),
+                });
+            }
+        }
 
         // ── Synthesize ─────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Synthesize,
         });
-        // E-003: apply the max_synthesis_sources cap when configured. Select
-        // the highest-relevance sources so the LLM sees the most valuable
-        // evidence. `--use-low-relevance` sources are already in the pool
-        // when `use_low_relevance` is true; the cap just picks the top N by
-        // relevance rank.
-        let synthesis_sources: Vec<Source> = if let Some(cap) = config.max_synthesis_sources {
-            if sources.len() > cap {
-                tracing::info!(
-                    total = sources.len(),
-                    cap,
-                    "research: applying max_synthesis_sources cap"
-                );
-                select_top_relevance_sources(&sources, cap)
-            } else {
-                sources.clone()
-            }
-        } else {
-            sources.clone()
-        };
         // Decide which fallback path we'll take *before* calling the engine
         // so we can attribute the resulting summary correctly in the UI.
         let has_llm_engine = !self.analysis_is_noop();
         let (analysis, synth_outcome, synth_detail) =
-            match self.synthesize(&name, &topic, &synthesis_sources).await {
+            match self.synthesize(&name, &topic, &sources).await {
                 Ok((result, outcome)) => {
                     // Map the engine's AnalysisOutcome to the user-facing
                     // SynthesizeOutcome. When no LLM engine is wired in
@@ -1330,18 +1588,14 @@ impl ResearchSession {
         self.manager.complete_gathering(name_str).await?;
 
         let total_sources = sources.len();
-        let pdf_count = pdf_count.max(
-            sources
-                .iter()
-                .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
-                .count(),
-        );
-        let youtube_count = youtube_count.max(
-            sources
-                .iter()
-                .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
-                .count(),
-        );
+        let pdf_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "pdf"))
+            .count();
+        let youtube_count = sources
+            .iter()
+            .filter(|s| matches!(s, Source::Web { media_type, .. } if media_type == "youtube"))
+            .count();
         observer.on_event(SessionEvent::Done {
             total_sources,
             pdf_count,
@@ -1483,31 +1737,6 @@ pub struct RunOutcome {
 
 // ── Free helpers ─────────────────────────────────────────────────────────
 
-/// Select the top `cap` sources by relevance rank (Milestone E-003).
-///
-/// Sources are sorted by [`Source::relevance_rank`] descending. Ties are
-/// broken by original order (stable sort) so the caller's source ordering
-/// is preserved among equal-rank sources. Local and spec sources (which
-/// default to rank 5) are not unfairly excluded relative to medium-relevance
-/// web sources.
-fn select_top_relevance_sources(sources: &[Source], cap: usize) -> Vec<Source> {
-    // Create (index, source) pairs, sort by (rank desc, index asc), take cap.
-    let mut indexed: Vec<(usize, &Source)> = sources.iter().enumerate().collect();
-    indexed.sort_by(|a, b| {
-        b.1.relevance_rank()
-            .cmp(&a.1.relevance_rank())
-            .then(a.0.cmp(&b.0))
-    });
-    let mut selected: Vec<(usize, Source)> = indexed
-        .into_iter()
-        .take(cap)
-        .map(|(i, s)| (i, s.clone()))
-        .collect();
-    // Restore original order so source indices remain stable for citations.
-    selected.sort_by_key(|(i, _)| *i);
-    selected.into_iter().map(|(_, s)| s).collect()
-}
-
 /// Compute the project root from the `research/` root (its parent).
 fn project_root_for(research_root: &Path) -> &Path {
     research_root.parent().unwrap_or(research_root)
@@ -1533,8 +1762,348 @@ async fn load_template(research_root: &Path, template: Option<&str>) -> Option<S
     }
 }
 
-use fallback::{cross_references_from, default_findings, default_open_questions, default_summary};
-use topic::{clean_site_title, derive_topic_from_url_body};
+fn default_summary(sources: &[Source], topic: &str) -> String {
+    let web = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Web { .. }))
+        .collect::<Vec<_>>();
+    let local = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Local { .. }))
+        .collect::<Vec<_>>();
+    let specs = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Spec { .. }))
+        .collect::<Vec<_>>();
+    let total = sources.len();
+
+    if sources.is_empty() {
+        return format!(
+            "No sources were captured for '{topic}'. Re-run with a more specific topic or after enabling the relevant tools."
+        );
+    }
+
+    let mut out = format!(
+        "Gathered {total} source(s) for '{topic}' ({w} web, {l} local, {s} spec).",
+        w = web.len(),
+        l = local.len(),
+        s = specs.len(),
+        topic = topic,
+        total = total,
+    );
+
+    // Web: name the top 3 by title so the reader knows what was actually pulled in.
+    if !web.is_empty() {
+        out.push_str("\n\n**Web sources:** ");
+        let titles: Vec<String> = web
+            .iter()
+            .filter_map(|s| match s {
+                Source::Web { title, url, .. } if !title.is_empty() => Some(title.clone()),
+                Source::Web { url, .. } => Some(url.clone()),
+                _ => None,
+            })
+            .take(3)
+            .collect();
+        out.push_str(&titles.join("; "));
+        if web.len() > 3 {
+            out.push_str(&format!(" (and {} more)", web.len() - 3));
+        }
+        out.push('.');
+    }
+
+    // Local: name the top 3 paths so the reader knows which files were pulled in.
+    if !local.is_empty() {
+        out.push_str("\n\n**Local files:** ");
+        let paths: Vec<String> = local
+            .iter()
+            .filter_map(|s| match s {
+                Source::Local { path, .. } => Some(path.clone()),
+                _ => None,
+            })
+            .take(3)
+            .collect();
+        out.push_str(&paths.join("; "));
+        if local.len() > 3 {
+            out.push_str(&format!(" (and {} more)", local.len() - 3));
+        }
+        out.push('.');
+    }
+
+    // Specs: name each spec so the reader sees which prior specs informed this research.
+    if !specs.is_empty() {
+        out.push_str("\n\n**Prior specs cross-referenced:** ");
+        let ids: Vec<String> = specs
+            .iter()
+            .filter_map(|s| match s {
+                Source::Spec { spec_id, .. } => Some(spec_id.clone()),
+                _ => None,
+            })
+            .collect();
+        out.push_str(&ids.join(", "));
+        out.push('.');
+    }
+
+    out.push_str(
+        "\n\n_No LLM analysis was applied to these sources — the section above is a mechanical digest. Re-run with a configured model for a synthesized analysis._",
+    );
+    out
+}
+
+fn default_findings(sources: &[Source], topic: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let web: Vec<&Source> = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Web { .. }))
+        .collect();
+    let local: Vec<&Source> = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Local { .. }))
+        .collect();
+    let specs: Vec<&Source> = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Spec { .. }))
+        .collect();
+
+    // Per-web-source finding. The reader gets the title and a 200-char
+    // excerpt so the finding stands on its own without opening the
+    // supporting file.
+    for (idx, src) in web.iter().enumerate() {
+        if let Source::Web {
+            published_at: None,
+            title,
+            url,
+            body,
+            ..
+        } = src
+        {
+            let label = if title.is_empty() {
+                url.as_str()
+            } else {
+                title.as_str()
+            };
+            let excerpt = body_excerpt(body, 200);
+            let observation = if excerpt.is_empty() {
+                format!(
+                    "The web source **{label}** from <{url}> was captured, but no body text was returned by the fetch. [#{n}]",
+                    n = idx + 1,
+                )
+            } else {
+                format!(
+                    "The web source **{label}** from <{url}> states: \"{excerpt}\" [#{n}]",
+                    n = idx + 1,
+                )
+            };
+            let previous = if idx > 0 {
+                format!(
+                    "This finding follows and reinforces the web-source thread begun in Finding {idx}."
+                )
+            } else {
+                "No direct dependencies.".to_string()
+            };
+            let headline = crate::document::make_headline_from_observation(&observation);
+            let finding = format!(
+                "**Headline:** {headline}\n\n**Observation:** {observation}\n\n**Analysis:** This evidence relates directly to the topic '{topic}', providing public context that can be compared against project-local material.\n\n**Cross-reference / Dependencies:** {previous}\n\n**Implication:** The source should be treated as background unless it is corroborated by an in-project reference or a later finding; if no corroboration exists, flag it as an open question.",
+            );
+            out.push(finding);
+        }
+    }
+
+    // Per-local-source findings.
+    let local_offset = web.len();
+    for (idx, src) in local.iter().enumerate() {
+        if let Source::Local {
+            path,
+            relevance,
+            body,
+            ..
+        } = src
+        {
+            let excerpt = body_excerpt(body, 200);
+            let observation = if excerpt.is_empty() {
+                format!(
+                    "The in-project file `{path}` was matched as relevant (`{relevance}`), but no excerpt was captured. [#{n}]",
+                    n = local_offset + idx + 1,
+                )
+            } else {
+                format!(
+                    "The in-project file `{path}` (relevance: `{relevance}`) contains the following excerpt: \"{excerpt}\" [#{n}]",
+                    n = local_offset + idx + 1,
+                )
+            };
+            let sibling_idx = if idx > 0 {
+                Some(local_offset + idx)
+            } else {
+                None
+            };
+            let web_idx = if web.is_empty() { None } else { Some(1usize) };
+            let dependencies = match (sibling_idx, web_idx) {
+                (Some(s), Some(_)) => format!(
+                    "This finding is related to Finding {s} (the previous local match) and builds on Finding 1 (the first web source) by grounding public information in project code.",
+                ),
+                (Some(s), None) => format!(
+                    "This finding depends on Finding {s}, which established the first local match in this sequence.",
+                ),
+                                  (None, Some(_)) => "This finding is the first local match; it can be cross-checked against Finding 1 (the first web source).".to_string(),                (None, None) => "No direct dependencies.".to_string(),
+            };
+            let headline = crate::document::make_headline_from_observation(&observation);
+            let finding = format!(
+                "**Headline:** {headline}\n\n**Observation:** {observation}\n\n**Analysis:** This in-project evidence shows how '{topic}' touches the current codebase and is the strongest signal of immediate relevance.\n\n**Cross-reference / Dependencies:** {dependencies}\n\n**Implication:** The referenced path is a concrete place to start implementation or further investigation; consider opening it as a cross-reference and verifying the excerpt against the latest source.",
+            );
+            out.push(finding);
+        }
+    }
+
+    // Per-spec findings.
+    let spec_offset = web.len() + local.len();
+    for (idx, src) in specs.iter().enumerate() {
+        if let Source::Spec {
+            spec_id, relevance, ..
+        } = src
+        {
+            let note = if relevance.is_empty() {
+                format!("see specs/{spec_id}/SPEC.md")
+            } else {
+                relevance.clone()
+            };
+            let first_local = if local_offset > 0 {
+                Some(local_offset + 1)
+            } else {
+                None
+            };
+            let first_web = if web.is_empty() { None } else { Some(1usize) };
+            let dependencies = match (first_local, first_web) {
+                (Some(l), Some(_)) => format!(
+                    "This finding connects the prior specification to the in-project evidence in Finding {l} and the web background in Finding 1; treat it as the bridge between design intent and current code.",
+                ),
+                (Some(l), None) => format!(
+                    "This finding depends on Finding {l}, which identified the in-project material that implements (or should implement) this spec.",
+                ),
+                (None, Some(_)) => "This finding is related to Finding 1 (web background) but no local implementation has been matched yet.".to_string(),
+                (None, None) => "No direct dependencies.".to_string(),
+            };
+            let finding = format!(
+                "**Headline:** Prior spec `{spec_id}` is relevant to '{topic}' ({note})\n\n**Observation:** Prior spec `{spec_id}` is relevant to '{topic}' ({note}) [#{n}].\n\n**Analysis:** This specification establishes requirements or decisions that pre-date the current research, and should constrain or guide any conclusions drawn from newer sources.\n\n**Cross-reference / Dependencies:** {dependencies}\n\n**Implication:** Before acting on later findings, verify that the project still honours this spec; conflicts between this spec and newer evidence should be escalated as an open question.",
+                n = spec_offset + idx + 1,
+                spec_id = spec_id,
+                topic = topic,
+                note = note,
+                dependencies = dependencies,
+            );
+            out.push(finding);
+        }
+    }
+
+    if sources.is_empty() {
+        out.push(format!(
+            "**Headline:** No sources captured\n\n**Observation:** No sources were captured for '{topic}'.\n\n**Analysis:** Without captured web pages, local files, or prior specs, the research cannot yet support a substantive conclusion.\n\n**Cross-reference / Dependencies:** No direct dependencies.\n\n**Implication:** Consider re-running with a more specific topic, or run inside a project with relevant files and specs so gathering has something to work with."
+        ));
+    }
+    out
+}
+
+/// Build a per-source bullet title + short excerpt suitable for embedding
+/// in the Findings section when no LLM analysis is available. Returns an
+/// empty string when the body is empty / unavailable.
+fn body_excerpt(body: &str, max_chars: usize) -> String {
+    // Strip the "Excerpt — N keyword match(es)" header that the local
+    // gatherer prepends so we don't double-print it in the Findings section.
+    let stripped = body.strip_prefix("Excerpt —").map_or(body, |rest| {
+        rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ' ' || c == '\n')
+    });
+    // Strip markdown code fences (e.g. ```text) that can appear at the start
+    // of supporting-file bodies so the excerpt begins with real content.
+    let stripped = stripped
+        .trim_start()
+        .trim_start_matches("```text")
+        .trim_start_matches("```")
+        .trim_start();
+    // Collapse whitespace so the excerpt fits on one logical line.
+    let collapsed: String = stripped
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    let collapsed = collapsed.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Drop a trailing markdown fence that survived the collapse.
+    let collapsed = collapsed
+        .strip_suffix("```")
+        .map_or(collapsed.clone(), |s| s.trim_end().to_string());
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        // Reserve one character for the ellipsis so the total output never
+        // exceeds the requested limit.
+        let budget = max_chars.saturating_sub(1);
+        let mut out: String = collapsed.chars().take(budget).collect();
+        out.push('…');
+        out
+    }
+}
+
+fn default_open_questions(sources: &[Source], topic: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let web = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Web { .. }))
+        .count();
+    let local = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Local { .. }))
+        .count();
+    let spec = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Spec { .. }))
+        .count();
+    if sources.is_empty() {
+        out.push(format!(
+            "Why was nothing captured for '{topic}' — was a tool unavailable, the topic too narrow, or the search query off?"
+        ));
+    } else {
+        if web == 0 {
+            out.push("No web sources were captured — was `websearch` unavailable, or does the topic lack good public references?".into());
+        }
+        if local == 0 {
+            out.push(
+                "No in-project files matched — is there a code path or doc the topic should touch that grep did not surface?"
+                    .into(),
+            );
+        }
+        if spec == 0 {
+            out.push(
+                "No prior specs were cross-referenced — is the topic genuinely new, or were existing specs filtered out by the keyword match?"
+                    .into(),
+            );
+        }
+        out.push(format!(
+            "Re-run `/research {topic}` with a configured LLM to produce an LLM-synthesized analysis instead of this mechanical digest."
+        ));
+    }
+    out
+}
+
+fn cross_references_from(sources: &[Source]) -> Vec<crate::document::CrossReference> {
+    sources
+        .iter()
+        .filter_map(|s| match s {
+            Source::Local {
+                path,
+                relevance,
+                kind,
+                ..
+            } => Some(crate::document::CrossReference {
+                path: path.clone(),
+                relevance: format_with_kind(relevance, *kind),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn format_with_kind(relevance: &str, kind: LocalSourceKind) -> String {
+    match kind {
+        LocalSourceKind::InProject => relevance.to_string(),
+        LocalSourceKind::Extra => format!("{relevance} (from --sources-dir)"),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -2452,6 +3021,317 @@ mod tests {
             "Specs phase event should fire even when skipped"
         );
     }
+    #[test]
+    fn default_summary_counts_each_source_type() {
+        let s = vec![
+            Source::Web {
+                published_at: None,
+                url: "u".into(),
+                title: "t".into(),
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/web-01.md"),
+                relevance: String::new(),
+                body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+            },
+            Source::Local {
+                path: "x.md".into(),
+                kind: LocalSourceKind::InProject,
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/local-01.md"),
+                relevance: "r".into(),
+                body: String::new(),
+            },
+        ];
+        let out = default_summary(&s, "topic");
+        assert!(out.contains("2 source(s)"));
+        assert!(out.contains("1 web"));
+        assert!(out.contains("1 local"));
+        // Mechanical fallback must be transparent about its provenance.
+        assert!(out.contains("No LLM analysis was applied"));
+    }
+
+    #[test]
+    fn default_summary_names_web_titles_and_local_paths() {
+        let s = vec![
+            Source::Web {
+                published_at: None,
+                url: "https://a".into(),
+                title: "Article A".into(),
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/web-01.md"),
+                relevance: String::new(),
+                body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+            },
+            Source::Web {
+                published_at: None,
+                url: "https://b".into(),
+                title: "Article B".into(),
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/web-02.md"),
+                relevance: String::new(),
+                body: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+            },
+            Source::Local {
+                path: "src/lib.rs".into(),
+                kind: LocalSourceKind::InProject,
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/local-01.md"),
+                relevance: "anchor".into(),
+                body: String::new(),
+            },
+        ];
+        let out = default_summary(&s, "topic");
+        assert!(out.contains("**Web sources:**"));
+        assert!(out.contains("Article A"));
+        assert!(out.contains("Article B"));
+        assert!(out.contains("**Local files:**"));
+        assert!(out.contains("src/lib.rs"));
+    }
+
+    #[test]
+    fn default_summary_handles_empty_source_list() {
+        let out = default_summary(&[], "topic");
+        assert!(out.contains("No sources were captured"));
+        assert!(!out.contains("No LLM analysis"));
+    }
+
+    #[test]
+    fn default_findings_handles_zero_sources() {
+        let out = default_findings(&[], "x");
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("No sources"));
+        assert!(out[0].contains("**Headline:**"));
+        assert!(out[0].contains("**Observation:**"));
+        assert!(out[0].contains("No direct dependencies."));
+    }
+
+    #[test]
+    fn default_findings_include_source_citation_marker() {
+        let s = vec![Source::Web {
+            published_at: None,
+            url: "https://a".into(),
+            title: "Article A".into(),
+            captured_at: chrono::Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
+            body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        }];
+        let out = default_findings(&s, "topic");
+        assert_eq!(out.len(), 1);
+        assert!(
+            out[0].contains("[#1]"),
+            "mechanical finding should cite its source: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn default_findings_emits_per_source_with_excerpts() {
+        let s = vec![
+            Source::Web {
+                published_at: None,
+                url: "https://a".into(),
+                title: "Article A".into(),
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/web-01.md"),
+                relevance: String::new(),
+                body: "Body of article A — talks about cargo workspaces and lockfiles.".into(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+            },
+            Source::Local {
+                path: "src/lib.rs".into(),
+                kind: LocalSourceKind::InProject,
+                captured_at: chrono::Utc::now(),
+                body_path: PathBuf::from("sources/local-01.md"),
+                relevance: "anchor file".into(),
+                body: "Excerpt — 2 keyword match(es)\n\n▶    1: fn main() { }".into(),
+            },
+            Source::Spec {
+                spec_id: "foo".into(),
+                captured_at: chrono::Utc::now(),
+                relevance: "Foo spec".into(),
+            },
+        ];
+        let out = default_findings(&s, "topic");
+        // One finding per source.
+        assert_eq!(out.len(), 3, "expected 3 findings, got {out:?}");
+        // Each finding uses the five-paragraph structure (Headline + four required).
+        for f in &out {
+            assert!(
+                f.contains("**Headline:**"),
+                "missing Headline paragraph: {f}"
+            );
+            assert!(
+                f.contains("**Observation:**"),
+                "missing Observation paragraph: {f}"
+            );
+            assert!(
+                f.contains("**Analysis:**"),
+                "missing Analysis paragraph: {f}"
+            );
+            assert!(
+                f.contains("**Cross-reference / Dependencies:**"),
+                "missing Cross-reference paragraph: {f}"
+            );
+            assert!(
+                f.contains("**Implication:**"),
+                "missing Implication paragraph: {f}"
+            );
+        }
+        // Web finding carries the title and excerpt.
+        assert!(out[0].contains("Article A"));
+        assert!(out[0].contains("cargo workspaces"));
+        // Local finding carries the relevance note and excerpt, and references the web finding.
+        assert!(out[1].contains("src/lib.rs"));
+        assert!(out[1].contains("anchor file"));
+        assert!(out[1].contains("Finding 1"));
+        // Spec finding carries the id and references the local finding.
+        assert!(out[2].contains("foo"));
+        assert!(out[2].contains("Finding 2"));
+    }
+
+    #[test]
+    fn body_excerpt_respects_max_chars_and_counts_ellipsis() {
+        let body = "word ".repeat(50);
+        let excerpt = body_excerpt(&body, 200);
+        assert!(
+            excerpt.chars().count() <= 200,
+            "excerpt must not exceed 200 chars, got {} chars",
+            excerpt.chars().count()
+        );
+        assert!(
+            excerpt.ends_with('…'),
+            "truncated excerpt should end with ellipsis"
+        );
+    }
+
+    #[test]
+    fn body_excerpt_strips_trailing_markdown_fences() {
+        let body = "Real content line.\n```";
+        let excerpt = body_excerpt(body, 200);
+        assert!(!excerpt.contains("```"));
+        assert!(excerpt.starts_with("Real content line"));
+    }
+
+    #[test]
+    fn body_excerpt_strips_leading_markdown_fences() {
+        let body = "```text\nThis is the real content that should appear first.\n```";
+        let excerpt = body_excerpt(body, 200);
+        assert!(!excerpt.starts_with("`"));
+        assert!(excerpt.starts_with("This is the real content"));
+    }
+
+    #[test]
+    fn default_findings_web_excerpt_does_not_exceed_limit() {
+        let long_body = "a".repeat(500);
+        let s = vec![Source::Web {
+            published_at: None,
+            url: "https://a".into(),
+            title: "Long Article".into(),
+            captured_at: chrono::Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
+            body: long_body,
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        }];
+        let out = default_findings(&s, "topic");
+        assert_eq!(out.len(), 1);
+        let observation = &out[0];
+        let obs_start = observation
+            .find("**Observation:**")
+            .expect("Observation paragraph");
+        let obs_body = &observation[obs_start + "**Observation:**".len()..];
+        let prefix = "states: \"";
+        let start = obs_body.find(prefix).expect("quoted excerpt start") + prefix.len();
+        let end = obs_body[start..].find("\" [#").expect("quoted excerpt end");
+        let excerpt = &obs_body[start..start + end];
+        assert!(
+            excerpt.chars().count() <= 200,
+            "web source excerpt must be at most 200 chars, got {}: {excerpt}",
+            excerpt.chars().count()
+        );
+    }
+
+    #[test]
+    fn default_findings_falls_back_to_metadata_when_body_is_empty() {
+        let s = vec![Source::Web {
+            published_at: None,
+            url: "https://a".into(),
+            title: "Empty Page".into(),
+            captured_at: chrono::Utc::now(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            relevance: String::new(),
+            body: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+        }];
+        let out = default_findings(&s, "topic");
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("Empty Page"));
+        assert!(out[0].contains("no body text was returned"));
+        assert!(out[0].contains("**Headline:**"));
+        assert!(out[0].contains("**Observation:**"));
+        assert!(out[0].contains("No direct dependencies."));
+    }
+
+    #[test]
+    fn default_open_questions_suggests_re_run_with_llm() {
+        let s = vec![Source::Spec {
+            spec_id: "x".into(),
+            captured_at: chrono::Utc::now(),
+            relevance: String::new(),
+        }];
+        let out = default_open_questions(&s, "topic");
+        assert!(out.iter().any(|q| q.contains("No web sources")));
+        assert!(out.iter().any(|q| q.contains("No in-project files")));
+        // Always suggest a re-run when no LLM analysis was applied.
+        assert!(out.iter().any(|q| q.contains("Re-run")));
+    }
+
+    #[test]
+    fn default_open_questions_handles_empty_source_list() {
+        let out = default_open_questions(&[], "topic");
+        assert_eq!(out.len(), 1);
+        assert!(out[0].contains("Why was nothing captured"));
+    }
 
     #[tokio::test]
     async fn synthesize_result_event_emitted_when_no_llm() {
@@ -2622,875 +3502,106 @@ mod tests {
         assert!(iterations.iterations.is_some() || iterations.depth == Some(Depth::Deep));
     }
 
-    #[tokio::test]
-    async fn overlapped_gather_combines_web_and_local_sources_and_emits_phases() {
-        use crate::local_gatherer::{LocalGatherer, LocalTool};
-        use std::path::PathBuf;
-        use std::sync::Arc;
-
-        /// LocalTool that returns one local source and one spec source so we
-        /// can verify both are merged with web sources in the overlapped gather.
-        #[derive(Default)]
-        struct MixedLocalTool;
-        #[async_trait::async_trait]
-        impl LocalTool for MixedLocalTool {
-            async fn glob(
-                &self,
-                _root: &std::path::Path,
-                _pattern: &str,
-            ) -> anyhow::Result<Vec<std::path::PathBuf>> {
-                Ok(vec![PathBuf::from("src/lib.rs")])
-            }
-            async fn grep(
-                &self,
-                _path: &std::path::Path,
-                _terms: &[String],
-            ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
-                Ok(vec![crate::local_gatherer::GrepMatch {
-                    line: 1,
-                    text: "Rust async is great".into(),
-                }])
-            }
-            async fn read(&self, _path: &std::path::Path) -> anyhow::Result<String> {
-                Ok("Rust async is great".into())
-            }
-            async fn list_specs(&self, _root: &std::path::Path) -> anyhow::Result<Vec<String>> {
-                Ok(vec!["some-spec".into()])
-            }
-            async fn spec_title(
-                &self,
-                _root: &std::path::Path,
-                _spec_id: &str,
-            ) -> anyhow::Result<String> {
-                Ok("Some spec title".into())
-            }
-        }
-
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-
-        let web = WebGatherer::new(
-            Arc::new(FakeSearch {
-                hits: vec![WebSearchHit {
-                    url: "https://example.com".into(),
-                    title: "Example".into(),
-                    snippet: String::new(),
-                    matched_query: String::new(),
-                    search_tool: String::new(),
-                    search_engine: String::new(),
-                }],
-            }),
-            Arc::new(FakeFetch {
-                pages: HashMap::from([(
-                    "https://example.com".into(),
-                    WebFetchedPage {
-                        published_at: None,
-                        url: "https://example.com".into(),
-                        title: "Example".into(),
-                        body: "web body".into(),
-                        content_type: None,
-                        page_type: None,
-                        language: None,
-                    },
-                )]),
-            }),
-        );
-        let local = LocalGatherer::new(Arc::new(MixedLocalTool));
-
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            Some(local),
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async".into(),
-            ..SessionConfig::default()
-        };
-        let observer = Arc::new(CollectObserver::default());
-        let outcome = session
-            .run("overlap-test", "Overlap Test", &cfg, observer.clone())
-            .await
-            .unwrap();
-
-        let web_count = outcome
-            .sources
-            .iter()
-            .filter(|s| matches!(s, Source::Web { .. }))
-            .count();
-        let local_count = outcome
-            .sources
-            .iter()
-            .filter(|s| matches!(s, Source::Local { .. }))
-            .count();
-        let spec_count = outcome
-            .sources
-            .iter()
-            .filter(|s| matches!(s, Source::Spec { .. }))
-            .count();
-        assert!(
-            web_count >= 1,
-            "overlapped gather must include web sources; got {outcome:?}"
-        );
-        assert!(
-            local_count >= 1,
-            "overlapped gather must include local sources; got {outcome:?}"
-        );
-        assert!(
-            spec_count >= 1,
-            "overlapped gather must include spec sources; got {outcome:?}"
-        );
-
-        // RESEARCH.md must cite both source types in the mechanical summary.
-        let body = tokio::fs::read_to_string(research_root.join("overlap-test/RESEARCH.md"))
-            .await
-            .unwrap();
-        assert!(
-            body.contains("Example"),
-            "RESEARCH.md should cite the web source title; got:\n{body}"
-        );
-        assert!(
-            body.contains("src/lib.rs"),
-            "RESEARCH.md should cite the local file path; got:\n{body}"
-        );
-        assert!(
-            body.contains("some-spec"),
-            "RESEARCH.md should cite the spec id; got:\n{body}"
-        );
-
-        // Phase events for Web, Local, and Specs must all be emitted.
-        let events = observer.events.lock().unwrap();
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Web
-                }
-            )),
-            "expected Web phase event"
-        );
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Local
-                }
-            )),
-            "expected Local phase event"
-        );
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Specs
-                }
-            )),
-            "expected Specs phase event"
-        );
-    }
-
-    #[tokio::test]
-    async fn overlapped_gather_survives_local_phase_failure() {
-        use crate::local_gatherer::{LocalGatherError, LocalGatherer, LocalTool};
-
-        struct FailingLocalTool;
-        #[async_trait::async_trait]
-        impl LocalTool for FailingLocalTool {
-            async fn glob(
-                &self,
-                _root: &std::path::Path,
-                _pattern: &str,
-            ) -> anyhow::Result<Vec<std::path::PathBuf>> {
-                Err(LocalGatherError::NoTerms.into())
-            }
-            async fn grep(
-                &self,
-                _path: &std::path::Path,
-                _terms: &[String],
-            ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
-                Ok(Vec::new())
-            }
-            async fn read(&self, _path: &std::path::Path) -> anyhow::Result<String> {
-                Ok(String::new())
-            }
-            async fn list_specs(&self, _root: &std::path::Path) -> anyhow::Result<Vec<String>> {
-                Ok(Vec::new())
-            }
-            async fn spec_title(
-                &self,
-                _root: &std::path::Path,
-                _spec_id: &str,
-            ) -> anyhow::Result<String> {
-                Ok(String::new())
-            }
-        }
-
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-
-        let web = WebGatherer::new(
-            Arc::new(FakeSearch {
-                hits: vec![WebSearchHit {
-                    url: "https://example.com".into(),
-                    title: "Example".into(),
-                    snippet: String::new(),
-                    matched_query: String::new(),
-                    search_tool: String::new(),
-                    search_engine: String::new(),
-                }],
-            }),
-            Arc::new(FakeFetch {
-                pages: HashMap::from([(
-                    "https://example.com".into(),
-                    WebFetchedPage {
-                        published_at: None,
-                        url: "https://example.com".into(),
-                        title: "Example".into(),
-                        body: "web body".into(),
-                        content_type: None,
-                        page_type: None,
-                        language: None,
-                    },
-                )]),
-            }),
-        );
-        let local = LocalGatherer::new(Arc::new(FailingLocalTool));
-
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            Some(local),
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async".into(),
-            ..SessionConfig::default()
-        };
-        let outcome = session
-            .run(
-                "local-fail-test",
-                "Local Fail Test",
-                &cfg,
-                Arc::new(NoopObserver),
-            )
-            .await
-            .unwrap();
-
-        assert!(
-            outcome
-                .sources
-                .iter()
-                .any(|s| matches!(s, Source::Web { .. })),
-            "web sources must still be captured when local phase fails"
-        );
-        assert!(
-            !outcome
-                .sources
-                .iter()
-                .any(|s| matches!(s, Source::Local { .. })),
-            "no local sources should be present when local phase fails"
-        );
-    }
-
-    /// D-002: Verify that per-phase diagnostic events are emitted in order:
-    /// Web phase → Local phase → Specs phase.  The overlapped gather emits
-    /// `Phase::Web` and `Phase::Local` synchronously before `tokio::join!`,
-    /// and `Phase::Specs` after the local future completes, so the ordering
-    /// is deterministic regardless of which gather finishes first.
-    #[tokio::test]
-    async fn overlapped_gather_emits_phase_events_in_order() {
-        use crate::local_gatherer::{LocalGatherer, LocalTool};
-        use std::path::PathBuf;
-
-        #[derive(Default)]
-        struct MixedLocalTool;
-        #[async_trait::async_trait]
-        impl LocalTool for MixedLocalTool {
-            async fn glob(
-                &self,
-                _root: &std::path::Path,
-                _pattern: &str,
-            ) -> anyhow::Result<Vec<std::path::PathBuf>> {
-                Ok(vec![PathBuf::from("src/lib.rs")])
-            }
-            async fn grep(
-                &self,
-                _path: &std::path::Path,
-                _terms: &[String],
-            ) -> anyhow::Result<Vec<crate::local_gatherer::GrepMatch>> {
-                Ok(vec![crate::local_gatherer::GrepMatch {
-                    line: 1,
-                    text: "Rust async is great".into(),
-                }])
-            }
-            async fn read(&self, _path: &std::path::Path) -> anyhow::Result<String> {
-                Ok("Rust async is great".into())
-            }
-            async fn list_specs(&self, _root: &std::path::Path) -> anyhow::Result<Vec<String>> {
-                Ok(vec!["some-spec".into()])
-            }
-            async fn spec_title(
-                &self,
-                _root: &std::path::Path,
-                _spec_id: &str,
-            ) -> anyhow::Result<String> {
-                Ok("Some spec title".into())
-            }
-        }
-
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-
-        let web = WebGatherer::new(
-            Arc::new(FakeSearch {
-                hits: vec![WebSearchHit {
-                    url: "https://example.com".into(),
-                    title: "Example".into(),
-                    snippet: String::new(),
-                    matched_query: String::new(),
-                    search_tool: String::new(),
-                    search_engine: String::new(),
-                }],
-            }),
-            Arc::new(FakeFetch {
-                pages: HashMap::from([(
-                    "https://example.com".into(),
-                    WebFetchedPage {
-                        published_at: None,
-                        url: "https://example.com".into(),
-                        title: "Example".into(),
-                        body: "web body".into(),
-                        content_type: None,
-                        page_type: None,
-                        language: None,
-                    },
-                )]),
-            }),
-        );
-        let local = LocalGatherer::new(Arc::new(MixedLocalTool));
-
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            Some(local),
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async".into(),
-            ..SessionConfig::default()
-        };
-        let observer = Arc::new(CollectObserver::default());
-        let _ = session
-            .run("event-order-test", "Event Order", &cfg, observer.clone())
-            .await
-            .unwrap();
-
-        // Collect the indices of the Web, Local, and Specs phase events.
-        let events = observer.events.lock().unwrap();
-        let web_idx = events.iter().position(|e| {
-            matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Web
-                }
-            )
-        });
-        let local_idx = events.iter().position(|e| {
-            matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Local
-                }
-            )
-        });
-        let specs_idx = events.iter().position(|e| {
-            matches!(
-                e,
-                SessionEvent::Phase {
-                    phase: SessionPhase::Specs
-                }
-            )
-        });
-
-        assert!(web_idx.is_some(), "expected Web phase event");
-        assert!(local_idx.is_some(), "expected Local phase event");
-        assert!(specs_idx.is_some(), "expected Specs phase event");
-
-        let web_idx = web_idx.unwrap();
-        let local_idx = local_idx.unwrap();
-        let specs_idx = specs_idx.unwrap();
-
-        assert!(
-            web_idx < local_idx,
-            "Web phase must be emitted before Local phase; got web={web_idx}, local={local_idx}"
-        );
-        assert!(
-            local_idx < specs_idx,
-            "Local phase must be emitted before Specs phase; got local={local_idx}, specs={specs_idx}"
-        );
-    }
-
-    /// D-003: When `--from-url` is supplied alongside a topic, the seed URL
-    /// must appear as the **first** web source (source #1), ahead of any
-    /// sources discovered by the normal web-search phase.
-    #[tokio::test]
-    async fn from_url_seed_appears_as_first_source() {
-        // The search tool returns one additional hit so we can verify the
-        // --from-url seed precedes it in the source list.
-        struct SearchWithExtraHit;
-        #[async_trait]
-        impl WebSearchTool for SearchWithExtraHit {
-            async fn search(&self, _query: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-                Ok(vec![WebSearchHit {
-                    url: "https://example.com/extra".into(),
-                    title: "Rust async extra result".into(),
-                    snippet: "More about Rust async programming".into(),
-                    matched_query: String::new(),
-                    search_tool: String::new(),
-                    search_engine: String::new(),
-                }])
-            }
-        }
-        struct MultiFetch;
-        #[async_trait]
-        impl WebFetchTool for MultiFetch {
-            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
-                if url == "https://example.com/seed" {
-                    Ok(WebFetchedPage {
-                        published_at: None,
-                        url: url.to_string(),
-                        title: "Seed Page".into(),
-                        body: "This is the seed page body about Rust async.".into(),
-                        content_type: None,
-                        page_type: None,
-                        language: None,
-                    })
-                } else {
-                    Ok(WebFetchedPage {
-                        published_at: None,
-                        url: url.to_string(),
-                        title: "Extra Page".into(),
-                        body: "Extra page body.".into(),
-                        content_type: None,
-                        page_type: None,
-                        language: None,
-                    })
-                }
-            }
-        }
-
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-
-        let manager = ResearchManager::new(&research_root);
-        let web = WebGatherer::new(Arc::new(SearchWithExtraHit), Arc::new(MultiFetch));
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            None,
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async".into(),
-            from_url: Some("https://example.com/seed".into()),
-            ..SessionConfig::default()
-        };
-        let outcome = session
-            .run(
-                "seed-order-test",
-                "Seed Order",
-                &cfg,
-                Arc::new(NoopObserver),
-            )
-            .await
-            .unwrap();
-
-        // The first web source must be the --from-url seed.
-        let first_web = outcome
-            .sources
-            .iter()
-            .find(|s| matches!(s, Source::Web { .. }));
-        assert!(
-            first_web.is_some(),
-            "expected at least one web source; got {:?}",
-            outcome.sources
-        );
-        assert!(
-            matches!(
-                first_web.unwrap(),
-                Source::Web { url, title, .. }
-                    if url == "https://example.com/seed" && title == "Seed Page"
-            ),
-            "the --from-url seed must be the first web source; got {:?}",
-            first_web
-        );
-
-        // The extra search result must come after the seed.
-        let web_urls: Vec<&str> = outcome
-            .sources
-            .iter()
-            .filter_map(|s| match s {
-                Source::Web { url, .. } => Some(url.as_str()),
-                _ => None,
-            })
-            .collect();
-        let seed_pos = web_urls
-            .iter()
-            .position(|u| *u == "https://example.com/seed");
-        let extra_pos = web_urls
-            .iter()
-            .position(|u| *u == "https://example.com/extra");
-        assert!(seed_pos.is_some(), "seed URL must be in sources");
-        assert!(extra_pos.is_some(), "extra URL must be in sources");
-        assert!(
-            seed_pos.unwrap() < extra_pos.unwrap(),
-            "seed URL must appear before extra URL; got seed={:?}, extra={:?}",
-            seed_pos,
-            extra_pos
-        );
-    }
-
-    // ── Milestone E-003: max_synthesis_sources cap tests ──────────────────
+    // ── topic-derivation unit tests ──────────��──────────────────────────────
 
     #[test]
-    fn select_top_relevance_sources_keeps_highest_ranked() {
-        let make_web = |relevance: &str| Source::Web {
-            published_at: None,
-            url: format!("https://example.com/{relevance}"),
-            title: relevance.to_string(),
-            captured_at: chrono::Utc::now(),
-            body_path: std::path::PathBuf::from("sources/web-01.md"),
-            body: "text".to_string(),
-            relevance: relevance.to_string(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-        };
-        let sources = vec![
-            make_web("Low — weak query match"),
-            make_web("High — title matches query"),
-            make_web("Very low — no clear query match"),
-            make_web("Medium — partial query match"),
-        ];
-        let selected = select_top_relevance_sources(&sources, 2);
-        assert_eq!(selected.len(), 2);
-        // High (rank 7) and Medium (rank 5) should be selected.
-        assert!(selected[0].relevance().unwrap_or("").starts_with("High"));
-        assert!(selected[1].relevance().unwrap_or("").starts_with("Medium"));
-    }
-
-    #[test]
-    fn select_top_relevance_sources_preserves_original_order() {
-        let make_web = |relevance: &str, url: &str| Source::Web {
-            published_at: None,
-            url: url.to_string(),
-            title: relevance.to_string(),
-            captured_at: chrono::Utc::now(),
-            body_path: std::path::PathBuf::from("sources/web-01.md"),
-            body: "text".to_string(),
-            relevance: relevance.to_string(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-        };
-        // Sources in order: A(high), B(low), C(high), D(low)
-        let sources = vec![
-            make_web("High — title matches query", "https://a"),
-            make_web("Low — weak query match", "https://b"),
-            make_web("High — title matches query", "https://c"),
-            make_web("Low — weak query match", "https://d"),
-        ];
-        let selected = select_top_relevance_sources(&sources, 2);
-        assert_eq!(selected.len(), 2);
-        // A and C should be selected (both high rank), in original order.
-        let urls: Vec<&str> = selected
-            .iter()
-            .filter_map(|s| match s {
-                Source::Web { url, .. } => Some(url.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(urls, vec!["https://a", "https://c"]);
-    }
-
-    #[test]
-    fn select_top_relevance_sources_all_when_under_cap() {
-        let make_web = |relevance: &str| Source::Web {
-            published_at: None,
-            url: format!("https://example.com/{relevance}"),
-            title: relevance.to_string(),
-            captured_at: chrono::Utc::now(),
-            body_path: std::path::PathBuf::from("sources/web-01.md"),
-            body: "text".to_string(),
-            relevance: relevance.to_string(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-        };
-        let sources = vec![make_web("High"), make_web("Medium")];
-        let selected = select_top_relevance_sources(&sources, 10);
-        assert_eq!(selected.len(), 2);
-    }
-
-    #[test]
-    fn select_top_relevance_sources_includes_low_relevance_when_in_pool() {
-        // When use_low_relevance is true, low-relevance sources are in the
-        // pool. If the cap is large enough, they should be selected too.
-        let make_web = |relevance: &str| Source::Web {
-            published_at: None,
-            url: format!("https://example.com/{relevance}"),
-            title: relevance.to_string(),
-            captured_at: chrono::Utc::now(),
-            body_path: std::path::PathBuf::from("sources/web-01.md"),
-            body: "text".to_string(),
-            relevance: relevance.to_string(),
-            search_tool: String::new(),
-            search_engine: String::new(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-        };
-        let sources = vec![
-            make_web("High — title matches query"),
-            make_web("Low — weak query match"),
-        ];
-        // Cap of 2 means both are selected (low-relevance is in the pool).
-        let selected = select_top_relevance_sources(&sources, 2);
-        assert_eq!(selected.len(), 2);
-        assert!(
-            selected.iter().any(
-                |s| matches!(s, Source::Web { relevance, .. } if relevance.starts_with("Low"))
-            )
-        );
-    }
-
-    // ── Milestone H-001: per-phase timeout tests ──────────────────────
-
-    #[tokio::test]
-    async fn h001_web_phase_timeout_aborts_slow_web_gather() {
-        use crate::web_gatherer::{
-            WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
-        };
-
-        // Search returns hits immediately but fetch sleeps 60s.
-        struct SlowFetch;
-        #[async_trait]
-        impl WebFetchTool for SlowFetch {
-            async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                Ok(WebFetchedPage {
-                    published_at: None,
-                    url: _url.to_string(),
-                    title: "slow".into(),
-                    body: "slow body".into(),
-                    content_type: None,
-                    page_type: None,
-                    language: None,
-                })
-            }
-        }
-        struct FastSearch;
-        #[async_trait]
-        impl WebSearchTool for FastSearch {
-            async fn search(&self, _query: &str, _max: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-                Ok(vec![WebSearchHit {
-                    url: "https://slow.example".into(),
-                    title: "Rust async runtime".into(),
-                    snippet: "Tokio runtime".into(),
-                    matched_query: String::new(),
-                    search_tool: "test".into(),
-                    search_engine: "test".into(),
-                }])
-            }
-        }
-        let web = WebGatherer::new(Arc::new(FastSearch), Arc::new(SlowFetch))
-            .with_fetch_timeout(std::time::Duration::from_secs(60));
-
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            None,
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async runtime".into(),
-            web_phase_timeout_secs: Some(1),
-            fetch_timeout_secs: 60,
-            disable_local: true,
-            disable_specs: true,
-            ..SessionConfig::default()
-        };
-        #[derive(Default)]
-        struct CollectEvents(std::sync::Mutex<Vec<SessionEvent>>);
-        impl SessionObserver for CollectEvents {
-            fn on_event(&self, event: SessionEvent) {
-                self.0.lock().unwrap().push(event);
-            }
-        }
-        let obs = Arc::new(CollectEvents::default());
-        let outcome = session.run("h001timeout", "Test", &cfg, obs.clone()).await;
-        assert!(outcome.is_ok(), "run should complete even with timeout");
-        let events = obs.0.lock().unwrap();
-        // The web phase timeout should emit a WebSearchFailed event.
-        assert!(
-            events.iter().any(|e| matches!(
-                e,
-                SessionEvent::WebSearchFailed { error } if error.contains("timed out")
-            )),
-            "expected WebSearchFailed with 'timed out', got {events:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn h001_local_phase_timeout_aborts_slow_local_gather() {
-        use crate::local_gatherer::{GrepMatch, LocalGatherer, LocalTool};
-
-        // LocalTool that sleeps 60s on glob.
-        struct SlowLocal;
-        #[async_trait]
-        impl LocalTool for SlowLocal {
-            async fn glob(
-                &self,
-                _root: &std::path::Path,
-                _pattern: &str,
-            ) -> anyhow::Result<Vec<std::path::PathBuf>> {
-                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                Ok(Vec::new())
-            }
-            async fn grep(
-                &self,
-                _path: &std::path::Path,
-                _terms: &[String],
-            ) -> anyhow::Result<Vec<GrepMatch>> {
-                Ok(Vec::new())
-            }
-            async fn read(&self, _path: &std::path::Path) -> anyhow::Result<String> {
-                Ok(String::new())
-            }
-            async fn list_specs(&self, _root: &std::path::Path) -> anyhow::Result<Vec<String>> {
-                Ok(Vec::new())
-            }
-            async fn spec_title(
-                &self,
-                _root: &std::path::Path,
-                _spec_id: &str,
-            ) -> anyhow::Result<String> {
-                Ok(String::new())
-            }
-        }
-
-        let local = LocalGatherer::new(Arc::new(SlowLocal));
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            None,
-            Some(local),
-            Arc::new(crate::analysis::NoopAnalysisEngine),
-        );
-        let cfg = SessionConfig {
-            topic: "Rust async runtime".into(),
-            local_phase_timeout_secs: Some(1),
-            disable_specs: true,
-            ..SessionConfig::default()
-        };
-        let outcome = session
-            .run("h001localtimeout", "Test", &cfg, Arc::new(NoopObserver))
-            .await;
-        assert!(
-            outcome.is_ok(),
-            "run should complete even with local timeout"
-        );
-        // The local phase timed out so no local sources should be captured.
-        let outcome = outcome.unwrap();
-        let local_count = outcome
-            .sources
-            .iter()
-            .filter(|s| matches!(s, Source::Local { .. }))
-            .count();
+    fn split_glued_words_splits_camel_case_and_acronyms() {
         assert_eq!(
-            local_count, 0,
-            "timed-out local phase should yield 0 sources"
+            split_glued_words("HomepageArticlesLarge"),
+            "Homepage Articles Large"
+        );
+        assert_eq!(split_glued_words("AIReasoning"), "AI Reasoning");
+        assert_eq!(split_glued_words("RustAsync"), "Rust Async");
+        // Lower/upper transitions only, not inside acronyms.
+        assert_eq!(split_glued_words("URL"), "URL");
+    }
+
+    #[test]
+    fn clean_site_title_strips_site_brand_and_nav_prefixes() {
+        assert_eq!(
+            clean_site_title(
+                "InfoQ HomepageArticlesLarge Concept Models: a Paradigm Shift in AI Reasoning"
+            ),
+            Some("Large Concept Models: a Paradigm Shift in AI Reasoning".into())
+        );
+        assert_eq!(
+            clean_site_title("Medium | Articles | Rust Async Patterns"),
+            Some("Rust Async Patterns".into())
+        );
+        assert_eq!(
+            clean_site_title("Large Concept Models: a Paradigm Shift in AI Reasoning | InfoQ"),
+            Some("Large Concept Models: a Paradigm Shift in AI Reasoning".into())
         );
     }
 
-    #[tokio::test]
-    async fn h002_session_wires_search_retry_config() {
-        // Verify that the session completes successfully when search retry
-        // config is set. The search returns empty so no actual retries occur,
-        // but the config must be wired without error.
-        use crate::web_gatherer::{
-            WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
-        };
+    #[test]
+    fn clean_site_title_rejects_generic_or_short_titles() {
+        assert_eq!(clean_site_title("Example Site"), None);
+        assert_eq!(clean_site_title("Home"), None);
+        assert_eq!(clean_site_title("Articles"), None);
+        assert_eq!(clean_site_title("OK"), None);
+    }
 
-        struct OkSearch;
-        #[async_trait]
-        impl WebSearchTool for OkSearch {
-            async fn search(&self, _query: &str, _max: usize) -> anyhow::Result<Vec<WebSearchHit>> {
-                Ok(Vec::new())
-            }
-        }
-        struct OkFetch;
-        #[async_trait]
-        impl WebFetchTool for OkFetch {
-            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
-                Ok(WebFetchedPage {
-                    published_at: None,
-                    url: url.to_string(),
-                    title: "t".into(),
-                    body: "b".into(),
-                    content_type: None,
-                    page_type: None,
-                    language: None,
-                })
-            }
-        }
-        let web = WebGatherer::new(Arc::new(OkSearch), Arc::new(OkFetch));
-        let tmp = TempDir::new().unwrap();
-        let research_root = tmp.path().join("research");
-        tokio::fs::create_dir_all(&research_root).await.unwrap();
-        let manager = ResearchManager::new(&research_root);
-        let session = ResearchSession::new(
-            manager,
-            Some(web),
-            None,
-            Arc::new(crate::analysis::NoopAnalysisEngine),
+    #[test]
+    fn derive_topic_prefers_cleaned_title_over_body() {
+        let body = "Home About Contact\n\nThe actual article begins here with useful content."; // 10 words - kept
+        let title = "InfoQ HomepageArticlesLarge Concept Models: a Paradigm Shift in AI Reasoning";
+        assert_eq!(
+            derive_topic_from_url_body(body, title, "https://example.com/article"),
+            Some("Large Concept Models: a Paradigm Shift in AI Reasoning — The actual article begins here with useful content".into())
         );
-        let cfg = SessionConfig {
-            topic: "test topic".into(),
-            search_max_retries: 5,
-            search_retry_base_delay_ms: 0,
-            search_circuit_breaker_threshold: 10,
-            disable_local: true,
-            disable_specs: true,
-            ..SessionConfig::default()
-        };
-        let outcome = session
-            .run("h002retrycfg", "Test", &cfg, Arc::new(NoopObserver))
-            .await;
-        assert!(outcome.is_ok(), "session with retry config should complete");
+    }
+
+    #[test]
+    fn derive_topic_appends_description_and_skips_title_duplicate() {
+        let body = "Large Concept Models: a Paradigm Shift in AI Reasoning are introduced in this article. They move generation from tokens to concepts, improving reasoning and explainability.";
+        let title = "InfoQ HomepageArticlesLarge Concept Models: a Paradigm Shift in AI Reasoning";
+        let topic = derive_topic_from_url_body(body, title, "https://example.com/article");
+        assert!(
+            topic
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("Large Concept Models: a Paradigm Shift in AI Reasoning — They move"),
+            "expected title + body description, got {topic:?}"
+        );
+    }
+
+    #[test]
+    fn derive_topic_falls_back_to_body_when_title_is_generic() {
+        let body = "The Rust async model maps asynchronous operations onto lightweight futures.";
+        let title = "Example Site";
+        let topic = derive_topic_from_url_body(body, title, "https://example.com/article");
+        assert!(
+            topic
+                .as_deref()
+                .unwrap_or("")
+                .contains("Rust async model maps asynchronous operations"),
+            "expected body-derived topic, got {topic:?}"
+        );
+    }
+
+    #[test]
+    fn derive_topic_description_truncates_long_sentences() {
+        let body = "This is an extremely long introductory sentence that goes on and on and on in order to test that the derived topic description is truncated to a reasonable length without breaking in the middle of a word.";
+        let title = "Some Article Title";
+        let topic = derive_topic_from_url_body(body, title, "https://example.com/article").unwrap();
+        assert!(
+            topic.len() <= MAX_DERIVED_TOPIC_CHARS,
+            "topic too long: {}",
+            topic.len()
+        );
+        assert!(topic.starts_with("Some Article Title —"), "topic: {topic}");
+    }
+
+    #[test]
+    fn fuzzy_contains_detects_subsequence() {
+        assert!(fuzzy_contains(
+            "large concept models shift ai reasoning",
+            "concept models shift"
+        ));
+        assert!(!fuzzy_contains(
+            "large concept models",
+            "concept models shift"
+        ));
     }
 }

@@ -65,8 +65,9 @@ pub mod web_gatherer;
 
 pub use adaptive::{AdaptiveStopper, StopDecision};
 pub use analysis::{
-    AnalysisEngine, AnalysisOutcome, AnalysisResult, LlmAnalysisEngine, NoopAnalysisEngine,
-    SourceBody, build_source_bodies,
+    AnalysisEngine, AnalysisOutcome, AnalysisResult, HeuristicSummarizer, LlmAnalysisEngine,
+    NoopAnalysisEngine, SourceBody, SourceSummarizer, build_source_bodies, chunk_source_bodies,
+    merge_chunk_results, summarize_source_bodies, total_body_chars,
 };
 pub use cli::{
     FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
@@ -76,7 +77,7 @@ pub use diagram::render_findings_diagram;
 pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
     assemble_document, fence_source_body, mark_complete, mark_in_progress, render_skeleton,
-    render_supporting_file,
+    render_supporting_file, truncate_body_to_bytes,
 };
 pub use engine::{
     Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,
@@ -86,13 +87,14 @@ pub use item::{
     DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_full,
 };
 pub use local_gatherer::{
-    DEFAULT_GLOBS, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch, LocalGatherConfig, LocalGatherError,
-    LocalGatherer, LocalTool, MAX_LOCAL_EXCERPT_LINES, build_local_excerpt, build_relevance_note,
-    collect_matched_terms, derive_terms, local_body_path,
+    DEFAULT_GLOBS, DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch,
+    LocalGatherConfig, LocalGatherError, LocalGatherer, LocalTool, MAX_LOCAL_EXCERPT_LINES,
+    build_local_excerpt, build_relevance_note, collect_matched_terms, derive_terms,
+    local_body_path,
 };
 pub use manager::{
-    IndexTimestamp, ResearchError, ResearchManager, SearchHit, render_document_for,
-    suggest_closest_from, union_with_existing,
+    IndexTimestamp, ResearchError, ResearchManager, SearchHit, SearchIndex, SearchIndexEntry,
+    render_document_for, suggest_closest_from, union_with_existing,
 };
 pub use plan_dep::{
     ResearchDependency, ResearchDependencyError, parse_research_dependencies,
@@ -114,7 +116,9 @@ pub use status::ResearchStatus;
 pub use verify::{KeywordVerifier, VerificationResult, Verifier};
 pub use web_date::extract_published_at;
 pub use web_gatherer::{
-    DEFAULT_FETCH_CONCURRENCY, GatherEvent, GatherResult, HeuristicQueryDecomposer,
+    DEFAULT_FETCH_CONCURRENCY, DEFAULT_FETCH_TIMEOUT, DEFAULT_MAX_WEB_RESULTS,
+    DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD, DEFAULT_SEARCH_MAX_RETRIES,
+    DEFAULT_SEARCH_RETRY_BASE_DELAY_MS, GatherEvent, GatherResult, HeuristicQueryDecomposer,
     LlmQueryDecomposer, QueryDecomposer, WebFetchTool, WebFetchedPage, WebGatherError, WebGatherer,
     WebSearchHit, WebSearchTool, WebSourceKind, classify_web_source,
 };

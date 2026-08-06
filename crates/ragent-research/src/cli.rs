@@ -6,6 +6,7 @@
 use crate::research_name::ResearchNameError;
 
 /// Parsed `ragent research <subcommand>` arguments.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
@@ -46,6 +47,12 @@ pub enum ResearchCliCommand {
         /// a search returns many hits, at the cost of more in-flight HTTP
         /// connections.
         fetch_concurrency: Option<usize>,
+        /// `--local-concurrently N` — override the maximum number of local
+        /// candidate scoring/spec-scan tasks that run in parallel. The
+        /// default is `ragent_research::DEFAULT_LOCAL_CONCURRENCY` (8); `0`
+        /// is clamped up to `1`. Larger values reduce wall-clock latency on
+        /// large projects at the cost of more in-flight file handles.
+        local_concurrency: Option<usize>,
         /// `--use-local` — enable the local-file scanning phase.
         use_local: bool,
         /// `--use-specs` — enable the prior-spec cross-reference phase.
@@ -56,6 +63,35 @@ pub enum ResearchCliCommand {
         /// threshold; this flag disables that filter so every fetched page is
         /// retained regardless of relevance score.
         use_low_relevance: bool,
+        /// `--fetch-timeout-secs N` — override the per-page fetch timeout.
+        /// Pages that take longer than this are treated as a fetch failure so
+        /// one slow URL cannot stall the whole gather pass. The default is
+        /// 30 seconds.
+        fetch_timeout_secs: Option<u64>,
+        /// `--web-phase-timeout-secs N` — optional wall-clock timeout for the
+        /// entire web-gathering phase (Milestone H-001). When set, the phase
+        /// is aborted if it exceeds `N` seconds and a diagnostic is emitted so
+        /// a slow search/fetch cannot stall the session. When `None`, no
+        /// phase-level timeout is applied.
+        web_phase_timeout_secs: Option<u64>,
+        /// `--local-phase-timeout-secs N` — optional wall-clock timeout for the
+        /// entire local-gathering phase (Milestone H-001). When set, the phase
+        /// is aborted if it exceeds `N` seconds and a diagnostic is emitted so
+        /// a slow filesystem scan cannot stall the session. When `None`, no
+        /// phase-level timeout is applied.
+        local_phase_timeout_secs: Option<u64>,
+        /// `--search-max-retries N` — maximum retry attempts for a failed
+        /// sub-query search (Milestone H-002). Defaults to 2. `0` disables
+        /// retries.
+        search_max_retries: Option<u32>,
+        /// `--search-retry-base-delay-ms N` — base delay in milliseconds for
+        /// the first search-retry backoff (Milestone H-002). Subsequent
+        /// retries double this value. Defaults to 200 ms.
+        search_retry_base_delay_ms: Option<u64>,
+        /// `--search-circuit-breaker-threshold N` — number of consecutive
+        /// search-tool failures after which the circuit-breaker opens
+        /// (Milestone H-003). `0` disables the circuit-breaker. Defaults to 3.
+        search_circuit_breaker_threshold: Option<u32>,
     },
     /// `ragent research continue <name> [message]` — resume an in-progress item (T-012).
     Continue {
@@ -152,6 +188,13 @@ impl ResearchCliCommand {
                         use_local: false,
                         use_specs: false,
                         use_low_relevance: false,
+                        fetch_timeout_secs: None,
+                        local_concurrency: None,
+                        web_phase_timeout_secs: None,
+                        local_phase_timeout_secs: None,
+                        search_max_retries: None,
+                        search_retry_base_delay_ms: None,
+                        search_circuit_breaker_threshold: None,
                     }
                 }
             }
@@ -162,7 +205,8 @@ impl ResearchCliCommand {
         // Parse: ragent research create <name> <topic> [--from-url <URL>]
         //        [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep]
         //        [--format <artifact>] [--sources-dir <path>] [--template <name>]
-        //        [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]
+        //        [--fetch-concurrently N] [--local-concurrently N] [--fetch-timeout-secs N] [--use-local]
+        //        [--use-specs] [--use-low-relevance]
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
@@ -174,6 +218,13 @@ impl ResearchCliCommand {
         let mut sources_dir: Option<String> = None;
         let mut template: Option<String> = None;
         let mut fetch_concurrency: Option<usize> = None;
+        let mut fetch_timeout_secs: Option<u64> = None;
+        let mut local_concurrency: Option<usize> = None;
+        let mut web_phase_timeout_secs: Option<u64> = None;
+        let mut local_phase_timeout_secs: Option<u64> = None;
+        let mut search_max_retries: Option<u32> = None;
+        let mut search_retry_base_delay_ms: Option<u64> = None;
+        let mut search_circuit_breaker_threshold: Option<u32> = None;
         let mut use_local = false;
         let mut use_specs = false;
         let mut use_low_relevance = false;
@@ -244,6 +295,62 @@ impl ResearchCliCommand {
                         i += 1;
                     }
                 }
+                "--local-concurrently" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        local_concurrency = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--fetch-timeout-secs" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        fetch_timeout_secs = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--web-phase-timeout-secs" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        web_phase_timeout_secs = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--local-phase-timeout-secs" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        local_phase_timeout_secs = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--search-max-retries" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        search_max_retries = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--search-retry-base-delay-ms" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        search_retry_base_delay_ms = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--search-circuit-breaker-threshold" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        search_circuit_breaker_threshold = v.parse().ok();
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
                 "--use-local" => {
                     use_local = true;
                     i += 1;
@@ -284,6 +391,13 @@ impl ResearchCliCommand {
             use_local,
             use_specs,
             use_low_relevance,
+            fetch_timeout_secs,
+            local_concurrency,
+            web_phase_timeout_secs,
+            local_phase_timeout_secs,
+            search_max_retries,
+            search_retry_base_delay_ms,
+            search_circuit_breaker_threshold,
         }
     }
 
