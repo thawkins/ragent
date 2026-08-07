@@ -704,7 +704,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         match sub.as_str() {
             "help" | "" => {
                 self.append_assistant_text(
-                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Display recent log entries from `<working_dir>/log/edits-*.jsonl` |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
+                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Show counts, outcomes, and success/failure ratio per tool |\n| `/editlog analyse` | Analyse failed edits for `old_str` characteristics that may cause failures |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
                 );
                 self.status = "editlog: help".to_string();
             }
@@ -735,7 +735,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 self.status = format!("editlog: {}", if enabled { "on" } else { "off" });
             }
             "show" => {
-                self.show_editlog();
+                self.show_editlog_stats();
+            }
+            "analyse" => {
+                self.show_editlog_analysis();
             }
             "clear" => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
@@ -748,73 +751,142 @@ Usage: `/telemetry help|on|off|setup|counters`",
             }
             _ => {
                 self.append_assistant_text(
-                    "From: /editlog\n\nUsage: `/editlog on|off|status|show|clear|help`",
+                    "From: /editlog\n\nUsage: `/editlog on|off|status|show|analyse|clear|help`",
                 );
                 self.status = "editlog: usage".to_string();
             }
         }
     }
 
-    /// Render the most recent edit-log entries into the assistant output.
-    fn show_editlog(&mut self) {
+    /// Render aggregate edit-log statistics into the assistant output.
+    fn show_editlog_stats(&mut self) {
+        use ragent_tools_core::edit_log::edit_log_stats;
         let working_dir = std::env::current_dir().unwrap_or_default();
         let log_dir = working_dir.join("log");
-        let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(&log_dir) {
-            Ok(e) => e.flatten().collect(),
-            Err(_) => {
-                self.append_assistant_text(&format!(
-                    "From: /editlog show\n\n⚠ Log directory not found: {}.",
-                    log_dir.display()
-                ));
-                self.status = "editlog: no logs".to_string();
-                return;
-            }
-        };
-        let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries
-            .into_iter()
-            .filter(|e| {
-                let name = e.file_name();
-                let s = name.to_string_lossy();
-                s.starts_with("edits-") && s.ends_with(".jsonl")
-            })
-            .filter_map(|e| {
-                let mtime = e.metadata().ok().and_then(|m| m.modified().ok())?;
-                Some((e.path(), mtime))
-            })
-            .collect();
-        files.sort_by(|a, b| b.1.cmp(&a.1));
-        let Some((latest, _)) = files.first() else {
+
+        let Some(stats) = edit_log_stats(&working_dir) else {
             self.append_assistant_text(&format!(
-                "From: /editlog show\n\nNo edit-log files found in {}.",
+                "From: /editlog show\n\n⚠ Log directory not found: {}.",
+                log_dir.display()
+            ));
+            self.status = "editlog: no logs".to_string();
+            return;
+        };
+
+        if stats.total() == 0 {
+            self.append_assistant_text(&format!(
+                "From: /editlog show\n\nNo edit-log entries found in {}.",
                 log_dir.display()
             ));
             self.status = "editlog: empty".to_string();
             return;
-        };
-        let content = match std::fs::read_to_string(latest) {
-            Ok(c) => c,
-            Err(e) => {
-                self.append_assistant_text(&format!(
-                    "From: /editlog show\n\n⚠ Could not read {}: {e}",
-                    latest.display()
-                ));
-                self.status = "editlog: read error".to_string();
-                return;
-            }
-        };
-        let lines: Vec<&str> = content.lines().collect();
-        let tail = lines.iter().rev().take(50).copied().collect::<Vec<_>>();
-        let mut output = format!(
-            "From: /editlog show\n\nRecent edit log entries from `{}`:\n\n```jsonl\n",
-            latest.display()
-        );
-        for line in tail.into_iter().rev() {
-            output.push_str(line);
-            output.push('\n');
         }
-        output.push_str("```\n");
+
+        let mut tools: Vec<&String> = stats.tool_counts.keys().collect();
+        tools.sort();
+
+        let mut output = "From: /editlog show\n\n".to_string();
+        output.push_str("| Tool | Count | Success | Failure | Success % |\n");
+        output.push_str("|---|---|---|---:|---:|\n");
+        for tool in &tools {
+            let total = stats.tool_counts[*tool];
+            let success = stats.success_for(tool);
+            let failure = stats.failure_for(tool);
+            let pct = stats.success_pct_for(tool);
+            output.push_str(&format!(
+                "| {} | {} | {} | {} | {:.1}% |\n",
+                tool, total, success, failure, pct
+            ));
+        }
+
+        if !stats.failure_reasons.is_empty() {
+            output.push_str("\n**Failure reasons**\n\n");
+            output.push_str("| Reason | Count |\n");
+            output.push_str("|---|---:|\n");
+            let mut reasons: Vec<(&String, &usize)> = stats.failure_reasons.iter().collect();
+            reasons.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+            for (reason, count) in reasons {
+                output.push_str(&format!("| {} | {} |\n", reason, count));
+            }
+        }
+
         self.append_assistant_text(&output);
         self.status = "editlog: shown".to_string();
+    }
+
+    /// Render an analysis of failed `old_str` values into the assistant output.
+    fn show_editlog_analysis(&mut self) {
+        use ragent_tools_core::edit_log::{OldStrRisk, edit_log_analyse};
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let log_dir = working_dir.join("log");
+
+        let Some(analysis) = edit_log_analyse(&working_dir) else {
+            self.append_assistant_text(&format!(
+                "From: /editlog analyse\n\n⚠ Log directory not found: {}.",
+                log_dir.display()
+            ));
+            self.status = "editlog: no logs".to_string();
+            return;
+        };
+
+        if analysis.failure_count == 0 {
+            self.append_assistant_text(&format!(
+                "From: /editlog analyse\n\nNo failed edit-log entries found in {}.",
+                log_dir.display()
+            ));
+            self.status = "editlog: no failures".to_string();
+            return;
+        }
+
+        let mut output = "From: /editlog analyse\n\n".to_string();
+        output.push_str(&format!(
+            "Analysed {} failed edit operation{}. {} had one or more characteristics that may explain the failure.\n\n",
+            analysis.failure_count,
+            if analysis.failure_count == 1 { "" } else { "s" },
+            analysis.risky_failure_count
+        ));
+
+        let by_freq = analysis.risks_by_frequency();
+        if by_freq.is_empty() {
+            output.push_str("No obvious `old_str` risk characteristics were detected.\n");
+        } else {
+            output.push_str("| Risk characteristic | Failures | % of failures |\n");
+            output.push_str("|---|---|---:|\n");
+            for (risk, count) in &by_freq {
+                let pct = (*count as f64 / analysis.failure_count as f64) * 100.0;
+                output.push_str(&format!("| {} | {} | {:.1}% |\n", risk.label(), count, pct));
+            }
+        }
+
+        if !analysis.combination_counts.is_empty() {
+            output.push_str("\n**Common combinations**\n\n");
+            output.push_str("| Combination | Count |\n");
+            output.push_str("|---|---:|\n");
+            let mut combos: Vec<(&Vec<OldStrRisk>, &usize)> =
+                analysis.combination_counts.iter().collect();
+            combos.sort_by(|a, b| b.1.cmp(a.1));
+            for (combo, count) in combos.iter().take(10) {
+                let labels: Vec<String> =
+                    combo.iter().map(|r| format!("`{}`", r.label())).collect();
+                output.push_str(&format!("| {} | {} |\n", labels.join(" + "), count));
+            }
+        }
+
+        if !analysis.risk_examples.is_empty() {
+            output.push_str("\n**Examples**\n\n");
+            for (risk, examples) in &analysis.risk_examples {
+                output.push_str(&format!("*{}*\n\n", risk.label()));
+                for ex in examples.iter().take(3) {
+                    output.push_str(&format!(
+                        "- `{}` on `{}` → {}\n  `old_str`: `{}`\n\n",
+                        ex.tool, ex.file_path, ex.outcome, ex.old_str_preview
+                    ));
+                }
+            }
+        }
+
+        self.append_assistant_text(&output);
+        self.status = "editlog: analysed".to_string();
     }
 
     /// Entry point for all slash commands. Logs invocation, records the raw

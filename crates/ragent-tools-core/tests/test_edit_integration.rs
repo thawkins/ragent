@@ -529,8 +529,11 @@ async fn test_read_then_edit_no_stale_error() {
 
 use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 
+static LOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[tokio::test]
 async fn test_edit_log_success_writes_jsonl() {
+    let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log");
     set_edit_log_enabled(true);
@@ -584,6 +587,7 @@ async fn test_edit_log_success_writes_jsonl() {
 
 #[tokio::test]
 async fn test_edit_log_dry_run_writes_jsonl() {
+    let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log");
     set_edit_log_enabled(true);
@@ -633,6 +637,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
 
 #[tokio::test]
 async fn test_edit_log_failure_writes_jsonl() {
+    let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log");
     set_edit_log_enabled(true);
@@ -679,6 +684,7 @@ async fn test_edit_log_failure_writes_jsonl() {
 
 #[tokio::test]
 async fn test_edit_log_disabled_does_not_write() {
+    let _guard = LOG_TEST_MUTEX.lock().unwrap();
     // Disable logging before creating the temp dir so `log/` is never created.
     set_edit_log_enabled(false);
     assert!(!is_edit_log_enabled());

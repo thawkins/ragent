@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 1.0.14
+
+### Changed — version bump and security audit
+
+- Incremental release bump to 1.0.14.
+- `cargo audit` reports 7 allowed warnings (unmaintained/unsound crates) that are
+  suppressed via existing project policy; no new high-severity advisories introduced.
+
 ## Version: 1.0.13
 
 ### Added — Edit-operation audit logging

@@ -779,7 +779,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "editlog",
-        description: "Toggle edit-operation logging: /editlog on|off|status|show",
+        description: "Edit-operation logging: /editlog on|off|status|show|analyse|clear",
     },
     SlashCommandDef {
         trigger: "actionloop",
