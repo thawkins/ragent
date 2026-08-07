@@ -7,6 +7,7 @@ use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamStore,
 };
 use ragent_types::ThinkingLevel;
+use ragent_types::strutil::truncate_bytes;
 
 use ragent_config::OtelConfig;
 use ragent_telemetry::counters::{TelemetryCountersContent, current_values};
@@ -5741,11 +5742,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                             mems.len()
                                         ));
                                         for row in mems {
-                                            let preview = if row.content.len() > 120 {
-                                                format!("{}…", &row.content[..120])
-                                            } else {
-                                                row.content.clone()
-                                            };
+                                            let preview = truncate_bytes(&row.content, 120);
                                             output.push_str(&format!(
                                                 "- **#{id}** `{conf:.2}` {preview}\n",
                                                 id = row.id,

@@ -643,14 +643,11 @@ static EDIT_LOG_MUTEX: Mutex<()> = Mutex::new(());
 fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
     for _ in 0..50 {
         if let Ok(entries) = std::fs::read_dir(log_dir) {
-            let found = entries
-                .flatten()
-                .map(|e| e.path())
-                .find(|p| {
-                    p.file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|n| n.starts_with("edits-") && n.ends_with(".jsonl"))
-                });
+            let found = entries.flatten().map(|e| e.path()).find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("edits-") && n.ends_with(".jsonl"))
+            });
             if found.is_some() {
                 return found;
             }

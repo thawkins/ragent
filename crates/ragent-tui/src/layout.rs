@@ -14,6 +14,7 @@ use crate::app::{image_dimensions_or_placeholder, sanitize_for_display};
 
 use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
+use ragent_types::strutil::truncate_bytes;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Position, Rect},
@@ -3423,11 +3424,7 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             )));
             for row in rows {
-                let preview = if row.content.len() > 80 {
-                    format!("{}…", &row.content[..80])
-                } else {
-                    row.content.clone()
-                };
+                let preview = truncate_bytes(&row.content, 80);
                 lines.push(Line::from(vec![
                     Span::styled(format!("#{}", row.id), Style::default().fg(Color::DarkGray)),
                     Span::raw(" "),

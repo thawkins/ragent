@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 1.0.15
+
+### Fixed — CI formatting and multi_edit edit-log tests
+
+- Ran `cargo fmt` to fix formatting in `crates/ragent-tools-core/tests/test_multiedit.rs`.
+- Fix flaky `multi_edit` edit-log tests (commit `3fb331c`).
+- Incremental release bump to 1.0.15.
+
 ## Version: 1.0.14
 
 ### Changed — version bump and security audit

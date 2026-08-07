@@ -30,6 +30,7 @@ use crate::source::Source;
 use crate::state::{ResearchState, SubQuestionStatus};
 use crate::status::ResearchStatus;
 use chrono::{DateTime, Utc};
+use ragent_types::strutil::truncate_bytes;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -197,7 +198,7 @@ fn extract_one_line_summary(body: &str) -> String {
             // Collapse to a single line and cap at 200 chars.
             let single = cleaned.replace('\n', " ");
             if single.len() > 200 {
-                return format!("{}…", &single[..200]);
+                return truncate_bytes(&single, 200);
             }
             return single;
         }
@@ -1353,6 +1354,22 @@ mod tests {
     fn extract_one_line_summary_skips_placeholder() {
         let body = "## Executive Summary\n\n(no executive summary recorded yet — run a gathering pass to populate)\n\n## Top 5 Implications\n\n";
         assert_eq!(extract_one_line_summary(body), "");
+    }
+
+    #[test]
+    fn extract_one_line_summary_truncates_multibyte_safely() {
+        // Use a 2-byte character repeated so the 200-byte boundary falls inside
+        // a character. The function must not panic and should return a valid
+        // truncated string ending with the ellipsis marker.
+        let summary = "é".repeat(150);
+        let body = format!("## Executive Summary\n\n{summary}\n\n## Findings\n\n");
+        let got = extract_one_line_summary(&body);
+        assert!(!got.is_empty());
+        assert!(
+            got.ends_with('…'),
+            "expected truncated summary to end with ellipsis: {got}"
+        );
+        assert!(got.chars().count() <= 200);
     }
     #[test]
     fn suggest_closest_picks_shortest_distance() {

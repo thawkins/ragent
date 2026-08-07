@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use anyhow::{Result, bail};
+use ragent_types::strutil::truncate_bytes_no_ellipsis;
 
 /// Supported Office document formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,13 +94,42 @@ pub fn truncate_output(text: String) -> String {
             "\n\n... [Output truncated at {}KB. Use range/sheet/slide selection to read specific sections.]",
             MAX_OUTPUT_BYTES / 1024
         );
-        let truncated = &text[..MAX_OUTPUT_BYTES];
+        let truncated = truncate_bytes_no_ellipsis(&text, MAX_OUTPUT_BYTES);
         // Prefer cutting at the last newline, but ensure we leave room for the suffix
         let max_body = MAX_OUTPUT_BYTES.saturating_sub(suffix.len() + 1);
-        let mut boundary = truncated.rfind('\n').unwrap_or(MAX_OUTPUT_BYTES);
+        let max_body = max_body.min(truncated.len());
+        let mut boundary = truncated.rfind('\n').unwrap_or(truncated.len());
         if boundary > max_body {
             boundary = max_body;
         }
-        format!("{}{}", &text[..boundary], suffix)
+        format!("{}{}", &truncated[..boundary], suffix)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_output_does_not_panic_on_multibyte_boundary() {
+        // Build a string longer than MAX_OUTPUT_BYTES where the byte limit
+        // falls inside a multi-byte character ("é" is 2 bytes).
+        let chunk = "é".repeat(200);
+        let text = chunk.repeat(MAX_OUTPUT_BYTES / chunk.len() + 1);
+        let result = truncate_output(text);
+        assert!(
+            result.len() <= MAX_OUTPUT_BYTES + 128,
+            "truncated result unexpectedly large"
+        );
+        assert!(
+            result.contains("Output truncated"),
+            "truncated result should include the truncation notice"
+        );
+    }
+
+    #[test]
+    fn truncate_output_keeps_short_text_unchanged() {
+        let text = "Short text with émojis 🎉".to_string();
+        assert_eq!(truncate_output(text.clone()), text);
     }
 }

@@ -14,6 +14,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
+use ragent_types::strutil::truncate_bytes_no_ellipsis;
 
 /// Supported `LibreOffice` / `OpenDocument` formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,11 +74,11 @@ pub fn truncate_output(text: String) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         text
     } else {
-        let truncated = &text[..MAX_OUTPUT_BYTES];
-        let boundary = truncated.rfind('\n').unwrap_or(MAX_OUTPUT_BYTES);
+        let truncated = truncate_bytes_no_ellipsis(&text, MAX_OUTPUT_BYTES);
+        let boundary = truncated.rfind('\n').unwrap_or(truncated.len());
         format!(
             "{}\n\n... [Output truncated at {}KB.]",
-            &text[..boundary],
+            &truncated[..boundary],
             MAX_OUTPUT_BYTES / 1024
         )
     }
@@ -217,4 +218,32 @@ pub fn attr_value(e: &quick_xml::events::BytesStart<'_>, local_name: &str) -> Op
         .flatten()
         .find(|a| std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == local_name)
         .map(|a| decode_attr_value(&a))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_output_does_not_panic_on_multibyte_boundary() {
+        // Build a string longer than MAX_OUTPUT_BYTES where the byte limit
+        // falls inside a multi-byte character ("é" is 2 bytes).
+        let chunk = "é".repeat(200);
+        let text = chunk.repeat(MAX_OUTPUT_BYTES / chunk.len() + 1);
+        let result = truncate_output(text);
+        assert!(
+            result.len() <= MAX_OUTPUT_BYTES + 64,
+            "truncated result unexpectedly large"
+        );
+        assert!(
+            result.contains("Output truncated"),
+            "truncated result should include the truncation notice"
+        );
+    }
+
+    #[test]
+    fn truncate_output_keeps_short_text_unchanged() {
+        let text = "Short text with émojis 🎉".to_string();
+        assert_eq!(truncate_output(text.clone()), text);
+    }
 }
