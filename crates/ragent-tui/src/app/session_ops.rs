@@ -312,6 +312,7 @@ impl App {
         }
     }
 
+    #[allow(unused_variables)]
     pub(crate) fn debug_log_input_transition(
         &self,
         source: &str,
