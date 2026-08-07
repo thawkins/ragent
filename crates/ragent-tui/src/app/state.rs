@@ -778,6 +778,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Show startup timing breakdown for the current session",
     },
     SlashCommandDef {
+        trigger: "editlog",
+        description: "Toggle edit-operation logging: /editlog on|off|status|show",
+    },
+    SlashCommandDef {
         trigger: "actionloop",
         description: "Agent action-loop timing: /actionloop [help|clip]",
     },

@@ -695,6 +695,117 @@ Usage: `/telemetry help|on|off|setup|counters`",
         }
     }
 
+    /// Handle the `/editlog` slash command.
+    fn handle_editlog_command(&mut self, args: &str) {
+        use ragent_tools_core::edit_log::{is_edit_log_enabled, set_edit_log_enabled};
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        match sub.as_str() {
+            "help" | "" => {
+                self.append_assistant_text(
+                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Display recent log entries from `<working_dir>/log/edits-*.jsonl` |",
+                );
+                self.status = "editlog: help".to_string();
+            }
+            "on" => {
+                set_edit_log_enabled(true);
+                self.append_assistant_text(
+                    "From: /editlog on\n\n✅ Edit-operation logging enabled.",
+                );
+                self.status = "editlog: enabled".to_string();
+            }
+            "off" => {
+                set_edit_log_enabled(false);
+                self.append_assistant_text(
+                    "From: /editlog off\n\n✅ Edit-operation logging disabled.",
+                );
+                self.status = "editlog: disabled".to_string();
+            }
+            "status" => {
+                let enabled = is_edit_log_enabled();
+                let dir = std::env::current_dir()
+                    .map(|p| p.join("log").display().to_string())
+                    .unwrap_or_else(|_| "(unknown)".to_string());
+                self.append_assistant_text(&format!(
+                    "From: /editlog status\n\nEdit logging: {}\nLog directory: {}",
+                    if enabled { "enabled" } else { "disabled" },
+                    dir
+                ));
+                self.status = format!("editlog: {}", if enabled { "on" } else { "off" });
+            }
+            "show" => {
+                self.show_editlog();
+            }
+            _ => {
+                self.append_assistant_text(
+                    "From: /editlog\n\nUsage: `/editlog on|off|status|show|help`",
+                );
+                self.status = "editlog: usage".to_string();
+            }
+        }
+    }
+
+    /// Render the most recent edit-log entries into the assistant output.
+    fn show_editlog(&mut self) {
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let log_dir = working_dir.join("log");
+        let entries: Vec<std::fs::DirEntry> = match std::fs::read_dir(&log_dir) {
+            Ok(e) => e.flatten().collect(),
+            Err(_) => {
+                self.append_assistant_text(&format!(
+                    "From: /editlog show\n\n⚠ Log directory not found: {}.",
+                    log_dir.display()
+                ));
+                self.status = "editlog: no logs".to_string();
+                return;
+            }
+        };
+        let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries
+            .into_iter()
+            .filter(|e| {
+                let name = e.file_name();
+                let s = name.to_string_lossy();
+                s.starts_with("edits-") && s.ends_with(".jsonl")
+            })
+            .filter_map(|e| {
+                let mtime = e.metadata().ok().and_then(|m| m.modified().ok())?;
+                Some((e.path(), mtime))
+            })
+            .collect();
+        files.sort_by(|a, b| b.1.cmp(&a.1));
+        let Some((latest, _)) = files.first() else {
+            self.append_assistant_text(&format!(
+                "From: /editlog show\n\nNo edit-log files found in {}.",
+                log_dir.display()
+            ));
+            self.status = "editlog: empty".to_string();
+            return;
+        };
+        let content = match std::fs::read_to_string(latest) {
+            Ok(c) => c,
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /editlog show\n\n⚠ Could not read {}: {e}",
+                    latest.display()
+                ));
+                self.status = "editlog: read error".to_string();
+                return;
+            }
+        };
+        let lines: Vec<&str> = content.lines().collect();
+        let tail = lines.iter().rev().take(50).copied().collect::<Vec<_>>();
+        let mut output = format!(
+            "From: /editlog show\n\nRecent edit log entries from `{}`:\n\n```jsonl\n",
+            latest.display()
+        );
+        for line in tail.into_iter().rev() {
+            output.push_str(line);
+            output.push('\n');
+        }
+        output.push_str("```\n");
+        self.append_assistant_text(&output);
+        self.status = "editlog: shown".to_string();
+    }
+
     /// Entry point for all slash commands. Logs invocation, records the raw
     /// command in input history, dispatches to the inner implementation, and
     /// emits a "Finished" log entry once complete (unless a background task
@@ -1611,6 +1722,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                 }
             }
+            "editlog" => self.handle_editlog_command(args),
             "help" => {
                 let mut help_lines = String::from("From: /help\nAvailable commands:\n\n```\n");
                 for cmd_def in SLASH_COMMANDS {

@@ -629,3 +629,108 @@ async fn test_batch_stale_file_rejected() {
     assert_eq!(std::fs::read_to_string(&p1).unwrap(), original_a);
     assert_eq!(std::fs::read_to_string(&p2).unwrap(), original_b);
 }
+
+// ── Edit-log instrumentation for multi_edit (editlog spec) ──────────────────
+
+use ragent_tools_core::edit_log::set_edit_log_enabled;
+
+#[tokio::test]
+async fn test_multiedit_log_success_writes_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+    set_edit_log_enabled(true);
+
+    write_file(tmp.path(), "a.rs", "alpha\nbeta\n");
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            { "file_path": "a.rs", "old_string": "beta", "new_string": "BETA" }
+        ]
+    });
+    let _out = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("multi_edit should succeed");
+
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+
+    let path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(
+        lines.len() >= 2,
+        "multi_edit success should log each resolved edit"
+    );
+
+    let success_count = lines
+        .iter()
+        .filter(|line| {
+            let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+            entry["tool"] == "multi_edit" && entry["outcome"] == "success"
+        })
+        .count();
+    assert_eq!(
+        success_count, 2,
+        "two successful multi_edit operations should be logged"
+    );
+
+    set_edit_log_enabled(false);
+    let _ = std::fs::remove_dir_all(&log_dir);
+}
+
+#[tokio::test]
+async fn test_multiedit_log_failure_writes_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+    set_edit_log_enabled(true);
+
+    write_file(tmp.path(), "a.rs", "alpha\n");
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "not found", "new_string": "X" }
+        ]
+    });
+    let _err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("missing old_string must error");
+
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+
+    let path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(!lines.is_empty());
+    let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(entry["tool"], "multi_edit");
+    assert!(
+        entry["outcome"].as_str().unwrap().contains("not found"),
+        "outcome should record not-found: {}",
+        entry["outcome"]
+    );
+
+    set_edit_log_enabled(false);
+    let _ = std::fs::remove_dir_all(&log_dir);
+}

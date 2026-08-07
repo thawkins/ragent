@@ -1,11 +1,33 @@
 # Changelog
 
+## Version: 1.0.13
+
+### Added — Edit-operation audit logging
+
+- New `ragent-tools-core/src/edit_log.rs` provides `log_edit_operation`, a
+  process-wide atomic `EDIT_LOG_ENABLED` flag, and helpers `is_edit_log_enabled`,
+  `set_edit_log_enabled`, and `clear_edit_logs`.
+- `edit` and `multi_edit` now log every outcome path (success, dry-run preview,
+  no-change rejection, create/mkdir/write errors, stale-file rejection, and
+  match failures) to `<working_dir>/log/edits-<timestamp>.jsonl` when enabled.
+- TUI `/editlog` slash command added with subcommands `on|off|status|show|help`.
+- `EditTool` and `MultiEditTool` instrument all branches; `create_file` now
+  receives the `dry_run` flag so create paths are also logged.
+- Tests added for successful edits, dry-run previews, failures, disabled logging,
+  and multi_edit batch logging.
+
 ## Version: 1.0.12
 
 ### Changed — update security audits
 
 - Incremental release bump; security audit clean via `.cargo/audit.toml`
   suppressions for advisories blocked by upstream compatibility.
+
+### Changed — research finding heading format
+
+- `/research` `RESEARCH.md` findings now render with an extra blank line above,
+  a bold finding number (`### **Finding N** —`), and the same `###` heading
+  level to preserve outline structure.
 
 ## Version: 1.0.11
 

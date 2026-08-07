@@ -52,6 +52,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::time::SystemTime;
 
+use super::edit_log::log_edit_operation;
 use super::path_util::resolve_path;
 use super::replace::{find_exact_replacement_range, format_match_failure};
 use super::{Tool, ToolContext, ToolOutput};
@@ -180,11 +181,21 @@ impl Tool for EditTool {
 
         // ── Create operation (FR-006): empty old_string ───────────────────────
         if old_string.is_empty() {
-            return create_file(&path, new_string, ctx, used_legacy_params).await;
+            return create_file(&path, new_string, ctx, used_legacy_params, dry_run).await;
         }
 
         // ── No-change rejection (FR-007) ──────────────────────────────────────
         if old_string == new_string {
+            let outcome = format!("no-change rejected in {}", path.display());
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                &path,
+                old_string,
+                new_string,
+                &outcome,
+                dry_run,
+            );
             bail!(
                 "old_string and new_string are identical in {}. \
                  No changes would be made; refusing the no-op edit.",
@@ -192,18 +203,41 @@ impl Tool for EditTool {
             );
         }
 
-        // ── Read the file ─────────────────────────────────────────────────────
+        // ── Read the file ────────���────────────────────────────────────────────
         let content = tokio::fs::read_to_string(&path).await.with_context(|| {
             format!(
                 "Cannot read file '{}': file may not exist or is not accessible",
                 path.display()
             )
-        })?;
+        });
+        if let Err(ref e) = content {
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                &path,
+                old_string,
+                new_string,
+                &format!("read error: {e}"),
+                dry_run,
+            );
+        }
+        let content = content?;
 
         // ── Stale-file detection (FR-003) ─────────────────────────────────────
-        check_stale_file(&path, ctx)?;
+        if let Err(e) = check_stale_file(&path, ctx) {
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                &path,
+                old_string,
+                new_string,
+                &format!("stale-file rejected: {e}"),
+                dry_run,
+            );
+            return Err(e);
+        }
 
-        // ── Exact-byte replacement (FR-004, FR-005) ───────────────────────
+        // ── Exact-byte replacement (FR-004, FR-005) ───��───────────────────
         let (start, end, new_str) =
             match find_exact_replacement_range(&content, old_string, new_string) {
                 Ok(range) => range,
@@ -212,7 +246,17 @@ impl Tool for EditTool {
                         0 => super::replace::FindDiag::not_found(),
                         n => super::replace::FindDiag::multiple(n),
                     };
-                    bail!(format_match_failure(&diag, &path));
+                    let err = format_match_failure(&diag, &path);
+                    log_edit_operation(
+                        &ctx.working_dir,
+                        "edit",
+                        &path,
+                        old_string,
+                        new_string,
+                        &err,
+                        dry_run,
+                    );
+                    bail!(err);
                 }
             };
 
@@ -222,6 +266,15 @@ impl Tool for EditTool {
             let old_lines = old_string.lines().count();
             let new_lines = new_str.lines().count();
             let path_str = path.display().to_string();
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                &path,
+                old_string,
+                new_string,
+                "success (dry-run preview)",
+                dry_run,
+            );
             return Ok(ToolOutput {
                 content: snippet.clone(),
                 metadata: Some(json!({
@@ -238,9 +291,21 @@ impl Tool for EditTool {
         // ── Apply the replacement ────────────────────────────────────────────────────────────────
         let new_content = format!("{}{}{}", &content[..start], new_str, &content[end..]);
 
-        tokio::fs::write(&path, &new_content)
+        let write_result = tokio::fs::write(&path, &new_content)
             .await
-            .with_context(|| format!("Failed to write file: {}", path.display()))?;
+            .with_context(|| format!("Failed to write file: {}", path.display()));
+        if let Err(ref e) = write_result {
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                &path,
+                old_string,
+                new_string,
+                &format!("write error: {e}"),
+                dry_run,
+            );
+        }
+        write_result?;
 
         // Record the new mtime so a subsequent edit in the same session does not
         // trip the stale-file check on the file we just wrote.
@@ -269,6 +334,15 @@ impl Tool for EditTool {
                  Use file_path/old_string/new_string instead."
             );
         }
+        log_edit_operation(
+            &ctx.working_dir,
+            "edit",
+            &path,
+            old_string,
+            new_string,
+            "success",
+            dry_run,
+        );
 
         Ok(ToolOutput {
             content: snippet,
@@ -289,8 +363,18 @@ async fn create_file(
     new_string: &str,
     ctx: &ToolContext,
     used_legacy_params: bool,
+    dry_run: bool,
 ) -> Result<ToolOutput> {
     if path.exists() {
+        log_edit_operation(
+            &ctx.working_dir,
+            "edit",
+            path,
+            "",
+            new_string,
+            "create rejected: file already exists",
+            dry_run,
+        );
         bail!(
             "Cannot create file '{}': it already exists. \
              To edit an existing file, provide a non-empty old_string that \
@@ -303,14 +387,38 @@ async fn create_file(
         && !parent.as_os_str().is_empty()
         && !parent.exists()
     {
-        tokio::fs::create_dir_all(parent)
+        let parent_result = tokio::fs::create_dir_all(parent)
             .await
-            .with_context(|| format!("Failed to create parent dirs for {}", path.display()))?;
+            .with_context(|| format!("Failed to create parent dirs for {}", path.display()));
+        if let Err(ref e) = parent_result {
+            log_edit_operation(
+                &ctx.working_dir,
+                "edit",
+                path,
+                "",
+                new_string,
+                &format!("mkdir error: {e}"),
+                dry_run,
+            );
+        }
+        parent_result?;
     }
 
-    tokio::fs::write(path, new_string)
+    let write_result = tokio::fs::write(path, new_string)
         .await
-        .with_context(|| format!("Failed to write new file: {}", path.display()))?;
+        .with_context(|| format!("Failed to write new file: {}", path.display()));
+    if let Err(ref e) = write_result {
+        log_edit_operation(
+            &ctx.working_dir,
+            "edit",
+            path,
+            "",
+            new_string,
+            &format!("write error: {e}"),
+            dry_run,
+        );
+    }
+    write_result?;
 
     record_edit_timestamp(path, ctx);
 
@@ -332,6 +440,15 @@ async fn create_file(
              Use file_path/old_string/new_string instead."
         );
     }
+    log_edit_operation(
+        &ctx.working_dir,
+        "edit",
+        path,
+        "",
+        new_string,
+        "success",
+        dry_run,
+    );
 
     Ok(ToolOutput {
         content: snippet,

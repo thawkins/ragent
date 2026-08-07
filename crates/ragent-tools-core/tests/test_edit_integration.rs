@@ -524,3 +524,180 @@ async fn test_read_then_edit_no_stale_error() {
         .expect("read-then-edit should succeed without stale error");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn foo() { 2 }\n");
 }
+
+// ── Edit-log instrumentation (editlog spec) ─────────────────────────────────
+
+use ragent_tools_core::edit_log::{is_edit_log_enabled, set_edit_log_enabled};
+
+#[tokio::test]
+async fn test_edit_log_success_writes_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+    set_edit_log_enabled(true);
+    assert!(is_edit_log_enabled());
+
+    assert_edit(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {\n    bar\n}\n",
+        "    bar\n",
+        "    baz\n",
+        "fn foo() {\n    baz\n}\n",
+    )
+    .await;
+
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+
+    let path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(
+        !lines.is_empty(),
+        "log file should contain at least one entry"
+    );
+    let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(entry["tool"], "edit");
+    assert!(
+        entry["file_path"].as_str().unwrap().ends_with("/a.rs"),
+        "file_path should end with /a.rs: {}",
+        entry["file_path"]
+    );
+    assert_eq!(entry["old_str"], "    bar\n");
+    assert_eq!(entry["new_str"], "    baz\n");
+    assert_eq!(entry["outcome"], "success");
+    assert_eq!(entry["dry_run"], false);
+
+    set_edit_log_enabled(false);
+    let _ = std::fs::remove_dir_all(&log_dir);
+}
+
+#[tokio::test]
+async fn test_edit_log_dry_run_writes_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+    set_edit_log_enabled(true);
+
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "    bar\n",
+        "new_string": "    baz\n",
+        "dry_run": true,
+    });
+    let _out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("dry_run edit should succeed");
+
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+
+    let log_path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(!lines.is_empty());
+    let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["outcome"], "success (dry-run preview)");
+    assert_eq!(entry["dry_run"], true);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn foo() {\n    bar\n}\n",
+        "file must remain unchanged"
+    );
+
+    set_edit_log_enabled(false);
+    let _ = std::fs::remove_dir_all(&log_dir);
+}
+
+#[tokio::test]
+async fn test_edit_log_failure_writes_jsonl() {
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+    set_edit_log_enabled(true);
+
+    write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "not in file",
+        "new_string": "x",
+    });
+    let _err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("absent text must error");
+
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+
+    let log_path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert!(!lines.is_empty());
+    let entry: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(entry["tool"], "edit");
+    assert!(
+        entry["outcome"].as_str().unwrap().contains("not found"),
+        "outcome should record not-found: {}",
+        entry["outcome"]
+    );
+
+    set_edit_log_enabled(false);
+    let _ = std::fs::remove_dir_all(&log_dir);
+}
+
+#[tokio::test]
+async fn test_edit_log_disabled_does_not_write() {
+    // Disable logging before creating the temp dir so `log/` is never created.
+    set_edit_log_enabled(false);
+    assert!(!is_edit_log_enabled());
+
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join("log");
+
+    assert_edit(
+        tmp.path(),
+        "a.rs",
+        "fn foo() {\n    bar\n}\n",
+        "    bar\n",
+        "    baz\n",
+        "fn foo() {\n    baz\n}\n",
+    )
+    .await;
+
+    assert!(
+        !log_dir.exists() || std::fs::read_dir(&log_dir).unwrap().count() == 0,
+        "log directory should not contain entries when logging is disabled"
+    );
+}

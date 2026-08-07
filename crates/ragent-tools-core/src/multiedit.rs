@@ -39,6 +39,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use super::edit_log::log_edit_operation;
 use super::path_util::resolve_path;
 use super::replace::{FindDiag, find_exact_replacement_range, format_match_failure};
 use super::{Tool, ToolContext, ToolOutput};
@@ -235,6 +236,19 @@ impl Tool for MultiEditTool {
         // was read. Files with no recorded timestamp proceed (no baseline).
         for path in &unique_paths {
             if let Err(e) = check_stale_file(path, ctx) {
+                for op in &ops {
+                    if &op.path == path {
+                        log_edit_operation(
+                            &ctx.working_dir,
+                            "multi_edit",
+                            &op.path,
+                            &op.old_str,
+                            &op.new_str,
+                            &format!("stale-file rejected: {e}"),
+                            dry_run,
+                        );
+                    }
+                }
                 bail!("{e}");
             }
         }
@@ -252,7 +266,17 @@ impl Tool for MultiEditTool {
                         super::replace::FindError::NotFound => FindDiag::not_found(),
                         super::replace::FindError::MultipleMatches(n) => FindDiag::multiple(n),
                     };
-                    anyhow::anyhow!("Edit {}: {}", i, format_match_failure(&diag, &op.path))
+                    let err = format!("Edit {}: {}", i, format_match_failure(&diag, &op.path));
+                    log_edit_operation(
+                        &ctx.working_dir,
+                        "multi_edit",
+                        &op.path,
+                        &op.old_str,
+                        &op.new_str,
+                        &err,
+                        dry_run,
+                    );
+                    anyhow::anyhow!(err)
                 })?;
 
             let old_lines = original[start..end].lines().count().max(1);
@@ -279,7 +303,7 @@ impl Tool for MultiEditTool {
                     let ea = &edits[a];
                     let eb = &edits[b];
                     if ea.start < eb.end && eb.start < ea.end {
-                        bail!(
+                        let err = format!(
                             "Edits {} and {} overlap in {} (bytes {}-{} and {}-{}). \
                              Merge them into a single edit or remove one.",
                             ea.input_index,
@@ -290,6 +314,16 @@ impl Tool for MultiEditTool {
                             eb.start,
                             eb.end
                         );
+                        log_edit_operation(
+                            &ctx.working_dir,
+                            "multi_edit",
+                            path,
+                            "",
+                            "",
+                            &err,
+                            dry_run,
+                        );
+                        bail!(err);
                     }
                 }
             }
@@ -309,15 +343,15 @@ impl Tool for MultiEditTool {
         let mut total_added = 0usize;
         let mut total_removed = 0usize;
 
-        for (path, mut edits) in resolved_by_file {
+        for (path, edits) in resolved_by_file.iter_mut() {
             // Sort end-to-start (descending by end, tie-break by start desc).
             edits.sort_by(|a, b| b.end.cmp(&a.end).then(b.start.cmp(&a.start)));
 
             let content = file_contents
-                .get_mut(&path)
+                .get_mut(path)
                 .expect("file content must exist");
 
-            for edit in &edits {
+            for edit in &mut *edits {
                 *content = format!(
                     "{}{}{}",
                     &content[..edit.start],
@@ -331,7 +365,7 @@ impl Tool for MultiEditTool {
             let removed: usize = edits.iter().map(|e| e.old_lines).sum();
 
             file_stats.insert(
-                path,
+                path.clone(),
                 FileStats {
                     edits: edits_count,
                     added,
@@ -344,19 +378,57 @@ impl Tool for MultiEditTool {
         }
 
         // Phase 5: Write all modified files (skipped in dry-run mode).
+        let mut write_errors: Vec<String> = Vec::new();
         if !dry_run {
             for (path, content) in &file_contents {
                 if file_stats.contains_key(path) {
-                    tokio::fs::write(path, content)
+                    if let Err(e) = tokio::fs::write(path, content)
                         .await
-                        .with_context(|| format!("Failed to write file: {}", path.display()))?;
-                    // Refresh the read timestamp for this file so a follow-up
-                    // edit in the same session does not trip the stale-file
-                    // check on a file we just wrote (editrenewal FR-003).
-                    record_edit_timestamp(path, ctx);
+                        .with_context(|| format!("Failed to write file: {}", path.display()))
+                    {
+                        write_errors.push(format!("{e}"));
+                    } else {
+                        // Refresh the read timestamp for this file so a follow-up
+                        // edit in the same session does not trip the stale-file
+                        // check on a file we just wrote (editrenewal FR-003).
+                        record_edit_timestamp(path, ctx);
+                    }
                 }
             }
         }
+
+        if let Some(first_err) = write_errors.first() {
+            for (path, edits) in &resolved_by_file {
+                for edit in edits {
+                    log_edit_operation(
+                        &ctx.working_dir,
+                        "multi_edit",
+                        path,
+                        &ops[edit.input_index].old_str,
+                        &ops[edit.input_index].new_str,
+                        &format!("write error: {first_err}"),
+                        dry_run,
+                    );
+                }
+            }
+            bail!("{first_err}");
+        }
+
+        // Log a success entry for every resolved edit operation.
+        for (path, edits) in &resolved_by_file {
+            for edit in edits {
+                log_edit_operation(
+                    &ctx.working_dir,
+                    "multi_edit",
+                    path,
+                    &ops[edit.input_index].old_str,
+                    &ops[edit.input_index].new_str,
+                    "success",
+                    dry_run,
+                );
+            }
+        }
+
         let file_count = file_stats.len();
 
         // Build per-file stats array sorted by path for stable display order.

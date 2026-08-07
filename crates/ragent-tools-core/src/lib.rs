@@ -18,6 +18,7 @@ pub mod copy_file;
 pub mod create;
 pub mod diff;
 pub mod edit;
+pub mod edit_log;
 pub mod file_info;
 pub mod mkdir;
 pub mod move_file;

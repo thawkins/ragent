@@ -23,6 +23,10 @@ mod file_lock {
 mod path_util {
     pub(crate) use ragent_tools_core::path_util::resolve_path;
 }
+mod edit_log {
+    pub(crate) use ragent_tools_core::edit_log::log_edit_operation;
+}
+
 #[path = "../src/edit.rs"]
 #[allow(unreachable_pub)] // public items are reachable from the lib target, not this test target
 mod edit;
