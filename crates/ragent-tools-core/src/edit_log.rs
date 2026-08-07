@@ -230,7 +230,7 @@ impl OldStrRisk {
 pub fn detect_old_str_risks(old_str: &str) -> Vec<OldStrRisk> {
     let mut risks = Vec::new();
 
-    if old_str.chars().any(|c| !c.is_ascii()) {
+    if !old_str.is_ascii() {
         risks.push(OldStrRisk::ContainsUtf);
     }
 
@@ -250,9 +250,7 @@ pub fn detect_old_str_risks(old_str: &str) -> Vec<OldStrRisk> {
 
     // `lines()` skips the trailing empty string, so a trailing blank line is
     // detected separately below.
-    let raw_has_blank_line = old_str
-        .split(|c| c == '\n' || c == '\r')
-        .any(|line| line.is_empty());
+    let raw_has_blank_line = old_str.split(['\n', '\r']).any(|line| line.is_empty());
     let lines_have_blank = old_str.lines().any(|line| line.trim().is_empty());
     if raw_has_blank_line || lines_have_blank {
         risks.push(OldStrRisk::ContainsBlankLines);
@@ -605,15 +603,15 @@ pub fn clear_edit_log_contents(working_dir: &Path) -> usize {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str.starts_with("edits-") && name_str.ends_with(".jsonl") {
-                if let Ok(file) = std::fs::OpenOptions::new()
+            if name_str.starts_with("edits-")
+                && name_str.ends_with(".jsonl")
+                && let Ok(file) = std::fs::OpenOptions::new()
                     .write(true)
                     .truncate(true)
                     .open(entry.path())
-                {
-                    drop(file);
-                    cleared += 1;
-                }
+            {
+                drop(file);
+                cleared += 1;
             }
         }
     }
