@@ -26,11 +26,9 @@
 //! threshold. Two trigger models are supported:
 //!
 //! * **Percentage (recommended)** — when `CompactionConfig::threshold` is set
-//!   (e.g. `0.8` for 80%), the threshold is `context_window * threshold`. This
-//!   is the legacy `compression.auto_threshold` value, migrated through so
-//!   existing configurations keep their configured trigger point.
+//!   (e.g. `0.8` for 80%), the threshold is `context_window * threshold`.
 //! * **Buffer** — when `threshold` is `None`, the threshold is
-//!   `context_window - max(output_tokens, buffer)` (the SPEC FR-003 default).
+//!   `context_window - max(output_tokens, context_window * buffer_fraction)`.
 //!
 //! The effective count prefers the provider-reported `input_tokens` from the
 //! previous turn when available (FR-002), falling back to the local estimate on
@@ -58,6 +56,15 @@ pub const CHARS_PER_TOKEN: usize = 4;
 /// because [`estimate_request_tokens`] sums component byte lengths rather than
 /// materialising the full JSON string.
 pub const MESSAGE_OVERHEAD_TOKENS: usize = 10;
+
+/// Minimum fraction of the context window that must be filled before automatic
+/// pre-send compaction is allowed to fire.
+///
+/// This floor prevents compaction from running on every small prompt when the
+/// configured buffer or a user-supplied percentage threshold would otherwise
+/// trigger at a very low usage level. Emergency overflow compaction is not
+/// subject to this floor.
+pub const MIN_COMPACTION_THRESHOLD_FRACTION: f64 = 0.7;
 
 /// Rough token cost attributed to an image content part for vision models.
 pub const IMAGE_TOKEN_ESTIMATE: usize = 1_000;
@@ -195,25 +202,37 @@ pub fn effective_request_tokens(estimated_tokens: usize, last_reported_input_tok
     }
 }
 
-/// Compute the compaction threshold (FR-003).
+/// Compute the compaction threshold (FR-003) with a 70 % usage floor.
 ///
 /// When `config.threshold` is set (a fraction such as `0.8` for 80%), the
 /// threshold is `context_window * threshold` — the user-configured trigger
-/// point (migrated from the legacy `compression.auto_threshold`). Otherwise it
-/// falls back to the buffer-based model `context_window -
-/// max(output_tokens, buffer)`, saturating at zero so a tiny context window
-/// never produces an underflow.
+/// point. Otherwise it falls back to the buffer-based model
+/// `context_window - max(output_tokens, context_window * buffer_fraction)`,
+/// saturating at zero so a tiny context window never produces an underflow.
+///
+/// In either case the result is raised to at least
+/// [`MIN_COMPACTION_THRESHOLD_FRACTION`] of the context window (70 %). This
+/// ensures that automatic pre-send compaction only runs once the conversation
+/// has reached 70 % of the model's context window, preventing premature
+/// summarisation after a routine prompt. Emergency overflow compaction bypasses
+/// this function, so it is not affected by the floor.
 #[must_use]
 pub fn compaction_threshold(
     context_window: usize,
     output_tokens: usize,
-    buffer: usize,
+    buffer_fraction: f64,
     threshold: Option<f64>,
 ) -> usize {
-    match threshold {
+    let candidate = match threshold {
         Some(frac) if (0.0..=1.0).contains(&frac) => ((context_window as f64) * frac) as usize,
-        _ => context_window.saturating_sub(output_tokens.max(buffer)),
-    }
+        _ => {
+            let buffer_tokens =
+                ((context_window as f64) * buffer_fraction.clamp(0.0, 1.0)) as usize;
+            context_window.saturating_sub(output_tokens.max(buffer_tokens))
+        }
+    };
+    let floor = ((context_window as f64) * MIN_COMPACTION_THRESHOLD_FRACTION) as usize;
+    candidate.max(floor).min(context_window)
 }
 
 /// Evaluate whether compaction should fire for the upcoming LLM request.
@@ -225,7 +244,7 @@ pub fn compaction_threshold(
 ///
 /// # Arguments
 ///
-/// * `config` — compaction configuration (supplies `buffer`).
+/// * `config` — compaction configuration (supplies `buffer_fraction`).
 /// * `estimated_tokens` — local [`estimate_request_tokens`] result.
 /// * `last_reported_input_tokens` — provider-reported `input_tokens` from the
 ///   previous turn, or `0` if unavailable.

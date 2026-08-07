@@ -698,9 +698,8 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Handle the `/editlog` slash command.
     fn handle_editlog_command(&mut self, args: &str) {
-        use ragent_tools_core::edit_log::{
-            clear_edit_log_contents, is_edit_log_enabled, set_edit_log_enabled,
-        };
+        use ragent_config::edit_log::{is_enabled as is_edit_log_enabled, persist_edit_log};
+        use ragent_tools_core::edit_log::clear_edit_log_contents;
         let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
         match sub.as_str() {
             "help" | "" => {
@@ -709,20 +708,34 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 );
                 self.status = "editlog: help".to_string();
             }
-            "on" => {
-                set_edit_log_enabled(true);
-                self.append_assistant_text(
-                    "From: /editlog on\n\n✅ Edit-operation logging enabled.",
-                );
-                self.status = "editlog: enabled".to_string();
-            }
-            "off" => {
-                set_edit_log_enabled(false);
-                self.append_assistant_text(
-                    "From: /editlog off\n\n✅ Edit-operation logging disabled.",
-                );
-                self.status = "editlog: disabled".to_string();
-            }
+            "on" => match persist_edit_log(true) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /editlog on\n\n✅ Edit-operation logging enabled.",
+                    );
+                    self.status = "editlog: enabled".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /editlog on\n\n⚠ Failed to persist edit-log state: {e}"
+                    ));
+                    self.status = format!("editlog: persist failed ({e})");
+                }
+            },
+            "off" => match persist_edit_log(false) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /editlog off\n\n✅ Edit-operation logging disabled.",
+                    );
+                    self.status = "editlog: disabled".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /editlog off\n\n⚠ Failed to persist edit-log state: {e}"
+                    ));
+                    self.status = format!("editlog: persist failed ({e})");
+                }
+            },
             "status" => {
                 let enabled = is_edit_log_enabled();
                 let dir = std::env::current_dir()

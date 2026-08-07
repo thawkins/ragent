@@ -16,7 +16,8 @@
 
 use ragent_tools_core::path_util::resolve_path;
 use ragent_tools_core::replace::{
-    FindDiag, FindDiagKind, FindError, find_exact_replacement_range, format_match_failure,
+    FindDiag, FindDiagKind, FindError, decode_escapes, find_exact_replacement_range,
+    find_flexible_replacement_range, format_match_failure,
 };
 use std::path::{Path, PathBuf};
 
@@ -103,4 +104,71 @@ fn format_match_failure_multiple_matches_asks_for_more_context() {
         msg.contains("more surrounding context"),
         "should ask for more context: {msg}"
     );
+}
+
+// ── collapse_whitespace: flexible matcher (opt-in) ─────────────────────────
+
+#[test]
+fn test_decode_escapes_basic() {
+    assert_eq!(decode_escapes("a\\tb"), "a\tb");
+    assert_eq!(decode_escapes("a\\nb"), "a\nb");
+    assert_eq!(decode_escapes("a\\rb"), "a\rb");
+    assert_eq!(decode_escapes("a\\\\b"), "a\\b");
+    // Unknown escapes are kept verbatim (no mangling).
+    assert_eq!(decode_escapes("C:\\\\path"), "C:\\path");
+    assert_eq!(decode_escapes("plain"), "plain");
+}
+
+#[test]
+fn test_flexible_matcher_collapses_multiple_spaces() {
+    let content = "alpha   beta   gamma\n";
+    // Needle has single spaces; content has runs of 3.
+    let (s, e, effective) = find_flexible_replacement_range(content, "alpha beta", "X").unwrap();
+    assert_eq!(&content[s..e], "alpha   beta");
+    assert_eq!(effective, "X");
+}
+
+#[test]
+fn test_flexible_matcher_decodes_tab_escape() {
+    let content = "let x = 1;\n\tlet y = 2;\n";
+    let needle = "let x = 1;\\n\\tlet y = 2;";
+    let (s, e, _new) = find_flexible_replacement_range(content, needle, "R").unwrap();
+    assert_eq!(&content[s..e], "let x = 1;\n\tlet y = 2;");
+}
+
+#[test]
+fn test_flexible_matcher_matches_blank_line_collapse() {
+    let content = "fn a() {\n\n\n    bar\n}\n";
+    let needle = "fn a() {\n    bar\n}\n";
+    let (s, e, _) = find_flexible_replacement_range(content, needle, "R\n").unwrap();
+    assert_eq!(&content[s..e], "fn a() {\n\n\n    bar\n}\n");
+}
+
+#[test]
+fn test_flexible_matcher_exact_hit_still_requires_uniqueness() {
+    // Needle occurs twice byte-for-byte: must stay ambiguous even in flexible mode.
+    let content = "dup and dup\n";
+    let err = find_flexible_replacement_range(content, "dup", "DUP").unwrap_err();
+    assert!(
+        matches!(err, FindError::MultipleMatches(2)),
+        "exact duplicates must remain rejected: {err:?}"
+    );
+}
+
+#[test]
+fn test_flexible_matcher_ambiguous_flexible_hits_rejected() {
+    // Two locations that both match under whitespace-collapse → ambiguous.
+    let content = "a  b\na    b\n";
+    let err = find_flexible_replacement_range(content, "a b", "X").unwrap_err();
+    assert!(
+        matches!(err, FindError::MultipleMatches(_)),
+        "two flexible hits must be rejected: {err:?}"
+    );
+}
+
+#[test]
+fn test_flexible_matcher_not_found() {
+    let content = "fn a() { 1 }\n";
+    let err = find_flexible_replacement_range(content, "totally absent", "x").unwrap_err();
+    assert!(matches!(err, FindError::NotFound));
 }

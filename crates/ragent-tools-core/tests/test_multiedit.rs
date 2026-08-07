@@ -658,6 +658,7 @@ fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBu
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_multiedit_log_success_writes_jsonl() {
     let _guard = EDIT_LOG_MUTEX.lock().unwrap();
     clear_edit_logs(std::env::temp_dir().as_path());
@@ -702,6 +703,7 @@ async fn test_multiedit_log_success_writes_jsonl() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_multiedit_log_failure_writes_jsonl() {
     let _guard = EDIT_LOG_MUTEX.lock().unwrap();
     clear_edit_logs(std::env::temp_dir().as_path());
@@ -734,4 +736,70 @@ async fn test_multiedit_log_failure_writes_jsonl() {
 
     set_edit_log_enabled(false);
     clear_edit_logs(tmp.path());
+}
+
+// ── collapse_whitespace (per-edit opt-in) ──────────────────────────────────
+
+#[tokio::test]
+async fn test_multiedit_collapse_whitespace_per_edit() {
+    let tmp = TempDir::new().unwrap();
+    // a.rs needs flexible matching (4-space needle vs 8-space content);
+    // b.rs uses strict matching.
+    write_file(tmp.path(), "a.rs", "fn a() {\n        bar\n}\n");
+    write_file(tmp.path(), "b.rs", "beta\n");
+
+    let input = json!({
+        "edits": [
+            {
+                "file_path": "a.rs",
+                "old_string": "fn a() {\n    bar\n}\n",
+                "new_string": "fn a() {\n    baz\n}\n",
+                "collapse_whitespace": true
+            },
+            { "file_path": "b.rs", "old_string": "beta", "new_string": "BETA" }
+        ]
+    });
+    MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("mixed strict+flexible batch should succeed");
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "fn a() {\n    baz\n}\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("b.rs")).unwrap(),
+        "BETA\n"
+    );
+}
+
+#[tokio::test]
+async fn test_multiedit_collapse_whitespace_failure_is_atomic() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "alpha\n");
+    write_file(tmp.path(), "b.rs", "beta\n");
+    let input = json!({
+        "edits": [
+            { "file_path": "a.rs", "old_string": "alpha", "new_string": "ALPHA" },
+            {
+                "file_path": "b.rs",
+                "old_string": "nonexistent",
+                "new_string": "BETA",
+                "collapse_whitespace": true
+            }
+        ]
+    });
+    let err = MultiEditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("failed flexible edit must abort the whole batch");
+    assert!(
+        err.to_string().contains("collapse_whitespace"),
+        "error should mention collapse_whitespace mode: {err}"
+    );
+    // Atomicity: a.rs must NOT have been written.
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "alpha\n"
+    );
 }

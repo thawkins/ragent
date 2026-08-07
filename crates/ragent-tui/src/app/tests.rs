@@ -1,4 +1,5 @@
 //! Inline tests for the TUI app module.
+#![allow(clippy::redundant_pub_crate)]
 #[cfg(test)]
 mod app_tests {
     use crate::app::helpers::{is_discovery_notice, try_extract_research_code_block};

@@ -198,8 +198,9 @@ with OpenCode's `opencode.json`.
       },
       "compaction": {
         "auto": true,
-        "buffer": 20000,
-        "keep": { "tokens": 8000 }
+        "threshold": 0.7,
+        "buffer": 0.10,
+        "keep": { "tokens": 0.20 }
       },
       "tool_visibility": {    "office": true,
     "github": true,

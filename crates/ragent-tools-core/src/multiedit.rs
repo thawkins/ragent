@@ -41,7 +41,10 @@ use std::time::SystemTime;
 
 use super::edit_log::log_edit_operation;
 use super::path_util::resolve_path;
-use super::replace::{FindDiag, find_exact_replacement_range, format_match_failure};
+use super::replace::{
+    FindDiag, FindError, find_exact_replacement_range, find_flexible_replacement_range,
+    format_match_failure,
+};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
@@ -70,6 +73,8 @@ struct EditOp {
     path: PathBuf,
     old_str: String,
     new_str: String,
+    /// Opt-in whitespace-collapse matching for this edit (default false).
+    collapse_ws: bool,
 }
 
 /// A resolved edit: the original input index, the byte range against the
@@ -106,11 +111,15 @@ impl Tool for MultiEditTool {
         "Apply multiple surgical text edits to one or more files atomically. \
          Required parameter: `edits` (array of edit objects). Each edit object \
          must provide `file_path` (string), `old_string` (string), and \
-         `new_string` (string). Every edit must match exactly once in its file; \
-         if any single edit fails validation, no files are modified. Edits to \
-         the same file are overlap-checked and applied highest-offset-first, so \
-         input order does not matter. Legacy aliases `path`/`old_str`/`new_str` \
-         are accepted inside each edit object but deprecated."
+         `new_string` (string). By default every edit must match exactly once in \
+         its file, byte-for-byte; if any single edit fails validation, no files \
+         are modified. Each edit also accepts `collapse_whitespace` (boolean, \
+         default false) to relax matching for that edit: backslash escapes \
+         (\\t, \\n, \\r, \\\\) in old_string are decoded and every whitespace \
+         run matches a non-empty whitespace run in the file. Edits to the same \
+         file are overlap-checked and applied highest-offset-first, so input \
+         order does not matter. Legacy aliases `path`/`old_str`/`new_str` are \
+         accepted inside each edit object but deprecated."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -134,6 +143,11 @@ impl Tool for MultiEditTool {
                             "new_string": {
                                 "type": "string",
                                 "description": "REQUIRED. Replacement string"
+                            },
+                            "collapse_whitespace": {
+                                "type": "boolean",
+                                "description": "If true, relax matching for this edit: backslash escapes (\\t, \\n, \\r, \\\\) in old_string are decoded and every whitespace run matches a non-empty whitespace run in the file. Default false (byte-for-byte exact).",
+                                "default": false
                             },
                             "path": {
                                 "type": "string",
@@ -201,11 +215,16 @@ impl Tool for MultiEditTool {
                 .as_str()
                 .or_else(|| edit["new_str"].as_str())
                 .with_context(|| format!("Edit {i}: missing 'new_string' (or legacy 'new_str')"))?;
+            let collapse_ws = edit
+                .get("collapse_whitespace")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
 
             ops.push(EditOp {
                 path: resolve_path(&ctx.working_dir, path_str),
                 old_str: old_str.to_string(),
                 new_str: new_str.to_string(),
+                collapse_ws,
             });
         }
 
@@ -260,11 +279,35 @@ impl Tool for MultiEditTool {
                 .get(&op.path)
                 .expect("file content must exist for every op path");
 
-            let (start, end, effective_new) =
+            let (start, end, effective_new) = if op.collapse_ws {
+                find_flexible_replacement_range(original, &op.old_str, &op.new_str).map_err(
+                    |e| {
+                        let diag = match e {
+                            FindError::NotFound => FindDiag::not_found(),
+                            FindError::MultipleMatches(n) => FindDiag::multiple(n),
+                        };
+                        let err = format!(
+                            "Edit {}: {} (collapse_whitespace mode)",
+                            i,
+                            format_match_failure(&diag, &op.path)
+                        );
+                        log_edit_operation(
+                            &ctx.working_dir,
+                            "multi_edit",
+                            &op.path,
+                            &op.old_str,
+                            &op.new_str,
+                            &err,
+                            dry_run,
+                        );
+                        anyhow::anyhow!(err)
+                    },
+                )?
+            } else {
                 find_exact_replacement_range(original, &op.old_str, &op.new_str).map_err(|e| {
                     let diag = match e {
-                        super::replace::FindError::NotFound => FindDiag::not_found(),
-                        super::replace::FindError::MultipleMatches(n) => FindDiag::multiple(n),
+                        FindError::NotFound => FindDiag::not_found(),
+                        FindError::MultipleMatches(n) => FindDiag::multiple(n),
                     };
                     let err = format!("Edit {}: {}", i, format_match_failure(&diag, &op.path));
                     log_edit_operation(
@@ -277,7 +320,8 @@ impl Tool for MultiEditTool {
                         dry_run,
                     );
                     anyhow::anyhow!(err)
-                })?;
+                })?
+            };
 
             let old_lines = original[start..end].lines().count().max(1);
             let new_lines = effective_new.lines().count();

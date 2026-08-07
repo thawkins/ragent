@@ -68,7 +68,7 @@ enum LocalEmbeddingInner {
     /// Successfully loaded and ready for inference.
     Ready {
         session: ort::session::Session,
-        tokenizer: tokenizers::Tokenizer,
+        tokenizer: Box<tokenizers::Tokenizer>,
     },
     /// Initialisation failed; store the error so we don't retry indefinitely.
     Failed(String),
@@ -127,7 +127,10 @@ impl LocalEmbeddingProvider {
             MODEL_REPO, self.dimensions
         );
 
-        *guard = LocalEmbeddingInner::Ready { session, tokenizer };
+        *guard = LocalEmbeddingInner::Ready {
+            session,
+            tokenizer: Box::new(tokenizer),
+        };
         Ok(())
     }
 
@@ -310,10 +313,10 @@ impl EmbeddingProvider for LocalEmbeddingProvider {
         match self.encode(text) {
             Ok(vec) => Ok(vec),
             Err(e) => {
-                if let Ok(mut guard) = self.inner.lock() {
-                    if matches!(*guard, LocalEmbeddingInner::Uninit) {
-                        *guard = LocalEmbeddingInner::Failed(e.to_string());
-                    }
+                if let Ok(mut guard) = self.inner.lock()
+                    && matches!(*guard, LocalEmbeddingInner::Uninit)
+                {
+                    *guard = LocalEmbeddingInner::Failed(e.to_string());
                 }
                 Err(e)
             }

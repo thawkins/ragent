@@ -521,8 +521,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `apply_patch` | Apply a Codex-style patch with add/delete/update and file moves |
 | `read` | Read file contents with line-range support |
 | `write` / `create` | Create or overwrite a file |
-| `edit` | Replace one exact string occurrence |
-| `multiedit` | Apply multiple edits atomically across one or more files |
+| `edit` | Replace one exact string occurrence; optional `collapse_whitespace` relaxes matching (whitespace-run collapse + `\t`/`\n`/`\r`/`\\` escape decoding) |
+| `multiedit` | Apply multiple edits atomically across one or more files; each edit honours its own `collapse_whitespace` flag |
 | `patch` | Apply a unified diff |
 | `rm` | Delete a single file |
 | `move` / `move_file` | Move or rename a file/directory |
@@ -739,7 +739,7 @@ graph LR
 | Phase | Responsibility |
 |-------|----------------|
 | Build Context | Assemble system prompt, memories, code index, conversation history |
-| Compact | Summarise conversation history when estimated request tokens exceed `context_window - max(output_tokens, compaction.buffer)` (FR-003); emergency compaction on provider context-overflow errors (FR-004) |
+| Compact | Summarise conversation history when estimated request tokens exceed the configured percentage of the model's context window (`threshold`, default 70%) or, when `threshold` is null, `context_window - max(output_tokens, compaction.buffer)` (FR-003); emergency compaction on provider context-overflow errors (FR-004) |
 | LLM Call | Send request to selected provider |
 | Stream | Emit assistant chunks and tool call events |
 | Execute Tools | Check permissions, run tools, record results |
@@ -934,12 +934,17 @@ The format is compatible with OpenCode's `opencode.json`.
     "semantic": { "enabled": false, "dimensions": 384 }
   },
   // OpenCode-derived summarisation compaction (recommended).
-  // Compaction triggers when estimated request tokens exceed
-  // context_window - max(output_tokens, buffer).
+  // Compaction triggers when estimated request tokens exceed the configured
+  // percentage of the model's context window. `threshold: 0.7` means the
+  // summarisation runs once usage crosses 70 % of the available context,
+  // regardless of the model's absolute context size. When `threshold` is
+  // null, the fraction-based fallback `context_window - max(output_tokens,
+  // buffer)` is used instead.
   "compaction": {
     "auto": true,
-    "buffer": 20000,
-    "keep": { "tokens": 8000 }
+    "threshold": 0.7,
+    "buffer": 0.10,
+    "keep": { "tokens": 0.20 }
   },
   // Deprecated legacy Headroom compression block. Still parsed for
   // one-release migration: `compression.enabled` maps to
@@ -992,8 +997,8 @@ The format is compatible with OpenCode's `opencode.json`.
 
 The `compaction` block controls OpenCode-derived summarisation-based context-window
 compaction, which replaces the older Headroom `compression` scheme. It satisfies
-FR-008 (auto toggle) and FR-011 (user-overridable buffer, keep-tokens, and summary
-output-token values).
+FR-008 (auto toggle) and FR-011 (user-overridable threshold, buffer, keep-tokens,
+and summary output-token values).
 
 ```jsonc
 {
@@ -1001,15 +1006,22 @@ output-token values).
     // Enable automatic pre-send summarisation. When false, only emergency
     // overflow compaction runs on provider context-overflow errors (FR-008).
     "auto": true,
-    // Token buffer reserved for the model response and safety margin.
-    // Compaction triggers when estimated request tokens exceed
-    // context_window - max(output_tokens, buffer). Default: 20000 (FR-011).
-    "buffer": 20000,
+    // Fraction of the model's context window at which automatic pre-send
+    // compaction triggers (0.0–1.0). Default: 0.7 (70 %). This is the
+    // recommended, model-independent trigger: 70 % of a 32k window is 22.4k
+    // tokens, while 70 % of a 200k window is 140k tokens. The threshold is
+    // never below 70 %, even when a fraction-based fallback is used.
+    "threshold": 0.7,
+    // Response/safety buffer as a fraction of the model's context window.
+    // Only used when `threshold` is null. Compaction then triggers when
+    // estimated request tokens exceed context_window - max(output_tokens,
+    // buffer). Default: 0.10 (10 %, FR-011).
+    "buffer": 0.10,
     // Recent conversation turns kept verbatim after compaction.
     "keep": {
-      // Maximum tokens of recent user/assistant/tool turns to preserve.
-      // Default: 8000 (FR-011).
-      "tokens": 8000
+      // Fraction of the context window reserved for recent user/assistant/tool turns to preserve.
+      // Default: 0.20 (20 %, FR-011).
+      "tokens": 0.20
     }
   }
 }
@@ -1018,8 +1030,14 @@ output-token values).
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `auto` | bool | `true` | Enable automatic pre-send compaction (FR-008) |
-| `buffer` | usize | `20000` | Response/safety token buffer; compaction trigger threshold (FR-011) |
-| `keep.tokens` | usize | `8000` | Max tokens of recent turns preserved verbatim (FR-011) |
+| `threshold` | f64 | `0.7` | Fraction of context window that triggers compaction; model-independent |
+| `buffer` | f64 | `0.10` | Fallback response/safety buffer as a fraction of the context window when `threshold` is null (FR-011) |
+| `keep.tokens` | f64 | `0.20` | Fraction of context window reserved for recent turns preserved verbatim (FR-011) |
+
+The compaction trigger threshold is always raised to at least 70 % of the
+model's context window, so automatic pre-send compaction never fires on routine
+prompts that fill less than 70 % of the available context. Emergency overflow
+compaction is not subject to this floor.
 
 The compaction summary output length is fixed at `4096` tokens and tool outputs
 are truncated to `2000` characters before being serialised into the summarisation

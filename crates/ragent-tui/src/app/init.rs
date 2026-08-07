@@ -128,6 +128,9 @@ impl App {
         let app_config = ragent_agent::Config::load().unwrap_or_default();
         sub.record("App: config reload", t0.elapsed());
 
+        // Sync the edit-log runtime flag from persisted config.
+        ragent_config::edit_log::sync_from_config();
+
         let t0 = Instant::now();
         let selected_model = storage.get_setting("selected_model").ok().flatten();
         let selected_model_ctx_window = storage

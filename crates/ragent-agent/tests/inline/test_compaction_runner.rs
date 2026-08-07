@@ -27,8 +27,9 @@ fn assistant_msg(text: &str) -> Message {
 
 #[test]
 fn test_select_keeps_recent_tail_within_budget() {
-    // keep_tokens default = 8_000; each short message is ~1-3 tokens, so all
-    // five messages fit in the recent tail and the head is empty.
+    // keep.tokens default = 0.20; on a 100k window that is 20k tokens. Each
+    // short message is ~1-3 tokens, so all five messages fit in the recent tail
+    // and the head is empty.
     let messages = vec![
         user_msg("aaaa"),
         assistant_msg("bbbb"),
@@ -37,7 +38,7 @@ fn test_select_keeps_recent_tail_within_budget() {
         user_msg("eeee"),
     ];
     let config = CompactionConfig::default();
-    let split = select(&messages, &config);
+    let split = select(&messages, &config, 100_000);
     assert!(split.head_messages.is_empty());
     assert_eq!(split.recent_messages.len(), 5);
     assert!(split.recent_tokens > 0);
@@ -45,13 +46,13 @@ fn test_select_keeps_recent_tail_within_budget() {
 
 #[test]
 fn test_select_splits_when_budget_exceeded() {
-    // A tiny keep_tokens forces a split: only the last message fits.
+    // A tiny keep fraction forces a split: only the last message fits.
     let messages = vec![user_msg("aaaa"), assistant_msg("bbbb"), user_msg("cccc")];
     let config = CompactionConfig {
-        keep: ragent_config::compaction::KeepConfig { tokens: Some(0) },
+        keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
-    let split = select(&messages, &config);
+    let split = select(&messages, &config, 100_000);
     // With a zero budget, only the last message is kept verbatim.
     assert_eq!(split.recent_messages.len(), 1);
     assert_eq!(split.recent_messages[0].text_content(), "cccc");
@@ -64,7 +65,7 @@ fn test_select_drops_compaction_messages() {
     // Insert a compaction message in the middle; select should ignore it.
     messages.insert(1, build_compaction_message("sess", "old summary"));
     let config = CompactionConfig::default();
-    let split = select(&messages, &config);
+    let split = select(&messages, &config, 100_000);
     // The compaction message is dropped from both head and recent.
     assert!(
         split
@@ -83,10 +84,25 @@ fn test_select_drops_compaction_messages() {
 #[test]
 fn test_select_empty_history() {
     let config = CompactionConfig::default();
-    let split = select(&[], &config);
+    let split = select(&[], &config, 100_000);
     assert!(split.head_messages.is_empty());
     assert!(split.recent_messages.is_empty());
     assert_eq!(split.recent_tokens, 0);
+}
+
+#[test]
+fn test_select_respects_fraction_on_small_window() {
+    // keep fraction 0.20 on a 1000-token window gives 200 tokens. With messages
+    // that sum to more than 200 tokens, only the last message should be kept.
+    let messages = vec![
+        user_msg("a".repeat(400).as_str()),
+        assistant_msg("b".repeat(400).as_str()),
+        user_msg("c".repeat(400).as_str()),
+    ];
+    let config = CompactionConfig::default();
+    let split = select(&messages, &config, 1_000);
+    assert_eq!(split.recent_messages.len(), 1);
+    assert_eq!(split.head_messages.len(), 2);
 }
 
 #[test]
@@ -176,7 +192,7 @@ async fn test_compact_replaces_history_with_summary_and_recent() {
         user_msg("latest user asking to fix a bug"),
     ];
     let config = CompactionConfig {
-        keep: ragent_config::compaction::KeepConfig { tokens: Some(5) },
+        keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> =
@@ -231,7 +247,7 @@ async fn test_compact_bails_when_nothing_to_summarise() {
     // previous summary -> nothing to summarise.
     let messages = vec![user_msg("only message")];
     let config = CompactionConfig {
-        keep: ragent_config::compaction::KeepConfig { tokens: Some(0) },
+        keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> =
@@ -269,7 +285,7 @@ async fn test_compact_bails_on_empty_summary() {
         user_msg("third"),
     ];
     let config = CompactionConfig {
-        keep: ragent_config::compaction::KeepConfig { tokens: Some(0) },
+        keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> = Arc::new(MockLlmClient::with_scenario(MockScenario::Empty));
@@ -300,7 +316,7 @@ async fn test_compact_publishes_started_and_finished_events() {
         user_msg("third message"),
     ];
     let config = CompactionConfig {
-        keep: ragent_config::compaction::KeepConfig { tokens: Some(0) },
+        keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> =

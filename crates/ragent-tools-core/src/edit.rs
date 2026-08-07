@@ -54,7 +54,9 @@ use std::time::SystemTime;
 
 use super::edit_log::log_edit_operation;
 use super::path_util::resolve_path;
-use super::replace::{find_exact_replacement_range, format_match_failure};
+use super::replace::{
+    FindError, find_exact_replacement_range, find_flexible_replacement_range, format_match_failure,
+};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Minimum lines of context to show before and after the edited region in the
@@ -84,9 +86,14 @@ impl Tool for EditTool {
     fn description(&self) -> &'static str {
         "Replace exactly one occurrence of `old_string` with `new_string` in a \
          single file. Required parameters: `file_path` (string), `old_string` \
-         (string), and `new_string` (string). The old_string must match exactly \
-         once, byte-for-byte (indentation, whitespace, and line endings must \
-         match precisely). Include 3–5 lines of context around \
+         (string), and `new_string` (string). By default the old_string must \
+         match exactly once, byte-for-byte (indentation, whitespace, and line \
+         endings must match precisely). Optional `collapse_whitespace` \
+         (boolean, default false) relaxes matching: backslash escapes \
+         (\\t, \\n, \\r, \\\\) in old_string are decoded and every run of \
+         whitespace matches a non-empty run of whitespace in the file, so \
+         collapsed indentation or alignment whitespace does not cause spurious \
+         failures. Include 3–5 lines of context around \
          the change point so the match is unique. Use an empty `old_string` on \
          a non-existent file to create it; use an empty `new_string` to delete \
          the matched text. Optional: `dry_run` (boolean) previews the change \
@@ -113,6 +120,11 @@ impl Tool for EditTool {
                 "dry_run": {
                     "type": "boolean",
                     "description": "If true, resolve the match and return a preview snippet without writing the file."
+                },
+                "collapse_whitespace": {
+                    "type": "boolean",
+                    "description": "If true, relax matching: backslash escapes (\\t, \\n, \\r, \\\\) in old_string are decoded and every whitespace run matches a non-empty whitespace run in the file. Default false (byte-for-byte exact).",
+                    "default": false
                 },
                 "path": {
                     "type": "string",
@@ -169,6 +181,10 @@ impl Tool for EditTool {
 
         let dry_run = input
             .get("dry_run")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let collapse_whitespace = input
+            .get("collapse_whitespace")
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
@@ -237,8 +253,32 @@ impl Tool for EditTool {
             return Err(e);
         }
 
-        // ── Exact-byte replacement (FR-004, FR-005) ───��───────────────────
-        let (start, end, new_str) =
+        // ── Replacement (FR-004, FR-005; opt-in flexible mode) ───────────────
+        let (start, end, new_str) = if collapse_whitespace {
+            match find_flexible_replacement_range(&content, old_string, new_string) {
+                Ok(range) => range,
+                Err(e) => {
+                    let diag = match e {
+                        FindError::NotFound => super::replace::FindDiag::not_found(),
+                        FindError::MultipleMatches(n) => super::replace::FindDiag::multiple(n),
+                    };
+                    let err = format!(
+                        "{} (collapse_whitespace mode: escapes decoded, whitespace runs collapsed)",
+                        format_match_failure(&diag, &path)
+                    );
+                    log_edit_operation(
+                        &ctx.working_dir,
+                        "edit",
+                        &path,
+                        old_string,
+                        new_string,
+                        &err,
+                        dry_run,
+                    );
+                    bail!(err);
+                }
+            }
+        } else {
             match find_exact_replacement_range(&content, old_string, new_string) {
                 Ok(range) => range,
                 Err(_) => {
@@ -258,9 +298,8 @@ impl Tool for EditTool {
                     );
                     bail!(err);
                 }
-            };
-
-        // ── Dry-run preview: resolve the match but do not write ────────────────
+            }
+        };
         if dry_run {
             let snippet = build_snippet(&content, start, end);
             let old_lines = old_string.lines().count();
@@ -325,6 +364,7 @@ impl Tool for EditTool {
             "new_lines": new_lines,
             "lines": lines_changed,
             "dry_run": false,
+            "collapse_whitespace": collapse_whitespace,
             "snippet": snippet,
         });
 

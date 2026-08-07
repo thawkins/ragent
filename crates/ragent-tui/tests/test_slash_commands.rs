@@ -157,6 +157,84 @@ fn cwd_lock() -> MutexGuard<'static, ()> {
         Err(poisoned) => poisoned.into_inner(),
     }
 }
+
+#[test]
+fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
+    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
+    let _lock = cwd_lock();
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
+    ragent_config::edit_log::set_enabled(false);
+
+    let mut app = make_app_with_storage(storage);
+
+    // Sanity: edit log starts off.
+    assert!(!ragent_config::edit_log::is_enabled());
+
+    // Press Alt+E through the app handler so the persist path runs.
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
+
+    // Handler should have toggled and persisted edit logging on.
+    assert!(ragent_config::edit_log::is_enabled());
+    assert!(app.status.contains("Edit log enabled"));
+
+    // Status bar indicator should reflect the current (enabled) state.
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| layout::render(frame, &mut app))
+        .expect("draw");
+    let cells = terminal.backend().buffer().content.clone();
+    let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
+    assert!(
+        text.contains("EditLog:✓"),
+        "status bar should show enabled edit-log indicator: {text}"
+    );
+
+    // Toggle back off and verify.
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT));
+    assert!(!ragent_config::edit_log::is_enabled());
+    assert!(app.status.contains("Edit log disabled"));
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| layout::render(frame, &mut app))
+        .expect("draw");
+    let cells = terminal.backend().buffer().content.clone();
+    let text: String = cells.iter().map(ratatui::buffer::Cell::symbol).collect();
+    assert!(
+        text.contains("EditLog:✗"),
+        "status bar should show disabled edit-log indicator: {text}"
+    );
+}
+
+#[test]
+fn test_slash_editlog_toggles_and_persists() {
+    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
+    let _lock = cwd_lock();
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _temp = enter_temp_config_dir();
+    let _guard = CwdGuard(original_cwd);
+    ragent_config::edit_log::set_enabled(false);
+
+    let mut app = make_app_with_storage(storage);
+    app.input = "/editlog on".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(ragent_config::edit_log::is_enabled());
+    assert!(app.status.contains("enabled"));
+
+    app.input = "/editlog off".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(!ragent_config::edit_log::is_enabled());
+    assert!(app.status.contains("disabled"));
+}
+
 #[test]
 fn test_backfill_model_ctx_window_refreshes_stale_ollama_cloud_cache() {
     let mut app = make_app();
@@ -2814,7 +2892,7 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     assert!(app.status.contains("YOLO mode enabled"));
 
     // Status bar indicator should reflect the current (enabled) state.
-    let backend = TestBackend::new(120, 30);
+    let backend = TestBackend::new(140, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| layout::render(frame, &mut app))
@@ -2832,7 +2910,7 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     assert!(app.status.contains("YOLO mode disabled"));
 
     // Status bar should now show the disabled indicator.
-    let backend = TestBackend::new(120, 30);
+    let backend = TestBackend::new(140, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| layout::render(frame, &mut app))

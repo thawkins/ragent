@@ -1125,6 +1125,32 @@ impl App {
                     };
                     self.needs_redraw = true;
                 }
+                InputAction::ToggleEditLog => {
+                    match ragent_config::edit_log::toggle_persist() {
+                        Ok(enabled) => {
+                            self.status = if enabled {
+                                "Edit log enabled".to_string()
+                            } else {
+                                "Edit log disabled".to_string()
+                            };
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                format!(
+                                    "Edit log {}",
+                                    if enabled { "enabled" } else { "disabled" }
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            self.status = format!("⚠ failed to persist edit log state: {e}");
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("Edit log persist failed: {e}"),
+                            );
+                        }
+                    }
+                    self.needs_redraw = true;
+                }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
                 }

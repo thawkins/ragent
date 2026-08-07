@@ -55,20 +55,17 @@ impl App {
             return false;
         };
 
-        // Use the user-configured percentage threshold (migrated from
-        // `compression.auto_threshold`, e.g. 0.8 = 80%) when present, so the
-        // TUI's pre-send check matches the server-side estimator. Otherwise
-        // fall back to a conservative 92% before the hard provider limit.
-        let threshold = match self
-            .current_config()
-            .compaction
-            .threshold
-            .filter(|t| (0.0..=1.0).contains(t))
-        {
-            Some(frac) => (context_window as f64 * frac) as u64,
-            None => (context_window as f32 * 0.92) as u64,
-        };
-        self.last_input_tokens >= threshold
+        // Use the shared estimator logic so the TUI pre-send check matches the
+        // agent/server path. The threshold is a fraction of the model's context
+        // window (default 70%), which makes the trigger independent of the
+        // model's absolute context size.
+        let threshold = ragent_agent::compaction::compaction_threshold(
+            context_window,
+            0,
+            self.current_config().compaction.buffer,
+            self.current_config().compaction.threshold,
+        ) as u64;
+        self.last_input_tokens > threshold
     }
 
     pub(crate) fn start_compaction(&mut self, auto_triggered: bool) -> bool {
@@ -325,9 +322,9 @@ impl App {
         {
             if before_input != self.input || before_cursor != self.input_cursor {
                 tracing::debug!(
-                    source,
+                    source = source,
                     before_chars = before_input.chars().count(),
-                    before_cursor,
+                    before_cursor = before_cursor,
                     after_chars = self.input_len_chars(),
                     after_cursor = self.input_cursor,
                     screen = ?self.current_screen,

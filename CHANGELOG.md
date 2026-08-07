@@ -1,5 +1,90 @@
 # Changelog
 
+## Version: 1.0.17
+
+### Added — Optional `collapse_whitespace` matching for `edit` / `multi_edit`
+
+- The `edit` and `multi_edit` tools now accept an optional
+  `collapse_whitespace` boolean (default `false`, i.e. the existing
+  byte-for-byte strict matcher is unchanged). When `true`, backslash escapes
+  (`\t`, `\n`, `\r`, `\\`) in `old_string` are decoded and every run of
+  whitespace matches a non-empty run of whitespace in the file, so collapsed
+  indentation or alignment whitespace no longer causes spurious "old_string
+  not found" failures. Uniqueness and the whole-batch atomicity of
+  `multi_edit` are preserved in flexible mode.
+- New public helpers in `ragent_tools_core::replace`: `decode_escapes` and
+  `find_flexible_replacement_range` (two-lane matching: exact lane wins when
+  unique; whitespace-tolerant scan otherwise; ambiguous hits rejected).
+- `edit` result metadata now includes `collapse_whitespace: true` when the
+  relaxed matcher was used, and failure messages mention the flexible mode.
+
+### Added — Persistent edit-log toggle with Alt+E and status-bar indicator
+
+- Added `edit_log` boolean field to `ragent_config::Config`; defaults to `false`
+  and merges across global/project config files.
+- New `ragent_config::edit_log` module provides `is_enabled`, `set_enabled`,
+  `sync_from_config`, `persist_edit_log`, and `toggle_persist` — mirroring the
+  YOLO persistence helpers.
+- `ragent_tools_core::edit_log::is_edit_log_enabled` now delegates to the
+  shared `ragent_config::edit_log` runtime flag, ensuring the TUI, tools, and
+  status bar all see the same state.
+- TUI `Alt+E` toggles edit logging; the new state is persisted to
+  `.ragent/ragent.json` and a status/log message confirms the change.
+- TUI `/editlog on|off` now persists the new state to `ragent.json` instead of
+  changing the runtime flag only.
+- Status bar line 2 shows an `EditLog:{✓|✗}` indicator next to `AutoPilot`,
+  reflecting the current persisted state.
+- Added tests for `Alt+E` toggle + indicator and `/editlog` persistence.
+
+### Fixed — Clippy warnings across workspace
+
+- Removed unused underscore-prefixed bindings in `session_ops.rs`.
+- Added `#![allow(clippy::redundant_pub_crate)]` to `crates/ragent-tui/src/app/tests.rs`.
+- Allowed `clippy::await_holding_lock` on edit-log integration tests that
+  intentionally serialise process-wide state with a static mutex.
+- Reduced `LocalEmbeddingInner::Ready` variant size by boxing the tokenizer.
+- Collapsed nested `if let` in `LocalEmbeddingProvider::embed`.
+- Added `#[allow(dead_code)]` to edit-log analysis APIs that are public but not
+  yet consumed in every compilation unit.
+
+### Fixed — Repeated "Context compression skipped" notices
+
+- Added a per-turn `compaction_attempted_this_turn` flag to `LoopState` and the
+  agent-loop orchestrator.
+- The pre-send compaction path now sets the flag before invoking the runner and
+  suppresses further compaction attempts for the rest of the turn, even when the
+  runner bails with a "Context compression skipped" notice.
+- Both emergency-overflow compaction paths now use the same flag, so a skipped
+  emergency compaction is not retried either.
+- `compressed_this_turn` is still tracked separately so the post-compaction
+  continuation nudge only fires after a successful compression.
+- Added `test_pre_send_compaction_skipped_notice_emitted_once_per_turn` to
+  verify that only one skipped notice is published per turn.
+
+### Changed — Model-independent context-compaction trigger
+
+- `CompactionConfig::default().threshold` is now `0.7` (70 % of the model's
+  context window) instead of `None`. This makes the default pre-send compaction
+  trigger independent of the model's absolute context size.
+- `CompactionConfig::default().buffer` is now a fraction of the context window
+  (`0.10`, i.e. 10 %) instead of an absolute `20_000` tokens.
+- `CompactionConfig::default().keep.tokens` is now a fraction of the context
+  window (`0.20`, i.e. 20 %) instead of an absolute `8_000` tokens.
+- `compaction_threshold()` and `select()` compute absolute token budgets from
+  these fractions using the resolved `context_window`, so compaction behavior
+  scales automatically with the model in use.
+- The agent-loop pre-send estimator (`compaction_threshold`) now enforces a
+  70 % context-window floor, so automatic compaction never fires on routine
+  prompts that fill less than 70 % of the available context.
+- The TUI pre-send compaction check (`should_auto_compact_before_send`) now
+  uses the shared `compaction_threshold()` estimator instead of a private 92 %
+  fallback, keeping the TUI and server/agent paths consistent.
+- Updated `SPEC.md`, `QUICKSTART.md`, and `README.md` compaction examples to
+  show the new `threshold`, `buffer`, and `keep.tokens` fraction fields.
+- Adjusted compaction config and runner tests to reflect fraction-based
+  defaults and the fact that legacy `compression.auto_threshold` only fills an
+  explicit `threshold: null`.
+
 ## Version: 1.0.15
 
 ### Fixed — CI formatting and multi_edit edit-log tests

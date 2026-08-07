@@ -12,7 +12,8 @@ use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root};
 
 mod replace {
     pub(crate) use ragent_tools_core::replace::{
-        FindDiag, find_exact_replacement_range, format_match_failure,
+        FindDiag, FindError, find_exact_replacement_range, find_flexible_replacement_range,
+        format_match_failure,
     };
 }
 

@@ -388,8 +388,9 @@ Ragent loads configuration from multiple sources (last wins):
       // Context-window compaction (OpenCode-derived summarisation)
       "compaction": {
         "auto": true,          // auto-summarise before send (FR-008)
-        "buffer": 20000,       // response/safety token buffer (FR-011)
-        "keep": { "tokens": 8000 }  // recent turns kept verbatim (FR-011)
+        "threshold": 0.7,    // trigger at 70% of the model's context window
+        "buffer": 0.10,       // fallback response/safety buffer as a fraction of the window when threshold is null (FR-011)
+        "keep": { "tokens": 0.20 }  // fraction of the window kept as recent turns verbatim (FR-011)
       },
 
       // OpenTelemetry metrics export (optional)

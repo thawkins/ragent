@@ -616,6 +616,20 @@ fn build_line2_right(
         ));
     }
 
+    // Edit-log status
+    {
+        let enabled = ragent_tools_core::edit_log::is_edit_log_enabled();
+        let (icon, color) = if enabled {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        spans.push(Span::styled(
+            format!("EditLog:{icon} "),
+            Style::default().fg(color),
+        ));
+    }
+
     // Telemetry (OpenTelemetry metrics export) status
     {
         let (icon, color) = if app.session_processor.telemetry.is_enabled() {

@@ -9,7 +9,6 @@
 //! `/editlog on|off` slash command in the TUI.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use regex::Regex;
@@ -17,20 +16,18 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-/// Process-wide switch that enables or disables edit logging.
-///
-/// The default is `false`. The TUI's `/editlog on|off` command toggles this.
-static EDIT_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
-
 /// Returns the current edit-log enabled state.
+///
+/// The runtime flag lives in `ragent_config::edit_log` so it can be kept in
+/// sync with the `edit_log` field in `ragent.json`.
 #[must_use]
 pub fn is_edit_log_enabled() -> bool {
-    EDIT_LOG_ENABLED.load(Ordering::Relaxed)
+    ragent_config::edit_log::is_enabled()
 }
 
 /// Enables or disables edit logging.
 pub fn set_edit_log_enabled(enabled: bool) {
-    EDIT_LOG_ENABLED.store(enabled, Ordering::Relaxed);
+    ragent_config::edit_log::set_enabled(enabled);
 }
 
 /// Build the path to the log directory (`<working_dir>/log`).
@@ -287,6 +284,7 @@ pub fn detect_old_str_risks(old_str: &str) -> Vec<OldStrRisk> {
 
 /// Risk profile for a failed edit-log entry.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FailedEditRisk {
     /// Tool that performed the edit.
     pub tool: String,
@@ -318,6 +316,7 @@ pub struct EditLogAnalysis {
 impl EditLogAnalysis {
     /// Return the risk characteristics sorted by descending frequency.
     #[must_use]
+    #[allow(dead_code)]
     pub fn risks_by_frequency(&self) -> Vec<(OldStrRisk, usize)> {
         let mut v: Vec<(OldStrRisk, usize)> = self
             .risk_counts
@@ -470,6 +469,7 @@ pub(crate) fn normalize_outcome(outcome: &str) -> String {
 impl EditLogStats {
     /// Total number of logged edit operations across all tools.
     #[must_use]
+    #[allow(dead_code)]
     pub fn total(&self) -> usize {
         self.tool_counts.values().sum()
     }
@@ -591,6 +591,7 @@ pub fn clear_edit_logs(working_dir: &Path) -> usize {
 /// returns the number of files cleared. The `log/` directory itself is
 /// preserved (created if missing) so that future edit operations can keep
 /// logging to the same location.
+#[allow(dead_code)]
 pub fn clear_edit_log_contents(working_dir: &Path) -> usize {
     let log_dir = log_dir(working_dir);
     if !log_dir.exists() {

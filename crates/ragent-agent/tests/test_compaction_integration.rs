@@ -151,6 +151,11 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     let tool_registry = Arc::new(tool::create_default_registry());
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
+    let mut config = ragent_config::Config::default();
+    // Keep 80% of the small context window verbatim so the head remains small
+    // enough for the summary prompt while still exceeding the 70% trigger.
+    config.compaction.keep.tokens = Some(0.8);
+
     let processor = SessionProcessor {
         session_manager: session_manager.clone(),
         provider_registry: Arc::new(provider_registry),
@@ -167,7 +172,11 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
         cached_tool_names: parking_lot::RwLock::new(None),
         cached_tool_definition_bytes: parking_lot::RwLock::new(None),
         llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
-        cached_config: parking_lot::Mutex::new(None),
+        cached_config: parking_lot::Mutex::new(Some(CachedConfig {
+            config: Arc::new(config),
+            file_mtimes: Vec::new(),
+            env_overrides_present: false,
+        })),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
         )),
@@ -279,6 +288,7 @@ async fn test_pre_send_compaction_skipped_when_auto_disabled() {
     // processor's config cache so `load_config_cached` returns it.
     let mut disabled_config = ragent_config::Config::default();
     disabled_config.compaction.auto = false;
+    disabled_config.compaction.keep.tokens = Some(0.0);
 
     let processor = SessionProcessor {
         session_manager: session_manager.clone(),
@@ -503,6 +513,7 @@ async fn test_emergency_overflow_compaction_retries_once() {
     // path must still fire on overflow.
     let mut disabled_config = ragent_config::Config::default();
     disabled_config.compaction.auto = false;
+    disabled_config.compaction.keep.tokens = Some(0.0);
 
     let processor = SessionProcessor {
         session_manager: session_manager.clone(),
@@ -640,6 +651,7 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
 
     let mut disabled_config = ragent_config::Config::default();
     disabled_config.compaction.auto = false;
+    disabled_config.compaction.keep.tokens = Some(0.0);
 
     let processor = SessionProcessor {
         session_manager: session_manager.clone(),
@@ -722,5 +734,205 @@ async fn test_emergency_overflow_compaction_skipped_with_partial_output() {
     assert!(
         captured.iter().any(|r| r.tools.is_empty()),
         "an emergency summarisation request should have been captured"
+    );
+}
+
+// ── Repeated skipped-notice guard (T-012 follow-up) ────────────────────────
+//
+// When pre-send compaction bails out with a "skipped" notice, the agent loop
+// must not re-attempt compaction on subsequent iterations of the same turn.
+// Otherwise the user sees a storm of identical "Context compression skipped"
+// messages. The `compaction_attempted_this_turn` flag gates further attempts.
+
+#[derive(Clone)]
+struct SkippedNoticeMockProvider;
+
+struct SkippedNoticeMockClient;
+
+#[async_trait::async_trait]
+impl LlmClient for SkippedNoticeMockClient {
+    async fn chat(
+        &self,
+        _request: ChatRequest,
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
+        // Return a tool call on every request so the agent loop keeps iterating
+        // until max_steps. This gives pre-send compaction multiple chances to run.
+        Ok(Box::pin(stream::iter(vec![
+            StreamEvent::ToolCallStart {
+                id: "call_1".to_string(),
+                name: "get_env".to_string(),
+            },
+            StreamEvent::ToolCallDelta {
+                id: "call_1".to_string(),
+                args_json: r#"{"name":"HOME"}"#.to_string(),
+            },
+            StreamEvent::ToolCallEnd {
+                id: "call_1".to_string(),
+            },
+            StreamEvent::Finish {
+                reason: LlmFinishReason::Stop,
+            },
+        ])))
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for SkippedNoticeMockProvider {
+    fn id(&self) -> &'static str {
+        "ollama"
+    }
+
+    fn name(&self) -> &'static str {
+        "Skipped Notice Mock Ollama"
+    }
+
+    fn default_models(&self) -> Vec<ModelInfo> {
+        vec![ModelInfo {
+            id: "qwen3:latest".to_string(),
+            provider_id: "ollama".to_string(),
+            name: "Qwen3".to_string(),
+            cost: Cost {
+                input: 0.0,
+                output: 0.0,
+            },
+            capabilities: Capabilities {
+                reasoning: false,
+                streaming: true,
+                vision: false,
+                tool_use: true,
+                thinking_levels: vec![],
+            },
+            // Tiny context window: the summary prompt always exceeds
+            // `context_window - SUMMARY_OUTPUT_TOKENS`, so `compact()` bails
+            // with a "Context compression skipped" notice. At the same time the
+            // pre-send trigger is above the 70 % floor, so the loop attempts
+            // compaction exactly once per turn.
+            context_window: 1_000,
+            max_output: Some(8_192),
+            request_multiplier: None,
+            thinking_config: None,
+        }]
+    }
+
+    fn as_any_static(&self) -> &(dyn std::any::Any + 'static) {
+        self
+    }
+
+    async fn create_client(
+        &self,
+        _api_key: &str,
+        _base_url: Option<&str>,
+        _options: &HashMap<String, serde_json::Value>,
+    ) -> Result<Box<dyn LlmClient>> {
+        Ok(Box::new(SkippedNoticeMockClient))
+    }
+}
+
+#[tokio::test]
+async fn test_pre_send_compaction_skipped_notice_emitted_once_per_turn() {
+    let mut provider_registry = ProviderRegistry::new();
+    provider_registry.register(Box::new(SkippedNoticeMockProvider));
+
+    let event_bus = Arc::new(EventBus::new(64));
+    let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
+    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
+    let tool_registry = Arc::new(tool::create_default_registry());
+    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
+
+    // keep=0 gives compaction a non-empty head once the first tool result is
+    // appended, but the tiny context window still forces the runner to skip.
+    let mut config = ragent_config::Config::default();
+    config.compaction.keep.tokens = Some(0.0);
+
+    let processor = SessionProcessor {
+        session_manager: session_manager.clone(),
+        provider_registry: Arc::new(provider_registry),
+        tool_registry,
+        permission_checker,
+        event_bus: event_bus.clone(),
+        task_manager: std::sync::OnceLock::new(),
+        team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
+        active_spec: tokio::sync::RwLock::new(None),
+        spec_manager: std::sync::OnceLock::new(),
+        cached_tool_definitions: parking_lot::RwLock::new(None),
+        cached_tool_names: parking_lot::RwLock::new(None),
+        cached_tool_definition_bytes: parking_lot::RwLock::new(None),
+        llm_client_cache: parking_lot::RwLock::new(std::collections::HashMap::new()),
+        cached_config: parking_lot::Mutex::new(Some(CachedConfig {
+            config: Arc::new(config),
+            file_mtimes: Vec::new(),
+            env_overrides_present: false,
+        })),
+        team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: ragent_agent::StreamConfig::default(),
+        auto_approve: false,
+        system_prompt_cache: parking_lot::RwLock::new(None),
+        skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+        telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        bg_service: std::sync::OnceLock::new(),
+    };
+    let working_dir = tempfile::tempdir().expect("tempdir");
+    let session = session_manager
+        .create_session(working_dir.path().to_path_buf())
+        .expect("session should be created");
+
+    // Seed enough history that the first pre-send estimate exceeds the trigger.
+    let pad = "x".repeat(4_000);
+    for i in 0..4 {
+        let role = if i % 2 == 0 {
+            Role::User
+        } else {
+            Role::Assistant
+        };
+        let msg = Message::new(
+            &session.id,
+            role,
+            vec![Message::user_text("sess", format!("message {i} {pad}")).parts[0].clone()],
+        );
+        storage.create_message(&msg).expect("seed message");
+    }
+
+    let mut agent = AgentInfo::new("general", "General");
+    agent.model = Some(ModelRef {
+        provider_id: "ollama".to_string(),
+        model_id: "qwen3:latest".to_string(),
+    });
+    // Allow a couple of tool-calling iterations so the guard would be exercised.
+    agent.max_steps = Some(3);
+
+    let mut rx = event_bus.subscribe();
+
+    let _reply = processor
+        .process_message(
+            &session.id,
+            "please continue",
+            &agent,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .expect("process_message should complete");
+
+    let mut skipped_count = 0;
+    while let Ok(event) = rx.try_recv() {
+        if let ragent_agent::event::Event::AgentNotice { message, .. } = event {
+            if message.contains("Context compression skipped") {
+                skipped_count += 1;
+            }
+        }
+    }
+
+    assert_eq!(
+        skipped_count, 1,
+        "expected exactly one 'Context compression skipped' notice per turn, got {skipped_count}"
     );
 }

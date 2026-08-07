@@ -1,8 +1,7 @@
 //! OpenCode-derived context-window compaction.
 //!
-//! This module contains the summarisation-based compaction runner that
-//! replaces the removed Headroom `compression` module (FR-012 / FR-013). It
-//! currently exposes:
+//! This module contains the summarisation-based compaction runner.
+//! It currently exposes:
 //!
 //! - [`estimator`] — fast local token estimator and compaction trigger
 //!   (FR-002, FR-003).

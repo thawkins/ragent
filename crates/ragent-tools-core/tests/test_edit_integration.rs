@@ -532,6 +532,7 @@ use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit
 static LOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_edit_log_success_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
@@ -586,6 +587,7 @@ async fn test_edit_log_success_writes_jsonl() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_edit_log_dry_run_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
@@ -636,6 +638,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_edit_log_failure_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
@@ -683,6 +686,7 @@ async fn test_edit_log_failure_writes_jsonl() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn test_edit_log_disabled_does_not_write() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     // Disable logging before creating the temp dir so `log/` is never created.
@@ -705,5 +709,89 @@ async fn test_edit_log_disabled_does_not_write() {
     assert!(
         !log_dir.exists() || std::fs::read_dir(&log_dir).unwrap().count() == 0,
         "log directory should not contain entries when logging is disabled"
+    );
+}
+
+// ── collapse_whitespace: tool-level opt-in ─────────────────────────────────
+
+#[tokio::test]
+async fn test_edit_collapse_whitespace_matches_runs() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n        bar\n}\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() {\n    bar\n}\n",
+        "new_string": "fn foo() {\n    baz\n}\n",
+        "collapse_whitespace": true,
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("collapse_whitespace edit should succeed across indentation widths");
+    let result = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(result, "fn foo() {\n    baz\n}\n");
+    let meta = out.metadata.unwrap();
+    assert_eq!(meta["collapse_whitespace"], json!(true));
+}
+
+#[tokio::test]
+async fn test_edit_collapse_whitespace_decodes_escapes() {
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "let a = 1;\n\tlet b = 2;\n");
+    let input = json!({
+        "file_path": "a.rs",
+        // Literal backslash escapes in the needle: \n and \t.
+        "old_string": "let a = 1;\\n\\tlet b = 2;",
+        "new_string": "let a = 1;\nlet b = 2;",
+        "collapse_whitespace": true,
+    });
+    EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("escaped needle should match tab-indented line");
+    let result = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(result, "let a = 1;\nlet b = 2;\n");
+}
+
+#[tokio::test]
+async fn test_edit_collapse_whitespace_default_still_strict() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "alpha   beta\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "alpha beta",
+        "new_string": "X",
+    });
+    let err = EditTool.execute(input, &ctx(tmp.path())).await.expect_err(
+        "without collapse_whitespace the strict matcher must reject whitespace mismatch",
+    );
+    assert!(
+        err.to_string().contains("byte-for-byte"),
+        "error must demand exact matching: {err}"
+    );
+    // File unchanged.
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "alpha   beta\n"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_collapse_whitespace_preserves_uniqueness_check() {
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "dup  and  dup\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "dup",
+        "new_string": "DUP",
+        "collapse_whitespace": true,
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("duplicate needle must still be rejected in collapse mode");
+    assert!(
+        err.to_string().contains("match exactly once"),
+        "error must demand unique match: {err}"
     );
 }

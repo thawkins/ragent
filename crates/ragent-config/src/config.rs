@@ -5,7 +5,7 @@
 //! `RAGENT_CONFIG_CONTENT` env. Provider, agent, MCP server, and permission
 //! settings are all configured here.
 
-use crate::compaction::{CompactionConfig, LegacyCompressionConfig};
+use crate::compaction::CompactionConfig;
 use anyhow::bail;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -81,18 +81,10 @@ pub struct Config {
     /// Context compaction configuration (OpenCode-derived summarisation).
     ///
     /// When `auto` is `true`, the agent summarises conversation history before
-    /// sending a request that would exceed the context window minus the
-    /// configured buffer. This replaces the older Headroom-based `compression`
-    /// section.
+    /// sending a request that would exceed the configured threshold or
+    /// buffer.
     #[serde(default)]
     pub compaction: CompactionConfig,
-    /// Deprecated alias for the context compaction configuration.
-    ///
-    /// If present, `compression.enabled` is mapped to `compaction.auto` when the
-    /// new `compaction` section does not explicitly set `auto`. This one-
-    /// release shim eases migration from the Headroom compression scheme.
-    #[serde(default, alias = "compression")]
-    pub compression: LegacyCompressionConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
@@ -127,6 +119,9 @@ pub struct Config {
     /// YOLO mode — bypass command validation and tool restrictions.
     #[serde(default)]
     pub yolo: bool,
+    /// Edit-operation logging enabled for `edit` and `multi_edit`.
+    #[serde(default)]
+    pub edit_log: bool,
     /// User-defined price overrides for cost estimation (FR-011).
     ///
     /// Each entry overrides the built-in price table for a specific model.
@@ -1780,41 +1775,15 @@ impl Config {
             base.tool_visibility.specified.browser = true;
         }
 
-        // Compaction: overlay takes precedence.        base.compaction = overlay.compaction;
-        base.compression = LegacyCompressionConfig::default();
-
-        // Apply legacy `compression.enabled` -> `compaction.auto` migration when
-        // the overlay config file contains `compression` but not `compaction`.
-        for path in &overlay.config_paths {
-            if let Ok(content) = std::fs::read_to_string(path)
-                && let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
-            {
-                let has_compaction = value.get("compaction").is_some();
-                let has_compression = value.get("compression").is_some();
-                if !has_compaction && has_compression {
-                    if let Some(enabled) = value
-                        .get("compression")
-                        .and_then(|c| c.get("enabled"))
-                        .and_then(|v| v.as_bool())
-                    {
-                        base.compaction.auto = enabled;
-                    }
-                    // Carry the configured trigger point across so compaction
-                    // fires at the user's chosen percentage (e.g. 0.8 = 80%)
-                    // instead of the buffer-based default.
-                    if let Some(threshold) = value
-                        .get("compression")
-                        .and_then(|c| c.get("auto_threshold"))
-                        .and_then(|v| v.as_f64())
-                    {
-                        base.compaction.threshold = Some(threshold);
-                    }
-                }
-            }
-        }
+        // Compaction: overlay takes precedence.
+        base.compaction = overlay.compaction;
 
         if overlay.yolo {
             base.yolo = overlay.yolo;
+        }
+
+        if overlay.edit_log {
+            base.edit_log = overlay.edit_log;
         }
 
         base

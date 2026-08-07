@@ -111,12 +111,18 @@ pub struct CompactionOutcome {
 /// # Arguments
 ///
 /// * `messages` — full conversation history in ragent internal format.
-/// * `config` — compaction configuration (supplies `keep_tokens` and
+/// * `config` — compaction configuration (supplies `keep_fraction` and
 ///   `tool_output_max_chars`).
+/// * `context_window` — the model's context window in tokens, used to turn the
+///   configured `keep` fraction into an absolute token budget.
 #[must_use]
-pub fn select(messages: &[Message], config: &CompactionConfig) -> SelectedSplit {
+pub fn select(
+    messages: &[Message],
+    config: &CompactionConfig,
+    context_window: usize,
+) -> SelectedSplit {
     let tool_max = config.tool_output_max_chars();
-    let keep_tokens = config.keep_tokens();
+    let keep_tokens = ((config.keep_fraction() * context_window as f64) as usize).max(1);
 
     // (original_index, serialised_text, token_cost) for every non-compaction
     // message with non-empty serialised content.
@@ -351,7 +357,7 @@ pub async fn compact(
     let tool_max = config.tool_output_max_chars();
 
     // 1. Select verbatim recent tail + head to summarise.
-    let split = select(&messages, config);
+    let split = select(&messages, config, context_window);
 
     // 2. Nothing-to-summarise guard (OpenCode:
     //    `if (!selected || (selected.head.length === 0 && previousSummary?.
@@ -493,9 +499,7 @@ pub async fn compact(
 /// `chat_messages` in place with `[compaction_msg, ...recent]`. The caller then
 /// retries the turn once with the compacted history.
 ///
-/// This is the drop-in replacement for the legacy Headroom
-/// `emergency_compress_chat_messages` helper. Unlike the Headroom version it
-/// is `async` (it calls the LLM to produce the summary) and never silently
+/// It is `async` (it calls the LLM to produce the summary) and never silently
 /// drops structured message parts (FR-014) — the serialiser represents them
 /// textually inside the summary prompt.
 ///

@@ -95,6 +95,10 @@ pub(crate) struct LoopState {
     pub cumulative_model_wait_ms: u64,
     /// Hysteresis flag: compression already ran this turn.
     pub compressed_this_turn: bool,
+    /// Hysteresis flag: a compaction attempt (success or failure) already ran
+    /// this turn. Prevents repeated user-visible "compaction skipped" notices
+    /// and wasted re-serialisation when the runner bails out.
+    pub compaction_attempted_this_turn: bool,
     /// Set once after a post-compaction continuation nudge fires.
     pub compaction_nudged: bool,
     /// Last LLM-reported input token count (0 if provider omits usage).
@@ -918,13 +922,14 @@ impl SessionProcessor {
                             // `compressed_this_turn` guard prevents a second
                             // compaction.
                             if is_token_overflow_error_message(&error_message)
-                                && !loop_state.compressed_this_turn
+                                && !loop_state.compaction_attempted_this_turn
                             {
                                 // FR-004: emergency overflow compaction. The
                                 // `chat()` call failed before any assistant
                                 // tokens were produced, so run the summarisation
                                 // runner with reason "overflow" and retry the
                                 // turn once with the compacted history.
+                                loop_state.compaction_attempted_this_turn = true;
                                 let compact_result = crate::compaction::emergency_compact(
                                     session_id,
                                     Arc::make_mut(&mut loop_state.chat_messages),
@@ -1127,7 +1132,7 @@ impl SessionProcessor {
                                 );
                             let is_emergency_overflow: bool = {
                                 attempt < max_retries
-                                    && !loop_state.compressed_this_turn
+                                    && !loop_state.compaction_attempted_this_turn
                                     && !has_meaningful_partial_output
                                     && is_token_overflow_error_message(&message)
                             };
@@ -1141,8 +1146,10 @@ impl SessionProcessor {
                                 // eligible regardless of `compaction.auto` (when
                                 // `auto` is false the runner relies solely on
                                 // emergency summarisation — FR-008). The
-                                // `compressed_this_turn` guard ensures only a
-                                // single emergency compaction per turn.
+                                // `compaction_attempted_this_turn` guard ensures
+                                // only a single compaction attempt per turn, so a
+                                // skipped emergency compaction is not retried.
+                                loop_state.compaction_attempted_this_turn = true;
                                 let compact_result = crate::compaction::emergency_compact(
                                     session_id,
                                     Arc::make_mut(&mut loop_state.chat_messages),

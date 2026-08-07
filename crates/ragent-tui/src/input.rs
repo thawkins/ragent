@@ -129,6 +129,8 @@ pub enum InputAction {
     ToggleTelemetry,
     /// Toggle YOLO mode (Alt+Y).
     ToggleYolo,
+    /// Toggle edit-operation logging (Alt+E).
+    ToggleEditLog,
     /// Scroll the research markdown viewer up.
     ResearchViewPageUp,
     /// Scroll the research markdown viewer down.
@@ -723,6 +725,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleYolo)
+        }
+        // Alt+E toggles edit-operation logging.
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleEditLog)
         }
         KeyCode::Char(c) => {
             if app.is_input_blocked() {

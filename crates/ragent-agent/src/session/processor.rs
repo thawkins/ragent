@@ -661,6 +661,7 @@ impl SessionProcessor {
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compressed_this_turn = compressed_this_turn;
+        let mut compaction_attempted_this_turn = false;
         let mut last_reported_input_tokens = last_reported_input_tokens;
         let mut compaction_nudged = false;
         // P-17: reuse the per-step ContentPart buffers across loop iterations
@@ -766,7 +767,7 @@ impl SessionProcessor {
             let _backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
 
-            if turn.session_config.compaction.auto && !compressed_this_turn {
+            if turn.session_config.compaction.auto && !compaction_attempted_this_turn {
                 // Skip the local estimate when the provider already reported
                 // input tokens for the previous turn — `evaluate_trigger`
                 // prefers the provider value, so the local estimate is pure
@@ -800,6 +801,7 @@ impl SessionProcessor {
                         .rev()
                         .find(|m| m.role == Role::Compaction)
                         .map(|m| m.text_content());
+                    compaction_attempted_this_turn = true;
                     let compact_result = crate::compaction::compact(
                         session_id,
                         messages,
@@ -860,6 +862,7 @@ impl SessionProcessor {
                 last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
+                compaction_attempted_this_turn,
                 compaction_nudged,
                 last_reported_input_tokens,
             };
@@ -879,6 +882,7 @@ impl SessionProcessor {
             let mut llm_result = llm_result;
             chat_messages = loop_state.chat_messages;
             compressed_this_turn = loop_state.compressed_this_turn;
+            compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
             last_reported_input_tokens = loop_state.last_reported_input_tokens;
 
             if llm_result.last_input_tokens > 0 {
@@ -933,6 +937,7 @@ impl SessionProcessor {
                     last_interim_hash,
                     cumulative_model_wait_ms,
                     compressed_this_turn,
+                    compaction_attempted_this_turn,
                     compaction_nudged,
                     last_reported_input_tokens,
                 };
@@ -949,6 +954,7 @@ impl SessionProcessor {
                 chat_messages = std::mem::take(&mut loop_state.chat_messages);
                 task_completeness_nudged = loop_state.task_completeness_nudged;
                 compressed_this_turn = loop_state.compressed_this_turn;
+                compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
                 compaction_nudged = loop_state.compaction_nudged;
                 if should_continue {
                     continue;

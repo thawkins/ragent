@@ -1,11 +1,8 @@
 //! Bidirectional conversion between provider-facing `ChatMessage`s and the
 //! internal [`Message`] representation.
 //!
-//! These helpers previously lived in the now-removed Headroom
-//! `compression::pipeline` module. They are pure data transforms with no
-//! dependency on `headroom-core`, so they survive the Headroom removal
-//! (T-011, FR-012) and are used by the compaction runner and the agent loop's
-//! pre-send / emergency-overflow compaction paths.
+//! These are pure data transforms used by the compaction runner and the agent
+//! loop's pre-send / emergency-overflow compaction paths.
 
 use chrono::Utc;
 

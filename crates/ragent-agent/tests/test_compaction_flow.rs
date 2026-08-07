@@ -68,7 +68,7 @@ async fn test_compact_bails_when_summary_prompt_would_overflow_context() {
         assistant_msg(&big),
     ];
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(0) },
+        keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> =
@@ -164,7 +164,7 @@ async fn test_emergency_compact_replaces_chat_messages_in_place() {
     let original_len = chat_messages.len();
 
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(0) },
+        keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> = Arc::new(SummaryClient);
@@ -221,7 +221,7 @@ async fn test_emergency_compact_leaves_chat_messages_unchanged_on_error() {
     let snapshot_first = chat_text(&chat_messages[0]);
 
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(0) },
+        keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> = Arc::new(SummaryClient);
@@ -264,10 +264,12 @@ fn test_select_keeps_last_message_even_when_it_exceeds_keep_budget() {
     let big = "z".repeat(50_000);
     let messages = vec![user_msg(&big)];
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(100) },
+        keep: KeepConfig {
+            tokens: Some(0.001),
+        },
         ..Default::default()
     };
-    let split = select(&messages, &config);
+    let split = select(&messages, &config, 100_000);
     assert!(split.head_messages.is_empty(), "head must be empty");
     assert_eq!(
         split.recent_messages.len(),
@@ -286,10 +288,10 @@ fn test_select_single_long_turn_with_zero_budget() {
     // With keep_tokens = 0 the recent tail still contains the last message.
     let messages = vec![user_msg(&"a".repeat(8_000))];
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(0) },
+        keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
-    let split = select(&messages, &config);
+    let split = select(&messages, &config, 100_000);
     assert!(split.head_messages.is_empty());
     assert_eq!(split.recent_messages.len(), 1);
 }
@@ -330,7 +332,7 @@ async fn test_compact_passes_previous_summary_into_prompt() {
         user_msg("second question"),
     ];
     let config = CompactionConfig {
-        keep: KeepConfig { tokens: Some(0) },
+        keep: KeepConfig { tokens: Some(0.0) },
         ..Default::default()
     };
     let client: Arc<dyn LlmClient> = Arc::new(CapturingClient {
