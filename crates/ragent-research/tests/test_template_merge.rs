@@ -89,7 +89,7 @@ fn template_is_merged_not_replacing_standard_sections() {
     );
 
     // The five required labeled paragraphs remain mandatory inside Findings.
-    assert!(body.contains("### Finding 1 — Observation summary"));
+    assert!(body.contains("### **Finding 1** — Observation summary"));
     assert!(body.contains("**Observation:**"));
     assert!(body.contains("**Analysis:**"));
     assert!(body.contains("**Cross-reference / Dependencies:**"));
@@ -107,7 +107,7 @@ fn no_template_preserves_standard_sections_unchanged() {
     assert!(body.contains("## Topic"));
     assert!(body.contains("## Executive Summary"));
     assert!(body.contains("## Findings"));
-    assert!(body.contains("### Finding 1 — Observation summary"));
+    assert!(body.contains("### **Finding 1** — Observation summary"));
     assert!(body.contains("**Observation:**"));
     assert!(body.contains("**Analysis:**"));
     assert!(body.contains("**Cross-reference / Dependencies:**"));
@@ -134,7 +134,7 @@ fn template_with_custom_placeholder_section_is_populated_in_addition_to_findings
         .find("## Findings")
         .expect("## Findings section must be present even with a template");
     let findings_section = &body[findings_idx..];
-    assert!(findings_section.contains("### Finding 1 — Observation summary"));
+    assert!(findings_section.contains("### **Finding 1** — Observation summary"));
     assert!(findings_section.contains("**Observation:**"));
     assert!(findings_section.contains("**Analysis:**"));
     assert!(findings_section.contains("**Cross-reference / Dependencies:**"));

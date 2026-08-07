@@ -697,12 +697,14 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
     /// Handle the `/editlog` slash command.
     fn handle_editlog_command(&mut self, args: &str) {
-        use ragent_tools_core::edit_log::{is_edit_log_enabled, set_edit_log_enabled};
+        use ragent_tools_core::edit_log::{
+            clear_edit_log_contents, is_edit_log_enabled, set_edit_log_enabled,
+        };
         let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
         match sub.as_str() {
             "help" | "" => {
                 self.append_assistant_text(
-                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Display recent log entries from `<working_dir>/log/edits-*.jsonl` |",
+                    "From: /editlog help\n\n## /editlog — Edit-operation logging\n\n| Subcommand | Description |\n|---|---|\n| `/editlog help` | Show this help |\n| `/editlog status` | Show whether logging is enabled and the log directory |\n| `/editlog on` | Enable logging of `edit` and `multi_edit` operations |\n| `/editlog off` | Disable logging |\n| `/editlog show` | Display recent log entries from `<working_dir>/log/edits-*.jsonl` |\n| `/editlog clear` | Empty the contents of the editlog files (files are kept) |",
                 );
                 self.status = "editlog: help".to_string();
             }
@@ -735,9 +737,18 @@ Usage: `/telemetry help|on|off|setup|counters`",
             "show" => {
                 self.show_editlog();
             }
+            "clear" => {
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                let cleared = clear_edit_log_contents(&working_dir);
+                self.append_assistant_text(&format!(
+                    "From: /editlog clear\n\n✅ Cleared {cleared} edit-log file{}.",
+                    if cleared == 1 { "" } else { "s" }
+                ));
+                self.status = "editlog: cleared".to_string();
+            }
             _ => {
                 self.append_assistant_text(
-                    "From: /editlog\n\nUsage: `/editlog on|off|status|show|help`",
+                    "From: /editlog\n\nUsage: `/editlog on|off|status|show|clear|help`",
                 );
                 self.status = "editlog: usage".to_string();
             }

@@ -429,7 +429,23 @@ impl WebFetchTool for AgentWebFetchTool {
         // `mf_fetch` returns a structured envelope. If the envelope is present,
         // use its metadata and content; otherwise treat the legacy `webfetch`
         // output as the page body directly.
-        let (body, title, content_type, page_type, language) = if is_mf_fetch {
+        // Detect YouTube transcript output before the generic envelope parser
+        // moves `output.content`. YouTube `mf_fetch` results are plain text with
+        // the video title on a `Title:` line followed by the transcript.
+        let youtube_override = is_mf_fetch
+            && output
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("page_type"))
+                .and_then(|v| v.as_str())
+                == Some("youtube");
+        let youtube_parsed = if youtube_override {
+            parse_mf_fetch_youtube_body(&output.content)
+        } else {
+            None
+        };
+
+        let (mut body, mut title, content_type, page_type, language) = if is_mf_fetch {
             parse_mf_fetch_output(url, &output.content, output.metadata.as_ref())
         } else {
             let title = output
@@ -460,6 +476,16 @@ impl WebFetchTool for AgentWebFetchTool {
                 None,
             )
         };
+
+        // Apply the YouTube-specific transcript/title parse that was computed
+        // before the generic envelope parser moved `output.content`.
+        let mut page_type = page_type;
+        if let Some((yt_title, transcript)) = youtube_parsed {
+            body = transcript;
+            title = yt_title;
+            page_type = Some("youtube".to_string());
+        }
+
         // Opportunistically fetch the raw HTML head to extract a publication
         // date from the page's embedded metadata. This is a best-effort step:
         // any failure (network error, non-HTML content, missing date) simply
@@ -637,6 +663,29 @@ fn strip_mf_fetch_header(content: &str) -> &str {
         .split_once("\n\n")
         .map(|(_, rest)| rest)
         .unwrap_or(content)
+}
+
+/// Parse the plain-text payload returned by `mf_fetch` for a YouTube URL.
+///
+/// The tool output starts with the standard `mf_fetch:` header block, followed
+/// by a body whose first line is `Title: <video title>` and the rest is the
+/// caption transcript. This function strips both the header block and the title
+/// prefix so the research layer stores only the transcript and records the
+/// actual video title.
+///
+/// Returns `Some((title, transcript))` when the expected format is found, or
+/// `None` if the output is missing a `Title:` line.
+fn parse_mf_fetch_youtube_body(content: &str) -> Option<(String, String)> {
+    let body = strip_mf_fetch_header(content);
+    let mut lines = body.lines();
+    let title_line = lines.next()?;
+    let title = title_line
+        .strip_prefix("Title:")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())?
+        .to_string();
+    let transcript = lines.collect::<Vec<_>>().join("\n");
+    Some((title, transcript.trim_start().to_string()))
 }
 
 /// Fetch the raw HTML for `url` and attempt to extract a publication date.
@@ -866,6 +915,7 @@ fn parse_specs_list(content: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool::ToolOutput;
 
     #[test]
     fn test_parse_websearch_output_from_metadata() {
@@ -929,6 +979,112 @@ mod tests {
 ";
         let ids = parse_specs_list(text);
         assert_eq!(ids, vec!["auth-refactor", "model-router", "researchsystem"]);
+    }
+
+    #[test]
+    fn test_parse_mf_fetch_youtube_body_extracts_title_and_transcript() {
+        let content = "mf_fetch: https://www.youtube.com/watch?v=dQw4w9WgXcQ\nStatus: 200\nContent type: text/plain\n\nTitle: Never Gonna Give You Up\n\n[Intro]\nWe're no strangers to love\n[Verse 1]\nYou know the rules and so do I\n";
+        let (title, transcript) = parse_mf_fetch_youtube_body(content).expect("parse succeeded");
+        assert_eq!(title, "Never Gonna Give You Up");
+        assert_eq!(
+            transcript,
+            "[Intro]\nWe're no strangers to love\n[Verse 1]\nYou know the rules and so do I"
+        );
+    }
+
+    #[test]
+    fn test_parse_mf_fetch_youtube_body_missing_title_line_returns_none() {
+        let content = "mf_fetch: https://example.com/\nStatus: 200\n\nSome plain content without a title prefix.\n";
+        assert!(parse_mf_fetch_youtube_body(content).is_none());
+    }
+
+    #[test]
+    fn test_agent_web_fetch_tool_uses_mf_fetch_youtube_title() {
+        use async_trait::async_trait;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct FakeMfFetchTool {
+            called_with_youtube: AtomicBool,
+        }
+
+        #[async_trait]
+        impl AgentTool for FakeMfFetchTool {
+            fn name(&self) -> &'static str {
+                "mf_fetch"
+            }
+
+            fn description(&self) -> &'static str {
+                "fake"
+            }
+
+            fn parameters_schema(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+
+            fn permission_category(&self) -> &'static str {
+                "web:read"
+            }
+
+            async fn execute(
+                &self,
+                input: serde_json::Value,
+                _ctx: &AgentToolContext,
+            ) -> Result<ToolOutput> {
+                if input
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|u| u.contains("youtube.com"))
+                {
+                    self.called_with_youtube.store(true, Ordering::SeqCst);
+                }
+                Ok(ToolOutput {
+                    content: "mf_fetch: https://www.youtube.com/watch?v=abc\nStatus: 200\nContent type: text/plain\n\nTitle: A Video Title\n\nTranscript line one\nTranscript line two".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "page_type": "youtube",
+                        "content_type": "text/plain",
+                        "title": "A Video Title",
+                    })),
+                })
+            }
+        }
+
+        let fake = Arc::new(FakeMfFetchTool {
+            called_with_youtube: AtomicBool::new(false),
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake.clone(),
+                ctx: AgentToolContext {
+                    session_id: "test".to_string(),
+                    working_dir: std::env::current_dir().unwrap(),
+                    event_bus: Arc::new(crate::event::EventBus::new(8)),
+                    storage: None,
+                    task_manager: None,
+                    active_model: None,
+                    team_context: None,
+                    team_manager: None,
+                    code_index: None,
+                    bg_service: None,
+                    spec_manager: None,
+                    active_spec_id: None,
+                    config: None,
+                    read_timestamps: Arc::new(std::sync::RwLock::new(
+                        std::collections::HashMap::new(),
+                    )),
+                    cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                },
+            };
+            fetcher
+                .fetch("https://www.youtube.com/watch?v=abc")
+                .await
+                .expect("fetch succeeded")
+        });
+        assert!(fake.called_with_youtube.load(Ordering::SeqCst));
+        assert_eq!(page.title, "A Video Title");
+        assert_eq!(page.page_type.as_deref(), Some("youtube"));
+        assert_eq!(page.content_type.as_deref(), Some("text/plain"));
+        assert_eq!(page.body, "Transcript line one\nTranscript line two");
     }
 
     #[test]

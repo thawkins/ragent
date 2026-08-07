@@ -632,7 +632,7 @@ async fn test_batch_stale_file_rejected() {
 
 // ── Edit-log instrumentation for multi_edit (editlog spec) ──────────────────
 
-use ragent_tools_core::edit_log::set_edit_log_enabled;
+use ragent_tools_core::edit_log::{clear_edit_logs, set_edit_log_enabled};
 
 #[tokio::test]
 async fn test_multiedit_log_success_writes_jsonl() {
@@ -686,7 +686,7 @@ async fn test_multiedit_log_success_writes_jsonl() {
     );
 
     set_edit_log_enabled(false);
-    let _ = std::fs::remove_dir_all(&log_dir);
+    clear_edit_logs(tmp.path());
 }
 
 #[tokio::test]
@@ -732,5 +732,5 @@ async fn test_multiedit_log_failure_writes_jsonl() {
     );
 
     set_edit_log_enabled(false);
-    let _ = std::fs::remove_dir_all(&log_dir);
+    clear_edit_logs(tmp.path());
 }

@@ -310,7 +310,9 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
                 remainder.push_str("\n\n");
                 remainder.push_str(&sources_list);
             }
-            body.push_str(&format!("### Finding {n} — {headline}\n\n{remainder}\n\n"));
+            body.push_str(&format!(
+                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+            ));
         }
     }
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
@@ -423,7 +425,9 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
                 remainder.push_str("\n\n");
                 remainder.push_str(&sources_list);
             }
-            body.push_str(&format!("### Finding {n} — {headline}\n\n{remainder}\n\n"));
+            body.push_str(&format!(
+                "\n### **Finding {n}** — {headline}\n\n{remainder}\n\n"
+            ));
         }
     }
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012). In the
@@ -1304,7 +1308,7 @@ mod tests {
         let assembled = assemble_document(&doc);
         let finding = assembled
             .body
-            .split("### Finding 1 — Observation summary\n\n")
+            .split("### **Finding 1** — Observation summary\n\n")
             .nth(1)
             .unwrap();
         // After "### Finding N — headline\n\n" the required labels should be separated by blank lines.
@@ -1341,10 +1345,10 @@ mod tests {
         ];
         let assembled = assemble_document(&doc);
         assert!(assembled.body.contains(
-            "### Finding 1 — Observation summary\n\n**Observation:**\nfirst observation"
+            "### **Finding 1** — Observation summary\n\n**Observation:**\nfirst observation"
         ));
         assert!(assembled.body.contains(
-            "### Finding 2 — Observation summary\n\n**Observation:**\nsecond observation"
+            "### **Finding 2** — Observation summary\n\n**Observation:**\nsecond observation"
         ));
         assert!(assembled.body.contains("Related to Finding 1."));
         assert!(
@@ -1606,7 +1610,7 @@ mod tests {
                 .into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         assert!(
             finding.contains("**Sources:**"),
             "finding should contain Sources paragraph: {finding}"
@@ -1653,7 +1657,7 @@ mod tests {
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         // Sources should be in index order, not citation order, and deduped.
         let sources_idx = finding.find("**Sources:**").unwrap();
         let sources_block = &finding[sources_idx..];
@@ -1729,7 +1733,7 @@ mod tests {
                 .into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         assert!(
             finding.contains(
                 "**Source date range:** 2023-01-10..2024-06-01 (2 of 3 cited web sources dated)"
@@ -1769,7 +1773,7 @@ mod tests {
                 .into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         assert!(
             finding.contains(
                 "**Source date range:** — (cited web sources did not expose a publication date)"
@@ -1818,7 +1822,7 @@ mod tests {
                 .into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         let count = finding.matches("**Sources:**").count();
         assert_eq!(
             count, 1,
@@ -1835,7 +1839,7 @@ mod tests {
 **Observation:** obs\n\n**Analysis:** analysis\n\n**Cross-reference / Dependencies:** none\n\n**Implication:** impl".into(),
           ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         assert!(
             finding.contains("**Cross-reference / Dependencies:**\nnone"),
             "cross-reference label should stand on its own line: {finding}"
@@ -1980,7 +1984,7 @@ mod tests {
                 .into(),
         ];
         let assembled = assemble_document(&doc);
-        let finding = assembled.body.split("### Finding 1").nth(1).unwrap();
+        let finding = assembled.body.split("### **Finding 1**").nth(1).unwrap();
         // Each sentence of the Analysis body must be on its own paragraph.
         assert!(
             finding.contains("**Analysis:**\nSentence one.\n\nSentence two.\n\nSentence three."),

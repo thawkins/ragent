@@ -191,7 +191,8 @@ pub fn edit_log_summary(working_dir: &Path) -> (usize, usize, usize, f64) {
 
 /// Delete all edit-log files in the working directory's `log/` subdirectory.
 ///
-/// Returns the number of files removed.
+/// Returns the number of files removed. The `log/` directory itself is left
+/// intact; only matching `edits-*.jsonl` files are deleted.
 pub fn clear_edit_logs(working_dir: &Path) -> usize {
     let log_dir = log_dir(working_dir);
     if !log_dir.exists() {
@@ -212,6 +213,39 @@ pub fn clear_edit_logs(working_dir: &Path) -> usize {
         }
     }
     removed
+}
+
+/// Empty the contents of every edit-log file without deleting the files.
+///
+/// Truncates each `edits-*.jsonl` file in the log directory to zero bytes and
+/// returns the number of files cleared. The `log/` directory itself is
+/// preserved (created if missing) so that future edit operations can keep
+/// logging to the same location.
+pub fn clear_edit_log_contents(working_dir: &Path) -> usize {
+    let log_dir = log_dir(working_dir);
+    if !log_dir.exists() {
+        let _ = std::fs::create_dir_all(&log_dir);
+        return 0;
+    }
+
+    let mut cleared = 0usize;
+    if let Ok(entries) = std::fs::read_dir(&log_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("edits-") && name_str.ends_with(".jsonl") {
+                if let Ok(file) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(entry.path())
+                {
+                    drop(file);
+                    cleared += 1;
+                }
+            }
+        }
+    }
+    cleared
 }
 
 #[cfg(test)]

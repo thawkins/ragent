@@ -527,7 +527,7 @@ async fn test_read_then_edit_no_stale_error() {
 
 // ── Edit-log instrumentation (editlog spec) ─────────────────────────────────
 
-use ragent_tools_core::edit_log::{is_edit_log_enabled, set_edit_log_enabled};
+use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
 
 #[tokio::test]
 async fn test_edit_log_success_writes_jsonl() {
@@ -579,7 +579,7 @@ async fn test_edit_log_success_writes_jsonl() {
     assert_eq!(entry["dry_run"], false);
 
     set_edit_log_enabled(false);
-    let _ = std::fs::remove_dir_all(&log_dir);
+    clear_edit_logs(tmp.path());
 }
 
 #[tokio::test]
@@ -628,7 +628,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
     );
 
     set_edit_log_enabled(false);
-    let _ = std::fs::remove_dir_all(&log_dir);
+    clear_edit_logs(tmp.path());
 }
 
 #[tokio::test]
@@ -674,7 +674,7 @@ async fn test_edit_log_failure_writes_jsonl() {
     );
 
     set_edit_log_enabled(false);
-    let _ = std::fs::remove_dir_all(&log_dir);
+    clear_edit_logs(tmp.path());
 }
 
 #[tokio::test]

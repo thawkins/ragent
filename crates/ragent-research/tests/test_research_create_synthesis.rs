@@ -246,7 +246,7 @@ async fn malformed_llm_response_surfaces_fallback_empty_and_writes_findings() {
         "RESEARCH.md must still contain a Findings section, got:\n{body}"
     );
     assert!(
-        body.contains("### Finding 1 — Findings could not be structured"),
+        body.contains("### **Finding 1** — Findings could not be structured"),
         "RESEARCH.md findings must have a headline heading, got:\n{body}"
     );
     assert!(
@@ -326,7 +326,7 @@ async fn well_formed_llm_response_surfaces_llm_and_writes_llm_findings() {
     );
     assert!(body.contains("## Findings"));
     assert!(
-        body.contains("### Finding 1 — The source describes async/await idioms 1"),
+        body.contains("### **Finding 1** — The source describes async/await idioms 1"),
         "RESEARCH.md findings must have a headline heading, got:\n{body}"
     );
     assert!(body.contains("**Observation:**"));
@@ -412,7 +412,7 @@ async fn no_llm_engine_surfaces_no_llm_outcome_and_writes_mechanical_findings() 
         .unwrap();
     assert!(body.contains("## Findings"));
     assert!(
-        body.contains("### Finding 1 —"),
+        body.contains("### **Finding 1** —"),
         "RESEARCH.md findings must have a headline heading, got:\n{body}"
     );
     assert!(body.contains("**Observation:**"));
@@ -556,7 +556,7 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
         "Results Findings must contain the LLM finding verbatim, got:\n{results_section}"
     );
     assert!(
-        results_section.contains("### Finding 1 — The source describes async/await idioms 1"),
+        results_section.contains("### **Finding 1** — The source describes async/await idioms 1"),
         "Results Findings must have a derived headline heading, got:\n{results_section}"
     ); // FR-009: Discussion contains cross-references and open questions.
     let discussion_idx = body

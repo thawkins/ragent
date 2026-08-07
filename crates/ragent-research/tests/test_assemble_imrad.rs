@@ -182,7 +182,7 @@ fn imrad_populated_fields_render_in_sections() {
         "Results must contain Findings sub-section: {results_body}"
     );
     assert!(
-        results_body.contains("### Finding 1 — Finding one headline"),
+        results_body.contains("### **Finding 1** — Finding one headline"),
         "Results must render numbered findings: {results_body}"
     );
     assert!(
