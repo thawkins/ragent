@@ -633,9 +633,37 @@ async fn test_batch_stale_file_rejected() {
 // ── Edit-log instrumentation for multi_edit (editlog spec) ──────────────────
 
 use ragent_tools_core::edit_log::{clear_edit_logs, set_edit_log_enabled};
+use std::sync::Mutex;
+
+/// All edit-log tests use a process-wide flag and the working-dir `log/` path,
+/// so they must run serialised to avoid one test clearing logs another just wrote.
+static EDIT_LOG_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Wait up to one second for an edits jsonl file to appear in `log_dir`.
+fn wait_for_edit_log_file(log_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    for _ in 0..50 {
+        if let Ok(entries) = std::fs::read_dir(log_dir) {
+            let found = entries
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("edits-") && n.ends_with(".jsonl"))
+                });
+            if found.is_some() {
+                return found;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    None
+}
 
 #[tokio::test]
 async fn test_multiedit_log_success_writes_jsonl() {
+    let _guard = EDIT_LOG_MUTEX.lock().unwrap();
+    clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log");
     set_edit_log_enabled(true);
@@ -652,20 +680,7 @@ async fn test_multiedit_log_success_writes_jsonl() {
         .await
         .expect("multi_edit should succeed");
 
-    let files: Vec<_> = std::fs::read_dir(&log_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
-        })
-        .collect();
-    assert!(
-        !files.is_empty(),
-        "log directory should contain an edits jsonl file"
-    );
-
-    let path = files.first().unwrap().path();
+    let path = wait_for_edit_log_file(&log_dir).expect("edit log file should be created");
     let content = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert!(
@@ -691,6 +706,8 @@ async fn test_multiedit_log_success_writes_jsonl() {
 
 #[tokio::test]
 async fn test_multiedit_log_failure_writes_jsonl() {
+    let _guard = EDIT_LOG_MUTEX.lock().unwrap();
+    clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
     let log_dir = tmp.path().join("log");
     set_edit_log_enabled(true);
@@ -706,20 +723,7 @@ async fn test_multiedit_log_failure_writes_jsonl() {
         .await
         .expect_err("missing old_string must error");
 
-    let files: Vec<_> = std::fs::read_dir(&log_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let s = e.file_name().to_string_lossy().to_string();
-            s.starts_with("edits-") && s.ends_with(".jsonl")
-        })
-        .collect();
-    assert!(
-        !files.is_empty(),
-        "log directory should contain an edits jsonl file"
-    );
-
-    let path = files.first().unwrap().path();
+    let path = wait_for_edit_log_file(&log_dir).expect("edit log file should be created");
     let content = std::fs::read_to_string(&path).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert!(!lines.is_empty());
