@@ -1,5 +1,15 @@
 # Changelog
 
+## Version: 1.0.21
+
+### Fixed — CI clippy failure
+
+- Added `#[allow(clippy::too_many_arguments)]` to
+  `log_cron_execution` in `crates/ragent-tools-core/src/cron_log.rs`.
+  The function takes 8 arguments (clippy's default threshold is 7),
+  which caused the CI clippy gate (`-D warnings`) to fail on the
+  v1.0.20 release commit.
+
 ## Version: 1.0.20
 
 ### Added — LLM-callable cron tools

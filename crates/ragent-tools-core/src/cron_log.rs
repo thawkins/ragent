@@ -141,6 +141,7 @@ fn append_json_line(path: &Path, value: &Value) -> std::io::Result<()> {
 /// * `outcome` — the [`CronOutcome`] of the execution.
 /// * `error` — error message if the outcome was `Error`, otherwise `None`.
 /// * `run_id` — the session/run id of the spawned agent run, if any.
+#[allow(clippy::too_many_arguments)]
 pub fn log_cron_execution(
     working_dir: &Path,
     event_id: &str,
