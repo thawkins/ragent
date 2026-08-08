@@ -431,34 +431,39 @@ impl TaskManager {
         tokio::spawn(async move {
             let start = Instant::now();
 
-            let config = crate::Config::default();
-            let mut agent_info =
-                match crate::agent::resolve_agent_with_customs(&agent, &config, &working_dir_buf) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        let error_msg = e.to_string();
-                        {
-                            let mut t = tasks.write().await;
-                            if let Some(entry) = t.get_mut(&tid) {
-                                entry.status = TaskStatus::Failed;
-                                entry.error = Some(error_msg.clone());
-                                entry.completed_at = Some(Utc::now());
-                            }
+            let config = processor.load_config_cached();
+            let mut agent_info = match crate::agent::resolve_agent_with_customs_and_model(
+                &agent,
+                &config,
+                &working_dir_buf,
+                &processor.provider_registry,
+            ) {
+                Ok(a) => a,
+                Err(e) => {
+                    let error_msg = e.to_string();
+                    {
+                        let mut t = tasks.write().await;
+                        if let Some(entry) = t.get_mut(&tid) {
+                            entry.status = TaskStatus::Failed;
+                            entry.error = Some(error_msg.clone());
+                            entry.completed_at = Some(Utc::now());
                         }
-                        cancel_flags.write().await.remove(&tid);
-                        event_bus.publish(Event::SubagentComplete {
-                            session_id: parent_sid,
-                            task_id: tid,
-                            child_session_id: csid,
-                            summary: format!("Error: {error_msg}"),
-                            success: false,
-                            duration_ms: start.elapsed().as_millis() as u64,
-                        });
-                        return;
                     }
-                };
+                    cancel_flags.write().await.remove(&tid);
+                    event_bus.publish(Event::SubagentComplete {
+                        session_id: parent_sid,
+                        task_id: tid,
+                        child_session_id: csid,
+                        summary: format!("Error: {error_msg}"),
+                        success: false,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    });
+                    return;
+                }
+            };
             agent_info.mode = AgentMode::Subagent;
 
+            // Apply explicit model override if provided.
             if let Some(ref model_str) = model
                 && let Some((provider, model_id)) = model_str
                     .split_once('/')
@@ -468,6 +473,32 @@ impl TaskManager {
                     provider_id: provider.to_string(),
                     model_id: model_id.to_string(),
                 });
+            } else if !agent_info.model_pinned || agent_info.model.is_none() {
+                // No explicit override: fall back to the user's persisted
+                // `selected_model` setting (same path the TUI uses via
+                // `apply_selected_model_and_thinking`). Without this, the
+                // agent would get `resolve_default_model`'s first-provider
+                // pick (Anthropic), which typically has no API key configured.
+                if let Ok(Some(model_str)) = processor
+                    .session_manager
+                    .storage()
+                    .get_setting("selected_model")
+                {
+                    if let Some((provider, model_id)) = model_str
+                        .split_once('/')
+                        .or_else(|| model_str.split_once(':'))
+                    {
+                        tracing::info!(
+                            agent = %agent_info.name,
+                            selected_model = %model_str,
+                            "Applied persisted selected_model to background agent"
+                        );
+                        agent_info.model = Some(ModelRef {
+                            provider_id: provider.to_string(),
+                            model_id: model_id.to_string(),
+                        });
+                    }
+                }
             }
 
             let result = processor
@@ -821,8 +852,13 @@ impl TaskManager {
         cancel_flag: Arc<AtomicBool>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String> {
-        let config = crate::Config::default();
-        let mut agent = crate::agent::resolve_agent_with_customs(agent_name, &config, working_dir)?;
+        let config = self.processor.load_config_cached();
+        let mut agent = crate::agent::resolve_agent_with_customs_and_model(
+            agent_name,
+            &config,
+            working_dir,
+            &self.processor.provider_registry,
+        )?;
         agent.mode = AgentMode::Subagent;
 
         // Apply model override
@@ -835,6 +871,31 @@ impl TaskManager {
                 provider_id: provider.to_string(),
                 model_id: model_id.to_string(),
             });
+        } else if !agent.model_pinned || agent.model.is_none() {
+            // No explicit override: fall back to the user's persisted
+            // `selected_model` setting so sub-agents use the same provider
+            // the user configured in the TUI.
+            if let Ok(Some(model_str)) = self
+                .processor
+                .session_manager
+                .storage()
+                .get_setting("selected_model")
+            {
+                if let Some((provider, model_id)) = model_str
+                    .split_once('/')
+                    .or_else(|| model_str.split_once(':'))
+                {
+                    tracing::info!(
+                        agent = %agent.name,
+                        selected_model = %model_str,
+                        "Applied persisted selected_model to sub-agent"
+                    );
+                    agent.model = Some(ModelRef {
+                        provider_id: provider.to_string(),
+                        model_id: model_id.to_string(),
+                    });
+                }
+            }
         }
 
         let response_msg = self

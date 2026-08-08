@@ -674,7 +674,18 @@ fn parse_every(rest: &str, now: DateTime<Utc>) -> Result<ParsedSchedule, Schedul
     })
 }
 
-/// Parse an ISO-8601 timestamp.
+/// Parse a timestamp, accepting ISO-8601 or natural-language shortcuts.
+///
+/// In addition to full RFC-3339 / ISO-8601 timestamps, this function
+/// recognises human-friendly time shortcuts resolved against the user's
+/// local timezone:
+///
+/// - `5pm` — next 5pm (today if not yet passed, else tomorrow)
+/// - `5:30pm` / `5:30 pm` — next 5:30pm
+/// - `17:00` — next 17:00 (24-hour clock)
+/// - `5am tomorrow` — 5am on the following day
+///
+/// The result is returned as a UTC `DateTime`.
 fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, ScheduleParseError> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -685,14 +696,142 @@ fn parse_timestamp(s: &str) -> Result<DateTime<Utc>, ScheduleParseError> {
     }
 
     // Try parsing as a full DateTime with timezone.
-    DateTime::parse_from_rfc3339(trimmed)
-        .map(|dt| dt.with_timezone(&Utc))
-        .or_else(|_| {
-            // Fallback: try without timezone (assume UTC).
-            chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
-                .map(|ndt| ndt.and_utc())
-        })
-        .map_err(|e| ScheduleParseError::InvalidTimestamp(trimmed.to_string(), e.to_string()))
+    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+
+    // Fallback: try without timezone (assume UTC).
+    if let Ok(ndt) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
+        return Ok(ndt.and_utc());
+    }
+
+    // Fallback: try natural-language time shortcut.
+    if let Ok(dt) = parse_natural_time(trimmed) {
+        return Ok(dt);
+    }
+
+    Err(ScheduleParseError::InvalidTimestamp(
+        trimmed.to_string(),
+        "not a valid ISO-8601 or natural-language timestamp".to_string(),
+    ))
+}
+
+/// Parse a natural-language time expression and resolve it to the next
+/// occurrence in the user's local timezone, returning a UTC `DateTime`.
+///
+/// Accepted forms (case-insensitive):
+///
+/// - `5pm`, `5:30pm`, `5:30 pm` — 12-hour clock with am/pm
+/// - `17:00`, `17:00:00` — 24-hour clock
+/// - `5am`, `5pm tomorrow` — optional `today` / `tomorrow` suffix
+///
+/// When no day is specified, the next upcoming occurrence is used: if the
+/// time today has not yet passed, today is used; otherwise tomorrow.
+fn parse_natural_time(s: &str) -> Result<DateTime<Utc>, ()> {
+    use chrono::{Local, NaiveTime, TimeZone};
+
+    let lower = s.trim().to_lowercase();
+
+    // Check for a "today" or "tomorrow" suffix.
+    let (time_part, day_offset) = if let Some(t) = lower.strip_suffix(" tomorrow") {
+        (t.trim(), 1)
+    } else if let Some(t) = lower.strip_suffix(" today") {
+        (t.trim(), 0)
+    } else {
+        (lower.as_str(), -1) // -1 = auto (today or tomorrow)
+    };
+
+    if time_part.is_empty() {
+        return Err(());
+    }
+
+    // Detect optional am/pm suffix.
+    let (time_core, is_pm) = if let Some(t) = time_part.strip_suffix("pm") {
+        (t.trim(), Some(true))
+    } else if let Some(t) = time_part.strip_suffix("am") {
+        (t.trim(), Some(false))
+    } else {
+        (time_part, None)
+    };
+
+    // Parse the numeric time portion: "H", "H:M", or "H:M:S".
+    let parts: Vec<&str> = time_core.split(':').collect();
+    if parts.is_empty() || parts.len() > 3 {
+        return Err(());
+    }
+
+    let hour: u32 = parts[0].parse().map_err(|_| ())?;
+    let minute: u32 = if parts.len() > 1 {
+        parts[1].parse().map_err(|_| ())?
+    } else {
+        0
+    };
+    let second: u32 = if parts.len() > 2 {
+        parts[2].parse().map_err(|_| ())?
+    } else {
+        0
+    };
+
+    // Convert 12-hour to 24-hour.
+    let hour24 = match is_pm {
+        Some(true) => {
+            if hour == 12 {
+                12 // 12pm = noon
+            } else if (1..=11).contains(&hour) {
+                hour + 12
+            } else {
+                return Err(()); // e.g. "13pm" is invalid
+            }
+        }
+        Some(false) => {
+            if hour == 12 {
+                0 // 12am = midnight
+            } else if (1..=11).contains(&hour) {
+                hour
+            } else {
+                return Err(()); // e.g. "13am" is invalid
+            }
+        }
+        None => {
+            // 24-hour clock: 0-23
+            if hour > 23 {
+                return Err(());
+            }
+            hour
+        }
+    };
+
+    if minute > 59 || second > 59 {
+        return Err(());
+    }
+
+    let local_now = Local::now();
+    let today = local_now.date_naive();
+
+    // Determine the target date.
+    let target_date = match day_offset {
+        0 => today,                             // explicit "today"
+        1 => today + chrono::Duration::days(1), // explicit "tomorrow"
+        _ => {
+            // Auto: use today if the time hasn't passed yet, else tomorrow.
+            let now_time = local_now.time();
+            let target_time = NaiveTime::from_hms_opt(hour24, minute, second).ok_or(())?;
+            if target_time <= now_time {
+                today + chrono::Duration::days(1)
+            } else {
+                today
+            }
+        }
+    };
+
+    let target_naive =
+        target_date.and_time(NaiveTime::from_hms_opt(hour24, minute, second).ok_or(())?);
+
+    Ok(Local
+        .from_local_datetime(&target_naive)
+        .single()
+        .ok_or(())?
+        .with_timezone(&Utc))
 }
 
 /// Advance a past start timestamp to the next future multiple of duration.
@@ -1172,6 +1311,115 @@ mod tests {
             .with_timezone(&Utc);
         assert_eq!(parsed.schedule.start_at, Some(expected));
         assert_eq!(parsed.next_due, expected);
+    }
+
+    // ---- natural-language timestamp tests ----
+
+    #[test]
+    fn test_parse_natural_time_5pm() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 5pm", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now, "5pm should be in the future");
+    }
+
+    #[test]
+    fn test_parse_natural_time_5pm_case_insensitive() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 5PM", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now);
+    }
+
+    #[test]
+    fn test_parse_natural_time_5_30pm() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 5:30pm", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now);
+        // Verify minute is 30
+        assert_eq!(parsed.next_due.format("%M").to_string(), "30");
+    }
+
+    #[test]
+    fn test_parse_natural_time_24_hour() {
+        use chrono::Offset;
+        let now = Utc::now();
+        let parsed = parse_schedule("at 17:00", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now);
+        // 17:00 local should produce a UTC time whose hour accounts for offset.
+        let local_offset_secs: i64 =
+            i64::from(chrono::Local::now().offset().fix().local_minus_utc());
+        let expected_utc_hour = (17i64 - (local_offset_secs / 3600)).rem_euclid(24);
+        assert_eq!(
+            parsed
+                .next_due
+                .format("%H")
+                .to_string()
+                .parse::<i64>()
+                .unwrap(),
+            expected_utc_hour
+        );
+    }
+
+    #[test]
+    fn test_parse_natural_time_5pm_tomorrow() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 5pm tomorrow", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now + chrono::Duration::hours(20));
+    }
+
+    #[test]
+    fn test_parse_natural_time_5am() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 5am", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        assert!(parsed.next_due > now);
+    }
+
+    #[test]
+    fn test_parse_natural_time_12pm_noon() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 12pm", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        // 12pm = noon, should be resolved to the next noon
+        assert!(parsed.next_due > now);
+    }
+
+    #[test]
+    fn test_parse_natural_time_12am_midnight() {
+        let now = Utc::now();
+        let parsed = parse_schedule("at 12am", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::OneShot);
+        // 12am = midnight, should be resolved to the next midnight
+        assert!(parsed.next_due > now);
+    }
+
+    #[test]
+    fn test_parse_natural_time_from_5pm_every_1h() {
+        let now = Utc::now();
+        let parsed = parse_schedule("from 5pm every 1h", now).unwrap();
+        assert_eq!(parsed.schedule.form, CronForm::RepeatFrom);
+        assert!(parsed.next_due > now);
+    }
+
+    #[test]
+    fn test_parse_natural_time_invalid() {
+        let now = Utc::now();
+        assert!(matches!(
+            parse_schedule("at 13pm", now),
+            Err(ScheduleParseError::InvalidTimestamp(_, _))
+        ));
+        assert!(matches!(
+            parse_schedule("at 25:00", now),
+            Err(ScheduleParseError::InvalidTimestamp(_, _))
+        ));
+        assert!(matches!(
+            parse_schedule("at abc", now),
+            Err(ScheduleParseError::InvalidTimestamp(_, _))
+        ));
     }
 
     // ---- next_due computation tests (FR-004, FR-005, FR-008, FR-009) ----

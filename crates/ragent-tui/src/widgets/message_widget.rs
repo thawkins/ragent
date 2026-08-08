@@ -148,6 +148,7 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 ///   github_comment_issue, github_close_issue, github_list_prs,
 ///   github_get_pr, github_create_pr, github_merge_pr, github_review_pr
 /// - ✨ Utility: format, metadata, truncate, read_line_range
+/// - ⏰ Cron Scheduler: cron_add, cron_remove, cron_list, cron_enable, cron_disable
 ///
 /// Summarise a tool's input for display in the TUI log panel.
 pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
@@ -1250,6 +1251,27 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
 
+        // ═══════════════════════════════════════════════════════════════════
+        // ⏰ CRON SCHEDULER
+        // ═══════════════════════════════════════════════════════════════════
+        "cron_add" => {
+            let id = get_str(&["id"]).unwrap_or_default();
+            let schedule = get_str(&["schedule"]).unwrap_or_default();
+            format!("⏰ add `{}` {}", trunc120(&id), trunc120(&schedule))
+        }
+        "cron_remove" => {
+            let id = get_str(&["id"]).unwrap_or_default();
+            format!("⏰ remove `{}`", trunc120(&id))
+        }
+        "cron_list" => "⏰ list events".to_string(),
+        "cron_enable" => {
+            let id = get_str(&["id"]).unwrap_or_default();
+            format!("⏰ enable `{}`", trunc120(&id))
+        }
+        "cron_disable" => {
+            let id = get_str(&["id"]).unwrap_or_default();
+            format!("⏰ disable `{}`", trunc120(&id))
+        }
         // ═══════════════════════════════════════════════════════════════════
         // DEFAULT: Unknown tools
         // ═══════════════════════════════════════════════════════════════════
@@ -2403,6 +2425,42 @@ pub fn tool_result_summary(
             } else {
                 Some("nothing to forget".to_string())
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ⏰ CRON SCHEDULER
+        // ═══════════════════════════════════════════════════════════════════
+        "cron_add" => {
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("⏰ `{}` scheduled", trunc120(id)))
+        }
+        "cron_remove" => {
+            let removed = out
+                .get("removed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(if removed {
+                format!("⏰ `{}` removed", trunc120(id))
+            } else {
+                format!("⏰ `{}` not found", trunc120(id))
+            })
+        }
+        "cron_list" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("⏰ {} listed", pluralize(count, "event", "events")))
+        }
+        "cron_enable" | "cron_disable" => {
+            let enabled = out
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(if enabled {
+                format!("⏰ `{}` enabled", trunc120(id))
+            } else {
+                format!("⏰ `{}` disabled", trunc120(id))
+            })
         }
 
         // ═══════════════════════════════════════════════════════════════════

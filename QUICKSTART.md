@@ -1153,7 +1153,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex show` | Show index status and statistics |
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
-| `/cron add \|remove\|list\|log\|help` | Schedule and manage recurring agent runs |
+| `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
 
 ### Benchmark Workflow
 
@@ -1166,9 +1166,9 @@ Ragent supports scheduling agent runs with a cron-like system. Use the
 
 | Form | Behaviour | Example |
 |------|-----------|--------|
-| `at <timestamp>` | One-shot — fires once at the specified time | `/cron add general at 2025-01-15T09:00 "Run tests"` |
-| `from <timestamp> every <duration>` | Repeating — first fire at the timestamp, then every duration | `/cron add general from 2025-01-15T09:00 every 30m "Run tests"` |
-| `every <duration>` | Repeating — first fire is duration from now | `/cron add general every 2h "Run tests"` |
+| `at <timestamp>` | One-shot — fires once at the specified time | `/cron add nightly general at 2025-01-15T09:00 "Run tests"` |
+| `from <timestamp> every <duration>` | Repeating — first fire at the timestamp, then every duration | `/cron add nightly general from 2025-01-15T09:00 every 30m "Run tests"` |
+| `every <duration>` | Repeating — first fire is duration from now | `/cron add nightly general every 2h "Run tests"` |
 
 Durations use a positive integer + unit: `m` (minutes), `h` (hours),
 `d` (days), `w` (weeks), `mo` (months = 30 days). Plural aliases
@@ -1181,8 +1181,11 @@ Timestamps are ISO-8601 (e.g. `2025-01-15T09:00:00Z` or
 
 | Command | Description |
 |---------|--------------|
-| `/cron add <agent> <schedule> "<prompt>"` | Schedule a new event |
+| `/cron add <cronname> <agent> <schedule> "<prompt>"` | Schedule a new event (`cronname` becomes the event ID) |
 | `/cron remove <event_id>` | Remove a scheduled event |
+| `/cron enable <event_id>` | Enable a previously disabled event |
+| `/cron disable <event_id>` | Disable an event |
+| `/cron detail <event_id>` | Show full details of a single event |
 | `/cron list` | List all events with human-readable schedules |
 | `/cron log [event_id]` | Show execution log (optionally filtered by event id) |
 | `/cron help` | Show usage |

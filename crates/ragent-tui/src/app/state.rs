@@ -567,7 +567,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "cron",
-        description: "Schedule agent runs: /cron add|remove|list|log|help",
+        description: "Schedule agent runs: /cron add <cronname> <agent> <schedule> \"<prompt>\"|remove|enable|disable|list|log|help",
     },
     SlashCommandDef {
         trigger: "compact",

@@ -1,5 +1,64 @@
 # Changelog
 
+## Version: 1.0.20
+
+### Added — LLM-callable cron tools
+
+- New `cron_add`, `cron_remove`, `cron_list`, `cron_enable`, and
+  `cron_disable` tools registered in the default tool registry, giving
+  the model direct access to the cron scheduler without going through
+  the TUI slash-command surface.
+- All cron tools read/write through the `Storage` layer, mirroring the
+  `/cron` slash-command handlers.
+- TUI log-panel rendering added for cron tool inputs and results
+  (⏰ summaries in `message_widget`).
+
+### Added — `/cron` slash-command enhancements
+
+- `/cron add` now takes a positional `cronname` as the first argument:
+  `/cron add <cronname> <agent> <schedule> "<prompt>"`. The cronname
+  becomes the event ID.
+- New `/cron enable <event_id>` and `/cron disable <event_id>` commands
+  to toggle events without removing them.
+- New `/cron detail <event_id>` command showing every stored field
+  including the full, untruncated prompt.
+- `/cron help` updated with parameter tables, schedule examples, and
+  natural-language timestamp documentation.
+
+### Added — Natural-language timestamp parsing
+
+- `parse_timestamp` now accepts human-friendly time shortcuts resolved
+  against the user's local timezone in addition to ISO-8601:
+  - `5pm` / `5PM` — next 5pm (today or tomorrow)
+  - `5:30pm` / `5:30 pm` — 12-hour clock with minutes
+  - `17:00` — 24-hour clock
+  - `5am tomorrow` / `5pm today` — explicit day offset
+- 12-hour edge cases handled: `12pm` = noon, `12am` = midnight, `13pm`
+  rejected as invalid.
+- Added 13 unit tests covering natural-language parsing, case
+  insensitivity, 24-hour conversion, and invalid inputs.
+
+### Fixed — Sub-agent and background-agent model resolution
+
+- Background agents and sub-agents (`new_task`) now use the user's
+  persisted `selected_model` setting from Storage instead of falling
+  back to `Config::default()` and `resolve_default_model`, which
+  typically picked Anthropic even when no API key was configured.
+- Agent resolution now uses `resolve_agent_with_customs_and_model` with
+  the cached config (`load_config_cached`) and the provider registry,
+  matching the TUI's model resolution path.
+- Explicit model overrides (`--model` / `model` parameter) still take
+  precedence; the persisted setting is only applied when no override is
+  present and the agent's model is not pinned.
+
+### Tests
+
+- `crates/ragent-agent/tests/test_cron_tools.rs` — 6 tests covering the
+  LLM-callable cron tool surface.
+- `crates/ragent-tui/tests/test_cron_add_positional.rs` — tests for the
+  positional `/cron add <cronname> ...` parser.
+- 13 new natural-language timestamp tests in `ragent-types/src/cron.rs`.
+
 ## Version: 1.0.19
 
 ### Added — Cron capability

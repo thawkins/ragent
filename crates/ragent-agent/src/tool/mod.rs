@@ -70,6 +70,9 @@ pub mod spec_read;
 pub mod spec_search;
 pub mod spec_task_update;
 
+/// Cron scheduler tools (LLM-callable equivalents of `/cron` slash commands).
+pub mod cron;
+
 /// Metadata builder for consistent tool output metadata.
 pub mod metadata;
 
@@ -1367,6 +1370,12 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(spec_search::SpecSearchTool));
     registry.register(Arc::new(spec_task_update::SpecTaskUpdateTool));
     registry.register(Arc::new(spec_coverage::SpecCoverageTool));
+    // Cron scheduler tools
+    registry.register(Arc::new(cron::CronAddTool));
+    registry.register(Arc::new(cron::CronRemoveTool));
+    registry.register(Arc::new(cron::CronListTool));
+    registry.register(Arc::new(cron::CronEnableTool));
+    registry.register(Arc::new(cron::CronDisableTool));
     // Background task manager (M3)
     registry.register(Arc::new(bg::BgTool));
     // M8 — durable initiatives and skill management

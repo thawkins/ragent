@@ -411,6 +411,14 @@ Recent highlights:
 - Amazon Bedrock provider with AWS SigV4 signing and dual API support
 - Startup ASCII art banner with compile timestamp
 - Instruction file discovery logging
+- Cron scheduler: `/cron add <cronname> <agent> <schedule> "<prompt>"` with
+  `enable`/`disable`/`detail` sub-commands and natural-language timestamps
+  (`5pm`, `5:30pm`, `17:00`, `5am tomorrow`)
+- LLM-callable cron tools (`cron_add`, `cron_remove`, `cron_list`,
+  `cron_enable`, `cron_disable`) for model-driven scheduling
+- Sub-agent and background-agent model resolution now uses the user's
+  persisted `selected_model` setting instead of falling back to
+  `Config::default()`
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

@@ -7303,8 +7303,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
     ///
     /// | Sub-command | Description |
     /// |---|---|
-    /// | `/cron add <agent> <schedule> "<prompt>"` | Create a new scheduled event |
+    /// | `/cron add <cronname> <agent> <schedule> "<prompt>"` | Create a new scheduled event |
     /// | `/cron remove <event_id>` | Delete an event by id |
+    /// | `/cron enable <event_id>` | Enable an event |
+    /// | `/cron disable <event_id>` | Disable an event |
     /// | `/cron list` | Show all events with human-readable schedules |
     /// | `/cron log [event_id]` | Show execution log, optionally filtered |
     /// | `/cron help` | Show usage |
@@ -7318,7 +7320,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         match sub.as_str() {
             "add" | "" => self.handle_cron_add(rest),
             "remove" => self.handle_cron_remove(rest),
+            "enable" => self.handle_cron_set_enabled(rest, true),
+            "disable" => self.handle_cron_set_enabled(rest, false),
             "list" => self.handle_cron_list(),
+            "detail" => self.handle_cron_detail(rest),
             "log" => self.handle_cron_log(rest),
             "help" => self.handle_cron_help(),
             _ => {
@@ -7337,68 +7342,105 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
              ## /cron — Scheduled agent runs\n\n\
              | Sub-command | Usage | Description |\n\
              |---|---|---|\n\
-             | `add` | `/cron add <agent> <schedule> \"<prompt>\"` | Create a new event |\n\
+             | `add` | `/cron add <cronname> <agent> <schedule> \"<prompt>\"` | Create a new event |\n\
              | `remove` | `/cron remove <event_id>` | Delete an event |\n\
+             | `enable` | `/cron enable <event_id>` | Enable an event |\n\
+             | `disable` | `/cron disable <event_id>` | Disable an event |\n\
              | `list` | `/cron list` | Show all events |\n\
+             | `detail` | `/cron detail <event_id>` | Show full details of an event |\n\
              | `log` | `/cron log [event_id]` | Show execution log |\n\
              | `help` | `/cron help` | Show this help |\n\n\
+             **`add` parameters (positional):**\n\n\
+             | Position | Parameter | Description |\n\
+             |---|---|---|\n\
+             | 1 | `cronname` | Sets the event ID |\n\
+             | 2 | `agent` | Agent type to run |\n\
+             | 3 | `schedule` | Schedule expression (see forms below) |\n\
+             | 4 | `prompt` | Prompt the agent executes (must be double-quoted) |\n\n\
              **Schedule forms:**\n\n\
              | Form | Example |\n\
              |---|---|\n\
              | `at <timestamp>` | One-shot at a specific time |\n\
              | `from <timestamp> every <duration>` | Repeating from a start time |\n\
              | `every <duration>` | Repeating from now |\n\n\
+             **Schedule examples:**\n\n\
+             | Example | Meaning |\n\
+             |---|---|\n\
+             | `at 2025-01-15T09:00:00Z` | One-shot run at 9am UTC on Jan 15 2025 |\n\
+             | `at 5pm` | One-shot at the next 5pm (today or tomorrow) |\n\
+             | `every 30m` | Repeat every 30 minutes starting now |\n\
+             | `from 5pm tomorrow every 1h` | Repeat hourly, first run at 5pm tomorrow |\n\
+             | `every 1d` | Repeat every 24 hours starting now |\n\n\
+             **Timestamps** accept ISO-8601 (`2025-01-15T09:00:00Z`) or \
+             natural-language shortcuts: `5pm`, `5:30pm`, `17:00`, `5am tomorrow`.\n\n\
              **Durations:** `<int><unit>` where unit is `m` (mins), `h` (hrs), \
              `d` (days), `w` (wks), or `mo` (months).",
         );
         self.status = "cron: help".to_string();
     }
 
-    /// Handle `/cron add <agent_type> <schedule> "<prompt>"`.
+    /// Handle `/cron add <cronname> <agent> <schedule> "<prompt>"`.
+    ///
+    /// Positional parameters set the event ID (`cronname`), the agent type, the
+    /// schedule expression, and the prompt. The prompt must be double-quoted.
     fn handle_cron_add(&mut self, rest: &str) {
-        // Parse: <agent_type> <schedule_expr> "<prompt>"
+        // Parse: <cronname> <agent_type> <schedule_expr> "<prompt>"
         // The prompt is the last double-quoted string.
         let rest = rest.trim();
         if rest.is_empty() {
             self.append_assistant_text(
                 "From: /cron add\n\n\
-                 Usage: `/cron add <agent> <schedule> \"<prompt>\"`\n\n\
-                 Example: `/cron add general every 30m \"Run tests\"`",
+                 Usage: `/cron add <cronname> <agent> <schedule> \"<prompt>\"`\n\n\
+                 Example: `/cron add nightly general every 30m \"Run tests\"`",
             );
             self.status = "cron: add usage".to_string();
             return;
         }
 
         // Extract the quoted prompt (last double-quoted segment).
-        let (schedule_part, prompt) = match extract_quoted_prompt(rest) {
+        let (before_prompt, prompt) = match extract_quoted_prompt(rest) {
             Some(p) => p,
             None => {
                 self.append_assistant_text(
                     "From: /cron add\n⚠ The prompt must be enclosed in double quotes.\n\n\
-                     Example: `/cron add general every 30m \"Run tests\"`",
+                     Example: `/cron add nightly general every 30m \"Run tests\"`",
                 );
                 self.status = "cron: add missing prompt".to_string();
                 return;
             }
         };
 
-        // Split agent_type from the schedule expression.
-        let (agent_type, schedule_expr) = match schedule_part.split_once(char::is_whitespace) {
+        // Split the remaining text into cronname, agent, and schedule.
+        // <cronname> <agent> <schedule...>
+        let (cronname, rest1) = match before_prompt.split_once(char::is_whitespace) {
+            Some((n, r)) => (n.trim(), r.trim()),
+            None => {
+                self.append_assistant_text(
+                    "From: /cron add\n⚠ Missing agent and schedule expression.\n\n\
+                     Format: `<cronname> <agent> <schedule> \"<prompt>\"`\n\
+                     Example: `/cron add nightly general every 30m \"Run tests\"`",
+                );
+                self.status = "cron: add missing agent".to_string();
+                return;
+            }
+        };
+
+        let (agent_type, schedule_expr) = match rest1.split_once(char::is_whitespace) {
             Some((a, s)) => (a.trim(), s.trim()),
             None => {
                 self.append_assistant_text(
                     "From: /cron add\n⚠ Missing schedule expression.\n\n\
-                     Format: `<agent> <schedule> \"<prompt>\"`\n\
-                     Example: `/cron add general every 30m \"Run tests\"`",
+                     Format: `<cronname> <agent> <schedule> \"<prompt>\"`\n\
+                     Example: `/cron add nightly general every 30m \"Run tests\"`",
                 );
                 self.status = "cron: add missing schedule".to_string();
                 return;
             }
         };
 
-        if agent_type.is_empty() || schedule_expr.is_empty() {
+        if cronname.is_empty() || agent_type.is_empty() || schedule_expr.is_empty() {
             self.append_assistant_text(
-                "From: /cron add\n⚠ Agent type and schedule expression are required.",
+                "From: /cron add\n⚠ cronname, agent, and schedule expression are all required.",
             );
             self.status = "cron: add missing fields".to_string();
             return;
@@ -7417,10 +7459,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
         };
 
-        // Generate a unique event id.
-        let event_id = format!("cron-{}", ragent_types::id::SessionId::new());
+        // Use the supplied cronname as the event id.
         let event = ragent_types::CronEvent::new(
-            event_id.clone(),
+            cronname.to_string(),
             agent_type.to_string(),
             prompt,
             parsed.schedule,
@@ -7498,13 +7539,59 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         }
     }
 
+    /// Handle `/cron enable <event_id>` or `/cron disable <event_id>`.
+    ///
+    /// Toggles the `enabled` flag on a stored cron event. When `enabled` is
+    /// `true` the scheduler will fire the event; when `false` it skips the
+    /// event and logs `"skipped"`.
+    fn handle_cron_set_enabled(&mut self, rest: &str, enabled: bool) {
+        let event_id = rest.trim();
+        let action = if enabled { "enable" } else { "disable" };
+        if event_id.is_empty() {
+            self.append_assistant_text(&format!(
+                "From: /cron {action}\n\nUsage: `/cron {action} <event_id>`"
+            ));
+            self.status = format!("cron: {action} usage");
+            return;
+        }
+
+        match self.storage.set_cron_event_enabled(event_id, enabled) {
+            Ok(true) => {
+                let mark = if enabled { "✅" } else { "⏸️" };
+                self.append_assistant_text(&format!(
+                    "From: /cron {action}\n{mark} Event `{}` {}.",
+                    event_id,
+                    if enabled { "enabled" } else { "disabled" }
+                ));
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("cron {action}: event {}", event_id),
+                );
+                self.status = format!("cron: {action}d");
+            }
+            Ok(false) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron {action}\n⚠ Event `{}` not found.",
+                    event_id
+                ));
+                self.status = "cron: not found".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron {action}\n❌ Failed to update event: {e}"
+                ));
+                self.status = format!("cron: {action} error");
+            }
+        }
+    }
+
     /// Handle `/cron list` — display all scheduled events.
     fn handle_cron_list(&mut self) {
         match self.storage.list_cron_events() {
             Ok(rows) if rows.is_empty() => {
                 self.append_assistant_text(
                     "From: /cron list\n\nℹ️  No scheduled events.\n\n\
-                     Use `/cron add <agent> <schedule> \"<prompt>\"` to create one.",
+                     Use `/cron add <cronname> <agent> <schedule> \"<prompt>\"` to create one.",
                 );
                 self.status = "cron: list empty".to_string();
             }
@@ -7543,6 +7630,85 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     "From: /cron list\n❌ Failed to list events: {e}"
                 ));
                 self.status = "cron: list error".to_string();
+            }
+        }
+    }
+
+    /// Handle `/cron detail <event_id>` — show full details of a single event.
+    ///
+    /// Displays every stored field including the complete (untruncated) prompt.
+    fn handle_cron_detail(&mut self, rest: &str) {
+        let event_id = rest.trim();
+        if event_id.is_empty() {
+            self.append_assistant_text("From: /cron detail\n\nUsage: `/cron detail <event_id>`");
+            self.status = "cron: detail usage".to_string();
+            return;
+        }
+
+        match self.storage.get_cron_event(event_id) {
+            Ok(Some(row)) => {
+                let desc = row_to_human_readable(&row);
+                let enabled_str = if row.enabled {
+                    "✓ enabled"
+                } else {
+                    "✗ disabled"
+                };
+                let next_due_display = format_next_due(&row.next_due, row.enabled);
+                let start_at_display = row.start_at.as_deref().unwrap_or("—");
+                let duration_display = row
+                    .duration_secs
+                    .map(duration_secs_to_string)
+                    .unwrap_or_else(|| "—".to_string());
+                let last_fired_display = row.last_fired.as_deref().unwrap_or("never");
+
+                let output = format!(
+                    "From: /cron detail\n\n\
+                     ## Event `{id}`\n\n\
+                     | Field | Value |\n\
+                     |---|---|\n\
+                     | ID | `{id}` |\n\
+                     | Agent | `{agent}` |\n\
+                     | Schedule | {raw} ({desc}) |\n\
+                     | Schedule form | `{form}` |\n\
+                     | Start at | {start_at} |\n\
+                     | Duration | {duration} |\n\
+                     | Enabled | {enabled} |\n\
+                     | Next due | {next_due} |\n\
+                     | Created at | {created_at} |\n\
+                     | Last fired | {last_fired} |\n\n\
+                     **Prompt:**\n\n\
+                     ```\n\
+                     {prompt}\n\
+                     ```",
+                    id = row.id,
+                    agent = row.agent_type,
+                    raw = row.schedule_raw,
+                    desc = desc,
+                    form = row.schedule_form,
+                    start_at = start_at_display,
+                    duration = duration_display,
+                    enabled = enabled_str,
+                    next_due = next_due_display,
+                    created_at = row.created_at,
+                    last_fired = last_fired_display,
+                    prompt = row.prompt,
+                );
+
+                self.append_assistant_text(&output);
+                self.status = "cron: detail".to_string();
+            }
+            Ok(None) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron detail\n\n⚠ Event `{}` not found.",
+                    event_id
+                ));
+                self.status = "cron: detail not found".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron detail\n❌ Failed to fetch event: {e}"
+                ));
+                self.status = "cron: detail error".to_string();
             }
         }
     }

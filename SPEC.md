@@ -1853,9 +1853,9 @@ Three schedule forms are supported:
 
 | Form | Behaviour | Example |
 |------|-----------|---------|
-| `at <timestamp>` | One-shot. Fires once at the specified time. | `/cron add general at 2025-01-15T09:00 "Run tests"` |
-| `from <timestamp> every <duration>` | Repeating. First fire at the timestamp, then every duration. | `/cron add general from 2025-01-15T09:00 every 30m "Run tests"` |
-| `every <duration>` | Repeating, no explicit start. First fire is duration from now. | `/cron add general every 2h "Run tests"` |
+| `at <timestamp>` | One-shot. Fires once at the specified time. | `/cron add nightly general at 2025-01-15T09:00 "Run tests"` |
+| `from <timestamp> every <duration>` | Repeating. First fire at the timestamp, then every duration. | `/cron add nightly general from 2025-01-15T09:00 every 30m "Run tests"` |
+| `every <duration>` | Repeating, no explicit start. First fire is duration from now. | `/cron add nightly general every 2h "Run tests"` |
 
 Durations are a positive integer + unit:
 
@@ -1867,18 +1867,34 @@ Durations are a positive integer + unit:
 | `w` | weeks | `wk`, `wks` |
 | `mo` | months (30 days) | `month`, `months` |
 
-Timestamps are ISO-8601 (e.g. `2025-01-15T09:00:00Z` or
-`2025-01-15T09:00:00+02:00`).
+Timestamps accept ISO-8601 (e.g. `2025-01-15T09:00:00Z` or
+`2025-01-15T09:00:00+02:00`) or natural-language shortcuts resolved against
+the user's local timezone:
+
+| Shortcut | Meaning |
+|----------|---------|
+| `5pm` | Next 5pm (today if not yet passed, else tomorrow) |
+| `5:30pm` / `5:30 pm` | Next 5:30pm |
+| `17:00` | Next 17:00 (24-hour clock) |
+| `5am tomorrow` | 5am on the following day |
+| `12pm` | Noon |
+| `12am` | Midnight |
 
 ### 16A.2 Slash Commands
 
 | Command | Description |
 |---------|-------------|
-| `/cron add <agent> <schedule> "<prompt>"` | Schedule a new event |
+| `/cron add <cronname> <agent> <schedule> "<prompt>"` | Schedule a new event (`cronname` becomes the event ID) |
 | `/cron remove <event_id>` | Remove a scheduled event |
+| `/cron enable <event_id>` | Enable a previously disabled event |
+| `/cron disable <event_id>` | Disable an event (skipped by the scheduler) |
 | `/cron list` | List all events with human-readable schedule descriptions |
+| `/cron detail <event_id>` | Show full details of a single event (untruncated prompt) |
 | `/cron log [event_id]` | Show execution log (optionally filtered by event id) |
 | `/cron help` | Show usage |
+
+The model can also manage cron events directly via the LLM-callable tools
+`cron_add`, `cron_remove`, `cron_list`, `cron_enable`, and `cron_disable`.
 
 ### 16A.3 Scheduler
 
