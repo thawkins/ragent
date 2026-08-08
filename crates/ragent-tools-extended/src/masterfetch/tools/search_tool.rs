@@ -23,10 +23,11 @@
 //!
 //! The tool is **keyless by default** (FR-023): it scrapes public search-engine
 //! HTML result pages via DuckDuckGo and Brave. No API keys are required for
-//! those backends. If a `langsearch_api_key` or `tavily_api_key` is configured
-//! in `ragent.json` (or the corresponding environment variable is set), an
-//! optional API-backed engine is added for higher-quality results; the keys are
-//! masked in diagnostics and never logged.
+//! those backends. If a `langsearch_api_key`, `tavily_api_key`, or
+//! `perplexity_api_key` is configured in `ragent.json` (or the corresponding
+//! environment variable is set), an optional API-backed engine is added for
+//! higher-quality results; the keys are masked in diagnostics and never
+//! logged.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -37,6 +38,7 @@ use std::sync::Arc;
 use super::super::MASTERFETCH_VERSION;
 use super::super::search::consensus::MergeOutput;
 use super::super::search::langsearch::LangSearchEngine;
+use super::super::search::perplexity::PerplexityEngine;
 use super::super::search::tavily::TavilyEngine;
 use super::super::search::{Freshness, SearchEngine, SearchOptions, SearchOrchestrator};
 
@@ -97,13 +99,16 @@ impl MfSearchTool {
     /// backends. If `ctx.config` contains a non-empty `langsearch_api_key`, a
     /// [`LangSearchEngine`] is added as a third backend. If `ctx.config`
     /// contains a non-empty `tavily_api_key` (or `TAVILY_API_KEY` environment
-    /// variable), a [`TavilyEngine`] is added as an additional backend.
+    /// variable), a [`TavilyEngine`] is added as an additional backend. If
+    /// `ctx.config` contains a non-empty `perplexity_api_key` (or
+    /// `PERPLEXITY_API_KEY` environment variable), a [`PerplexityEngine`] is
+    /// added as an additional backend.
     ///
     /// This helper is public so integration tests can verify backend wiring
     /// without making network requests.
     #[must_use]
     pub fn build_orchestrator(ctx: &ToolContext) -> SearchOrchestrator {
-        let (langsearch_key, tavily_key) = Self::resolve_search_keys(ctx);
+        let (langsearch_key, tavily_key, perplexity_key) = Self::resolve_search_keys(ctx);
         let mut engines: Vec<Arc<dyn SearchEngine>> = vec![
             Arc::new(super::super::search::duckduckgo::DuckDuckGoEngine::new()),
             Arc::new(super::super::search::brave::BraveEngine::new()),
@@ -116,15 +121,21 @@ impl MfSearchTool {
         if let Some(key) = tavily_key {
             engines.push(Arc::new(TavilyEngine::new(key)));
         }
+        if let Some(key) = perplexity_key {
+            engines.push(Arc::new(PerplexityEngine::new(key)));
+        }
         SearchOrchestrator::with_engines(engines)
     }
 
     /// Resolve configured API keys for optional search backends.
     ///
-    /// Returns `(langsearch_key, tavily_key)` where `langsearch_key` is taken
-    /// from `ctx.config.langsearch_api_key` and `tavily_key` is taken from the
-    /// `TAVILY_API_KEY` environment variable or `ctx.config.tavily_api_key`.
-    fn resolve_search_keys(ctx: &ToolContext) -> (Option<&str>, Option<String>) {
+    /// Returns `(langsearch_key, tavily_key, perplexity_key)` where
+    /// `langsearch_key` is taken from `ctx.config.langsearch_api_key`,
+    /// `tavily_key` is taken from the `TAVILY_API_KEY` environment variable or
+    /// `ctx.config.tavily_api_key`, and `perplexity_key` is taken from the
+    /// `PERPLEXITY_API_KEY` environment variable or
+    /// `ctx.config.perplexity_api_key`.
+    fn resolve_search_keys(ctx: &ToolContext) -> (Option<&str>, Option<String>, Option<String>) {
         let langsearch_key = ctx
             .config
             .as_ref()
@@ -137,18 +148,26 @@ impl MfSearchTool {
                     .and_then(|cfg| cfg.tavily_api_key.clone())
             })
             .filter(|k| !k.is_empty());
-        (langsearch_key, tavily_key)
+        let perplexity_key = std::env::var("PERPLEXITY_API_KEY")
+            .ok()
+            .or_else(|| {
+                ctx.config
+                    .as_ref()
+                    .and_then(|cfg| cfg.perplexity_api_key.clone())
+            })
+            .filter(|k| !k.is_empty());
+        (langsearch_key, tavily_key, perplexity_key)
     }
 
     /// Return availability status for all possible search backends.
     ///
-    /// DuckDuckGo and Brave are always considered available. LangSearch and
-    /// Tavily require an API key and are marked as `failed` when the key is
-    /// missing. `in_use` reflects the engines that are actually wired into the
-    /// orchestrator built from the supplied [`ToolContext`].
+    /// DuckDuckGo and Brave are always considered available. LangSearch,
+    /// Tavily, and Perplexity require an API key and are marked as `failed`
+    /// when the key is missing. `in_use` reflects the engines that are actually
+    /// wired into the orchestrator built from the supplied [`ToolContext`].
     #[must_use]
     pub fn engine_status(ctx: &ToolContext) -> Vec<EngineStatus> {
-        let (langsearch_key, tavily_key) = Self::resolve_search_keys(ctx);
+        let (langsearch_key, tavily_key, perplexity_key) = Self::resolve_search_keys(ctx);
         let orchestrator = Self::build_orchestrator(ctx);
         let in_use: HashSet<&str> = orchestrator.engine_names().into_iter().collect();
         vec![
@@ -175,6 +194,12 @@ impl MfSearchTool {
                 enabled: tavily_key.is_some(),
                 in_use: in_use.contains("tavily"),
                 failed: tavily_key.is_none(),
+            },
+            EngineStatus {
+                name: "Perplexity",
+                enabled: perplexity_key.is_some(),
+                in_use: in_use.contains("perplexity"),
+                failed: perplexity_key.is_none(),
             },
         ]
     }
@@ -223,11 +248,12 @@ impl Tool for MfSearchTool {
 
     fn description(&self) -> &'static str {
         "Local keyless web search. Required parameter: 'query'. Multiple backends \
-             run in parallel (DuckDuckGo, Brave, optional LangSearch / Tavily when \
-             configured via 'langsearch_api_key' or 'tavily_api_key'). Keyless backends \
-             do not require API keys. Optional 'site', 'exclude_sites', 'freshness' \
-             (day/week/month/year), 'max_results' (1-50, default 6), and 'page' (0-10). \
-             Each result carries relevance_score, fetch_relevance, and engines_consensus."
+             run in parallel (DuckDuckGo, Brave, optional LangSearch / Tavily / Perplexity \
+             when configured via 'langsearch_api_key', 'tavily_api_key', or \
+             'perplexity_api_key'). Keyless backends do not require API keys. Optional \
+             'site', 'exclude_sites', 'freshness' (day/week/month/year), 'max_results' \
+             (1-50, default 6), and 'page' (0-10). Each result carries relevance_score, \
+             fetch_relevance, and engines_consensus."
     }
     fn parameters_schema(&self) -> Value {
         json!({

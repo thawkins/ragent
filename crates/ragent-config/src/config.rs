@@ -69,6 +69,13 @@ pub struct Config {
     /// key is masked in diagnostics and never logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub langsearch_api_key: Option<String>,
+    /// Perplexity API key for the `mf_search` tool.
+    ///
+    /// Stored in `ragent.json` (global or project). When present, `mf_search`
+    /// will query the Perplexity Sonar API as an additional backend. The key
+    /// is masked in diagnostics and never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perplexity_api_key: Option<String>,
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,
@@ -1705,6 +1712,11 @@ impl Config {
         // langsearch_api_key: overlay overrides base
         if overlay.langsearch_api_key.is_some() {
             base.langsearch_api_key = overlay.langsearch_api_key;
+        }
+
+        // perplexity_api_key: overlay overrides base
+        if overlay.perplexity_api_key.is_some() {
+            base.perplexity_api_key = overlay.perplexity_api_key;
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)

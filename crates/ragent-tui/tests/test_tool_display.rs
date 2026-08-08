@@ -68,6 +68,30 @@ fn test_input_summary_bash_tool_uses_120_char_truncation() {
 }
 
 #[test]
+fn test_input_summary_bash_tool_multiline_replaces_newlines() {
+    let command =
+        "cd /home/thawkins/Projects/ragent\ntimeout 600 cargo test --workspace 2>&1 | tail -40";
+    let input = json!({ "command": command });
+    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    assert!(
+        !summary.contains('\n'),
+        "Multiline command should not contain raw newlines: {summary:?}"
+    );
+    assert!(
+        summary.contains("cd /home/thawkins/Projects/ragent"),
+        "Should contain first line: {summary}"
+    );
+    assert!(
+        summary.contains("timeout 600 cargo test --workspace"),
+        "Should contain second line: {summary}"
+    );
+    assert!(
+        summary.contains(" ; "),
+        "Should replace newlines with ' ; ': {summary}"
+    );
+}
+
+#[test]
 fn test_input_summary_grep_tool() {
     let input = json!({"pattern": "fn main", "path": "src"});
     let summary = tool_input_summary("grep", &input, "/home/user/project");

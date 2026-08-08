@@ -311,6 +311,10 @@ pub struct EditLogAnalysis {
     pub risk_examples: HashMap<OldStrRisk, Vec<FailedEditRisk>>,
     /// Count of distinct risk-characteristic combinations observed.
     pub combination_counts: HashMap<Vec<OldStrRisk>, usize>,
+    /// Number of succeeded edit operations per tool.
+    pub success_by_tool: HashMap<String, usize>,
+    /// Number of failed edit operations per tool.
+    pub failure_by_tool: HashMap<String, usize>,
 }
 
 impl EditLogAnalysis {
@@ -325,6 +329,34 @@ impl EditLogAnalysis {
             .collect();
         v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.label().cmp(b.0.label())));
         v
+    }
+
+    /// All tools that have at least one logged operation, sorted by name.
+    #[must_use]
+    pub fn tools_sorted(&self) -> Vec<&String> {
+        let mut tools: std::collections::HashSet<&String> = self.success_by_tool.keys().collect();
+        for t in self.failure_by_tool.keys() {
+            tools.insert(t);
+        }
+        let mut v: Vec<&String> = tools.into_iter().collect();
+        v.sort();
+        v
+    }
+
+    /// Failed-to-succeeded ratio for a tool, as a percentage.
+    ///
+    /// Returns `0.0` when the tool has no succeeded operations (i.e. the ratio
+    /// is undefined / infinite). Callers should treat the raw counts as the
+    /// source of truth; this helper is only for the summary table.
+    #[must_use]
+    pub fn failure_success_ratio_pct_for(&self, tool: &str) -> f64 {
+        let success = self.success_by_tool.get(tool).copied().unwrap_or(0);
+        if success == 0 {
+            0.0
+        } else {
+            let failure = self.failure_by_tool.get(tool).copied().unwrap_or(0);
+            (failure as f64 / success as f64) * 100.0
+        }
     }
 }
 
@@ -366,15 +398,24 @@ pub fn edit_log_analyse(working_dir: &Path) -> Option<EditLogAnalysis> {
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             let normalized = normalize_outcome(outcome);
-            if normalized == "success" || normalized == "unknown" {
-                continue;
-            }
-
             let tool = value
                 .get("tool")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string();
+
+            // Track per-tool success/failure counts for the ratio summary.
+            if normalized == "success" {
+                *analysis.success_by_tool.entry(tool.clone()).or_insert(0) += 1;
+                continue;
+            } else if normalized != "unknown" {
+                *analysis.failure_by_tool.entry(tool.clone()).or_insert(0) += 1;
+            }
+
+            if normalized == "unknown" {
+                continue;
+            }
+
             let file_path = value
                 .get("file_path")
                 .and_then(|v| v.as_str())
@@ -801,6 +842,17 @@ mod tests {
         let analysis = edit_log_analyse(wd).unwrap();
         assert_eq!(analysis.failure_count, 2);
         assert_eq!(analysis.risky_failure_count, 2);
+        // Per-tool success/failure counts: one success and two failures for "edit".
+        assert_eq!(
+            analysis.success_by_tool.get("edit").copied().unwrap_or(0),
+            1
+        );
+        assert_eq!(
+            analysis.failure_by_tool.get("edit").copied().unwrap_or(0),
+            2
+        );
+        // Fail/success ratio: 2/1 = 200%.
+        assert!((analysis.failure_success_ratio_pct_for("edit") - 200.0).abs() < 0.01);
         assert!(
             analysis
                 .risk_counts

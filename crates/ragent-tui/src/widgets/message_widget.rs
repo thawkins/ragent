@@ -379,11 +379,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ⚡ EXECUTION
         // ═══════════════════════════════════════════════════════════════════
         "bash" => {
-            // Aliases may send code/cmd instead of command.
+            // Aliases may send code/cmd instead of command. Replace newlines
+            // with " ; " so multiline commands display on a single line.
             get_str(&["command", "code", "cmd"])
                 .as_deref()
-                .and_then(|s| s.lines().next())
-                .map(|s| format!("⚡ $ {}", trunc120(s)))
+                .map(|s| s.replace('\n', " ; "))
+                .map(|s| format!("⚡ $ {}", trunc120(&s)))
                 .unwrap_or_else(|| "⚡ bash".to_string())
         }
 

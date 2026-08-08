@@ -1518,6 +1518,7 @@ fn test_ctrl_home_end_bindings() {
 
 #[test]
 fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "compare @first with @second".to_string();
     let first_cursor = app.input.find("@first").expect("first mention exists") + "@fi".len();
@@ -1541,6 +1542,7 @@ fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
 
 #[test]
 fn test_accept_file_menu_replaces_active_mention_span_only() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "compare @first with @second".to_string();
     let first_cursor = app.input.find("@first").expect("first mention exists") + "@first".len();
@@ -1569,6 +1571,7 @@ fn test_accept_file_menu_replaces_active_mention_span_only() {
 
 #[test]
 fn test_file_menu_closes_when_cursor_not_inside_mention() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "compare @first with @second".to_string();
     app.input_cursor = 0;
@@ -1657,6 +1660,7 @@ fn test_file_menu_enter_accepts_without_sending() {
 
 #[test]
 fn test_file_menu_no_matches_stays_open_for_feedback() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "@nomatch".to_string();
     app.input_cursor = app.input.chars().count();
@@ -1704,6 +1708,7 @@ fn test_slash_browse_refresh_updates_cache_metadata() {
 
 #[test]
 fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "@src".to_string();
     app.input_cursor = app.input.chars().count();
@@ -1725,6 +1730,7 @@ fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
 
 #[test]
 fn test_directory_menu_has_back_to_fuzzy_entry() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "@src".to_string();
     app.input_cursor = app.input.chars().count();
@@ -1749,6 +1755,7 @@ fn test_directory_menu_has_back_to_fuzzy_entry() {
 
 #[test]
 fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     app.input = "@src".to_string();
     app.input_cursor = app.input.chars().count();
@@ -1775,6 +1782,7 @@ fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
 
 #[test]
 fn test_file_menu_down_scrolls_selection_window() {
+    let _lock = cwd_lock();
     let mut app = make_app();
     let mut entries = Vec::new();
     for i in 0..12 {

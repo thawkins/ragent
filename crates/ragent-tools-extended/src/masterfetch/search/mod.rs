@@ -10,6 +10,7 @@
 //! - [`brave`] — Brave keyless backend (T-014).
 //! - [`langsearch`] — LangSearch API-backed backend (T-003).
 //! - [`tavily`] — Tavily API-backed backend (T-001, T-002).
+//! - [`perplexity`] — Perplexity Sonar API-backed backend.
 //! - [`consensus`] — merge, dedup, consensus boost, and ranking (T-015).
 //! - [`SearchOrchestrator`] — run all backends in parallel, merge, cache
 //!   (T-016).
@@ -44,6 +45,7 @@ pub mod consensus;
 pub mod duckduckgo;
 pub mod engine;
 pub mod langsearch;
+pub mod perplexity;
 pub mod tavily;
 
 // Re-export commonly used types at the module level.

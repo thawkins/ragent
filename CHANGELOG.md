@@ -1,5 +1,40 @@
 # Changelog
 
+## Version: 1.0.18
+
+### Added — Perplexity Sonar backend for `mf_search`
+
+- Added a new `perplexity` search backend (`PerplexityEngine`) that queries the
+  Perplexity Sonar API, wired into the MasterFetch search orchestrator alongside
+  the existing DuckDuckGo, Brave, LangSearch, and Tavily engines.
+- New `perplexity_api_key` field in `ragent_config::Config` (with merge support
+  across global/project config files). When present (or when the
+  `PERPLEXITY_API_KEY` environment variable is set), `mf_search` includes the
+  Perplexity backend as an additional engine. The key is masked in diagnostics
+  and never logged.
+- Added integration tests for the Perplexity backend wiring and API-key
+  resolution.
+
+### Added — Edit-log per-tool success/failure analysis
+
+- `EditLogAnalysis` now tracks per-tool success and failure counts via
+  `success_by_tool` and `failure_by_tool` maps.
+- New `tools_sorted()` helper returns all tools that have logged operations.
+- New `failure_success_ratio_pct_for(tool)` helper computes the failed-to-succeeded
+  ratio as a percentage for a given tool (returns `0.0` when the tool has no
+  succeeded operations).
+- The `edit_log_analyse` function now counts successful operations (previously
+  skipped) and records them per tool, enabling richer edit-log summaries.
+- Added tests verifying per-tool counts and ratio calculations.
+
+### Changed — Miscellaneous
+
+- Removed unused setup code from TUI app initialization (`init.rs`).
+- TUI slash-command and tool-display rendering updated for the new search
+  backend and edit-log analysis fields.
+- Updated existing `mf_search` tool tests for the new three-tuple key
+  resolution signature.
+
 ## Version: 1.0.17
 
 ### Added — Optional `collapse_whitespace` matching for `edit` / `multi_edit`

@@ -860,6 +860,24 @@ Usage: `/telemetry help|on|off|setup|counters`",
             analysis.risky_failure_count
         ));
 
+        // Per-tool success / failure / ratio table.
+        let tools = analysis.tools_sorted();
+        if !tools.is_empty() {
+            output.push_str("**Success vs failure by tool**\n\n");
+            output.push_str("| Tool | Success | Failure | Fail/Success ratio |\n");
+            output.push_str("|---|---:|---:|---:|\n");
+            for tool in &tools {
+                let success = analysis.success_by_tool.get(*tool).copied().unwrap_or(0);
+                let failure = analysis.failure_by_tool.get(*tool).copied().unwrap_or(0);
+                let ratio = analysis.failure_success_ratio_pct_for(tool);
+                output.push_str(&format!(
+                    "| {} | {} | {} | {:.1}% |\n",
+                    tool, success, failure, ratio
+                ));
+            }
+            output.push('\n');
+        }
+
         let by_freq = analysis.risks_by_frequency();
         if by_freq.is_empty() {
             output.push_str("No obvious `old_str` risk characteristics were detected.\n");
@@ -6406,7 +6424,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                           "\nKeyless engines (DuckDuckGo, Brave) are always enabled. \
                                            LangSearch requires `langsearch_api_key` in `ragent.json`. \
                                            Tavily requires `tavily_api_key` in `ragent.json` or the \
-                                           `TAVILY_API_KEY` environment variable.",
+                                           `TAVILY_API_KEY` environment variable. \
+                                           Perplexity requires `perplexity_api_key` in `ragent.json` \
+                                           or the `PERPLEXITY_API_KEY` environment variable.",
                                       );
                         self.append_assistant_text(&output);
                         self.status = "websearch: status shown".to_string();

@@ -25,7 +25,7 @@ use ragent_agent::{
     telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
-use ragent_config::yolo::sync_from_config;
+use ragent_config::{edit_log, yolo::sync_from_config};
 
 mod cli;
 
@@ -352,6 +352,7 @@ async fn main() -> Result<()> {
     // triggered elsewhere do not race with an in-flight toggle in multi-threaded
     // contexts (e.g. parallel tests).
     sync_from_config();
+    edit_log::sync_from_config();
     tracing::info!("Configuration loaded successfully");
 
     let auto_extract_config = config.memory.auto_extract.clone();

@@ -58,6 +58,23 @@ fn ctx_with_tavily_key(key: &str) -> ToolContext {
     }
 }
 
+/// Build a `ToolContext` with the given Perplexity API key in its config.
+fn ctx_with_perplexity_key(key: &str) -> ToolContext {
+    let mut config = Config::default();
+    config.perplexity_api_key = Some(key.to_string());
+    ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    }
+}
+
 #[test]
 fn test_tool_name_is_mf_search() {
     let tool = MfSearchTool;
@@ -91,6 +108,14 @@ fn test_description_mentions_key_features() {
     assert!(
         desc.contains("tavily_api_key"),
         "description should mention the optional Tavily API key"
+    );
+    assert!(
+        desc.contains("Perplexity"),
+        "description should mention Perplexity"
+    );
+    assert!(
+        desc.contains("perplexity_api_key"),
+        "description should mention the optional Perplexity API key"
     );
     assert!(
         desc.contains("relevance_score"),
@@ -144,6 +169,22 @@ fn test_orchestrator_with_empty_tavily_key_omits_tavily_engine() {
 }
 
 #[test]
+fn test_orchestrator_with_perplexity_key_adds_perplexity_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_perplexity_key("pplx-test-key"));
+    assert_eq!(orchestrator.engine_count(), 3);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"perplexity"));
+}
+
+#[test]
+fn test_orchestrator_with_empty_perplexity_key_omits_perplexity_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_perplexity_key(""));
+    assert_eq!(orchestrator.engine_count(), 2);
+    let names = orchestrator.engine_names();
+    assert!(!names.contains(&"perplexity"));
+}
+
+#[test]
 fn test_orchestrator_with_both_keys_adds_all_optional_engines() {
     let mut config = Config::default();
     config.langsearch_api_key = Some("ls-test-key".to_string());
@@ -164,6 +205,31 @@ fn test_orchestrator_with_both_keys_adds_all_optional_engines() {
     let names = orchestrator.engine_names();
     assert!(names.contains(&"langsearch"));
     assert!(names.contains(&"tavily"));
+}
+
+#[test]
+fn test_orchestrator_with_all_three_keys_adds_all_optional_engines() {
+    let mut config = Config::default();
+    config.langsearch_api_key = Some("ls-test-key".to_string());
+    config.tavily_api_key = Some("tvly-test-key".to_string());
+    config.perplexity_api_key = Some("pplx-test-key".to_string());
+    let ctx = ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    };
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx);
+    assert_eq!(orchestrator.engine_count(), 5);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"langsearch"));
+    assert!(names.contains(&"tavily"));
+    assert!(names.contains(&"perplexity"));
 }
 
 #[test]
@@ -271,7 +337,7 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
 #[test]
 fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
     let status = MfSearchTool::engine_status(&ctx());
-    assert_eq!(status.len(), 4);
+    assert_eq!(status.len(), 5);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =
         status.iter().map(|e| (e.name, e)).collect();
 
@@ -286,6 +352,9 @@ fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
 
     let tav = by_name["Tavily"];
     assert!(!tav.enabled && !tav.in_use && tav.failed);
+
+    let ppx = by_name["Perplexity"];
+    assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
 }
 
 #[test]
@@ -299,6 +368,9 @@ fn test_engine_status_with_langsearch_key_enables_langsearch() {
 
     let tav = by_name["Tavily"];
     assert!(!tav.enabled && !tav.in_use && tav.failed);
+
+    let ppx = by_name["Perplexity"];
+    assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
 }
 
 #[test]
@@ -312,6 +384,9 @@ fn test_engine_status_with_tavily_key_enables_tavily() {
 
     let lang = by_name["LangSearch"];
     assert!(!lang.enabled && !lang.in_use && lang.failed);
+
+    let ppx = by_name["Perplexity"];
+    assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
 }
 
 #[test]
@@ -331,13 +406,19 @@ fn test_engine_status_with_both_keys_enables_all_optional_engines() {
         )),
     };
     let status = MfSearchTool::engine_status(&ctx);
-    for e in status {
-        assert!(
-            e.enabled && e.in_use && !e.failed,
-            "{} should be fully enabled",
-            e.name
-        );
-    }
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    // LangSearch and Tavily should be fully enabled; Perplexity should be
+    // failed (no key in this test).
+    let lang = by_name["LangSearch"];
+    assert!(lang.enabled && lang.in_use && !lang.failed);
+
+    let tav = by_name["Tavily"];
+    assert!(tav.enabled && tav.in_use && !tav.failed);
+
+    let ppx = by_name["Perplexity"];
+    assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
 }
 
 #[test]
@@ -345,6 +426,7 @@ fn test_engine_status_with_empty_keys_treats_keys_as_missing() {
     let mut config = Config::default();
     config.langsearch_api_key = Some(String::new());
     config.tavily_api_key = Some(String::new());
+    config.perplexity_api_key = Some(String::new());
     let ctx = ToolContext {
         session_id: "test".to_string(),
         working_dir: std::env::temp_dir(),
@@ -364,4 +446,6 @@ fn test_engine_status_with_empty_keys_treats_keys_as_missing() {
     assert!(!by_name["LangSearch"].enabled);
     assert!(by_name["Tavily"].failed);
     assert!(!by_name["Tavily"].enabled);
+    assert!(by_name["Perplexity"].failed);
+    assert!(!by_name["Perplexity"].enabled);
 }
