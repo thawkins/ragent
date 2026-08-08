@@ -246,6 +246,18 @@ macro_rules! lock_conn {
 }
 
 impl Storage {
+    /// Acquire the internal connection lock for raw SQL access.
+    ///
+    /// Returns a `MutexGuard` that derefs to the `rusqlite::Connection`.
+    /// Intended for migration verification tests that need to inspect
+    /// table schemas directly.
+    #[doc(hidden)]
+    pub fn conn_lock_for_test(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))
+    }
+
     /// PERF-004: return whether the `sessions.format_version` column
     /// exists, using the cached `AtomicBool` when it has already been
     /// populated (by [`migrate`](Self::migrate) or a prior call).
@@ -579,6 +591,28 @@ impl Storage {
 
             CREATE INDEX IF NOT EXISTS idx_messages_embedding_dims
             ON messages_embedding(dimensions);
+
+            -- Agent cron system (spec agentchron): scheduled agent runs.
+            -- Stores one-shot and repeating events with their schedule
+            -- definition, enabled flag, and computed next-due timestamp.
+            -- The scheduler reads enabled events whose next_due has passed
+            -- and spawns agent runs via the existing new_task path.
+            CREATE TABLE IF NOT EXISTS cron_events (
+            id TEXT PRIMARY KEY,
+            agent_type TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            schedule_form TEXT NOT NULL,
+            start_at TEXT,
+            duration_secs INTEGER,
+            schedule_raw TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            next_due TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_fired TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_cron_events_next_due
+            ON cron_events(enabled, next_due);
 
             ",
         )?;
@@ -1698,6 +1732,173 @@ impl Storage {
         let changed = conn.execute(
             "DELETE FROM initiatives WHERE id = ?1 AND project = ?2",
             params![id, project],
+        )?;
+        Ok(changed > 0)
+    }
+
+    // ── Cron Events CRUD (spec agentchron T-006) ─────────────────────
+
+    /// Insert a new cron event into the `cron_events` table (FR-001, FR-002).
+    ///
+    /// The event's `id` must be unique; inserting a duplicate id fails with a
+    /// constraint error. All schedule fields are flattened into columns:
+    /// `schedule_form` stores the serde string (`one_shot`, `repeat_from`,
+    /// `repeat_now`), `start_at` and `duration_secs` are nullable.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the SQLite insert fails (e.g. duplicate id).
+    pub fn insert_cron_event(&self, event: &ragent_types::CronEvent) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let form_str = serde_json::to_string(&event.schedule.form)
+            .map_err(|e| anyhow::anyhow!("failed to serialise CronForm: {e}"))?;
+        // serde_json::to_string produces a quoted string; strip the quotes.
+        let form_str = form_str.trim_matches('"');
+        let start_at = event.schedule.start_at.map(|t| t.to_rfc3339());
+        let next_due = event.next_due.to_rfc3339();
+        let created_at = event.created_at.to_rfc3339();
+        let last_fired = event.last_fired.map(|t| t.to_rfc3339());
+        let enabled_i: i64 = i64::from(event.enabled);
+        conn.execute(
+            "INSERT INTO cron_events \
+           (id, agent_type, prompt, schedule_form, start_at, duration_secs, \
+           schedule_raw, enabled, next_due, created_at, last_fired) \
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                event.id,
+                event.agent_type,
+                event.prompt,
+                form_str,
+                start_at,
+                event.schedule.duration_secs,
+                event.schedule_raw,
+                enabled_i,
+                next_due,
+                created_at,
+                last_fired,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieve a single cron event by its id (FR-001).
+    ///
+    /// Returns `None` if no event with the given id exists.
+    pub fn get_cron_event(&self, id: &str) -> Result<Option<CronEventRow>> {
+        let conn = lock_conn!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT id, agent_type, prompt, schedule_form, start_at, \
+               duration_secs, schedule_raw, enabled, next_due, created_at, \
+               last_fired FROM cron_events WHERE id = ?1",
+                params![id],
+                cron_event_from_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// List all cron events, ordered by `next_due` ascending (FR-001).
+    ///
+    /// Used by the `/cron list` slash command.
+    pub fn list_cron_events(&self) -> Result<Vec<CronEventRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_type, prompt, schedule_form, start_at, \
+           duration_secs, schedule_raw, enabled, next_due, created_at, \
+           last_fired FROM cron_events ORDER BY next_due",
+        )?;
+        let rows = stmt
+            .query_map([], cron_event_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// List enabled cron events whose `next_due` is at or before `now`
+    /// (FR-010). Used by the scheduler tick to find events that need firing.
+    ///
+    /// Returns events ordered by `next_due` ascending.
+    pub fn list_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
+        let conn = lock_conn!(self)?;
+        let now_str = now.to_rfc3339();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_type, prompt, schedule_form, start_at, \
+           duration_secs, schedule_raw, enabled, next_due, created_at, \
+           last_fired FROM cron_events WHERE enabled = 1 AND next_due <= ?1 \
+           ORDER BY next_due",
+        )?;
+        let rows = stmt
+            .query_map(params![now_str], cron_event_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// List **disabled** cron events whose `next_due` is at or before `now`
+    /// (FR-007, FR-011). Used by the scheduler tick to log `"skipped"`
+    /// outcomes for due events that are not enabled.
+    ///
+    /// Returns events ordered by `next_due` ascending.
+    pub fn list_disabled_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
+        let conn = lock_conn!(self)?;
+        let now_str = now.to_rfc3339();
+        let mut stmt = conn.prepare(
+            "SELECT id, agent_type, prompt, schedule_form, start_at, \
+           duration_secs, schedule_raw, enabled, next_due, created_at, \
+           last_fired FROM cron_events WHERE enabled = 0 AND next_due <= ?1 \
+           ORDER BY next_due",
+        )?;
+        let rows = stmt
+            .query_map(params![now_str], cron_event_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Delete a cron event by id (FR-001). Returns `true` if a row was removed.
+    pub fn delete_cron_event(&self, id: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute("DELETE FROM cron_events WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    /// Update a cron event's `next_due` and optionally `last_fired` after a
+    /// fire (FR-004, FR-005). This is the "touch-next-due" operation the
+    /// scheduler calls after spawning an agent run.
+    ///
+    /// - For repeating events, pass the advanced `next_due` and `Some(now)` as
+    ///   `last_fired`.
+    /// - For one-shot events, pass `Some(now)` as `last_fired` and set
+    ///   `next_due` to the same value (or disable the event separately via
+    ///   [`Self::set_cron_event_enabled`]).
+    ///
+    /// Returns `true` if a row was updated.
+    pub fn update_cron_event_next_due(
+        &self,
+        id: &str,
+        next_due: &DateTime<Utc>,
+        last_fired: Option<&DateTime<Utc>>,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let next_due_str = next_due.to_rfc3339();
+        let last_fired_str = last_fired.map(|t| t.to_rfc3339());
+        let changed = conn.execute(
+            "UPDATE cron_events SET next_due = ?1, last_fired = ?2 WHERE id = ?3",
+            params![next_due_str, last_fired_str, id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Enable or disable a cron event (FR-007, FR-011).
+    ///
+    /// When `enabled` is `false`, the scheduler skips the event and logs
+    /// `"skipped"` instead of firing it.
+    ///
+    /// Returns `true` if a row was updated.
+    pub fn set_cron_event_enabled(&self, id: &str, enabled: bool) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let enabled_i: i64 = i64::from(enabled);
+        let changed = conn.execute(
+            "UPDATE cron_events SET enabled = ?1 WHERE id = ?2",
+            params![enabled_i, id],
         )?;
         Ok(changed > 0)
     }
@@ -3702,4 +3903,55 @@ pub struct SessionSearchParams {
     pub include_system: bool,
     /// Restrict search to a specific session id (optional).
     pub session_id: Option<String>,
+}
+
+// ── Cron Events (spec agentchron T-006) ──────────────────────────────
+
+/// Row representation of a cron event as stored in `SQLite`.
+///
+/// Returned by [`Storage::get_cron_event`], [`Storage::list_cron_events`],
+/// and [`Storage::list_due_cron_events`]. All timestamp fields are ISO-8601
+/// strings as stored in the database.
+#[derive(Debug, Clone)]
+pub struct CronEventRow {
+    /// Unique event identifier.
+    pub id: String,
+    /// Built-in or custom agent name to run.
+    pub agent_type: String,
+    /// Initial prompt passed to the agent.
+    pub prompt: String,
+    /// Schedule form: `one_shot`, `repeat_from`, or `repeat_now`.
+    pub schedule_form: String,
+    /// Explicit start timestamp (ISO-8601), or `None` for `repeat_now`.
+    pub start_at: Option<String>,
+    /// Repeat interval in seconds, or `None` for one-shot events.
+    pub duration_secs: Option<i64>,
+    /// Raw schedule expression string (e.g. `every 30m`).
+    pub schedule_raw: String,
+    /// Whether the event is enabled for scheduling.
+    pub enabled: bool,
+    /// Next-due timestamp (ISO-8601).
+    pub next_due: String,
+    /// Creation timestamp (ISO-8601).
+    pub created_at: String,
+    /// Last-fired timestamp (ISO-8601), or `None` if never fired.
+    pub last_fired: Option<String>,
+}
+
+/// Row-mapping helper for `cron_events` queries.
+fn cron_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronEventRow> {
+    let enabled_i: i64 = row.get(7)?;
+    Ok(CronEventRow {
+        id: row.get(0)?,
+        agent_type: row.get(1)?,
+        prompt: row.get(2)?,
+        schedule_form: row.get(3)?,
+        start_at: row.get(4)?,
+        duration_secs: row.get(5)?,
+        schedule_raw: row.get(6)?,
+        enabled: enabled_i != 0,
+        next_due: row.get(8)?,
+        created_at: row.get(9)?,
+        last_fired: row.get(10)?,
+    })
 }

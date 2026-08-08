@@ -8,7 +8,9 @@
 //! - LLM provider traits
 //! - Resource management
 //! - Utility functions
+//! - Cron scheduling types
 
+pub mod cron;
 pub mod error;
 pub mod event;
 pub mod html;
@@ -23,6 +25,10 @@ pub mod strutil;
 pub mod thinking;
 
 // Re-export commonly used types
+pub use cron::{
+    CronEvent, CronForm, CronSchedule, DurationParseError, ParsedSchedule, ScheduleParseError,
+    parse_duration, parse_schedule,
+};
 pub use error::RagentError;
 pub use event::{Event, EventBus};
 pub use id::{MessageId, SessionId};

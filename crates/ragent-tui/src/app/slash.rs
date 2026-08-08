@@ -7121,6 +7121,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                 }
             }
+            // ── /cron ────────────────────────────────────────────────────
+            "cron" => self.handle_cron_command(args),
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_agent::Config::load()
@@ -7292,4 +7294,450 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         out.push_str("```\n");
         Some(out)
     }
+
+    // ── /cron slash-command handler (spec agentchron T-013) ────────────
+
+    /// Handle the `/cron` slash-command family (FR-007 surface, FR-008, FR-009).
+    ///
+    /// Sub-commands:
+    ///
+    /// | Sub-command | Description |
+    /// |---|---|
+    /// | `/cron add <agent> <schedule> "<prompt>"` | Create a new scheduled event |
+    /// | `/cron remove <event_id>` | Delete an event by id |
+    /// | `/cron list` | Show all events with human-readable schedules |
+    /// | `/cron log [event_id]` | Show execution log, optionally filtered |
+    /// | `/cron help` | Show usage |
+    fn handle_cron_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        let rest = args
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r.trim())
+            .unwrap_or("");
+
+        match sub.as_str() {
+            "add" | "" => self.handle_cron_add(rest),
+            "remove" => self.handle_cron_remove(rest),
+            "list" => self.handle_cron_list(),
+            "log" => self.handle_cron_log(rest),
+            "help" => self.handle_cron_help(),
+            _ => {
+                self.append_assistant_text(&format!(
+                    "From: /cron\n⚠ Unknown sub-command '{sub}'. Use `/cron help` for usage."
+                ));
+                self.status = "cron: unknown".to_string();
+            }
+        }
+    }
+
+    /// Show `/cron` usage help.
+    fn handle_cron_help(&mut self) {
+        self.append_assistant_text(
+            "From: /cron help\n\n\
+             ## /cron — Scheduled agent runs\n\n\
+             | Sub-command | Usage | Description |\n\
+             |---|---|---|\n\
+             | `add` | `/cron add <agent> <schedule> \"<prompt>\"` | Create a new event |\n\
+             | `remove` | `/cron remove <event_id>` | Delete an event |\n\
+             | `list` | `/cron list` | Show all events |\n\
+             | `log` | `/cron log [event_id]` | Show execution log |\n\
+             | `help` | `/cron help` | Show this help |\n\n\
+             **Schedule forms:**\n\n\
+             | Form | Example |\n\
+             |---|---|\n\
+             | `at <timestamp>` | One-shot at a specific time |\n\
+             | `from <timestamp> every <duration>` | Repeating from a start time |\n\
+             | `every <duration>` | Repeating from now |\n\n\
+             **Durations:** `<int><unit>` where unit is `m` (mins), `h` (hrs), \
+             `d` (days), `w` (wks), or `mo` (months).",
+        );
+        self.status = "cron: help".to_string();
+    }
+
+    /// Handle `/cron add <agent_type> <schedule> "<prompt>"`.
+    fn handle_cron_add(&mut self, rest: &str) {
+        // Parse: <agent_type> <schedule_expr> "<prompt>"
+        // The prompt is the last double-quoted string.
+        let rest = rest.trim();
+        if rest.is_empty() {
+            self.append_assistant_text(
+                "From: /cron add\n\n\
+                 Usage: `/cron add <agent> <schedule> \"<prompt>\"`\n\n\
+                 Example: `/cron add general every 30m \"Run tests\"`",
+            );
+            self.status = "cron: add usage".to_string();
+            return;
+        }
+
+        // Extract the quoted prompt (last double-quoted segment).
+        let (schedule_part, prompt) = match extract_quoted_prompt(rest) {
+            Some(p) => p,
+            None => {
+                self.append_assistant_text(
+                    "From: /cron add\n⚠ The prompt must be enclosed in double quotes.\n\n\
+                     Example: `/cron add general every 30m \"Run tests\"`",
+                );
+                self.status = "cron: add missing prompt".to_string();
+                return;
+            }
+        };
+
+        // Split agent_type from the schedule expression.
+        let (agent_type, schedule_expr) = match schedule_part.split_once(char::is_whitespace) {
+            Some((a, s)) => (a.trim(), s.trim()),
+            None => {
+                self.append_assistant_text(
+                    "From: /cron add\n⚠ Missing schedule expression.\n\n\
+                     Format: `<agent> <schedule> \"<prompt>\"`\n\
+                     Example: `/cron add general every 30m \"Run tests\"`",
+                );
+                self.status = "cron: add missing schedule".to_string();
+                return;
+            }
+        };
+
+        if agent_type.is_empty() || schedule_expr.is_empty() {
+            self.append_assistant_text(
+                "From: /cron add\n⚠ Agent type and schedule expression are required.",
+            );
+            self.status = "cron: add missing fields".to_string();
+            return;
+        }
+
+        // Parse the schedule expression.
+        let now = chrono::Utc::now();
+        let parsed = match ragent_types::parse_schedule(schedule_expr, now) {
+            Ok(p) => p,
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron add\n❌ Failed to parse schedule `{schedule_expr}`:\n  {e}"
+                ));
+                self.status = "cron: add parse error".to_string();
+                return;
+            }
+        };
+
+        // Generate a unique event id.
+        let event_id = format!("cron-{}", ragent_types::id::SessionId::new());
+        let event = ragent_types::CronEvent::new(
+            event_id.clone(),
+            agent_type.to_string(),
+            prompt,
+            parsed.schedule,
+            schedule_expr.to_string(),
+            parsed.next_due,
+        );
+
+        // Insert into storage.
+        if let Err(e) = self.storage.insert_cron_event(&event) {
+            self.append_assistant_text(&format!("From: /cron add\n❌ Failed to store event: {e}"));
+            self.status = "cron: add store error".to_string();
+            return;
+        }
+
+        let desc = event.schedule.human_readable();
+        self.append_assistant_text(&format!(
+            "From: /cron add\n✅ Scheduled event created.\n\n\
+             | Field | Value |\n|---|---|\n\
+             | ID | `{}` |\n\
+             | Agent | `{}` |\n\
+             | Schedule | `{}` ({}) |\n\
+             | Next due | {} |\n\
+             | Prompt | \"{}\" |",
+            event.id,
+            agent_type,
+            schedule_expr,
+            desc,
+            event.next_due.to_rfc3339(),
+            event.prompt,
+        ));
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!(
+                "cron add: event {} agent={} schedule={}",
+                event.id, agent_type, schedule_expr
+            ),
+        );
+        self.status = "cron: added".to_string();
+    }
+
+    /// Handle `/cron remove <event_id>`.
+    fn handle_cron_remove(&mut self, rest: &str) {
+        let event_id = rest.trim();
+        if event_id.is_empty() {
+            self.append_assistant_text("From: /cron remove\n\nUsage: `/cron remove <event_id>`");
+            self.status = "cron: remove usage".to_string();
+            return;
+        }
+
+        match self.storage.delete_cron_event(event_id) {
+            Ok(true) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron remove\n✅ Event `{}` removed.",
+                    event_id
+                ));
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("cron remove: deleted event {}", event_id),
+                );
+                self.status = "cron: removed".to_string();
+            }
+            Ok(false) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron remove\n⚠ Event `{}` not found.",
+                    event_id
+                ));
+                self.status = "cron: not found".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron remove\n❌ Failed to remove event: {e}"
+                ));
+                self.status = "cron: remove error".to_string();
+            }
+        }
+    }
+
+    /// Handle `/cron list` — display all scheduled events.
+    fn handle_cron_list(&mut self) {
+        match self.storage.list_cron_events() {
+            Ok(rows) if rows.is_empty() => {
+                self.append_assistant_text(
+                    "From: /cron list\n\nℹ️  No scheduled events.\n\n\
+                     Use `/cron add <agent> <schedule> \"<prompt>\"` to create one.",
+                );
+                self.status = "cron: list empty".to_string();
+            }
+            Ok(rows) => {
+                let mut output = String::from(
+                    "From: /cron list\n\n## Scheduled Events\n\n\
+                     | ID | Agent | Schedule | Enabled | Next Due | Prompt |\n\
+                     |---|---|---|---|---|---|\n",
+                );
+                for row in &rows {
+                    // Reconstruct a human-readable schedule description from the row.
+                    let desc = row_to_human_readable(row);
+                    let prompt_preview = if row.prompt.len() > 40 {
+                        format!("{}…", &row.prompt[..40])
+                    } else {
+                        row.prompt.clone()
+                    };
+                    let enabled_str = if row.enabled { "✓" } else { "✗" };
+                    let next_due_display = format_next_due(&row.next_due, row.enabled);
+                    output.push_str(&format!(
+                        "| `{}` | `{}` | {} ({}) | {} | {} | \"{}\" |\n",
+                        row.id,
+                        row.agent_type,
+                        row.schedule_raw,
+                        desc,
+                        enabled_str,
+                        next_due_display,
+                        prompt_preview,
+                    ));
+                }
+                self.append_assistant_text(&output);
+                self.status = "cron: list".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /cron list\n❌ Failed to list events: {e}"
+                ));
+                self.status = "cron: list error".to_string();
+            }
+        }
+    }
+
+    /// Handle `/cron log [event_id]` — display execution log.
+    fn handle_cron_log(&mut self, rest: &str) {
+        let filter = rest.trim();
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let event_id = if filter.is_empty() {
+            None
+        } else {
+            Some(filter)
+        };
+
+        let entries = ragent_tools_core::cron_log::read_cron_log(&working_dir, event_id);
+
+        if entries.is_empty() {
+            self.append_assistant_text(&format!(
+                "From: /cron log\n\nℹ️  No execution log entries{}.",
+                if event_id.is_some() {
+                    format!(" for event `{}`", filter)
+                } else {
+                    String::new()
+                }
+            ));
+            self.status = "cron: log empty".to_string();
+            return;
+        }
+
+        let mut output = String::from(
+            "From: /cron log\n\n## Execution Log\n\n\
+             | Timestamp | Event | Agent | Outcome | Prompt |\n\
+             |---|---|---|---|---|\n",
+        );
+        for entry in &entries {
+            let prompt_preview = if entry.prompt.len() > 40 {
+                format!("{}…", &entry.prompt[..40])
+            } else {
+                entry.prompt.clone()
+            };
+            let outcome_icon = match entry.outcome.as_str() {
+                "success" => "✅",
+                "error" => "❌",
+                "skipped" => "⏭️",
+                _ => "•",
+            };
+            output.push_str(&format!(
+                "| {} | `{}` | `{}` | {} {} | \"{}\" |\n",
+                entry.timestamp,
+                entry.event_id,
+                entry.agent_type,
+                outcome_icon,
+                entry.outcome,
+                prompt_preview,
+            ));
+        }
+        self.append_assistant_text(&output);
+        self.status = "cron: log".to_string();
+    }
+}
+
+/// Extract the last double-quoted string from `s` as the prompt, returning
+/// the remaining text (before the quote) and the prompt contents.
+///
+/// Returns `None` if no double-quoted string is found.
+fn extract_quoted_prompt(s: &str) -> Option<(&str, String)> {
+    let last_open = s.rfind('"')?;
+    let first_open = s.find('"')?;
+    if last_open == first_open {
+        return None; // Only one quote — unbalanced.
+    }
+    let prompt = s[first_open + 1..last_open].to_string();
+    let before = s[..first_open].trim_end();
+    Some((before, prompt))
+}
+
+/// Format the next-due timestamp with a compact relative time suffix.
+///
+/// Returns the raw timestamp followed by a parenthesised relative
+/// duration such as `2026-08-08T14:30:00Z (in 12m)` or
+/// `2026-08-08T14:30:00Z (overdue 5m)` when the timestamp is in the past.
+/// Disabled events with a far-future sentinel timestamp show `—` for
+/// the relative part.
+fn format_next_due(next_due: &str, enabled: bool) -> String {
+    let Ok(ts) = chrono::DateTime::parse_from_rfc3339(next_due) else {
+        return next_due.to_string();
+    };
+    let now = chrono::Utc::now();
+    let delta = ts.with_timezone(&chrono::Utc) - now;
+    let total_secs = delta.num_seconds();
+
+    // Far-future sentinel (disabled one-shot events pushed to 9999-12-31).
+    if total_secs > 315_576_000 {
+        return if enabled {
+            format!("{next_due}")
+        } else {
+            format!("{next_due} (—)")
+        };
+    }
+
+    let abs_secs = total_secs.unsigned_abs() as i64;
+    let label = if total_secs >= 0 { "in" } else { "overdue" };
+    format!("{next_due} ({label} {})", compact_duration(abs_secs))
+}
+
+/// Format a duration in seconds as a compact string with up to two units.
+///
+/// Examples: `12m`, `5h30m`, `3d4h`, `45s`, `1w2d`.
+fn compact_duration(secs: i64) -> String {
+    const SECS_PER_MIN: i64 = 60;
+    const SECS_PER_HOUR: i64 = 3_600;
+    const SECS_PER_DAY: i64 = 86_400;
+    const SECS_PER_WEEK: i64 = 604_800;
+
+    let weeks = secs / SECS_PER_WEEK;
+    let rem = secs % SECS_PER_WEEK;
+    let days = rem / SECS_PER_DAY;
+    let rem = rem % SECS_PER_DAY;
+    let hours = rem / SECS_PER_HOUR;
+    let rem = rem % SECS_PER_HOUR;
+    let mins = rem / SECS_PER_MIN;
+    let seconds = rem % SECS_PER_MIN;
+
+    // Build up to two significant units.
+    let parts: [(&str, i64); 5] = [
+        ("w", weeks),
+        ("d", days),
+        ("h", hours),
+        ("m", mins),
+        ("s", seconds),
+    ];
+    let mut result: Vec<String> = Vec::new();
+    for (label, val) in &parts {
+        if *val > 0 {
+            result.push(format!("{val}{label}"));
+        }
+        if result.len() == 2 {
+            break;
+        }
+    }
+    if result.is_empty() {
+        "0s".to_string()
+    } else {
+        result.join("")
+    }
+}
+
+/// Build a human-readable schedule description from a [`CronEventRow`].
+///
+/// This mirrors [`CronSchedule::human_readable`] but works from the flattened
+/// row fields stored in SQLite.
+fn row_to_human_readable(row: &ragent_storage::CronEventRow) -> String {
+    match row.schedule_form.as_str() {
+        "one_shot" => match &row.start_at {
+            Some(ts) => format!("at {}", ts),
+            None => "at (missing timestamp)".to_string(),
+        },
+        "repeat_from" => {
+            let ts = row.start_at.as_deref().unwrap_or("?");
+            let dur = row
+                .duration_secs
+                .map(duration_secs_to_string)
+                .unwrap_or_else(|| "?".to_string());
+            format!("every {dur} from {ts}")
+        }
+        "repeat_now" => {
+            let dur = row
+                .duration_secs
+                .map(duration_secs_to_string)
+                .unwrap_or_else(|| "?".to_string());
+            format!("every {dur}")
+        }
+        _ => row.schedule_raw.clone(),
+    }
+}
+
+/// Convert a duration in seconds to a compact human-readable string.
+fn duration_secs_to_string(secs: i64) -> String {
+    const SECS_PER_MIN: i64 = 60;
+    const SECS_PER_HOUR: i64 = 3_600;
+    const SECS_PER_DAY: i64 = 86_400;
+    const SECS_PER_WEEK: i64 = 604_800;
+    const SECS_PER_MONTH: i64 = 2_592_000;
+
+    let units: [(&str, i64); 5] = [
+        ("mo", SECS_PER_MONTH),
+        ("w", SECS_PER_WEEK),
+        ("d", SECS_PER_DAY),
+        ("h", SECS_PER_HOUR),
+        ("m", SECS_PER_MIN),
+    ];
+    for (label, unit_secs) in &units {
+        if secs % unit_secs == 0 {
+            return format!("{}{}", secs / unit_secs, label);
+        }
+    }
+    format!("{secs}s")
 }

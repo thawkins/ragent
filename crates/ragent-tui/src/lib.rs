@@ -502,6 +502,18 @@ pub async fn run_tui(
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
     app.spec_manager = Some(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
 
+    // -- Cron scheduler startup --
+    // Start the background cron scheduler (FR-010, FR-017). It ticks every
+    // 30 seconds on a background task and never blocks the TUI event loop.
+    // The scheduler spawns agent runs via the new_task path and advances
+    // next_due for repeating events (FR-004, FR-005).
+    let cron_working_dir = std::env::current_dir().unwrap_or_default();
+    let cron_scheduler = app::cron::start_cron_scheduler(
+        Arc::clone(&storage),
+        Arc::clone(&session_processor),
+        cron_working_dir,
+    );
+
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {
         app.status = "resuming session…".to_string();
@@ -621,6 +633,9 @@ pub async fn run_tui(
         // Transition slash-command statuses to "ready" after a grace period.
         app.poll_status_expiry();
 
+        // Auto-dismiss the run-cost banner after 15 seconds.
+        app.poll_run_cost_banner_expiry();
+
         // Unblock swarm tasks whose dependencies are satisfied.
         app.poll_swarm_unblock();
 
@@ -716,6 +731,9 @@ pub async fn run_tui(
     });
 
     // -- Graceful shutdown of background resources --
+    // Stop the cron scheduler (FR-017: non-blocking background task).
+    cron_scheduler.stop();
+
     // Stop code index watcher (if running) - this has a Drop impl that calls stop()
     if let Some(session) = app.code_index_watch_session.take() {
         drop(session);

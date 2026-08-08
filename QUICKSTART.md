@@ -1153,6 +1153,56 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex show` | Show index status and statistics |
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
+| `/cron add \|remove\|list\|log\|help` | Schedule and manage recurring agent runs |
+
+### Benchmark Workflow
+
+## Cron Scheduling
+
+Ragent supports scheduling agent runs with a cron-like system. Use the
+`/cron` slash command to add, remove, list, and view scheduled events.
+
+### Schedule Forms
+
+| Form | Behaviour | Example |
+|------|-----------|--------|
+| `at <timestamp>` | One-shot — fires once at the specified time | `/cron add general at 2025-01-15T09:00 "Run tests"` |
+| `from <timestamp> every <duration>` | Repeating — first fire at the timestamp, then every duration | `/cron add general from 2025-01-15T09:00 every 30m "Run tests"` |
+| `every <duration>` | Repeating — first fire is duration from now | `/cron add general every 2h "Run tests"` |
+
+Durations use a positive integer + unit: `m` (minutes), `h` (hours),
+`d` (days), `w` (weeks), `mo` (months = 30 days). Plural aliases
+(`mins`, `hrs`, `days`, `wks`, `months`) are also accepted.
+
+Timestamps are ISO-8601 (e.g. `2025-01-15T09:00:00Z` or
+`2025-01-15T09:00:00+02:00`).
+
+### Commands
+
+| Command | Description |
+|---------|--------------|
+| `/cron add <agent> <schedule> "<prompt>"` | Schedule a new event |
+| `/cron remove <event_id>` | Remove a scheduled event |
+| `/cron list` | List all events with human-readable schedules |
+| `/cron log [event_id]` | Show execution log (optionally filtered by event id) |
+| `/cron help` | Show usage |
+
+### How It Works
+
+A background scheduler runs while the TUI session is active, ticking every
+30 seconds. When an event's `next_due` time has passed, the scheduler
+spawns a background agent run of the configured agent type with the
+configured prompt. For repeating events, `next_due` is advanced by one
+duration interval. For one-shot events, the event is marked as fired.
+
+Every execution is logged as a JSONL line to
+`<working_dir>/log/cron-<timestamp>.jsonl`, recording the event id,
+agent type, prompt, outcome (`"success"`, `"error"`, or `"skipped"`),
+and timestamp.
+
+Disabled events are skipped with a `"skipped"` outcome. Past-start
+timestamps for `from <ts> every <d>` are advanced by whole duration
+intervals until `next_due` is in the future.
 
 ### Benchmark Workflow
 

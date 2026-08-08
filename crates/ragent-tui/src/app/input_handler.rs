@@ -724,6 +724,7 @@ impl App {
         // the banner but let the character fall through to normal input
         // processing so the first keystroke is not lost.
         if self.run_cost_banner.take().is_some() {
+            self.run_cost_banner_at = None;
             self.needs_redraw = true;
             let is_plain_char = matches!(key.code, KeyCode::Char(_))
                 && !key.modifiers.contains(KeyModifiers::CONTROL)

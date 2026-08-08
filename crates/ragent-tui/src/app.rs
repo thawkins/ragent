@@ -12,6 +12,7 @@ pub use helpers::{image_dimensions_or_placeholder, sanitize_for_display};
 
 mod bench;
 mod compress;
+pub mod cron;
 mod event_handler;
 mod init;
 mod input_handler;

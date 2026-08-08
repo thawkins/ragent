@@ -1840,6 +1840,82 @@ token counters.
 
 ---
 
+## 16A. Cron Scheduling
+
+Ragent supports scheduling agent runs with a cron-like system. Users can
+schedule one-shot or repeating events, each with a designated agent type and an
+initial prompt. Events are persisted to SQLite and evaluated by a background
+scheduler while the TUI session is running.
+
+### 16A.1 Schedule Grammar
+
+Three schedule forms are supported:
+
+| Form | Behaviour | Example |
+|------|-----------|---------|
+| `at <timestamp>` | One-shot. Fires once at the specified time. | `/cron add general at 2025-01-15T09:00 "Run tests"` |
+| `from <timestamp> every <duration>` | Repeating. First fire at the timestamp, then every duration. | `/cron add general from 2025-01-15T09:00 every 30m "Run tests"` |
+| `every <duration>` | Repeating, no explicit start. First fire is duration from now. | `/cron add general every 2h "Run tests"` |
+
+Durations are a positive integer + unit:
+
+| Unit | Meaning | Aliases |
+|------|---------|---------|
+| `m` | minutes | `min`, `mins` |
+| `h` | hours | `hr`, `hrs` |
+| `d` | days | `day`, `days` |
+| `w` | weeks | `wk`, `wks` |
+| `mo` | months (30 days) | `month`, `months` |
+
+Timestamps are ISO-8601 (e.g. `2025-01-15T09:00:00Z` or
+`2025-01-15T09:00:00+02:00`).
+
+### 16A.2 Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/cron add <agent> <schedule> "<prompt>"` | Schedule a new event |
+| `/cron remove <event_id>` | Remove a scheduled event |
+| `/cron list` | List all events with human-readable schedule descriptions |
+| `/cron log [event_id]` | Show execution log (optionally filtered by event id) |
+| `/cron help` | Show usage |
+
+### 16A.3 Scheduler
+
+A background scheduler task runs while the TUI session is active, ticking every
+30 seconds. On each tick, it queries all enabled events whose `next_due` has
+passed and spawns a background agent run for each. For repeating events,
+`next_due` is advanced by one duration interval. For one-shot events, the event
+is marked as fired.
+
+### 16A.4 Execution Logging
+
+Every execution is logged as a single JSON line appended to
+`<working_dir>/log/cron-<timestamp>.jsonl`, mirroring the edit-log convention.
+Each entry records:
+
+- Event id
+- Agent type
+- Prompt
+- Outcome (`"success"`, `"error"`, or `"skipped"`)
+- Error message (if any)
+- Completion timestamp
+
+### 16A.5 Guards
+
+- **Disabled events** are skipped with a `"skipped"` outcome.
+- **Unknown agent types** are logged with an `"error"` outcome.
+- **Double-fire prevention**: if a repeating event's previous execution is
+  still running, the current due cycle is skipped and logged as `"skipped"`.
+
+### 16A.6 Past-Start Advancement
+
+When a `from <timestamp> every <duration>` event has a start timestamp in the
+past, `next_due` is advanced by whole duration intervals until it is strictly in
+the future. The original `start_at` timestamp is preserved unchanged.
+
+---
+
 ## 17. Orchestrator & Multi-Agent Coordination
 
 ### 17.1 Core Components

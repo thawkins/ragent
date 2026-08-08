@@ -16,6 +16,7 @@ pub mod append_file;
 pub mod apply_patch;
 pub mod copy_file;
 pub mod create;
+pub mod cron_log;
 pub mod diff;
 pub mod edit;
 pub mod edit_log;

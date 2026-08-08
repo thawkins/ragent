@@ -879,6 +879,7 @@ impl App {
                     dur = duration_secs,
                 );
                 self.run_cost_banner = Some(banner);
+                self.run_cost_banner_at = Some(std::time::Instant::now());
                 self.needs_redraw = true;
                 // Full details always go to the log panel (model + ms precision).
                 self.push_log_no_agent(

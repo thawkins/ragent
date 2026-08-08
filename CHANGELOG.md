@@ -1,6 +1,62 @@
 # Changelog
 
+## Version: 1.0.19
+
+### Added — Cron capability
+
+- Added agent cron scheduling system (`/cron` slash-command family) with
+  one-shot (`at <timestamp>`), repeating (`from <timestamp> every
+  <duration>`), and interval (`every <duration>`) schedule forms.
+- `cron_events` table persisted to SQLite via the existing `Storage` layer
+  with migration support.
+- Background scheduler ticks every 30 seconds, evaluating and firing
+  enabled events whose `next_due` has passed.
+- Execution outcomes (`success`, `error`, `skipped`) logged as JSONL to
+  `<working_dir>/log/cron-<timestamp>.jsonl`.
+- Duration parser supporting `m`, `h`, `d`, `w`, `mo` units with
+  plural/long-form aliases.
+- Comprehensive unit test coverage: duration parser (21 tests), schedule
+  parser (53 tests), storage round-trip (12 tests), `every` no-start
+  computation (6 tests), and past-start advancement (14 tests).
+
 ## Version: 1.0.18
+
+### Added — Agent cron system (`/cron`)
+
+- New cron scheduling system that lets users schedule agent runs with a
+  designated agent type and an initial prompt.
+- Three schedule forms supported:
+  - `at <timestamp>` — one-shot, fires once at the specified time.
+  - `from <timestamp> every <duration>` — repeating, first fire at the
+    given timestamp, then at each interval.
+  - `every <duration>` — repeating with no explicit start; first fire is
+    `duration` from now.
+- Duration parser supports `m` (minutes), `h` (hours), `d` (days),
+  `w` (weeks), `mo` (months = 30 days) with plural/long-form aliases
+  (`mins`, `hrs`, `days`, `wks`, `months`).
+- Events persisted to SQLite via the existing `Storage` layer; `cron_events`
+  table with migration.
+- Background scheduler ticks every 30 seconds on a non-blocking tokio
+  task while the TUI session is running, evaluates all enabled events,
+  and fires those whose `next_due` has passed.
+- `/cron` slash-command family:
+  - `/cron add <agent> <schedule> "<prompt>"` — schedule a new event.
+  - `/cron remove <event_id>` — remove a scheduled event.
+  - `/cron list` — list all events with human-readable schedule
+    descriptions.
+  - `/cron log [event_id]` — show execution log (optionally filtered).
+  - `/cron help` — show usage.
+- Every execution is logged as a JSONL line to
+  `<working_dir>/log/cron-<timestamp>.jsonl`, mirroring the edit-log
+  convention. Each entry records event id, agent type, prompt, outcome
+  (`"success"`, `"error"`, or `"skipped"`), and timestamp.
+- Disabled events are skipped with a `"skipped"` outcome.
+- Past-start timestamps for `from <ts> every <d>` are advanced by whole
+  duration intervals until `next_due` is in the future.
+- Added unit tests for duration parser (21 tests), schedule parser
+  (53 tests), storage round-trip (12 tests), `every <d>` no-start
+  `next_due` computation (6 tests), and `from <past> every <d>` past-start
+  advancement (14 tests).
 
 ### Added — Perplexity Sonar backend for `mf_search`
 

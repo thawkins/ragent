@@ -566,6 +566,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Manage context cache: /context refresh",
     },
     SlashCommandDef {
+        trigger: "cron",
+        description: "Schedule agent runs: /cron add|remove|list|log|help",
+    },
+    SlashCommandDef {
         trigger: "compact",
         description: "Summarise and compact the conversation history",
     },
@@ -1543,9 +1547,12 @@ pub struct App {
     /// Transient one-line run-complete banner shown after an agent run ends.
     ///
     /// Populated from `Event::RunCostSummary` and dismissed on the next
-    /// keypress. The full summary is always logged to the log panel
-    /// regardless of this banner's visibility.
+    /// keypress or after `RUN_COST_BANNER_EXPIRY_SECS` seconds. The full
+    /// summary is always logged to the log panel regardless of this banner's
+    /// visibility.
     pub run_cost_banner: Option<String>,
+    /// When the run-cost banner was first shown, for auto-dismissal.
+    pub run_cost_banner_at: Option<std::time::Instant>,
 }
 
 /// State for the `/research open` markdown viewer overlay.
@@ -1840,7 +1847,25 @@ impl App {
             self.needs_redraw = true;
         }
     }
+
+    /// Auto-dismiss the transient run-cost banner after
+    /// `RUN_COST_BANNER_EXPIRY_SECS` seconds so it does not obstruct the
+    /// status bar during long unattended runs (e.g. `/spec impl`).
+    ///
+    /// Called from the TUI main loop (~50 ms cadence).
+    pub fn poll_run_cost_banner_expiry(&mut self) {
+        if let Some(shown_at) = self.run_cost_banner_at {
+            if shown_at.elapsed() >= std::time::Duration::from_secs(RUN_COST_BANNER_EXPIRY_SECS) {
+                self.run_cost_banner = None;
+                self.run_cost_banner_at = None;
+                self.needs_redraw = true;
+            }
+        }
+    }
 }
+
+/// Auto-dismiss timeout (in seconds) for the transient run-cost banner.
+const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;
 
 /// Grace period (in milliseconds) before a slash-command status auto-clears to
 /// `"ready"`. Long enough to read the status, short enough to feel responsive.
