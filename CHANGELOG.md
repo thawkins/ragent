@@ -1,5 +1,16 @@
 # Changelog
 
+## Version: 1.0.22
+
+### Fixed — Time-sensitive `test_parse_natural_time_5pm_tomorrow` CI failure
+
+- Replaced the fragile assertion `parsed.next_due > now + 20 hours` in
+  `crates/ragent-types/src/cron.rs` with a robust date-based check.
+  The old assertion failed when CI ran after ~3pm UTC because "5pm
+  tomorrow" could be as little as ~18 hours away. The new assertions
+  verify that the result is in the future and on a later calendar day,
+  which is what "tomorrow" actually means.
+
 ## Version: 1.0.21
 
 ### Fixed — CI clippy failure

@@ -684,4 +684,346 @@ Queries: `german v1 rocket flying bomb history development`, `V-1 flying bomb Re
 
 ---
 
-*Update appended 2026-08-08 via `websearch` (queries: 3, results: 50, new pages: 2).*
+*Update appended 2026-08-08 via `websearch` (queries: 3, results: 50, new pages: 2).*## 2026-08-09 — Update search (4 queries, 87 results, 5 new pages)
+
+Queries: `german v1 rocket`, `german v1 rocket flying bomb pulsejet Reichenberg launch site`, `V-1 flying bomb Argus pulsejet engine technical design specifications history`, `V-1 flying bomb Peenemunde launch site Normandy Antwerp countermeasures WW2`
+
+### 138. V-1 Flying Bomb 1942–52: Hitler's Infamous "Doodlebug" — Osprey Publishing (Internet Archive PDF)
+- **URL:** https://archive.org/download/v-1-3_202107/V-1_3.pdf
+- **Summary:** Full PDF of the Osprey New Vanguard 106 book by Steven J. Zaloga (illustrated by Jim Laurier). Covers flying-bomb ancestors (Sperry aerial torpedoes, Larynx, Schmidt/Madelung 1935 pulse-jet proposal), the Kirschkern program, FZG-76 development, combat deployment in France, the Crossbow campaign, air-launched missile campaign, Operation Eisbär, improved Fi-103 missiles, Operation Donnerschlag, the Reichenberg piloted missile, and foreign copies (US JB-2, Soviet, French). Includes colour-plate commentary and bibliography.
+
+### 139. V-1 Flying Bomb in World War II — ThoughtCo
+- **URL:** https://www.thoughtco.com/world-war-ii-v-1-flying-bomb-2360702
+- **Summary:** Article on the V-1 flying bomb covering how Fritz Gosslau, refining the earlier work of Paul Schmidt, designed a pulse-jet engine with few moving parts. Air entered the intake, mixed with fuel, was ignited, and the reed valves sealed the intake to force exhaust out the rear, cycling ~50 times per second to produce thrust.
+
+### 140. Design, Construction and Testing of a Pulsejet Engine — Universitat Politècnica de València
+- **URL:** https://riunet.upv.es/server/api/core/bitstreams/2fa43ef2-cf2f-4f1f-b8dd-235fdd7769a9/content
+- **Summary:** Academic paper on pulsejet engine design, construction, and testing. References the V-1 flying bomb and notes that based on Schmidt's model the German Argus Company perfected the pulsejet, obtaining flight approval. Includes experimental methodology and performance analysis relevant to understanding the Argus As 109-014.
+
+### 141. V-1 Flying Bomb — 3D Scene — MozaWeb
+- **URL:** https://www.mozaweb.com/en/Extra-3D_scenes-V_1_flying_bomb-211483
+- **Summary:** Interactive 3D scene of the V-1 flying bomb showing it was powered by an Argus As 109-014 pulse-jet engine. A mixture of compressed air and 75-octane petrol was injected into the combustion chamber. Useful as a visual reference for the engine layout and fuselage construction.
+
+### 142. MASSIVE V1 Flying Bomb Factory and Launch Site — Facebook Video
+- **URL:** https://www.facebook.com/100078243690873/videos/massive-v1-flying-bomb-factory-and-launch-site-this-v1-flying-bomb-storage-and-l/817248604314922
+- **Summary:** Video about the V-1 flying bomb storage and launch building in the village of Siracourt, described as one of the most heavily attacked V-weapon sites in Northern France. Covers the massive concrete construction and allied bombing efforts to destroy it.
+
+---
+
+*Update appended 2026-08-09 via `mf_search` (queries: 4, results: 87, new pages: 5).*## 2026-08-09 — Update search (4 queries, 60 results, 7 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb pulsejet engine technical development history`, `V-1 flying bomb Reichenberg manned missile launch site WW2`, `V-1 flying bomb Peenemunde launch site Normandy Antwerp countermeasures WW2`
+
+### 143. The Aero-Resonator Power Plant of the V-1 Flying Bomb — DTIC (Project SQUID, Princeton)
+- **URL:** https://apps.dtic.mil/sti/pdfs/ADA800231.pdf
+- **Summary:** 1948 US Navy / Project SQUID technical report (TM-PR-4) translated from Dr. Ing. Guenther Diedrich's authoritative German manuscript (written shortly before the war's end, referencing dates as late as April 1945). Covers the full history and development of the V-1's pulsejet (aero-resonator) power plant from its crudest designs, test stands, resonator valves (inlet, flow, and controlled valves), resonator tube shapes, and mixture formation (steady, vaporous/gaseous, and powder fuels, including the spoiler nozzle process and automatic mixture regulation). Distinct from the previously logged DTIC document AD0733387 (#73).
+
+### 144. Pulsejet — NATO Terminology Dictionary (en-academic.com)
+- **URL:** https://nato_lt.en-academic.com/9675/pulsejet
+- **Summary:** NATO terminology dictionary entry defining "pulsejet" (pulsuojantysis variklis). Provides the formal NATO lexicon definition of the pulsejet engine type used in the V-1 flying bomb.
+
+### 145. Pulsejet Engine — Canonical AI
+- **URL:** https://canonica.ai/page/Pulsejet_Engine
+- **Summary:** Encyclopedic overview of the pulsejet engine — a type of jet engine characterised by its simplicity and distinctive pulsing combustion, unlike turbojets or turbofans. Covers the operating principle relevant to the V-1's Argus As 109-014 power plant.
+
+### 146. Pulsejet — Open Wiki
+- **URL:** https://owiki.org/wiki/Pulsejet
+- **Summary:** OpenWiki article on the pulsejet engine with a diagram of a valved pulsejet. Covers the combustion-in-pulses operating principle of the engine type that powered the V-1 flying bomb. Distinct from the previously logged owiki.org V-1 flying bomb pages (#103, #104).
+
+### 147. Pulsejet engine — Wikipedia
+- **URL:** https://en.wikipedia.org/wiki/Pulse_jet_engine
+- **Summary:** Wikipedia article on the pulse jet engine — the type of air-breathing jet engine where combustion occurs in pulses rather than continuously. Covers the history, the Argus As 109-014 used in the V-1, and post-war developments. Redirect target of "Pulse jet engine."
+
+### 148. Fieseler Fi 103R (Reichenberg) Manned V-1 Flying Bomb — Wehrmacht History
+- **URL:** https://www.wehrmacht-history.com/luftwaffe/missiles/fieseler-fi-103r-v1-flying-bomb.html
+- **Summary:** Wehrmacht History page dedicated specifically to the Fieseler Fi 103R Reichenberg — the manned, suicide-attack version of the V-1. Lists variants (R-I through R-IV), specs (850 kg Amatol 39 warhead, He 111 launch platform, Luftwaffe operator). Distinct from the previously logged base V-1 page (#48) on the same site.
+
+### 149. Fieseler Fi 103R (Reichenberg) — ZAP16 Military Aviation
+- **URL:** https://zap16.com/2026/03/15/fieseler-fi-103r-reichenberg
+- **Summary:** ZAP16 military aviation photography and spotting report on the Fieseler Fi 103R, code-named Reichenberg — the late-WWII German piloted version of the V-1 flying bomb ("Buzz Bomb"), developed under the auspices of the Leonidas Squadron.
+
+---
+
+*Update appended 2026-08-09 via `websearch` (queries: 4, results: 60, new pages: 7).*
+## 2026-08-09 — Update search (20 results, no new pages)
+
+*No new pages found.* All 20 search results were already logged in previous entries.
+
+*Update appended 2026-08-09 via `websearch` (engines: 2, results: 20, new pages: 0).*## 2026-08-09 — Update search (3 queries, 60 results, 5 new pages)
+
+Queries: `german v1 rocket`, `german v1 rocket buzz bomb doodlebug history`, `V-1 flying bomb pulsejet Argus engine development Peenemunde 2025 2026`
+
+### 150. Full text of "V-1 german rocket" — Internet Archive
+- **URL:** https://archive.org/stream/v-1-3_202107/V-1_1_djvu.txt
+- **Summary:** Full searchable text of Antony L. Kay's 1977 Monogram Aviation Publications book on the V-1. Covers the pulsejet's origins, the Peenemünde reconnaissance photo that confirmed the buzz bomb, the relative cost economics (50 V-1s per V-2, 300 per heavy bomber), piloted variants (Re 3 and Re 4 only, contrary to published reports), the "Hollenhund" (hell hound) code name ordered by Hitler, and the Rei-Wei (extended range) series developed in 1945. Distinct from the previously logged Osprey PDF (#138).
+
+### 151. Pulsejet — Wikipedia
+- **URL:** https://en.wikipedia.org/wiki/Pulsejet
+- **Summary:** Wikipedia article on the pulsejet engine — a type of jet engine where combustion occurs in pulses, capable of running with few or no moving parts. Covers the operating principle, history, and the Argus As 014 used in the V-1. Redirect target of "Pulse jet engine" (logged separately as #147); the canonical article URL.
+
+### 152. Fi-103/V-1 "Buzz Bomb" — Warbirds Resource Group
+- **URL:** https://www.warbirdsresourcegroup.org/LRG/v1.html
+- **Summary:** Warbirds Resource Group page on the Fi-103/V-1, crediting designers Robert Lusser (Fieseler) and Fritz Gosslau (Argus). Notes the welded sheet-steel fuselage, plywood wings, and the Argus pulse-jet power plant. A concise reference page with design and development notes sourced from Wikipedia.
+
+### 153. Argus As 014 pulsejet — Warbirds Resource Group (Power Plants)
+- **URL:** https://powerplants.warbirdsresourcegroup.org/german_argus_as014.html
+- **Summary:** Dedicated page on the Argus As 014 (RLM 109-014) pulsejet engine — the first model of pulsejet placed in mass production, used on the German V-1 flying bomb. Distinct from the Wikipedia Argus As 014 article (#47) and the Aardvark engineering page (#111).
+
+### 154. Argus As 014 Pulsejet Engine Overview — Scribd
+- **URL:** https://www.scribd.com/document/270956667/Pulse-Jet
+- **Summary:** Scribd document describing the key components and operating mechanism of the Argus As 109-014 pulsejet engine that powered the V-1 flying bomb in WW2. Distinct from the previously logged Scribd Fieseler Fi 103 document (#62).
+
+---
+
+*Update appended 2026-08-09 via `websearch` + `mf_search` (queries: 3, results: 60, new pages: 5).*## 2026-08-10 — Update search (4 queries, 60 results, 1 new page)
+
+Queries: `german v1 rocket`, `german v1 flying bomb history pulsejet`, `V-1 buzz bomb doodlebug WW2`, `Fieseler Fi 103 V-1 missile technical specifications`
+
+### 155. Fieseler Fi 103 "V1" — The Museum of Flight (Aircraft exhibit page)
+- **URL:** https://www.museumofflight.org/exhibits-and-events/aircraft/fieseler-fi-103-v1
+- **Summary:** Museum of Flight exhibit page for their V-1, acquired from a collector in 2006. The missile is a hybrid assembled from parts recovered from the Mittelwerk underground factory at Nordhausen, where enslaved labourers from Concentration Camp Dora built V-1s and V-2s. It has an early A-1 warhead on a later long-range B-1/E-1/F-1 airframe with wooden wings, and an FuG 23 trailing-wire tracking antenna. Stamped "PVC 1006" indicates it was intended for air-launch from modified Heinkel He-111 bombers. Notes ~30,000 V-1s built in 1944–45, over 22,000 launched (most from ramps, ~2,000 from He-111s). **Note:** The Museum's previous exhibit page at `/exhibits-and-events/exhibits/fieseler-fi-103-v1` (logged as #110) now redirects here — the museum reorganised its exhibit section.
+
+---
+
+*Update appended 2026-08-10 via `websearch` (queries: 4, results: 60, new pages: 1).*## 2026-08-09 — Update search (3 queries, 40 results, 12 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb site:fr.wikipedia.org`, `V-1 flying bomb site:es.wikipedia.org OR site:de.wikipedia.org OR site:ru.wikipedia.org`, `V-1 flying bomb 2024 2025 new article history`
+
+### 156. V1 (missile) — Wikipédia (Fieseler Fi-103 page)
+- **URL:** https://fr.wikipedia.org/wiki/Fieseler_Fi-103
+- **Summary:** French Wikipedia article on the V1 missile (Fieseler Fi 103). Covers development history, design, operational use against London and Antwerp, countermeasures, and the piloted Reichenberg variant. Specs: mass 2,247 kg, length 7.92 m, wingspan 5.78 m, speed ~670 km/h, range ~200–210 km, warhead 847 kg amatol.
+
+### 157. V1 (missile) — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/V1_(missile)
+- **Summary:** French Wikipedia article on the V1 missile — the first cruise missile in aviation history, used by Nazi Germany from 13 June 1944 to 29 March 1945 against the UK and Belgium (primarily the port of Antwerp).
+
+### 158. Fichier:Duxford UK Feb2005 V1flyingBomb.JPG — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:Duxford_UK_Feb2005_V1flyingbomb.JPG
+- **Summary:** Photograph of a German V-1 flying bomb displayed at the Imperial War Museum Duxford, England (February 2005).
+
+### 159. Fichier:Spitfire Tipping V-1 Flying Bomb.jpg — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:Spitfire_Tipping_V-1_Flying_Bomb.jpg
+- **Summary:** Historic silhouette photograph of a Royal Air Force Supermarine Spitfire manoeuvring alongside a German V-1 flying bomb, attempting to deflect it from its target (1944).
+
+### 160. Fichier:V-1 cutaway.jpg — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:V-1_cutaway.jpg
+- **Summary:** Cutaway technical diagram of the V-1 flying bomb showing internal components including pulsejet engine, fuel tank, warhead, and guidance gyros.
+
+### 161. Fichier:V-1 1944 - Typical Ski Site.jpg — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:V-1_1944_-_Typical_Ski_Site.jpg
+- **Summary:** Diagram of a completed V-1 flying bomb launch facility ('ski site') at Maisoncelle in northern France, showing ramp, storage, and support buildings.
+
+### 162. Bombe volante — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Bombe_volante
+- **Summary:** French Wikipedia article on flying bombs, primarily covering the German V1 used against London and the V2 ballistic missile during WWII.
+
+### 163. Fichier:V1Musee.jpg — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:V1Musee.jpg
+- **Summary:** Photograph of a V-1 bomb on display at the Musée de l'Armée in Paris (2008).
+
+### 164. Fichier:Bundesarchiv Bild V1 vor Start — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fichier:Bundesarchiv_Bild_146-1975-117-26,_Marschflugk%C3%B6rper_V1_vor_Start.jpg
+- **Summary:** Bundesarchiv photograph of a V-1 cruise missile (Marschflugkörper) before launch, with German caption describing the remote guidance system.
+
+### 165. Fieseler Fi 103R (Reichenberg) — Wikipédia
+- **URL:** https://fr.wikipedia.org/wiki/Fieseler_Fi_103R_(Reichenberg)
+- **Summary:** French Wikipedia article on the Fieseler Fi 103R Reichenberg — the piloted version of the V-1 flying bomb, code-named 'Reichenberg device', tested by Hanna Reitsch but never used in combat.
+
+### 166. Fieseler Fi 103 — Wikipedia (German)
+- **URL:** https://de.wikipedia.org/wiki/Fi_103
+- **Summary:** German Wikipedia article on the Fieseler Fi 103 (V-1) — the first militarily deployed cruise missile. Covers development at Peenemünde, Argus As 014 pulsejet propulsion, steam catapult launch (Walter-Schleuder), guidance via air-log propeller and gyrocompass, production, Allied countermeasures (flak, fighters, barrage balloons, intelligence), and the manned Reichenberg variant. Includes detailed technical specifications and operational history from June 1944 to March 1945. Notes the "Eifelschreck" nickname used by locals for V-1s launched from the Eifel region.
+
+### 167. A Wingtip and a Prayer — Today I Found Out (2025)
+- **URL:** https://www.todayifoundout.com/index.php/2025/12/a-wingtip-and-a-prayer-the-insane-way-british-pilots-defeated-germanys-secret-weapon
+- **Summary:** December 2025 article by Gilles Messier on how British RAF pilots defeated the V-1 flying bomb using the daring 'wing-tipping' tactic. Describes the V-1's Argus 109-014 pulsejet engine (500 cycles/min, 3.5 kN thrust), Peenemünde development, steam catapult launch (49-metre ramp, 0–320 km/h in ~1 second), gyrocompass guidance, and the cost-effectiveness analysis showing the V-1 was cheaper for Germany than conventional bombing (zero aircraft/personnel losses vs 3,075 aircraft and 7,690 personnel lost in the Blitz).
+
+---
+
+*Update appended 2026-08-09 via `websearch` (queries: 4, results: 40, new pages: 12).*## 2026-08-10 — Update search (3 queries, ~90 results, 9 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb 2025 2026 new article history`, `Vergeltungswaffe 1 Fieseler Fi 103 pulsejet buzz bomb`
+
+### 168. Restoring the National Air and Space Museum's V-1 Missile — Vintage Aviation News
+- **URL:** https://vintageaviationnews.com/aviation-museum-news/restoring-the-national-air-and-space-museums-v-1-missile.html
+- **Summary:** Article on the Smithsonian National Air and Space Museum's restoration of its V-1 cruise missile for the forthcoming Jay I. Kislak World War II in the Air gallery (opening 2026). The restoration uncovered an unexpected wooden replica warhead, clues about the original paint scheme, and indications of a possible demonstration firing. Notes the V-1 was deployed in far greater numbers than the V-2 and had significant psychological impact.
+
+### 169. Luftwaffe V1 Flying Bomb — War Time & Post War Reports Of Design — Axis History Forum
+- **URL:** https://forum.axishistory.com/viewtopic.php?t=285048
+- **Summary:** Axis History Forum thread collecting three articles discussing the design and Luftwaffe operations of the V-1 flying bomb and some of the Allied countermeasures. Community discussion with wartime and post-war report sources.
+
+### 170. Warhead Performance of the German Flying Bomb (V1) in World War Two — ResearchGate
+- **URL:** https://www.researchgate.net/publication/391869119_WARHEAD_PERFORMANCE_OF_THE_GERMAN_FLYING_BOMB_V1_IN_WORLD_WAR_TWO
+- **Summary:** Academic paper examining V-1 warhead performance. Notes the V-1 was cost effective, cheap and easy to produce, and analyses the number of design changes in the build and particularly in the warhead filling.
+
+### 171. Introduction of V-1 Flying Bombs early in the war would've been a game changer — AlternateHistory.com
+- **URL:** https://www.alternatehistory.com/forum/threads/introduction-of-v-1-flying-bombs-early-in-the-war-wouldve-been-a-game-changer.535048
+- **Summary:** Alternate history forum discussion examining the counterfactual of deploying the V-1 earlier in WWII. Argues the early-stage weapon was inaccurate, easily countered, and would have diverted resources from tanks, aircraft, and the Eastern Front; also notes the 250-mile range would require launch sites in northern France/Benelux within Allied bomber range.
+
+### 172. Fieseler Fi 103 — Afterburner
+- **URL:** https://afterburner.com.pl/fieseler-fi-103
+- **Summary:** Detailed Afterburner article tracing the flying-bomb concept from 1849 Austrian balloon bombs through the Hewitt-Sperry Automatic Airplane (1910s) to Paul Schmidt and Georg Hans Madelung's 1935 pulse-jet design, Argus's October 1939 Fernfeuer proposal, and the Gosslau/Lusser February 1942 design. Notes the original spec called for 300 km range at 700 km/h with a 500 kg payload; project approved 19 June 1942 as Flakzielgerät 76.
+
+### 173. The buzz bomb hi-res stock photography and images — Alamy
+- **URL:** https://www.alamy.com/stock-photo/the-buzz-bomb.html
+- **Summary:** Alamy stock photo collection of the "buzz bomb" — the Fieseler Fi 103 / V-1 German flying bomb powered by a pulse-jet engine. High-resolution historical photography.
+
+### 174. V-1 Flying Bomb — Fieseler Fi 103 (Vergeltungswaffe) — YouTube
+- **URL:** https://www.youtube.com/watch?v=QY308O42Ur4
+- **Summary:** YouTube documentary video (posted 5 Jun 2011, ~479k views) on the Fieseler Fi 103, better known as the V-1 and Buzz Bomb (Vergeltungswaffe 1, "retaliation weapon"), colloquially known in Britain as the "doodlebug."
+
+### 175. V-1 flying bomb: Germany's vengeance weapon — Home Front History (Facebook)
+- **URL:** https://www.facebook.com/groups/homefronthistory/posts/26135653439398074
+- **Summary:** Home Front History Facebook group post on the V-1 flying bomb — a German pilotless weapon used against Britain and Belgium in 1944 and 1945, officially known as the Fieseler Fi 103.
+
+### 176. On this day in 1945 the last V-1 launched toward England — National Air and Space Museum (Facebook)
+- **URL:** https://www.facebook.com/airandspace/posts/on-this-day-in-1945-the-last-v-1-launched-toward-england-during-world-war-ii-was/1342873324542739
+- **Summary:** Smithsonian National Air and Space Museum Facebook post marking the anniversary of the last V-1 launched toward England during WWII. Comments include accounts of RAF pilots who downed V-1s over London.
+
+---
+
+*Update appended 2026-08-10 via `websearch` + `mf_search` (queries: 3, results: ~90, new pages: 9).*
+## 2026-08-09 — Update search (~90 results, 5 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb buzz bomb doodlebug history`, `german v1 rocket history development` (via `websearch` + `mf_search`, 4 engines)
+
+### 177. German V1 Rocket (Known as a Buzz bomb or Doodlebug) — TripAdvisor (Eden Camp Modern History Museum)
+- **URL:** https://www.tripadvisor.ca/LocationPhotoDirectLink-g776616-d215642-i417074696-Eden_Camp_Modern_History_Museum-Malton_North_Yorkshire_England.html
+- **Summary:** TripAdvisor visitor photo from the Eden Camp Modern History Museum in Malton, North Yorkshire, showing a German V1 Rocket exhibit. The museum is a former WWII prisoner-of-war camp now housing exhibits on wartime life and technology.
+
+### 178. Germans used an UAV called V-1 as early as 1944 — Reddit (r/interestingasfuck)
+- **URL:** https://www.reddit.com/r/interestingasfuck/comments/1rpxg17/germans_used_an_uav_called_v1_as_early_as_1944
+- **Summary:** Reddit post noting the V-1 as the first cruise missile — a bomb with attached wings, a pulse-jet engine, and a simple gyroscope inertial navigation system. After a pre-programmed distance the engine cut out and the missile dived onto its target.
+
+### 179. V weapons and sites: the history of their development, production and launch — Liberation Route Europe
+- **URL:** https://www.liberationroute.com/en/stories/352/v-weapons-and-sites-the-history-of-their-development-production-and-launch
+- **Summary:** Liberation Route Europe article tracing V-weapon development from the 1930 German rocket research programme (formed to circumvent Treaty of Versailles restrictions) through the recruitment of Wernher von Braun in 1932 and Hitler's rise to power, covering both V-1 and V-2 production and launch operations.
+
+### 180. The V1 Rocket — Hitler's Flying Bomb — YouTube
+- **URL:** https://www.youtube.com/watch?v=hxrxjCbbhrg
+- **Summary:** YouTube video documentary on the V1 Bomb/Rocket, developed as one of Adolf Hitler's "Vengeance Weapons" and deployed by Nazi Germany during WWII. Covers the flying bomb's development, deployment, and impact.
+
+### 181. Instagram — Robert Lusser's grandson on the V1 project
+- **URL:** https://www.instagram.com/reel/DO8FswGDkNB
+- **Summary:** Instagram reel by a descendant of Robert Lusser, who headed the V1 flying bomb project for the Nazi Luftwaffe starting in 1942. Describes testing at the secret Peenemünde military base on the Baltic Sea.
+
+---
+
+*Update appended 2026-08-09 via `websearch` + `mf_search` (queries: 3, results: ~90, new pages: 5).*## 2026-08-10 — Update search (~40 results, 2 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb buzz bomb doodlebug` (via `websearch` + `mf_search`, 4 engines)
+
+### 182. Come era fatta la V1 (FZG76) — Trattori d'Epoca (Italian PDF monograph)
+- **URL:** http://www.trattoridepoca.com/images/stories/La%20V1%20PARTE%20PRIMA.pdf
+- **Summary:** Italian-language technical monograph (Part 1) by Dott. Ing. Giorgio Benvenuto covering the internal construction of the V1 (FZG 76). Opens with a Wikipedia excerpt on the Fieseler Fi 103, then details the autopilot system (gyrocompass, master gyroscope, altitude barometer, slave gyroscopes, servomotors). Covers the Argus As 014 pulsejet (50 pulses/sec), the Dampferzeuger steam catapult launch system, the Askania-developed autopilot, operational ceiling (2,750 m theoretical, lowered to within Bofors 40 mm range in May 1944), Heinkel He 111 air-launch operations by KG 3 (July 1944 – January 1945, ~1,176 launched), production figures (30,000 built, 350 work-hours each, cost 5,090 RM — 4% of a V-2), and combat impact on London (2,419 hits, 6,184 killed, 17,981 wounded) and Belgium (2,448 hits). Only 15% of V-1s hit their targets; 4,261 destroyed by fighters, anti-aircraft guns, and barrage balloons. Operation Crossbow defence described.
+
+### 183. 1st November 1944: A V1 flying bomb on show in Piccadilly, London — Aviation Française 1935-1975 (Facebook)
+- **URL:** https://www.facebook.com/groups/AviationFrancaise1940/posts/2355003574658520
+- **Summary:** Facebook post in the "Aviation Française 1935-1975 et autres nations combattantes" group showing a captured V1 flying bomb (Doodlebug) put on public display at Roote's in Piccadilly, London on 1 November 1944. The exhibit allowed Londoners who had endured the V-1 campaign (begun 13 June 1944) to see the weapon up close.
+
+---
+
+*Update appended 2026-08-10 via `websearch` + `mf_search` (queries: 2, results: ~40, new pages: 2).*
+## 2026-08-10 — Update search (48 results, 1 new page)
+
+Queries: `german v1 rocket` (via `websearch` 20 results + `mf_search` 28 results, 4 engines)
+
+### 184. V-1 missile — Britannica (alternate topic URL)
+- **URL:** https://www.britannica.com/topic/V-1-missile
+- **Summary:** Alternate Britannica topic-page URL for the V-1 missile entry (same content as the primary `/technology/V-1-missile` page already logged at #3). German jet-propelled missile of WWII, forerunner of modern cruise missiles.
+
+---
+
+*Update appended 2026-08-10 via `websearch` + `mf_search` (queries: 1, results: 48, new pages: 1).*## 2026-08-10 — Update search (28 results, 4 engines, no new pages)
+
+Search query: `german v1 rocket`
+
+All 28 results from this search (engines: Tavily + LangSearch; DuckDuckGo and Brave blocked)
+were already present in the log (entries 1–184). No new pages were found.
+
+---
+
+*Update appended 2026-08-10 via `mf_search` (engines: 4, results: 28, new pages: 0).*## 2026-08-10 — Update search (20 results, 4 engines, no new pages)
+
+Search query: `german v1 rocket`
+
+All 20 results from this search (DuckDuckGo + Brave + Tavily + LangSearch) were already
+present in the log (entries 1–184). No new pages were found.
+
+Notable confirmations: the EcuRed (Cuban Encyclopedia) Spanish article on the V-1
+(#28) and the Imperial War Museums V-Weapons page (#8) remain the top-ranked
+results, alongside Wikipedia (#2), Britannica (#3), the Smithsonian (#4), and
+the BBC Witness History audio (#5).
+
+---
+
+*Update appended 2026-08-10 via `websearch` (engines: 4, results: 20, new pages: 0).*## 2026-08-09 — Update search (24 results, 4 engines, no new pages)
+
+Search query: `german v1 rocket`
+
+Engines: Tavily + LangSearch returned 24 results (DuckDuckGo and Brave blocked).
+All 24 URLs returned were already present in the log (entries 1–184). No new
+pages were found.
+
+Top-ranked results remain the Imperial War Museums V-Weapons page (#8),
+Wikipedia V-1 flying bomb (#2), Smithsonian V-1 Cruise Missile (#4), and
+Britannica V-1 missile (#3).
+
+---
+
+*Update appended 2026-08-09 via `mf_search` (engines: 4, results: 24, new pages: 0).*## 2026-08-10 — Update search (49 results across 2 engines, no new pages)
+
+Search query: `german v1 rocket`
+
+Sources queried:
+- `websearch` — 20 results (DuckDuckGo + Brave + Tavily + LangSearch)
+- `mf_search` — 29 results (Tavily + LangSearch; DuckDuckGo and Brave blocked)
+
+All V-1-specific URLs returned were already present in the log (entries 1–184).
+10 of the 20 `websearch` results were German language-learning pages
+(thegermanproject.com, en.wikipedia.org/wiki/German_language, en.wikipedia.org/wiki/Germany,
+easygerman.org, germanpod101.com, deutschland.de, youtube.com/watch?v=oWWDjZeC9PE,
+learngerman.dw.com, germany.info, german.net) — irrelevant to the V-1 rocket topic
+and excluded from the count.
+
+Top-ranked V-1 results remain: Imperial War Museums V-Weapons (#8),
+Wikipedia V-1 flying bomb (#2), Britannica V-1 missile (#3), Smithsonian V-1 Cruise
+Missile (#4), and the BBC Witness History audio (#5).
+
+---
+
+*Update appended 2026-08-10 via `websearch` + `mf_search` (engines: 4, results: 49, new pages: 0).*## 2026-08-09 — Update search (~70 results across 4 queries, 3 new pages)
+
+Queries: `german v1 rocket`, `V-1 flying bomb pulsejet engine history`, `V-1 flying bomb Reichenberg piloted missile Fi 103R`, `V-1 flying bomb launch site Normandy France WW2`, `V-1 flying bomb crossbow campaign allied countermeasures`, `V-1 flying bomb 2025 new article history development`
+
+### 185. V-1 flying bomb facilities — Wikipedia
+- **URL:** https://en.wikipedia.org/wiki/V-1_flying_bomb_facilities
+- **Summary:** Wikipedia article on the V-1 launching sites, storage depots, and production facilities built by Nazi Germany in France and Germany to carry out the planned V-1 "flying bomb" attacks on the UK. Covers the "ski sites" (large concrete fortifications), modified/belhamelin sites (simplified, harder to detect), storage depots (Domléger, Renescure, Sautricourt, Beauvais, Valognes, Nucourt, Rilly-la-Montagne, Saint-Leu-d'Esserent, Siracourt), production at KdF-Stadt (Wolfsburg) Volkswagen Werke and Mittelwerk underground factory, the V-1 launch sequence (final assembly, compass swinging, hoisting, fueling, catapult setup, pulsejet startup, launch), He 111 air-launch bases (Gilze-Rijen, Venlo), and Allied bombing raids (Operation Crossbow, Operation Aphrodite).
+
+### 186. CROSSBOW AND GULF WAR COUNTER-SCUD EFFORTS: LESSONS FROM HISTORY — DTIC (Air War College)
+- **URL:** https://apps.dtic.mil/sti/pdfs/ADA393984.pdf
+- **Summary:** Air War College research report (April 1996) by Lt Col Mark E. Kipphut, USAF. Compares the WWII Allied "Crossbow" campaign (designed to stop Hitler's V-1 cruise and V-2 ballistic missile attacks against Great Britain and continental Europe) with the Gulf War coalition counter-Scud efforts against Iraqi tactical ballistic missiles. Examines planning shortfalls, intelligence and planning assumptions, targeting strategies, resource allocations, and planned effects on enemy operations. Concludes that in both campaigns, air power failed to suppress enemy missile launches, and identifies lessons for future ballistic missile challenges. Covers Crossbow Phase One (April 1943–June 1944) and Phase Two (June 1944–March 1945), the nature of the V-weapon threat, allied intelligence and warning, and strategic/tactical air force sortie allocations.
+
+### 187. How Hitler's fear-inducing 'flying bomb' ushered in drone warfare — Navy Times
+- **URL:** https://www.navytimes.com/veterans/military-history/2025/09/26/how-hitlers-fear-inducing-flying-bomb-ushered-in-drone-warfare
+- **Summary:** September 2025 article by Zita Ballinger Fletcher reframing the V-1 as the first suicide drone / UAV rather than simply the first cruise missile. Describes the V-1's 1,800-pound warhead, 400 mph speed, 15–30 minute flight time, advanced autopilot (barometric altimeter, magnetic compass, rate gyroscope, propeller-driven rangefinder), ramp-launch capability (similar to modern Kratos XQ-58A Valkyrie), swarm deployment, and air-launch from Heinkel 111 bombers. Notes ~30,000 V-1s built, 10,000+ fired at London, peak of 100+ launches per day. Covers Allied countermeasures (wing-tipping pioneered by Australian Spitfire ace Ken Collier, barrage balloons, anti-aircraft guns), slave-labor production at Mittelbau-Dora, and the V-1's ultimate strategic failure despite being cost-effective and technologically innovative.
+
+---
+
+*Update appended 2026-08-09 via `websearch` + `mf_search` (6 queries, ~70 results, 3 new pages).*## 2026-08-10 — Update search (20 results, no new pages)
+
+Search query: `german v1 rocket`
+
+All 20 results from this search were already present in the log (entries 1–187)
+or were irrelevant German-language-learning pages (thegermanproject.com,
+en.wikipedia.org/wiki/German_language, en.wikipedia.org/wiki/Germany,
+easygerman.org, germanpod101.com, deutschland.de, youtube.com/watch?v=oWWDjZeC9PE,
+learngerman.dw.com, germany.info, german.net) — excluded from the count.
+
+Top-ranked V-1 results remain: Wikipedia V-1 flying bomb (#2), Britannica V-1
+missile (#3), Smithsonian V-1 Cruise Missile (#4), BBC Witness History audio (#5),
+Imperial War Museums V-Weapons (#8), and the National Museum of the USAF JB-2
+Loon fact sheet (#11).
+
+---
+
+*Update appended 2026-08-10 via `websearch` (engines: 4, results: 20, new pages: 0).*
