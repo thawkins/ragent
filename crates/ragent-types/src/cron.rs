@@ -1368,7 +1368,10 @@ mod tests {
         let now = Utc::now();
         let parsed = parse_schedule("at 5pm tomorrow", now).unwrap();
         assert_eq!(parsed.schedule.form, CronForm::OneShot);
-        assert!(parsed.next_due > now + chrono::Duration::hours(20));
+        // "tomorrow" always resolves to the next calendar day, so the
+        // result must be in the future and on a later date than today.
+        assert!(parsed.next_due > now);
+        assert!(parsed.next_due.date_naive() > now.date_naive());
     }
 
     #[test]
