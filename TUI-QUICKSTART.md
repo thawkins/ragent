@@ -405,6 +405,18 @@ ragent asks a few clarifying questions if needed, then generates:
 
 - `specs/add-user-authentication/SPEC.md` — requirements, scope, acceptance criteria
 - `specs/add-user-authentication/PLAN.md` — tasks, dependencies, effort estimates
+- `specs/add-user-authentication/TESTPLAN.md` — manual test plan with `TC-NNN` test cases
+
+### Regenerate plans after editing a spec
+
+```text
+/spec update add-user-authentication
+```
+
+`/spec update` re-reads the existing `SPEC.md` and regenerates `PLAN.md` and
+`TESTPLAN.md` to match the current requirements. The `SPEC.md` file is not
+modified; existing task IDs are preserved where unchanged. Archived specs
+cannot be updated.
 
 ### List and validate specs
 

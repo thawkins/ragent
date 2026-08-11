@@ -86,7 +86,9 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   compression, and knowledge graph support
 - **Spec management** — `/spec` slash commands for creating, listing, searching,
   validating, and tracking specification lifecycles; `/spec jtbd` performs
-  Jobs-To-Be-Done analysis on existing specs
+  Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
+  `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` now
+  also emits a manual `TESTPLAN.md` test-plan artifact
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints
@@ -294,7 +296,7 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from 15 focused crates:
+The project is a Cargo workspace built from 17 focused crates:
 
 | Crate                     | Purpose                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -304,10 +306,12 @@ The project is a Cargo workspace built from 15 focused crates:
 | `ragent-config`         | Configuration types, defaults, and parsing                                                                                                                                                        |
 | `ragent-llm`            | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
 | `ragent-prompt_opt`     | Prompt optimization templates and completer abstraction                                                                                                                                           |
+| `ragent-research`       | Research system: web/local gathering, synthesis, RESEARCH.md output                                                                                                                               |
 | `ragent-server`         | Axum HTTP routes and SSE streaming                                                                                                                                                                |
-| `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival                                                                                                            |
+| `ragent-specs`          | Spec lifecycle management: discovery, validation, status transitions, review, archival, JTBD analysis                                                                                          |
 | `ragent-storage`        | SQLite-backed storage, snapshots, encrypted credentials                                                                                                                                           |
 | `ragent-team`           | Team coordination runtime and team tools                                                                                                                                                          |
+| `ragent-telemetry`      | OpenTelemetry instrumentation and OTLP export                                                                                                                                                     |
 | `ragent-tools-core`     | Core shell/file/search tools                                                                                                                                                                      |
 | `ragent-tools-extended` | Extended document/web/memory/codeindex tools                                                                                                                                                      |
 | `ragent-tools-vcs`      | GitHub and GitLab tool surface                                                                                                                                                                    |
@@ -361,12 +365,19 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-beta.28** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+**v1.0.23** — The core architecture, tool system (~150 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- `/spec update <spec-id>` sub-command re-reads an existing `SPEC.md` and regenerates
+  `PLAN.md` and `TESTPLAN.md` (preserving unchanged task IDs)
+- `/spec create` now generates a `TESTPLAN.md` manual test-plan artifact alongside
+  `SPEC.md` and `PLAN.md`
+- `/spec add` now regenerates `PLAN.md` + `TESTPLAN.md` after the incremental add
+- `/spec jtbd` Jobs-To-Be-Done analysis on existing specs
+- Research web-gather now requires readability extraction and fixes YouTube transcript capture
 - `memory_store` now reports a clear `stored` result and the TUI summary correctly shows
   successful structured-memory writes
 - Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
@@ -405,8 +416,9 @@ Recent highlights:
 - All 279 compiler warnings eliminated (build, tests, benches, examples)
 - Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
 - `read` tool instructions clarified (`end_line` is absolute line number)
-- Remote push prohibitions strengthened in `AGENTS.md`
-- SPEC.md audited, reorganized, and updated for v0.1.0-beta.28
+- Remote push prohibitions strengthened in `AGENTS.md`; added "no unsafe code" and
+  "no `.unwrap()` on user-facing paths" rules
+- SPEC.md audited, reorganized, and updated for v1.0.23
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery
 - Amazon Bedrock provider with AWS SigV4 signing and dual API support

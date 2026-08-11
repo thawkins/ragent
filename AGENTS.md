@@ -278,6 +278,8 @@ team_status                        ← read what they found
 3. When debugging a problem, change only one thing at a time. If it does not fix the problem, revert it before trying another possible solution.
 4. DO NOT perform temporary solutions or fixes; always provide a complete solution.
 5. DO NOT declare an issue as fixed unless it has been confirmed; 90% of assertions of completion turn out to be false.
+6. No unsafe code.
+7. No .unwrap() on user-facing paths. 
 
 ## Versioning
 

@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 0.1.0-beta.28
+**Version:** 1.0.24
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 
@@ -9,67 +9,67 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 274,571 |
-| Total Rust files | 684 |
-| Tests defined | 4,647 |
-| Test files | 229 |
-| Benchmark files | 9 |
+| Total Rust lines | 290,859 |
+| Total Rust files | 755 |
+| Tests defined | 5,072 |
+| Test files | 300 |
+| Benchmark files | 10 |
 | Tools registered | ~150 |
 | Supported languages (code index) | 15+ (Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD, Terraform, CMake, Gradle, Maven) |
-| Workspace crates | 15 |
+| Workspace crates | 17 |
 | Authors | 1 |
 
 ---
 
 ## Breakdown by Crate
 
-The project is organised as a Cargo workspace of 15 focused crates. The table below
+The project is organised as a Cargo workspace of 17 focused crates. The table below
 shows the file count, line count, and test-file count for each crate (including
 `src/`, `tests/`, `benches/`, and `examples/` directories where present).
 
 | Crate | Rust Files | Lines | Test Files | Description |
 |-------|-----------:|------:|-----------:|-------------|
-| `ragent-tui` | 84 | 52,512 | 44 | Ratatui terminal interface |
-| `ragent-agent` | 167 | 51,824 | 43 | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
-| `ragent-tools-extended` | 107 | 45,352 | 34 | Extended document/web/memory/codeindex tools |
-| `ragent-research` | 34 | 22,142 | 9 | Research system: web/local gathering, synthesis, RESEARCH.md output |
-| `ragent-llm` | 41 | 19,228 | 15 | Provider clients and model/provider registry |
-| `ragent-codeindex` | 29 | 15,521 | 6 | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
-| `ragent-tools-core` | 45 | 11,531 | 13 | Core shell/file/search tools |
-| `ragent-telemetry` | 21 | 10,123 | 12 | OpenTelemetry instrumentation and OTLP export |
+| `ragent-tui` | 92 | 57,095 | 51 | Ratatui terminal interface |
+| `ragent-agent` | 174 | 53,245 | 57 | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
+| `ragent-tools-extended` | 99 | 42,330 | 35 | Extended document/web/memory/codeindex tools |
+| `ragent-research` | 52 | 28,217 | 16 | Research system: web/local gathering, synthesis, RESEARCH.md output |
+| `ragent-llm` | 45 | 19,687 | 18 | Provider clients and model/provider registry |
+| `ragent-codeindex` | 48 | 15,543 | 25 | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
+| `ragent-tools-core` | 48 | 13,290 | 14 | Core shell/file/search tools |
+| `ragent-telemetry` | 25 | 10,217 | 16 | OpenTelemetry instrumentation and OTLP export |
 | `ragent-bench` | 23 | 8,389 | 2 | Benchmark runner shared between TUI and CLI |
-| `ragent-tools-vcs` | 33 | 7,063 | 1 | GitHub and GitLab tool surface |
-| `ragent-specs` | 16 | 6,730 | 5 | Spec lifecycle management: discovery, validation, status transitions, review, archival |
-| `ragent-config` | 23 | 6,506 | 15 | Configuration types, defaults, and parsing |
-| `ragent-server` | 9 | 4,421 | 3 | Axum HTTP routes and SSE streaming |
-| `ragent-storage` | 9 | 4,439 | 6 | SQLite-backed storage, snapshots, encrypted credentials |
-| `ragent-types` | 18 | 3,140 | 5 | Shared IDs, events, messages, and sanitization primitives |
+| `ragent-tools-vcs` | 35 | 7,627 | 2 | GitHub and GitLab tool surface |
+| `ragent-specs` | 21 | 7,298 | 10 | Spec lifecycle management: discovery, validation, status transitions, review, archival |
+| `ragent-config` | 25 | 6,678 | 16 | Configuration types, defaults, and parsing |
+| `ragent-storage` | 12 | 5,866 | 9 | SQLite-backed storage, snapshots, encrypted credentials |
+| `ragent-types` | 24 | 6,193 | 10 | Shared IDs, events, messages, and sanitization primitives |
+| `ragent-server` | 9 | 4,178 | 3 | Axum HTTP routes and SSE streaming |
 | `ragent-team` | 15 | 2,758 | 14 | Team coordination runtime and team tools |
 | `ragent-prompt_opt` | 3 | 681 | 2 | Prompt optimization templates and completer abstraction |
-| `ragent` (root) | 4 | 1,618 | 0 | Binary entry point and CLI wiring |
-| **Total** | **684** | **274,571** | **229** | |
+| `ragent` (root) | 2 | 1,457 | 0 | Binary entry point and CLI wiring |
+| **Total** | **755** | **290,859** | **300** | |
 
 ---
 
 ## Crate Size Distribution
 
 ```
-ragent-tui             ████████████████████████████  52,512 lines  (19.1 %)
-ragent-agent           ██████████████████████████    51,824 lines  (18.9 %)
-ragent-tools-extended  ██████████████████████        45,352 lines  (16.5 %)
-ragent-research        ███████████                   22,142 lines  ( 8.1 %)
-ragent-llm             █████████                     19,228 lines  ( 7.0 %)
-ragent-codeindex       ████████                      15,521 lines  ( 5.7 %)
-ragent-tools-core      ██████                        11,531 lines  ( 4.2 %)
-ragent-telemetry       █████                         10,123 lines  ( 3.7 %)
-ragent-bench           ████                           8,389 lines  ( 3.1 %)
-ragent-tools-vcs       ████                           7,063 lines  ( 2.6 %)
-ragent-specs           ███                            6,730 lines  ( 2.5 %)
-ragent-config          ███                            6,506 lines  ( 2.4 %)
-ragent-server          ██                             4,421 lines  ( 1.6 %)
-ragent-storage         ██                             4,439 lines  ( 1.6 %)
-ragent-types           ██                             3,140 lines  ( 1.1 %)
-ragent-team            █                              2,758 lines  ( 1.0 %)
+ragent-tui             ████████████████████████████  57,095 lines  (19.6 %)
+ragent-agent           ██████████████████████████    53,245 lines  (18.3 %)
+ragent-tools-extended  █████████████████████         42,330 lines  (14.6 %)
+ragent-research        ██████████████                28,217 lines  ( 9.7 %)
+ragent-llm             ██████████                    19,687 lines  ( 6.8 %)
+ragent-codeindex       ████████                      15,543 lines  ( 5.3 %)
+ragent-tools-core      ███████                       13,290 lines  ( 4.6 %)
+ragent-telemetry       █████                         10,217 lines  ( 3.5 %)
+ragent-bench           ████                           8,389 lines  ( 2.9 %)
+ragent-tools-vcs       ████                           7,627 lines  ( 2.6 %)
+ragent-specs           ███                            7,298 lines  ( 2.5 %)
+ragent-config          ███                            6,678 lines  ( 2.3 %)
+ragent-storage         ███                            5,866 lines  ( 2.0 %)
+ragent-types           ███                            6,193 lines  ( 2.1 %)
+ragent-server          ██                             4,178 lines  ( 1.4 %)
+ragent-team            █                              2,758 lines  ( 0.9 %)
 ragent-prompt_opt      ▏                                681 lines  ( 0.2 %)
 ```
 
@@ -79,24 +79,24 @@ ragent-prompt_opt      ▏                                681 lines  ( 0.2 %)
 
 | Crate | Test Files | Approx. Tests |
 |-------|-----------:|--------------:|
-| `ragent-tools-extended` | 34 | ~1,290 |
-| `ragent-tui` | 44 | ~752 |
-| `ragent-agent` | 43 | ~565 |
-| `ragent-research` | 9 | ~457 |
-| `ragent-llm` | 15 | ~318 |
-| `ragent-telemetry` | 12 | ~257 |
-| `ragent-codeindex` | 6 | ~238 |
-| `ragent-specs` | 5 | ~184 |
-| `ragent-tools-core` | 13 | ~164 |
-| `ragent-config` | 15 | ~119 |
+| `ragent-tools-extended` | 35 | ~1,390 |
+| `ragent-tui` | 51 | ~820 |
+| `ragent-agent` | 57 | ~610 |
+| `ragent-research` | 16 | ~470 |
+| `ragent-llm` | 18 | ~330 |
+| `ragent-codeindex` | 25 | ~260 |
+| `ragent-telemetry` | 16 | ~257 |
+| `ragent-specs` | 10 | ~200 |
+| `ragent-tools-core` | 14 | ~170 |
+| `ragent-config` | 16 | ~125 |
 | `ragent-team` | 14 | ~81 |
+| `ragent-types` | 10 | ~35 |
 | `ragent-server` | 3 | ~72 |
 | `ragent-bench` | 2 | ~59 |
-| `ragent-tools-vcs` | 1 | ~43 |
-| `ragent-types` | 5 | ~25 |
-| `ragent-storage` | 6 | ~20 |
+| `ragent-storage` | 9 | ~25 |
+| `ragent-tools-vcs` | 2 | ~43 |
 | `ragent-prompt_opt` | 2 | ~8 |
-| **Total** | **229** | **~4,647** |
+| **Total** | **300** | **~5,072** |
 
 ---
 
@@ -104,14 +104,7 @@ ragent-prompt_opt      ▏                                681 lines  ( 0.2 %)
 
 | Ratio | Value |
 |---|---|
-| UI + Server / Total | **20.8 %** (`ragent-tui` + `ragent-server`) |
-| Core + Tools / Total | **42.2 %** (`ragent-agent` + all tool crates) |
-| Research / Total | **8.1 %** (`ragent-research`) |
-| Data + Index / Total | **7.3 %** (`ragent-storage` + `ragent-codeindex`) |
-| Support / Total | **7.5 %** (`ragent-config` + `ragent-types` + `ragent-prompt_opt` + `ragent-telemetry`) |
-| Avg lines per file | **402** |
-
----
-
-*Last updated: 2026-02-16*
-*Generated from `find . -name '*.rs' -not -path './target/*'`*
+| Tests per source file | ~6.7 |
+| Test files / source files | ~0.40 |
+| Avg. lines per source file | ~385 |
+| Crates with benchmarks | 3 (`ragent-tui`, `ragent-server`, `ragent-codeindex`) |

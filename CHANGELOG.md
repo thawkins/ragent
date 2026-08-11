@@ -1,5 +1,53 @@
 # Changelog
 
+## Version: 1.0.24
+
+### Added — `/spec update` subcommand and TESTPLAN.md artifact
+
+- New `/spec update <spec-id>` sub-command re-reads the existing
+  `specs/<spec-id>/SPEC.md` and regenerates `PLAN.md` and `TESTPLAN.md`
+  to match the current requirements. `SPEC.md` is not modified. Existing
+  task IDs in `PLAN.md` are preserved where unchanged.
+  - Validates the spec ID and that the spec directory / `SPEC.md` exist.
+  - Guards against updating archived specs (returns an error).
+  - On not-found, lists available specs to aid discovery.
+  - Delegates to the `explore` agent by default, falling back to the
+    current agent. Dispatches generation via `process_message` and
+    publishes `AgentError` on failure.
+  - `SpecCommand::Update` variant added to `crates/ragent-specs` with
+    `build_update_status`, `build_update_message`, `build_update_log`,
+    and `build_update_prompt` helpers.
+- `/spec create` now generates a third artefact, `TESTPLAN.md`, alongside
+  `SPEC.md` and `PLAN.md` in every new spec directory. The file is a
+  human-readable **manual** test plan with a `## Test Cases` section, each
+  test case having a `TC-NNN` ID, title, preconditions, step-by-step
+  instructions, test data to enter, and expected results. When the feature
+  involves UI navigation, the plan enumerates every navigation step and
+  the exact data to enter. It may optionally include `## Prerequisites`
+  and `## Cleanup` sections. It does **not** contain automated test code,
+  `#[test]` functions, or `cargo test` references.
+- The `/spec create` status message, user-facing message, and log entry
+  now mention `TESTPLAN.md` so testers know a manual test plan was
+  produced.
+- `/spec add` now runs a second phase after the incremental requirement
+  addition that fully regenerates `PLAN.md` and `TESTPLAN.md` from the
+  updated `SPEC.md` (same logic as `/spec update`), so add operations stay
+  consistent with the latest requirements.
+- Tests added for the new behaviour: `test_slash_spec_update_missing_spec_id_shows_usage_error`,
+  `test_spec_jtbd`, and `TESTPLAN.md` assertions in the create test.
+
+### Changed — AGENTS.md project guidelines
+
+- Added rule 6: **No unsafe code.**
+- Added rule 7: **No `.unwrap()` on user-facing paths.**
+
+### Removed — Stale planning files
+
+- Deleted obsolete root planning documents that were superseded by the
+  `specs/` workflow: `ALPLAN.md`, `CUTPLAN.md`, `EDITPLAN.md`,
+  `RESEARCHPLAN.md`, `TOOLPLAN.md`.
+- Removed a stale unversioned `build` artifact from the repository root.
+
 ## Version: 1.0.23
 
 ### Added — Jobs-To-Be-Done analysis for specs

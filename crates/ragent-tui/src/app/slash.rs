@@ -5744,7 +5744,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "impl"
                             || sub == "add"
                             || sub == "delete"
-                            || sub == "jtbd" =>
+                            || sub == "jtbd"
+                            || sub == "update" =>
                     {
                         self.status = format!("Usage: /spec {} — try /spec help", sub);
                     }
@@ -5833,7 +5834,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 self.status = SpecCommand::build_add_status(&spec_id);
 
                                 let event_bus = self.event_bus.clone();
+                                let specs_root_phase2 = specs_root.clone();
+                                let spec_id_phase2 = spec_id.clone();
                                 tokio::spawn(async move {
+                                    // Phase 1: incremental add (new requirements + task rows)
                                     if let Err(e) =
                                         processor.process_message(&sid, &prompt, &agent, flag).await
                                     {
@@ -5841,6 +5845,52 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         event_bus.publish(ragent_agent::event::Event::AgentError {
                                             session_id: sid,
                                             error: format!("spec add generation failed: {e}"),
+                                        });
+                                        return;
+                                    }
+
+                                    // Phase 2: regenerate PLAN.md + TESTPLAN.md
+                                    // (same as /spec update — re-read the updated
+                                    // SPEC.md and fully regenerate both files)
+                                    let sid2 =
+                                        match ragent_specs::spec::SpecId::new(&spec_id_phase2) {
+                                            Some(id) => id,
+                                            None => {
+                                                tracing::warn!(
+                                                    "spec: invalid spec ID after add phase: {}",
+                                                    spec_id_phase2
+                                                );
+                                                return;
+                                            }
+                                        };
+                                    let mgr2 = SpecManager::new(&specs_root_phase2);
+                                    let plan_md = match mgr2.read_spec(&sid2).await {
+                                        Ok(spec) => spec.plan_md,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "spec: failed to read spec after add phase"
+                                            );
+                                            return;
+                                        }
+                                    };
+
+                                    let update_prompt =
+                                        SpecCommand::build_update_prompt(&spec_id_phase2, &plan_md);
+                                    let flag2 = Arc::new(AtomicBool::new(false));
+                                    if let Err(e) = processor
+                                        .process_message(&sid, &update_prompt, &agent, flag2)
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "spec: update generation failed after add"
+                                        );
+                                        event_bus.publish(ragent_agent::event::Event::AgentError {
+                                            session_id: sid,
+                                            error: format!(
+                                                "spec update generation failed after add: {e}"
+                                            ),
                                         });
                                     }
                                 });
@@ -5853,6 +5903,125 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 ));
                             }
                         }
+                    }
+                    SpecCommand::Update { spec_id } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // FR-006: validate spec ID format
+                        let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec update\n\n**Error:** Invalid spec ID \
+                                     `{}`. Spec IDs must be alphanumeric with hyphens or \
+                                     underscores only.",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+
+                        // FR-005/FR-010: read spec, guard archived, read PLAN.md
+                        let spec_id_owned = spec_id.clone();
+                        let result: Result<String, String> = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                let spec = match mgr.read_spec(&sid).await {
+                                    Ok(s) => s,
+                                    Err(_e) => {
+                                        // List available specs on not-found
+                                        let available: Vec<String> = match mgr
+                                            .discover_specs()
+                                            .await
+                                        {
+                                            Ok(specs) => specs
+                                                .iter()
+                                                .map(|s| {
+                                                    format!("  - {} ({})", s.id, s.status.as_str())
+                                                })
+                                                .collect(),
+                                            Err(_) => vec![],
+                                        };
+                                        let avail_str = if available.is_empty() {
+                                            "  (none found)".to_string()
+                                        } else {
+                                            available.join("\n")
+                                        };
+                                        return Err(format!(
+                                            "Spec `{}` not found.\n\nAvailable specs:\n{}",
+                                            spec_id_owned, avail_str
+                                        ));
+                                    }
+                                };
+                                // FR-013: guard archived specs
+                                if spec.status == ragent_specs::spec::SpecStatus::Archived {
+                                    return Err(format!(
+                                        "spec: '{}' is archived and cannot be updated",
+                                        spec_id_owned
+                                    ));
+                                }
+                                // FR-011: read existing PLAN.md for status preservation
+                                Ok(spec.plan_md)
+                            })
+                        });
+
+                        let plan_md = match result {
+                            Ok(p) => p,
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec update\n\n**Error:** {}",
+                                    e
+                                ));
+                                return;
+                            }
+                        };
+
+                        // FR-009: status, message, and log
+                        self.append_assistant_text(&SpecCommand::build_update_message(&spec_id));
+                        self.push_log_no_agent(
+                            crate::app::LogLevel::Info,
+                            SpecCommand::build_update_log(&spec_id),
+                        );
+
+                        // FR-007: select explore agent, fallback to current agent
+                        let explore_agent = self
+                            .cycleable_agents
+                            .iter()
+                            .find(|a| a.name == "explore")
+                            .cloned();
+                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
+                        self.apply_selected_model_and_thinking(&mut agent);
+                        agent.permission = ragent_agent::agent::default_permissions();
+
+                        // FR-008/FR-011: build prompt with plan_md for status preservation
+                        let prompt = SpecCommand::build_update_prompt(&spec_id, &plan_md);
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        let msg = Message::user_text(&sid, &prompt);
+                        self.messages.push(msg);
+
+                        let processor = self.session_processor.clone();
+                        let flag = Arc::new(AtomicBool::new(false));
+                        self.cancel_flag = Some(flag.clone());
+                        self.is_processing = true;
+                        self.status = SpecCommand::build_update_status(&spec_id);
+
+                        let event_bus = self.event_bus.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                processor.process_message(&sid, &prompt, &agent, flag).await
+                            {
+                                tracing::warn!(error = %e, "spec: update generation failed");
+                                event_bus.publish(ragent_agent::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!("spec update generation failed: {e}"),
+                                });
+                            }
+                        });
                     }
                     SpecCommand::Unknown(sub) => {
                         self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");

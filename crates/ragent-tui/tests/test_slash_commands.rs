@@ -2612,6 +2612,21 @@ fn test_slash_spec_no_args_shows_help() {
     assert!(text.contains("PLAN.md"), "should mention PLAN.md: {text}");
 }
 
+/// `/spec update` without a spec-id should show a usage error (FR-012).
+#[test]
+fn test_slash_spec_update_missing_spec_id_shows_usage_error() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/spec update");
+
+    assert!(
+        app.status.contains("Usage: /spec update"),
+        "missing spec-id should show usage error, got: {}",
+        app.status
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_slash_spec_task_lists_tasks() {
     let mut app = make_app();
@@ -2655,7 +2670,9 @@ async fn test_slash_spec_create_starts_generation() {
     app.execute_slash_command("/spec create websocket Add real-time collaborative editing");
 
     assert_eq!(
-        app.status, "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md…",
+        app.status,
+        "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md + \
+         specs/websocket/TESTPLAN.md…",
         "status should indicate generation"
     );
     assert!(app.is_processing, "should set is_processing");
@@ -2676,6 +2693,10 @@ async fn test_slash_spec_create_starts_generation() {
     assert!(
         text.contains("specs/websocket/PLAN.md"),
         "task should contain plan file path"
+    );
+    assert!(
+        text.contains("specs/websocket/TESTPLAN.md"),
+        "task should contain testplan file path"
     );
 }
 

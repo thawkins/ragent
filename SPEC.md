@@ -4,7 +4,7 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-    <strong>Version:</strong> 0.1.0-beta.28</p>
+    <strong>Version:</strong> 1.0.23</p>
   <p style="font-size: 1.1em;">
     <strong>Date:</strong> 2026-08-01
   </p>
@@ -101,21 +101,19 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v0.1.0-beta.28). The core architecture, tool system,
+Ragent is in **beta** (v1.0.23). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v0.1.0-beta.8 → v0.1.0-beta.28):**
-- **Release packaging & CI hardening** — Added tag-triggered `release.yml` workflow; disabled `.deb`/`.rpm` builds temporarily; moved to `ubuntu-latest-4-cores`; added free-disk-space cleanup; granted `contents: write` permission so `softprops/action-gh-release@v2` can publish releases (beta.23–beta.28)
-- **Provider setup UX** — `/provider` always allows editing an existing API key; `/model` jumps straight to the model list when a provider is configured; key/token fields are unmasked and shown in a wider dialog (beta.22)
-- **Research system maturation** — Wired real gatherers with completion reporting; added `--use-low-relevance` flag, `--from-file` local-document seeding, `--from-url` seeding, PDF/YouTube text extraction, excluded-source counts, search-tool/engine provenance, control-character sanitisation, and `html2text` panic recovery; web search diagnostics via `/websearch show|help|test`; added Tavily and LangSearch backends (beta.9–beta.22)
-- **Context compaction & autopilot reliability** — Compaction bail paths now publish `AgentNotice` events; post-compaction continuation nudge is threaded across loop iterations; autopilot suppresses auto-continue after `task_complete`; router status bar shows the actual downstream model and tier; synthetic `Finish` injected on router streams that end without a terminal event (beta.21)
-- **Startup responsiveness** — MCP, code-index startup, and provider health checks moved to background tasks; `/startup` slash command exposes per-stage timings; first keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
-- **Tool expansion** — Added `apply_patch`, `open`, `browser`, `conversation_search`, `session_search`, `bg`, `initiative`, `skill_manage`, `gmail`, `send_channel_message`, and the six `mf_*` MasterFetch tools; `ask_user` is now a standalone event-driven tool with multiple-choice support (beta.12–beta.17)
-- **Cost accounting** — `Event::RunCostSummary` is published at the end of each turn, persisted to SQLite, surfaced as a TUI banner, and included in `--include-cost` session exports (beta.12)
-- **Telemetry & operator features** — OpenTelemetry metrics export with `/telemetry` slash family and ALT-O panel; `sudo` askpass broker routes password prompts through the TUI question dialog; durable initiatives and runtime skill management tools; instruction-file `@<path>` includes (beta.2–beta.17)
+**Current Release Highlights (v1.0.17 → v1.0.23):**
+- **Spec lifecycle** — `/spec update` regenerates `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md` (preserving unchanged task IDs); `/spec create` now emits a `TESTPLAN.md` manual test-plan artifact; `/spec add` regenerates `PLAN.md` + `TESTPLAN.md` after incremental additions; `/spec jtbd` performs Jobs-To-Be-Done analysis on existing specs (v1.0.23)
+- **Research system maturation** — Mandatory readability extraction in the web-gather phase; `mf_fetch` reports `extraction_method`; YouTube transcript capture fixed with a brace-balanced `ytInitialPlayerResponse` scanner; failed fetches abort with explicit errors (v1.0.23)
+- **Cron scheduling** — LLM-callable `cron_add`/`cron_remove`/`cron_list`/`cron_enable`/`cron_disable` tools; natural-language timestamps (`5pm`, `5:30pm`, `17:00`, `5am tomorrow`); `--force` and `--agent` flags for JTBD; per-run execution logging (v1.0.19–v1.0.20)
+- **Edit tools** — Optional `collapse_whitespace` matching for `edit`/`multi_edit`; persistent edit-log toggle (Alt+E) with status-bar indicator (v1.0.17)
+- **Context compaction** — Model-independent fraction-based thresholds; per-turn guard suppressing repeated "Context compression skipped" notices (v1.0.17)
+- **Search backends** — Perplexity Sonar backend added to `mf_search` (v1.0.18)
 
 ---
 
@@ -1373,6 +1371,8 @@ graph LR
 | `/spec search <query>` | Search specs |
 | `/spec show <id>` | Read a spec |
 | `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
+| `/spec add <id> <requirement>` | Add an incremental requirement to an existing spec |
+| `/spec update <specname>` | Re-read `SPEC.md` and regenerate `PLAN.md` + `TESTPLAN.md` (preserves unchanged task IDs) |
 | `/spec jtbd <specname>` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
 
 ### 10.6 Research Linkage
@@ -2322,6 +2322,13 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.23 | 2026-08-11 | `/spec update` regenerates `PLAN.md` + `TESTPLAN.md` from edited `SPEC.md`; `/spec create` emits `TESTPLAN.md` manual test plan; `/spec add` regenerates plans after incremental add; `/spec jtbd` Jobs-To-Be-Done analysis; research readability extraction mandatory; YouTube transcript capture fixed |
+| v1.0.22 | 2026-08-09 | Fixed time-sensitive `test_parse_natural_time_5pm_tomorrow` CI failure (date-based assertion) |
+| v1.0.21 | 2026-08-09 | Fixed CI clippy failure (`#[allow(clippy::too_many_arguments)]` on `log_cron_execution`) |
+| v1.0.20 | 2026-08-09 | LLM-callable cron tools (`cron_add`/`cron_remove`/`cron_list`/`cron_enable`/`cron_disable`); `/cron` slash-command enhancements; natural-language timestamp parsing; sub-agent model resolution fix |
+| v1.0.19 | 2026-08-09 | Cron capability added (`/cron` slash command with scheduler, execution logging, and guards) |
+| v1.0.18 | 2026-08-08 | Perplexity Sonar backend for `mf_search`; edit-log per-tool success/failure analysis |
+| v1.0.17 | 2026-08-08 | `collapse_whitespace` matching for `edit`/`multi_edit`; persistent edit-log toggle (Alt+E); model-independent context-compaction trigger; per-turn "compression skipped" guard |
 | v0.1.0-beta.28 | 2026-08-01 | Fixed GitHub release workflow permissions (`contents: write`); reverted `check-and-test` to debug builds and added swap/timeout to avoid OOM; `memory_store` now returns a clear `stored` result |
 | v0.1.0-beta.27 | 2026-08-01 | CI runner optimisation: `ubuntu-latest-4-cores`, disabled debuginfo, free-disk-space cleanup |
 | v0.1.0-beta.26 | 2026-08-01 | Version bump |

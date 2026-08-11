@@ -74,6 +74,11 @@ pub enum SpecCommand {
         /// Free-text feature description for the new requirements.
         feature: String,
     },
+    /// Regenerate PLAN.md and TESTPLAN.md from an edited SPEC.md.
+    Update {
+        /// Spec identifier (directory name under `specs/`).
+        spec_id: String,
+    },
     /// Delete a spec directory from the workspace.
     Delete {
         /// Spec identifier.
@@ -277,6 +282,16 @@ impl SpecCommand {
                     }
                 }
             }
+            "update" => {
+                let spec_id = rest.trim();
+                if spec_id.is_empty() {
+                    Self::Unknown("update".to_string())
+                } else {
+                    Self::Update {
+                        spec_id: spec_id.to_string(),
+                    }
+                }
+            }
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -296,6 +311,7 @@ impl SpecCommand {
                 || s == "add"
                 || s == "delete"
                 || s == "jtbd"
+                || s == "update"
         )
     }
 
@@ -320,12 +336,16 @@ impl SpecCommand {
                     | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\
                     | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\
                     | `/spec jtbd <spec-id> [--force] [--agent <name>]` | required `spec-id`, optional `--force` and `--agent` | Perform a Jobs-To-Be-Done analysis of `specs/<spec-id>/SPEC.md` and write `specs/<spec-id>/JTBD.md`. Use `--force` to overwrite an existing file, `--agent <name>` to dispatch to a specific agent. |\n\
+                    | `/spec update <spec-id>` | required `spec-id` | Re-read the existing `SPEC.md` and regenerate `PLAN.md` and `TESTPLAN.md` from its current content. |\n\
                     Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets --from-research realtime-collab`"
     }
     /// Build the user-facing status string for a create operation.
     #[must_use]
     pub fn build_create_status(specname: &str) -> String {
-        format!("spec: writing specs/{specname}/SPEC.md + specs/{specname}/PLAN.md…")
+        format!(
+            "spec: writing specs/{specname}/SPEC.md + specs/{specname}/PLAN.md + \
+             specs/{specname}/TESTPLAN.md…"
+        )
     }
 
     /// Build the assistant message shown when a spec generation starts.
@@ -335,7 +355,8 @@ impl SpecCommand {
             "From: /spec\n📝 **Generating specification and plan…**\n\n\
              Creating spec directory `specs/{specname}` with:\n\
              - `specs/{specname}/SPEC.md` — EARS requirements specification\n\
-             - `specs/{specname}/PLAN.md` — implementation plan with tasks\n\n\
+             - `specs/{specname}/PLAN.md` — implementation plan with tasks\n\
+             - `specs/{specname}/TESTPLAN.md` — manual test plan with test cases\n\n\
              This may take a few moments.\n\
              ⚠️ **Tip:** After creation, you can validate with `/spec validate {specname}`."
         )
@@ -344,7 +365,10 @@ impl SpecCommand {
     /// Build the log entry for a create operation.
     #[must_use]
     pub fn build_create_log(specname: &str, feature: &str) -> String {
-        format!("Creating spec '{specname}' for feature: {feature} → specs/{specname}/SPEC.md")
+        format!(
+            "Creating spec '{specname}' for feature: {feature} → specs/{specname}/SPEC.md, \
+             specs/{specname}/PLAN.md, specs/{specname}/TESTPLAN.md"
+        )
     }
 
     /// Build the prompt sent to the explore agent for spec generation.
@@ -373,7 +397,16 @@ impl SpecCommand {
                             - Effort values: S, M, L
                             - Priority values: Critical, High, Medium, Low
           
-                         Use the `write` tool to create both files. Ensure the spec is clear, testable, and complete."
+                         3. `specs/{specname}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+                            - Start with YAML frontmatter containing `status: draft`
+                            - A `## Test Cases` section with one or more manual test cases
+                            - Each test case has an ID (`TC-001`, `TC-002`, …), a title, preconditions, step-by-step instructions, test data to enter, and expected results
+                            - When the feature involves user-interface navigation, enumerate every UI navigation step (keys pressed, menus opened, dialogs interacted with) and the exact data to enter into each field
+                            - You MAY include a `## Prerequisites` section listing environment setup, provider configuration, or sample files needed before the manual tests can be executed
+                            - You MAY include a `## Cleanup` section describing teardown steps to run after the manual tests complete
+                            - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`; this is a manual test plan only
+          
+                         Use the `write` tool to create all three files. Ensure the spec is clear, testable, and complete."
         )
     }
 
@@ -586,6 +619,82 @@ Write your analysis to `specs/{spec_id}/JTBD.md` using the `write` tool. The doc
 5. A **`## Coverage Matrix`** section with a markdown table mapping each `FR-NNN` / `NFR-NNN` to the job(s) it supports. Requirements with no corresponding job should be marked *unmapped*.
 
 Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is well-formed and every job follows the grammar above."#,
+        )
+    }
+
+    // ── Update helpers ─────────────────────────────────────────────────────
+
+    /// Build the user-facing status string for an update operation.
+    #[must_use]
+    pub fn build_update_status(spec_id: &str) -> String {
+        format!("spec: updating specs/{spec_id}/PLAN.md + specs/{spec_id}/TESTPLAN.md…")
+    }
+
+    /// Build the assistant message shown when a spec update starts.
+    #[must_use]
+    pub fn build_update_message(spec_id: &str) -> String {
+        format!(
+            "From: /spec update\n🔄 **Regenerating plan and test plan…**\n\n\
+             Re-reading `specs/{spec_id}/SPEC.md` and regenerating:\n\
+             - `specs/{spec_id}/PLAN.md` — implementation plan with tasks\n\
+             - `specs/{spec_id}/TESTPLAN.md` — manual test plan with test cases\n\n\
+             The `SPEC.md` file will not be modified.\n\
+             This may take a few moments."
+        )
+    }
+
+    /// Build the log entry for an update operation.
+    #[must_use]
+    pub fn build_update_log(spec_id: &str) -> String {
+        format!("Regenerating PLAN.md + TESTPLAN.md for spec '{spec_id}' from existing SPEC.md")
+    }
+
+    /// Build the prompt sent to the LLM agent for spec plan/test-plan regeneration.
+    ///
+    /// The prompt instructs the agent to read the existing `SPEC.md` and
+    /// regenerate `PLAN.md` and `TESTPLAN.md` to match the current requirements.
+    /// It explicitly forbids modifying `SPEC.md`. The existing `PLAN.md` content
+    /// is included so the agent can preserve task statuses for unchanged task
+    /// IDs (FR-011).
+    ///
+    /// # Arguments
+    ///
+    /// * `spec_id` — The spec identifier (directory name under `specs/`).
+    /// * `plan_md` — The current `PLAN.md` content, used for status preservation.
+    #[must_use]
+    pub fn build_update_prompt(spec_id: &str, plan_md: &str) -> String {
+        format!(
+            r#"You are an expert specification writer. An existing spec has been updated.
+Re-read the current `specs/{spec_id}/SPEC.md` and regenerate `specs/{spec_id}/PLAN.md` and `specs/{spec_id}/TESTPLAN.md` to match.
+
+**Spec ID:** {spec_id}
+
+**IMPORTANT:** Do NOT modify the `SPEC.md` file. Only regenerate `PLAN.md` and `TESTPLAN.md`.
+
+Read `specs/{spec_id}/SPEC.md` using the `read` tool first. If the file is large, read it in sections.
+
+Then write the following files using the `write` tool:
+
+1. `specs/{spec_id}/PLAN.md` — An implementation plan with:
+   - A `## Tasks` section with a markdown table.
+   - Columns: ID, Title, Requirement, Effort, Priority, Dependencies.
+   - Task IDs as T-001, T-002, etc.
+   - Link each task to relevant requirements from `SPEC.md`.
+   - Effort values: S, M, L.
+   - Priority values: Critical, High, Medium, Low.
+   - Preserve the status of any existing task IDs that remain unchanged.
+
+2. `specs/{spec_id}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
+   - YAML frontmatter with `status: draft`.
+   - A `## Test Cases` section with manual test cases.
+   - Each test case has an ID (`TC-001`, `TC-002`, …), a title, preconditions, step-by-step instructions, test data to enter, and expected results.
+   - Do NOT include automated test code, `#[test]` functions, or references to `cargo test`.
+
+**Existing PLAN.md content (for reference — preserve task statuses where IDs are unchanged):**
+
+{plan_md}
+
+Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete."#,
         )
     }
 }

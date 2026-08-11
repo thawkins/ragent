@@ -1082,7 +1082,16 @@ Run any of these from the TUI prompt:
 /research continue rust-async focus on io_uring integration
 /spec create async-await Add async/await ergonomics --from-research rust-async
 /spec jtbd async-await
+/spec update async-await
 ```
+
+`/spec update <specname>` re-reads the existing `specs/<specname>/SPEC.md`
+and regenerates `PLAN.md` and `TESTPLAN.md` to match the current requirements.
+The `SPEC.md` file is not modified; existing task IDs in `PLAN.md` are preserved
+where unchanged. Archived specs cannot be updated.
+
+`/spec create <name> <title>` now also generates a `TESTPLAN.md` manual test
+plan (with `TC-NNN` test cases) alongside `SPEC.md` and `PLAN.md`.
 
 `/spec jtbd <specname>` performs a Jobs-To-Be-Done analysis of an existing
 spec's `SPEC.md` and writes `JTBD.md` in the same spec folder. Use `--force`
@@ -1160,7 +1169,9 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
-| `/spec create <name> <title>` | Create a new spec from a prompt |
+| `/spec create <name> <title>` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
+| `/spec update <name>` | Regenerate PLAN.md and TESTPLAN.md from an edited SPEC.md |
+| `/spec add <name> <requirement>` | Add an incremental requirement to an existing spec |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
 
