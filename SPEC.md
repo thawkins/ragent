@@ -1119,7 +1119,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm status` | Show active swarm tasks |
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
-| `/spec list\|search\|show\|impl\|implement` | Spec lifecycle commands |
+| `/spec list\|search\|show\|impl\|implement\|jtbd` | Spec lifecycle commands; `jtbd` performs JTBD analysis |
 | `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
@@ -1373,6 +1373,7 @@ graph LR
 | `/spec search <query>` | Search specs |
 | `/spec show <id>` | Read a spec |
 | `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
+| `/spec jtbd <specname>` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
 
 ### 10.6 Research Linkage
 
@@ -1396,7 +1397,25 @@ research items under `research/<name>/`. Each item contains captured sources
 A research session runs in phases:
 
 1. **Setup** — validate name and create the skeleton `RESEARCH.md`.
-2. **Web** — issue `websearch` queries and fetch pages via `webfetch`.
+2. **Web** — issue `websearch` queries and fetch pages via `webfetch`. Every
+   HTML page captured as a web source must have been extracted by the
+   `readability-rs` crate (the research web-gather phase verifies the
+   `extraction_method` signal reported by `mf_fetch`, or re-runs readability
+   on the raw HTML when the legacy `webfetch` tool is used). Pages where
+   readability extraction failed — and would only be available via the
+   html2text / raw tag-strip fallbacks — are rejected with a
+   `readability extraction failed …` fetch error instead of being accepted.
+   PDF and YouTube sources bypass readability entirely by design. YouTube
+   sources are captured as the video's caption transcript: `mf_fetch`
+   parses the watch page's `ytInitialPlayerResponse` (brace-balanced,
+   string-aware JSON extraction), reads the caption tracks from
+   `captions.playerCaptionsTracklistRenderer.captionTracks`, and fetches
+   the default (or first English) track. A fetch that fails at the tool
+   level (e.g. `mf_fetch` reporting `content_ok = false` or an `error`,
+   such as "no caption tracks available for this YouTube video") is
+   rejected as an explicit `FetchFailed` event carrying the real reason —
+   placeholder error text never enters the research corpus as a source
+   body.
 3. **Local** — scan project files with `glob`/`grep`/`read`. Each captured
    file produces an excerpt showing the matching lines plus one line of
    context on either side, and a `relevance` note that names the matched

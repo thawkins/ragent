@@ -30,13 +30,14 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 
 use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
+use crate::gather_log::GatherLog;
 use crate::source::Source;
 use std::time::Duration;
 
@@ -91,6 +92,14 @@ pub const DEFAULT_SEARCH_RETRY_BASE_DELAY_MS: u64 = 200;
 /// calls are issued for the remainder of the gather pass. `0` disables the
 /// circuit-breaker entirely.
 pub const DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
+
+/// Minimum extracted content length (in characters) for a fetched page to be
+/// accepted as a web source. Pages whose cleaned body is shorter than this are
+/// rejected so near-empty extractions (paywalls, JS-only renders, soft 404s)
+/// do not pollute the synthesis prompt. The value matches the preview length
+/// surfaced in the progress display so a captured source always has at least
+/// a full preview's worth of content.
+pub const MIN_EXTRACTABLE_CONTENT_CHARS: usize = 256;
 
 /// Cap a captured web body at the same byte budget used by the supporting
 /// file renderer so the body stored on the `Source` matches what ends up on
@@ -256,6 +265,14 @@ pub enum GatherEvent {
         search_tool: String,
         /// Backend search engine(s) that returned this URL.
         search_engine: String,
+        /// First [`MIN_EXTRACTABLE_CONTENT_CHARS`] characters of the
+        /// extracted page body, so the progress display can preview the
+        /// captured content alongside the URL and title.
+        body_preview: String,
+        /// Detected human language of the page body in uppercase (e.g.
+        /// `"ENGLISH"`, `"FRENCH"`), or `"UNKNOWN"` when language
+        /// detection was unavailable.
+        language: String,
     },
     /// The underlying search tool returned an error.
     SearchFailed {
@@ -334,6 +351,10 @@ pub struct WebGatherer {
     /// [`DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3). `0` disables the
     /// circuit-breaker entirely.
     search_circuit_breaker_threshold: u32,
+    /// JSONL URL log (`log/research-<name>-<ts>-<rand>-web.jsonl`) recording
+    /// every search hit as `considered`/`captured`/`rejected` with a reason.
+    /// `None` disables logging. Set via [`with_gather_log`].
+    gather_log: Option<Arc<Mutex<GatherLog>>>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -348,6 +369,7 @@ impl std::fmt::Debug for WebGatherer {
                 "search_circuit_breaker_threshold",
                 &self.search_circuit_breaker_threshold,
             )
+            .field("has_gather_log", &self.gather_log.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -368,6 +390,59 @@ impl WebGatherer {
             search_max_retries: DEFAULT_SEARCH_MAX_RETRIES,
             search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
             search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
+            gather_log: None,
+        }
+    }
+
+    /// Attach a JSONL gather log that records every search hit considered
+    /// during [`gather_with_observer`] and whether it was captured or
+    /// rejected (with the rejection reason). Log entries are appended as
+    /// hits stream in and each concurrent fetch resolves. The log file is
+    /// created eagerly (even when a pass yields no hits) and flushed when
+    /// the gatherer is dropped. Failures to open the log are reported via
+    /// the observer and tracing, never propagated.
+    pub fn with_gather_log(mut self, log: GatherLog) -> Self {
+        self.gather_log = Some(Arc::new(Mutex::new(log)));
+        self
+    }
+
+    /// Append one per-URL outcome record to the gather log, when configured.
+    ///
+    /// Best-effort: lock-poisoning is recovered and write failures are
+    /// surfaced via `tracing::warn` so a logging problem can never fail a
+    /// gather pass. An empty `reason` is recorded as `None` (captured URLs
+    /// have no rejection reason).
+    #[allow(clippy::too_many_arguments)]
+    fn log_url_outcome(
+        &self,
+        url: &str,
+        query: &str,
+        title: &str,
+        search_tool: &str,
+        search_engine: &str,
+        status: &str,
+        reason: &str,
+        detail: Option<&serde_json::Value>,
+    ) {
+        let Some(log) = &self.gather_log else {
+            return;
+        };
+        let reason = if reason.is_empty() {
+            None
+        } else {
+            Some(reason)
+        };
+        if let Err(e) = log.lock().unwrap_or_else(|p| p.into_inner()).log_url(
+            url,
+            query,
+            status,
+            title,
+            search_tool,
+            search_engine,
+            reason,
+            detail,
+        ) {
+            tracing::warn!(error = %e, url, "research: web URL log write failed");
         }
     }
 
@@ -563,6 +638,19 @@ impl WebGatherer {
 
         tracing::info!(topic, max_results, "research: starting web-gathering phase");
 
+        if let Some(log) = &self.gather_log
+            && let Err(e) = log
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .log_event(&serde_json::json!({
+                    "event": "gather_start",
+                    "topic": topic,
+                    "max_results": max_results,
+                }))
+        {
+            tracing::warn!(error = %e, "research: failed to write gather-start to web URL log");
+        }
+
         // Determine the set of sub-queries.  If no decomposer is configured
         // we still treat the original topic as a single query so callers see
         // a consistent [`GatherResult`].
@@ -588,6 +676,17 @@ impl WebGatherer {
             obs.on_event(GatherEvent::QueriesDecomposed {
                 queries: queries.clone(),
             });
+        }
+        if let Some(log) = &self.gather_log
+            && let Err(e) =
+                log.lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .log_event(&serde_json::json!({
+                        "event": "queries_decomposed",
+                        "queries": queries,
+                    }))
+        {
+            tracing::warn!(error = %e, "research: failed to write queries to web URL log");
         }
 
         // Run each sub-query in parallel with bounded concurrency. Each
@@ -671,6 +770,42 @@ impl WebGatherer {
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut any_search_error: Option<String> = None;
         let mut excluded_count = 0usize;
+        let mut considered_count = 0usize;
+        let log_rejected = |url: &str,
+                            query: &str,
+                            title: &str,
+                            search_tool: &str,
+                            search_engine: &str,
+                            reason: &str,
+                            detail: Option<&serde_json::Value>| {
+            self.log_url_outcome(
+                url,
+                query,
+                title,
+                search_tool,
+                search_engine,
+                "rejected",
+                reason,
+                detail,
+            );
+        };
+        let log_captured = |url: &str,
+                            query: &str,
+                            title: &str,
+                            search_tool: &str,
+                            search_engine: &str,
+                            detail: Option<&serde_json::Value>| {
+            self.log_url_outcome(
+                url,
+                query,
+                title,
+                search_tool,
+                search_engine,
+                "captured",
+                "",
+                detail,
+            );
+        };
         let mut circuit_open_emitted = false;
 
         while let Some((idx, outcome)) = results.next().await {
@@ -685,7 +820,18 @@ impl WebGatherer {
                         if !seen_urls.insert(url_key) {
                             continue;
                         }
+                        considered_count += 1;
                         hit.matched_query = query.clone();
+                        self.log_url_outcome(
+                            &hit.url,
+                            &query,
+                            &hit.title,
+                            &hit.search_tool,
+                            &hit.search_engine,
+                            "considered",
+                            "",
+                            None,
+                        );
                         // Pre-filter by title/snippet relevance before any
                         // expensive full-page fetch (B-001).
                         if let Some((label, retained)) = self.filter_hit(&query, &hit) {
@@ -702,17 +848,26 @@ impl WebGatherer {
                             hits_by_url.push((query.clone(), hit));
                         } else {
                             excluded_count += 1;
+                            let reason =
+                                format!("title/snippet relevance too low for query {query}");
                             tracing::info!(
                                 query = %query,
                                 url = %hit.url,
                                 "research: skipping search hit due to low title/snippet relevance"
                             );
+                            log_rejected(
+                                &hit.url,
+                                &query,
+                                &hit.title,
+                                &hit.search_tool,
+                                &hit.search_engine,
+                                &reason,
+                                None,
+                            );
                             if let Some(obs) = observer {
                                 obs.on_event(GatherEvent::FetchFailed {
                                     url: hit.url.clone(),
-                                    error: format!(
-                                        "title/snippet relevance too low for query {query}"
-                                    ),
+                                    error: reason,
                                 });
                             }
                         }
@@ -767,6 +922,20 @@ impl WebGatherer {
                 obs.on_event(GatherEvent::SearchReturnedNoHits);
             }
             tracing::info!("research: websearch returned 0 hits");
+            if let Some(log) = &self.gather_log
+                && let Err(e) =
+                    log.lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .log_event(&serde_json::json!({
+                            "event": "gather_summary",
+                            "queries": queries,
+                            "considered": considered_count,
+                            "captured": 0,
+                            "rejected": excluded_count,
+                        }))
+            {
+                tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
+            }
             return Ok(GatherResult {
                 queries,
                 sources: Vec::new(),
@@ -829,8 +998,61 @@ impl WebGatherer {
                             });
                         }
                         collected.push((index, None));
+                        log_rejected(
+                            &page.url,
+                            &query,
+                            &title,
+                            &hit.search_tool,
+                            &hit.search_engine,
+                            &format!("relevance too low ({relevance})"),
+                            Some(&serde_json::json!({"relevance": relevance})),
+                        );
                         continue;
                     }
+                    // Reject pages whose extracted content is shorter than the
+                    // minimum extractable content length. Near-empty
+                    // extractions (paywalls, JS-only renders, soft 404s, empty
+                    // PDFs) add noise to the synthesis prompt without
+                    // contributing usable evidence.
+                    let content_chars = page.body.chars().count();
+                    if content_chars < MIN_EXTRACTABLE_CONTENT_CHARS {
+                        excluded_count += 1;
+                        let error = format!(
+                            "extracted content too short ({content_chars} < {MIN_EXTRACTABLE_CONTENT_CHARS} chars)"
+                        );
+                        tracing::info!(
+                            query = %query,
+                            url = %page.url,
+                            content_chars,
+                            "research: skipping web source — extracted content below minimum"
+                        );
+                        if let Some(obs) = observer {
+                            obs.on_event(GatherEvent::FetchFailed {
+                                url: page.url.clone(),
+                                error: error.clone(),
+                            });
+                        }
+                        collected.push((index, None));
+                        log_rejected(
+                            &page.url,
+                            &query,
+                            &title,
+                            &hit.search_tool,
+                            &hit.search_engine,
+                            &error,
+                            Some(&serde_json::json!({"content_chars": content_chars})),
+                        );
+                        continue;
+                    }
+                    let body_preview: String = page
+                        .body
+                        .lines()
+                        .filter(|l| !l.trim_start().starts_with("```"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                        .chars()
+                        .take(MIN_EXTRACTABLE_CONTENT_CHARS)
+                        .collect();
                     tracing::info!(
                         query = %query,
                         url = %page.url,
@@ -846,8 +1068,25 @@ impl WebGatherer {
                             title: title.clone(),
                             search_tool: hit.search_tool.clone(),
                             search_engine: hit.search_engine.clone(),
+                            body_preview,
+                            language: page
+                                .language
+                                .as_deref()
+                                .map(str::to_uppercase)
+                                .unwrap_or_else(|| "UNKNOWN".to_string()),
                         });
                     }
+                    log_captured(
+                        &page.url,
+                        &query,
+                        &title,
+                        &hit.search_tool,
+                        &hit.search_engine,
+                        Some(&serde_json::json!({
+                            "relevance": relevance,
+                            "content_chars": content_chars,
+                        })),
+                    );
                     collected.push((
                         index,
                         Some(Source::Web {
@@ -885,6 +1124,16 @@ impl WebGatherer {
                         error = %e,
                         "research: webfetch failed; skipping"
                     );
+                    excluded_count += 1;
+                    log_rejected(
+                        &hit.url,
+                        &query,
+                        &hit.title,
+                        &hit.search_tool,
+                        &hit.search_engine,
+                        &e.to_string(),
+                        None,
+                    );
                     collected.push((index, None));
                 }
                 Err(_) => {
@@ -899,6 +1148,16 @@ impl WebGatherer {
                         query = %query,
                         url = %hit.url,
                         "research: webfetch timed out; skipping"
+                    );
+                    excluded_count += 1;
+                    log_rejected(
+                        &hit.url,
+                        &query,
+                        &hit.title,
+                        &hit.search_tool,
+                        &hit.search_engine,
+                        &error,
+                        None,
                     );
                     collected.push((index, None));
                 }
@@ -932,6 +1191,20 @@ impl WebGatherer {
             excluded_count,
             "research: web-gathering phase complete"
         );
+        if let Some(log) = &self.gather_log
+            && let Err(e) =
+                log.lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .log_event(&serde_json::json!({
+                        "event": "gather_summary",
+                        "queries": queries,
+                        "considered": considered_count,
+                        "captured": sources.len(),
+                        "rejected": excluded_count,
+                    }))
+        {
+            tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
+        }
         Ok(GatherResult {
             queries,
             sources,
@@ -989,6 +1262,21 @@ fn web_body_path(index: usize) -> PathBuf {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// Generate a body string of at least [`MIN_EXTRACTABLE_CONTENT_CHARS`]
+    /// characters so fake fetched pages pass the minimum-content-length guard
+    /// in [`WebGatherer::gather_with_observer`]. The `prefix` is repeated and
+    /// padded so callers can still recognise their test content in assertions.
+    fn body256(prefix: &str) -> String {
+        let mut s = String::new();
+        while s.chars().count() < MIN_EXTRACTABLE_CONTENT_CHARS {
+            if !s.is_empty() {
+                s.push(' ');
+            }
+            s.push_str(prefix);
+        }
+        s
+    }
 
     /// In-memory `WebSearchTool` for tests.
     #[derive(Default)]
@@ -1109,7 +1397,7 @@ mod tests {
                 published_at: None,
                 url: "https://good.example".into(),
                 title: "Rust async runtime guide".into(),
-                body: "body good".into(),
+                body: body256("body good").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1121,7 +1409,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated shopping page".into(),
-                body: "body bad".into(),
+                body: body256("body bad").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1161,7 +1449,7 @@ mod tests {
                 published_at: None,
                 url: "https://bad.example".into(),
                 title: "completely unrelated page".into(),
-                body: "body".into(),
+                body: body256("body").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1306,7 +1594,7 @@ mod tests {
                     published_at: None,
                     url: url.into(),
                     title: format!("Title {url}"),
-                    body: "body".into(),
+                    body: body256("body").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -1356,7 +1644,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -1406,7 +1694,7 @@ mod tests {
                 published_at: None,
                 url: "https://a.example".into(),
                 title: "A — resolved".into(),
-                body: "body a".into(),
+                body: body256("body a").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1418,7 +1706,7 @@ mod tests {
                 published_at: None,
                 url: "https://b.example".into(),
                 title: "B — resolved".into(),
-                body: "body b".into(),
+                body: body256("body b").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1430,7 +1718,7 @@ mod tests {
                 published_at: None,
                 url: "https://c.example".into(),
                 title: String::new(), // empty title should fall back to search hit title
-                body: "body c".into(),
+                body: body256("body c").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -1491,7 +1779,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: "b".into(),
+                body: body256("b").into(),
 
                 content_type: None,
                 page_type: None,
@@ -1508,6 +1796,61 @@ mod tests {
         if let Source::Web { url, .. } = &sources[0] {
             assert_eq!(url, "https://ok");
         }
+    }
+
+    #[tokio::test]
+    async fn gather_suppresses_failed_youtube_fetch_with_reason() {
+        // A YouTube hit whose fetch adapter errors out (e.g. transcript
+        // extraction failed because no caption tracks are available) must not
+        // produce a source: it is suppressed with the adapter's error message
+        // surfaced in the FetchFailed event, the video never enters the
+        // research corpus, and `youtube_count` stays at zero.
+        let hits = vec![WebSearchHit {
+            url: "https://www.youtube.com/watch?v=abc".into(),
+            title: "Some Video".into(),
+            snippet: "topic Rust async Tokio runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        // No page is registered, so the URL must be in `fail_urls`; the real
+        // adapter bails instead of returning a placeholder body.
+        let (g, _, _) = gatherer_with(
+            hits,
+            std::collections::HashMap::new(),
+            vec!["https://www.youtube.com/watch?v=abc".into()],
+        );
+
+        #[derive(Default)]
+        struct CollectEvents(std::sync::Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        g.gather_with_observer("topic", 5, Some(&obs))
+            .await
+            .unwrap();
+
+        let events = obs.0.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                GatherEvent::FetchFailed { url, error }
+                    if url == "https://www.youtube.com/watch?v=abc"
+                        && error.contains("simulated fetch failure")
+            )),
+            "expected FetchFailed with the adapter error, got {events:?}"
+        );
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                GatherEvent::SourceCaptured { url, .. }
+                    if url == "https://www.youtube.com/watch?v=abc"
+            )),
+            "failed youtube fetch must not be captured as a source, got {events:?}"
+        );
     }
     #[tokio::test]
     async fn gather_respects_max_results() {
@@ -1545,7 +1888,7 @@ mod tests {
                     published_at: None,
                     url: u.into(),
                     title: u.into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
 
                     content_type: None,
                     page_type: None,
@@ -1603,7 +1946,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
 
                     content_type: None,
                     page_type: None,
@@ -1691,7 +2034,7 @@ mod tests {
                 published_at: None,
                 url: "https://ok".into(),
                 title: "OK".into(),
-                body: "b".into(),
+                body: body256("b").into(),
 
                 content_type: None,
                 page_type: None,
@@ -1748,7 +2091,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: format!("title-{url}"),
-                    body: format!("body-{url}"),
+                    body: body256(&format!("body-{url}")),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2003,7 +2346,7 @@ mod tests {
                 published_at: None,
                 url: _url.to_string(),
                 title: format!("title-{_url}"),
-                body: format!("body-{_url}"),
+                body: body256(&format!("body-{_url}")),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2195,7 +2538,7 @@ mod tests {
                 published_at: None,
                 url: "https://fr.example".into(),
                 title: "Article".into(),
-                body: "corps de texte".into(),
+                body: body256("corps de texte").into(),
                 content_type: None,
                 page_type: None,
                 language: Some("French".into()),
@@ -2222,7 +2565,7 @@ mod tests {
                 published_at: None,
                 url: "https://es.example".into(),
                 title: "Página".into(),
-                body: "cuerpo".into(),
+                body: body256("cuerpo").into(),
                 content_type: None,
                 page_type: None,
                 language: Some("Spanish".into()),
@@ -2268,7 +2611,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://example.com/paper.pdf".into(),
                 title: "PDF".into(),
-                body: "pdf body".into(),
+                body: body256("pdf body").into(),
                 content_type: Some("application/pdf".into()),
                 page_type: Some("pdf".into()),
                 published_at: None,
@@ -2280,7 +2623,7 @@ mod tests {
             WebFetchedPage {
                 url: "https://www.youtube.com/watch?v=abc123".into(),
                 title: "YouTube".into(),
-                body: "youtube transcript".into(),
+                body: body256("youtube transcript").into(),
                 content_type: Some("text/html".into()),
                 page_type: Some("youtube".into()),
                 published_at: None,
@@ -2333,7 +2676,7 @@ mod tests {
                 published_at: None,
                 url: "https://retry.example".into(),
                 title: "Rust async runtime".into(),
-                body: "body".into(),
+                body: body256("body").into(),
                 content_type: None,
                 page_type: None,
                 language: None,
@@ -2373,7 +2716,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2431,7 +2774,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2494,7 +2837,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2532,6 +2875,189 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, GatherEvent::SearchCircuitOpen { .. })),
             "circuit breaker should be disabled when threshold is 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_rejects_pages_below_min_extractable_content_chars() {
+        let hits = vec![WebSearchHit {
+            url: "https://short.example".into(),
+            title: "Short page".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://short.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://short.example".into(),
+                title: "Short page".into(),
+                // 100 chars — below the 256-char minimum.
+                body: "x".repeat(100),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert!(
+            sources.is_empty(),
+            "page with < MIN_EXTRACTABLE_CONTENT_CHARS should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_accepts_pages_at_min_extractable_content_chars() {
+        let hits = vec![WebSearchHit {
+            url: "https://exact.example".into(),
+            title: "Exact page".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://exact.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://exact.example".into(),
+                title: "Exact page".into(),
+                // Exactly 256 chars — at the minimum.
+                body: "x".repeat(MIN_EXTRACTABLE_CONTENT_CHARS),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(
+            sources.len(),
+            1,
+            "page with exactly MIN_EXTRACTABLE_CONTENT_CHARS should be accepted"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_source_captured_event_carries_body_preview() {
+        let hits = vec![WebSearchHit {
+            url: "https://preview.example".into(),
+            title: "Preview page".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://preview.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://preview.example".into(),
+                title: "Preview page".into(),
+                body: "A".repeat(500),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        g.gather_with_observer("Rust async runtime", 5, Some(&obs))
+            .await
+            .unwrap();
+        let events = obs.0.lock().unwrap();
+        let captured = events.iter().find(|e| {
+            matches!(
+                e,
+                GatherEvent::SourceCaptured { url, .. }
+                    if url == "https://preview.example"
+            )
+        });
+        assert!(captured.is_some(), "expected SourceCaptured event");
+        if let Some(GatherEvent::SourceCaptured {
+            body_preview,
+            language,
+            ..
+        }) = captured
+        {
+            assert_eq!(
+                body_preview.chars().count(),
+                MIN_EXTRACTABLE_CONTENT_CHARS,
+                "body_preview should be exactly MIN_EXTRACTABLE_CONTENT_CHARS chars"
+            );
+            assert!(
+                body_preview.chars().all(|c| c == 'A'),
+                "body_preview should contain the first 256 chars of the body"
+            );
+            // language is None in the fake page → "UNKNOWN"
+            assert_eq!(
+                language, "UNKNOWN",
+                "language should be UNKNOWN when page.language is None"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_emits_fetch_failed_for_short_content() {
+        let hits = vec![WebSearchHit {
+            url: "https://tiny.example".into(),
+            title: "Tiny page".into(),
+            snippet: "Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://tiny.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://tiny.example".into(),
+                title: "Tiny page".into(),
+                body: "tiny".into(),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("Rust async runtime", 5, Some(&obs))
+            .await
+            .unwrap();
+        assert!(result.sources.is_empty());
+        assert_eq!(result.excluded_count, 1);
+        let events = obs.0.lock().unwrap();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                GatherEvent::FetchFailed { url, error }
+                    if url == "https://tiny.example"
+                        && error.contains("too short")
+            )),
+            "expected FetchFailed with 'too short' message, got {:?}",
+            *events
         );
     }
 }

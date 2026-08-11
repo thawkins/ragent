@@ -4816,6 +4816,191 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             }
                         });
                     }
+                    SpecCommand::Jtbd {
+                        spec_id,
+                        force,
+                        agent,
+                    } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // FR-008: validate spec ID format
+                        let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec jtbd\n\n**Error:** Invalid spec ID \
+                                     `{}`. Spec IDs must be alphanumeric with hyphens or \
+                                     underscores only.",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+
+                        let mgr = SpecManager::new(&specs_root);
+                        let spec_dir = specs_root.join(id.as_str());
+                        let spec_md_path = spec_dir.join("SPEC.md");
+                        let jtbd_path = spec_dir.join("JTBD.md");
+
+                        let rt = tokio::runtime::Handle::current();
+                        let spec_id_owned = spec_id.clone();
+                        // Validation returns Ok(jtbd_exists) so the caller can
+                        // enforce the overwrite guard (FR-003 / FR-004).
+                        let validation: Result<bool, String> = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                // FR-008: confirm spec directory exists
+                                if !spec_dir.is_dir() {
+                                    return Err(format!(
+                                        "spec `{}` not found at {}",
+                                        spec_id_owned,
+                                        spec_dir.display()
+                                    ));
+                                }
+                                // FR-009: confirm SPEC.md exists and is readable
+                                match tokio::fs::read_to_string(&spec_md_path).await {
+                                    Ok(content) if content.trim().is_empty() => {
+                                        return Err(format!(
+                                            "SPEC.md is empty: {}",
+                                            spec_md_path.display()
+                                        ));
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        return Err(format!(
+                                            "SPEC.md not readable at {}: {}",
+                                            spec_md_path.display(),
+                                            e
+                                        ));
+                                    }
+                                }
+                                // FR-003/FR-004: check whether JTBD.md already exists
+                                let jtbd_exists = tokio::fs::metadata(&jtbd_path).await.is_ok();
+                                Ok(jtbd_exists)
+                            })
+                        });
+                        let jtbd_exists = match validation {
+                            Ok(exists) => exists,
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec jtbd\n\n**Error:** {}",
+                                    e
+                                ));
+                                return;
+                            }
+                        };
+
+                        // FR-003: refuse if JTBD.md exists and --force not given
+                        let _ = mgr; // SpecManager kept for parity / future use
+                        if jtbd_exists && !force {
+                            self.status = format!("spec jtbd: {} already has JTBD.md", spec_id);
+                            self.append_assistant_text(&format!(
+                                "From: /spec jtbd\n\n\
+                                 **JTBD.md already exists** at `specs/{}/JTBD.md`.\n\
+                                 Re-run with `--force` to overwrite:\n\n\
+                                 `/spec jtbd {} --force`",
+                                spec_id, spec_id
+                            ));
+                            return;
+                        }
+                        // FR-004: when --force is present the guard is bypassed
+                        // and the agent task below will overwrite JTBD.md.
+
+                        // FR-011: status, message, and log parity with /spec create
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        self.append_assistant_text(&SpecCommand::build_jtbd_message(&spec_id));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            SpecCommand::build_jtbd_log(&spec_id, force, agent.as_deref()),
+                        );
+
+                        // FR-005: optional --agent <name> override
+                        let mut selected_agent = if let Some(ref agent_name) = agent {
+                            match self
+                                .cycleable_agents
+                                .iter()
+                                .find(|a| a.name == *agent_name)
+                                .cloned()
+                            {
+                                Some(a) => a,
+                                None => {
+                                    self.status = format!("spec: agent '{}' not found", agent_name);
+                                    self.append_assistant_text(&format!(
+                                        "From: /spec jtbd\n\n**Error:** Agent \
+                                         `{}` not found. No task was spawned.",
+                                        agent_name
+                                    ));
+                                    return;
+                                }
+                            }
+                        } else {
+                            // FR-002: default to explore agent, fallback to current agent
+                            let explore_agent = self
+                                .cycleable_agents
+                                .iter()
+                                .find(|a| a.name == "explore")
+                                .cloned();
+                            explore_agent.unwrap_or_else(|| self.agent_info.clone())
+                        };
+                        self.apply_selected_model_and_thinking(&mut selected_agent);
+                        selected_agent.permission = ragent_agent::agent::default_permissions();
+
+                        // FR-002, FR-006, FR-007: build the JTBD analysis prompt
+                        let task = SpecCommand::build_jtbd_prompt(&spec_id);
+                        let msg = Message::user_text(&sid, &task);
+                        self.messages.push(msg);
+
+                        let processor = self.session_processor.clone();
+                        let flag = Arc::new(AtomicBool::new(false));
+                        self.cancel_flag = Some(flag.clone());
+                        self.is_processing = true;
+                        self.status = SpecCommand::build_jtbd_status(&spec_id);
+
+                        let event_bus = self.event_bus.clone();
+                        // FR-014: clone path + spec_id for cancellation cleanup
+                        let jtbd_path_for_cleanup = jtbd_path.clone();
+                        let spec_id_for_cleanup = spec_id.clone();
+                        let cancel_flag_for_check = flag.clone();
+                        tokio::spawn(async move {
+                            let result = processor
+                                .process_message(&sid, &task, &selected_agent, flag)
+                                .await;
+
+                            // FR-014: if cancelled, remove partial JTBD.md and notify
+                            if cancel_flag_for_check.load(Ordering::Acquire) {
+                                // FR-013: remove any partially-written file so a
+                                // subsequent --force re-run starts clean.
+                                if jtbd_path_for_cleanup.exists() {
+                                    if let Err(e) =
+                                        tokio::fs::remove_file(&jtbd_path_for_cleanup).await
+                                    {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "spec jtbd: failed to remove partial JTBD.md"
+                                        );
+                                    }
+                                }
+                                event_bus.publish(ragent_agent::event::Event::AgentNotice {
+                                    session_id: sid.clone(),
+                                    message: format!(
+                                        "spec jtbd: cancelled — partial JTBD.md for `{}` removed",
+                                        spec_id_for_cleanup
+                                    ),
+                                });
+                                return;
+                            }
+
+                            if let Err(e) = result {
+                                tracing::warn!(error = %e, "spec jtbd: analysis failed");
+                                event_bus.publish(ragent_agent::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!("spec jtbd analysis failed: {e}"),
+                                });
+                            }
+                        });
+                    }
                     SpecCommand::Validate { spec_id } => {
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let specs_root = working_dir.join("specs");
@@ -5558,7 +5743,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "coverage"
                             || sub == "impl"
                             || sub == "add"
-                            || sub == "delete" =>
+                            || sub == "delete"
+                            || sub == "jtbd" =>
                     {
                         self.status = format!("Usage: /spec {} — try /spec help", sub);
                     }

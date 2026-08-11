@@ -44,6 +44,8 @@ fn test_encode_progress_event_sanitizes_web_captured() {
             title: title.to_string(),
             search_tool: String::new(),
             search_engine: String::new(),
+            body_preview: String::new(),
+            language: "UNKNOWN".to_string(),
         },
     );
     let decoded = decode_progress_event(&encoded).expect("decode");
@@ -59,6 +61,11 @@ fn test_encode_progress_event_sanitizes_web_captured() {
     );
     assert!(decoded.detail.contains("https://example.com"));
     assert!(decoded.detail.contains("Title with control"));
+    assert!(
+        decoded.detail.contains("[UNKNOWN]"),
+        "language tag should be present in detail: {}",
+        decoded.detail
+    );
 }
 
 #[test]

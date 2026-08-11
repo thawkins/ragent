@@ -110,9 +110,7 @@ impl ResearchProgress {
         let detail = detail.into();
 
         // Accumulate per-URL web results as counts rather than log lines.
-        if phase == SessionPhase::Web
-            && status == StepStatus::Done
-            && detail.starts_with("captured ")
+        if phase == SessionPhase::Web && status == StepStatus::Done && detail.contains("captured ")
         {
             self.fetched_count += 1;
         } else if phase == SessionPhase::Web
@@ -287,6 +285,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 title,
                 search_tool,
                 search_engine,
+                body_preview,
+                language,
             } => {
                 let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
                     (true, true) => String::new(),
@@ -294,20 +294,24 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     (true, false) => format!(" via {search_engine}"),
                     (false, false) => format!(" via {search_tool} ({search_engine})"),
                 };
-                (
-                    SessionPhase::Web,
-                    "captured",
+                let lang_tag = format!("[{language}]");
+                let detail = if body_preview.is_empty() {
                     format!(
-                        "captured {}{} — {}",
+                        "{lang_tag} captured {}{} — {}",
                         sanitize_for_display(url),
                         provenance,
                         sanitize_for_display(title)
-                    ),
-                    None,
-                    0,
-                    0,
-                    0,
-                )
+                    )
+                } else {
+                    format!(
+                        "{lang_tag} captured {}{} — {}\n  {}",
+                        sanitize_for_display(url),
+                        provenance,
+                        sanitize_for_display(title),
+                        sanitize_for_display(body_preview)
+                    )
+                };
+                (SessionPhase::Web, "captured", detail, None, 0, 0, 0)
             }
             SessionEvent::FromUrlBodyPreview { url, body_preview } => (
                 SessionPhase::Setup,
@@ -389,7 +393,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 output_format,
                 depth,
                 iterations,
-                from_url,
+                from_urls,
                 from_file,
             } => {
                 let mut parts = vec![format!("output format: {output_format}")];
@@ -399,8 +403,13 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 if let Some(i) = iterations {
                     parts.push(format!("iterations: {i}"));
                 }
-                if let Some(url) = from_url {
-                    parts.push(format!("from-url: {}", sanitize_for_display(url)));
+                if !from_urls.is_empty() {
+                    let urls_display = from_urls
+                        .iter()
+                        .map(|u| sanitize_for_display(u))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!("from-url: {urls_display}"));
                 }
                 if let Some(path) = from_file {
                     parts.push(format!("from-file: {}", sanitize_for_display(path)));
@@ -755,7 +764,7 @@ fn test_failed_urls_rolled_into_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "captured https://a.com — A",
+        "[ENGLISH] captured https://a.com — A",
     );
     p.apply(
         SessionPhase::Web,
@@ -765,7 +774,7 @@ fn test_failed_urls_rolled_into_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "captured https://c.com — C",
+        "[FRENCH] captured https://c.com — C",
     );
     p.apply(
         SessionPhase::Web,
@@ -796,7 +805,7 @@ fn test_complete_message_replaces_totals_line() {
     p.apply(
         SessionPhase::Web,
         StepStatus::Done,
-        "captured https://a.com — A",
+        "[ENGLISH] captured https://a.com — A",
     );
     p.apply(
         SessionPhase::Web,

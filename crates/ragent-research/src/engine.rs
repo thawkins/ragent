@@ -168,12 +168,16 @@ impl GatherObserver for StateGatherForwarder {
                 title,
                 search_tool,
                 search_engine,
+                body_preview,
+                language,
             } => {
                 self.observer.on_event(SessionEvent::WebCaptured {
                     url,
                     title,
                     search_tool,
                     search_engine,
+                    body_preview,
+                    language,
                 });
             }
             _ => {}
@@ -386,14 +390,30 @@ impl IterativeEngine {
                                 title,
                                 search_tool,
                                 search_engine,
+                                body,
+                                language,
                                 ..
                             } = &src
                             {
+                                let body_preview: String = body
+                                    .lines()
+                                    .filter(|l| !l.trim_start().starts_with("```"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                                    .chars()
+                                    .take(crate::web_gatherer::MIN_EXTRACTABLE_CONTENT_CHARS)
+                                    .collect();
+                                let lang = language
+                                    .as_deref()
+                                    .map(str::to_uppercase)
+                                    .unwrap_or_else(|| "UNKNOWN".to_string());
                                 observer.on_event(SessionEvent::WebCaptured {
                                     url: url.clone(),
                                     title: title.clone(),
                                     search_tool: search_tool.clone(),
                                     search_engine: search_engine.clone(),
+                                    body_preview,
+                                    language: lang,
                                 });
                             }
                             state.add_source(src);
@@ -434,6 +454,17 @@ impl IterativeEngine {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    /// Attach a JSONL gather log to the web gatherer so every candidate URL
+    /// and its capture/rejection outcome is recorded under `<log_dir>/`.
+    /// No-op when web gathering is disabled.
+    #[must_use]
+    pub fn with_gather_log(mut self, log: crate::gather_log::GatherLog) -> Self {
+        if let Some(web) = self.web.take() {
+            self.web = Some(web.with_gather_log(log));
+        }
+        self
     }
 
     /// Run the analysis engine over the current sources, if any.
@@ -508,7 +539,7 @@ mod tests {
                 published_at: None,
                 url: url.to_string(),
                 title: "fake".to_string(),
-                body: "body text".to_string(),
+                body: "body text ".repeat(30),
                 content_type: None,
                 page_type: None,
                 language: None,

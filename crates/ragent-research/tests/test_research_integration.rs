@@ -348,7 +348,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 published_at: None,
                 url: url.to_string(),
                 title: "Example Page".into(),
-                body: "Real page body — talks about Rust lifetimes.".into(),
+                body: "Real page body — talks about Rust lifetimes. ".repeat(10),
                 content_type: None,
                 page_type: None,
                 language: Some("English".into()),

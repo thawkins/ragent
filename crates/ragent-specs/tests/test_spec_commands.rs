@@ -407,3 +407,154 @@ fn add_completion_summary_empty_ids() {
     let s = SpecCommand::build_add_completion_summary("my-spec", &[], &[]);
     assert!(s.contains("none"));
 }
+
+// ── JTBD parser tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn parse_jtbd_basic() {
+    let cmd = SpecCommand::parse("jtbd my-spec");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && !force && agent.is_none()));
+}
+
+#[test]
+fn parse_jtbd_force() {
+    let cmd = SpecCommand::parse("jtbd my-spec --force");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && force && agent.is_none()));
+}
+
+#[test]
+fn parse_jtbd_force_default_false() {
+    // FR-003: without --force, force must be false
+    let cmd = SpecCommand::parse("jtbd my-spec");
+    assert!(matches!(cmd, SpecCommand::Jtbd { force, .. } if !force));
+}
+
+#[test]
+fn parse_jtbd_agent() {
+    let cmd = SpecCommand::parse("jtbd my-spec --agent coder");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && !force && agent.as_deref() == Some("coder")));
+}
+
+#[test]
+fn parse_jtbd_force_and_agent() {
+    let cmd = SpecCommand::parse("jtbd my-spec --force --agent explore");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && force && agent.as_deref() == Some("explore")));
+}
+
+#[test]
+fn parse_jtbd_agent_before_force() {
+    // Order shouldn't matter — agent before force
+    let cmd = SpecCommand::parse("jtbd my-spec --agent general --force");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && force && agent.as_deref() == Some("general")));
+}
+
+#[test]
+fn parse_jtbd_agent_without_name() {
+    // --agent with no value following — agent stays None, no panic
+    let cmd = SpecCommand::parse("jtbd my-spec --agent");
+    assert!(matches!(cmd, SpecCommand::Jtbd { spec_id, force, agent }
+            if spec_id == "my-spec" && !force && agent.is_none()));
+}
+
+#[test]
+fn parse_jtbd_missing_spec_id() {
+    // FR-008: missing spec name → Unknown("jtbd")
+    assert!(matches!(SpecCommand::parse("jtbd"), SpecCommand::Unknown(s) if s == "jtbd"));
+}
+
+#[test]
+fn parse_jtbd_empty_args() {
+    // FR-008: empty argument string after subcommand → Unknown
+    assert!(matches!(SpecCommand::parse("jtbd   "), SpecCommand::Unknown(s) if s == "jtbd"));
+}
+
+#[test]
+fn parse_jtbd_is_usage_error() {
+    let cmd = SpecCommand::Unknown("jtbd".to_string());
+    assert!(cmd.is_usage_error());
+}
+
+#[test]
+fn help_message_contains_jtbd() {
+    let help = SpecCommand::build_help_message();
+    assert!(help.contains("/spec jtbd"));
+}
+
+// ── JTBD builder helper tests ─────────────────────────────────────────────────
+
+#[test]
+fn jtbd_status_is_well_formed() {
+    let s = SpecCommand::build_jtbd_status("my-spec");
+    assert!(s.contains("spec jtbd"));
+    assert!(s.contains("my-spec"));
+}
+
+#[test]
+fn jtbd_message_contains_spec_id() {
+    let s = SpecCommand::build_jtbd_message("my-spec");
+    assert!(s.contains("my-spec"));
+    assert!(s.contains("JTBD"));
+}
+
+#[test]
+fn jtbd_log_without_force_or_agent() {
+    let s = SpecCommand::build_jtbd_log("my-spec", false, None);
+    assert!(s.contains("my-spec"));
+    assert!(s.contains("JTBD.md"));
+    assert!(!s.contains("--force"));
+    assert!(!s.contains("--agent"));
+}
+
+#[test]
+fn jtbd_log_with_force() {
+    let s = SpecCommand::build_jtbd_log("my-spec", true, None);
+    assert!(s.contains("--force"));
+    assert!(!s.contains("--agent"));
+}
+
+#[test]
+fn jtbd_log_with_agent() {
+    let s = SpecCommand::build_jtbd_log("my-spec", false, Some("coder"));
+    assert!(s.contains("--agent"));
+    assert!(s.contains("coder"));
+    assert!(!s.contains("--force"));
+}
+
+#[test]
+fn jtbd_log_with_force_and_agent() {
+    let s = SpecCommand::build_jtbd_log("my-spec", true, Some("explore"));
+    assert!(s.contains("--force"));
+    assert!(s.contains("--agent"));
+    assert!(s.contains("explore"));
+}
+
+#[test]
+fn jtbd_prompt_contains_spec_id_and_files() {
+    let p = SpecCommand::build_jtbd_prompt("my-spec");
+    assert!(p.contains("my-spec"));
+    assert!(p.contains("SPEC.md"));
+    assert!(p.contains("JTBD.md"));
+}
+
+#[test]
+fn jtbd_prompt_contains_jtbd_grammar() {
+    // FR-006: prompt must instruct the JTBD grammar
+    let p = SpecCommand::build_jtbd_prompt("my-spec");
+    assert!(p.contains("When <situation>"));
+    assert!(p.contains("motivation"));
+    assert!(p.contains("expected outcome"));
+}
+
+#[test]
+fn jtbd_prompt_contains_traceability_instruction() {
+    // FR-007: prompt must instruct tracing jobs to FR/NFR IDs
+    let p = SpecCommand::build_jtbd_prompt("my-spec");
+    assert!(p.contains("FR-NNN"));
+    assert!(p.contains("NFR-NNN"));
+    assert!(p.contains("untraced"));
+}

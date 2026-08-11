@@ -68,29 +68,100 @@ pub async fn extract_transcript_from_watch_page(html: &str) -> Result<(String, S
         .await
         .with_context(|| format!("failed to read YouTube captions body from {caption_url}"))?;
 
-    let transcript =
-        parse_caption_xml(&captions_xml).with_context(|| "failed to parse YouTube caption XML")?;
+    caption_xml_to_transcript(&captions_xml, &caption_url).map(|transcript| (title, transcript))
+}
 
-    Ok((title, transcript))
+/// Parse a fetched caption body into a transcript, rejecting empty
+/// (bot-gated / consent-interstitial) responses. Exported for tests and for
+/// the fetch-tool layer so the guard is enforced at a single boundary.
+///
+/// YouTube's timedtext endpoint frequently answers with HTTP 200 and
+/// `content-length: 0` rather than a caption payload. An empty parsed
+/// transcript after a nominally successful fetch must not masquerade as
+/// "no captions available" — surface it as a distinct error so callers
+/// can tell bot-gating from a video that genuinely has no captions.
+pub fn caption_xml_to_transcript(xml: &str, caption_url: &str) -> Result<String> {
+    let transcript =
+        parse_caption_xml(xml).with_context(|| "failed to parse YouTube caption XML")?;
+    if transcript.is_empty() {
+        bail!(
+            "YouTube caption body was empty (transcript endpoint returned no caption \
+             segments from {caption_url}); the endpoint is likely bot-gated or the \
+             video may not have captions"
+        );
+    }
+    Ok(transcript)
 }
 
 /// Parse the `ytInitialPlayerResponse` object from a YouTube watch page.
 ///
 /// YouTube embeds this as a JavaScript variable assignment near the top of the
-/// HTML. We locate it with a simple regex and parse the JSON object.
+/// HTML. A regex-based `(\{.*?\})` extraction is not viable here: the object
+/// contains nested braces and JSON strings with `}`/`{` characters, so a
+/// non-greedy brace count either truncates the object at the first `};` or
+/// runs past it into the surrounding script. Instead we locate the marker,
+/// find the opening `{`, and scan forward counting braces while tracking
+/// JSON-string state (so delimiters inside strings, including escaped quotes,
+/// are ignored). The scan stops on the closing brace that balances the
+/// opening one, yielding the complete object regardless of nesting depth.
 pub fn parse_yt_initial_player_response(html: &str) -> Result<serde_json::Value> {
-    let re = regex::Regex::new(r"ytInitialPlayerResponse\s*=\s*(\{.*?\});").expect("valid regex");
-    let caps = re
-        .captures(html)
+    const MARKER: &str = "ytInitialPlayerResponse";
+    let marker_pos = html
+        .find(MARKER)
         .context("ytInitialPlayerResponse not found in YouTube page")?;
-    let json_str = caps
-        .get(1)
-        .context("ytInitialPlayerResponse match missing JSON")?
-        .as_str();
+    let rest = &html[marker_pos + MARKER.len()..];
+    let open_offset = rest
+        .find('{')
+        .context("ytInitialPlayerResponse has no JSON object")?;
+    let json_str = scan_balanced_json(&rest[open_offset..])
+        .context("ytInitialPlayerResponse JSON is unterminated")?;
     serde_json::from_str(json_str).context("failed to parse ytInitialPlayerResponse JSON")
 }
 
+/// Return the balanced JSON object starting at the first byte of `s`
+/// (which must be `{`), handling nested braces and JSON strings with escapes.
+/// Returns the slice covering exactly the balanced object, or `None` when the
+/// braces never balance before the end of `s`.
+fn scan_balanced_json(s: &str) -> Option<&str> {
+    if !s.starts_with('{') {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(&s[..=i]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// Choose the best available caption track URL from the player response.
+///
+/// Real YouTube watch pages nest the track list under
+/// `captions.playerCaptionsTracklistRenderer.captionTracks`; a legacy flat
+/// `captions.captionTracks` layout is also accepted (it is what some embedded
+/// player responses used to expose, and keeps the lookup forward-compatible).
 ///
 /// Preference order:
 /// 1. The renderer's default caption track.
@@ -102,7 +173,11 @@ pub fn caption_track_url(
 ) -> Result<String> {
     let tracks = player_response
         .get("captions")
-        .and_then(|c| c.get("captionTracks"))
+        .and_then(|c| {
+            c.get("playerCaptionsTracklistRenderer")
+                .and_then(|r| r.get("captionTracks"))
+                .or_else(|| c.get("captionTracks"))
+        })
         .and_then(|t| t.as_array())
         .context("no caption tracks available for this YouTube video")?;
 

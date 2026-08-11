@@ -51,6 +51,7 @@ pdf-extract = { workspace = true }
 lopdf = { workspace = true }
 serde_yaml = { workspace = true }
 url = { workspace = true }
+readability-rs = { workspace = true }
 rand = { workspace = true }
 grep-regex = { workspace = true }
 grep-searcher = { workspace = true }

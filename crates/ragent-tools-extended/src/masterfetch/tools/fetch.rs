@@ -376,22 +376,26 @@ async fn fetch_one_url(
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let fetcher_used = "http";
+    let extraction_method = extract_result.method.to_string();
 
     // FR-018: cache successful content.
     let content_type_for_cache = content_type.clone();
     let cache_ttl = params.cache_ttl;
     if content_ok && cache_ttl != 0 {
         let cache_body = display_content.clone();
+        let extraction_method_for_cache = extraction_method.clone();
         let key = cache_key.clone();
         let cache_clone = cache.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            if let Err(e) = cache_clone.set_cached(
+            let method = Some(extraction_method_for_cache.as_str());
+            if let Err(e) = cache_clone.set_cached_with_method(
                 &key,
                 &cache_body,
                 true,
                 status,
                 &content_type_for_cache,
                 cache_ttl,
+                method,
             ) {
                 tracing::warn!(error = %e, "mf_fetch: failed to cache content");
             }
@@ -417,6 +421,7 @@ async fn fetch_one_url(
         "next_action": envelope.next_action,
         "summary": envelope.summary,
         "fetcher_used": fetcher_used,
+        "extraction_method": extraction_method,
         "is_truncated": is_truncated,
         "next_offset": next_offset,
         "total_size_bytes": total_size_bytes,
@@ -766,6 +771,11 @@ fn cached_output(
         "next_action": "served from cache",
         "summary": "served from masterfetch content cache",
         "fetcher_used": "cache",
+        // The extraction method is recorded at insert time; entries cached
+        // before this signal existed report `"readability"` so downstream
+        // consumers (the research web-gather phase) can still distinguish
+        // readability-extracted pages from fallback extractions.
+        "extraction_method": entry.extraction_method.as_deref().unwrap_or("readability"),
         "is_truncated": false,
         "next_offset": 0,
         "total_size_bytes": entry.content.len(),

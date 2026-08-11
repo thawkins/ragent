@@ -60,6 +60,7 @@
 //!     created_at      INTEGER NOT NULL,  -- unix seconds
 //!     expires_at      INTEGER NOT NULL,  -- created_at + ttl
 //!     size_bytes      INTEGER NOT NULL,
+//!     extraction_method TEXT,             -- extraction chain stage (added later; NULL for legacy entries)
 //!     PRIMARY KEY (url, extraction_type, css_selector, pages)
 //! );
 //! ```
@@ -166,6 +167,10 @@ pub struct CachedEntry {
     pub expires_at: u64,
     /// Stored content size in bytes.
     pub size_bytes: usize,
+    /// Extraction-chain stage that produced the content (e.g. `"readability"`,
+    /// `"html2text"`, `"raw_text"`). `None` for entries stored before this
+    /// signal was recorded.
+    pub extraction_method: Option<String>,
 }
 
 /// Configuration for a [`ContentCache`].
@@ -266,6 +271,7 @@ impl ContentCache {
                 created_at      INTEGER NOT NULL,
                 expires_at      INTEGER NOT NULL,
                 size_bytes      INTEGER NOT NULL,
+                extraction_method TEXT,
                 PRIMARY KEY (url, extraction_type, css_selector, pages)
              );
              CREATE INDEX IF NOT EXISTS idx_fetch_cache_expires
@@ -274,6 +280,17 @@ impl ContentCache {
                  ON fetch_cache(created_at);",
         )
         .context("initialising cache schema")?;
+
+        // Older databases lack the extraction_method column; add it when
+        // opening an existing cache. New databases created above already
+        // have it, so probe first and only ALTER when missing.
+        let has_method_column = conn
+            .prepare("SELECT extraction_method FROM fetch_cache LIMIT 0")
+            .is_ok();
+        if !has_method_column {
+            conn.execute_batch("ALTER TABLE fetch_cache ADD COLUMN extraction_method TEXT;")
+                .context("migrating cache schema: adding extraction_method")?;
+        }
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -317,7 +334,7 @@ impl ContentCache {
         let row = conn
             .query_row(
                 "SELECT content, content_ok, status_code, content_type,
-                        created_at, expires_at, size_bytes
+                        created_at, expires_at, size_bytes, extraction_method
                  FROM fetch_cache
                  WHERE url = ?1
                    AND extraction_type = ?2
@@ -338,6 +355,7 @@ impl ContentCache {
                         created_at: row.get::<_, i64>(4)? as u64,
                         expires_at: row.get::<_, i64>(5)? as u64,
                         size_bytes: row.get::<_, i64>(6)? as usize,
+                        extraction_method: row.get::<_, Option<String>>(7)?,
                     })
                 },
             )
@@ -373,6 +391,38 @@ impl ContentCache {
         content_type: &str,
         ttl_seconds: u64,
     ) -> Result<()> {
+        self.set_cached_with_method(
+            key,
+            content,
+            content_ok,
+            status_code,
+            content_type,
+            ttl_seconds,
+            None,
+        )
+    }
+
+    /// Store a content entry in the cache, recording the extraction-chain
+    /// stage (`extraction_method`) that produced the content.
+    ///
+    /// Behaves exactly like [`ContentCache::set_cached`]; the optional
+    /// `extraction_method` is recorded so cache hits can report which stage
+    /// of the chain (readability, html2text, raw text) produced the content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `SQLite` write fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_cached_with_method(
+        &self,
+        key: &CacheKey,
+        content: &str,
+        content_ok: bool,
+        status_code: u16,
+        content_type: &str,
+        ttl_seconds: u64,
+        extraction_method: Option<&str>,
+    ) -> Result<()> {
         // FR-018: bad content is never cached.
         if !content_ok {
             return Ok(());
@@ -387,8 +437,8 @@ impl ContentCache {
             "INSERT OR REPLACE INTO fetch_cache
                  (url, extraction_type, css_selector, pages,
                   content, content_ok, status_code, content_type,
-                  created_at, expires_at, size_bytes)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                  created_at, expires_at, size_bytes, extraction_method)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 key.url,
                 key.extraction_type,
@@ -401,6 +451,7 @@ impl ContentCache {
                 now as i64,
                 expires_at as i64,
                 size_bytes,
+                extraction_method,
             ],
         )
         .context("inserting cache entry")?;

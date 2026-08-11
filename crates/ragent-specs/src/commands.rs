@@ -81,6 +81,17 @@ pub enum SpecCommand {
         /// If true, skip the confirmation prompt.
         yes: bool,
     },
+    /// Perform a Jobs-To-Be-Done analysis of an existing spec's SPEC.md,
+    /// writing the result to `specs/<specname>/JTBD.md`.
+    Jtbd {
+        /// Spec identifier (directory name under `specs/`).
+        spec_id: String,
+        /// If true, overwrite an existing `JTBD.md`.
+        force: bool,
+        /// Optional override agent name; if `None`, the default explore agent
+        /// is used (falling back to the currently selected agent).
+        agent: Option<String>,
+    },
     /// Unknown subcommand (preserves the raw name for error messages).
     Unknown(String),
 }
@@ -233,6 +244,39 @@ impl SpecCommand {
                     Self::Delete { spec_id, yes }
                 }
             }
+            "jtbd" => {
+                // Parse: /spec jtbd <specname> [--force] [--agent <name>]
+                let trimmed = rest.trim();
+                if trimmed.is_empty() {
+                    Self::Unknown("jtbd".to_string())
+                } else {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    let spec_id = parts[0].to_string();
+                    let mut force = false;
+                    let mut agent: Option<String> = None;
+                    let mut i = 1;
+                    while i < parts.len() {
+                        match parts[i] {
+                            "--force" => {
+                                force = true;
+                            }
+                            "--agent" => {
+                                i += 1;
+                                if let Some(name) = parts.get(i) {
+                                    agent = Some(name.to_string());
+                                }
+                            }
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                    Self::Jtbd {
+                        spec_id,
+                        force,
+                        agent,
+                    }
+                }
+            }
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -251,6 +295,7 @@ impl SpecCommand {
                 || s == "impl"
                 || s == "add"
                 || s == "delete"
+                || s == "jtbd"
         )
     }
 
@@ -273,7 +318,8 @@ impl SpecCommand {
                     | `/spec activate <spec-id>` | required `spec-id` | Activate a spec for context injection into agent prompts. |\n\
                     | `/spec deactivate` | none | Deactivate the currently active spec. |\n\
                     | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\
-                    | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\n\
+                    | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\
+                    | `/spec jtbd <spec-id> [--force] [--agent <name>]` | required `spec-id`, optional `--force` and `--agent` | Perform a Jobs-To-Be-Done analysis of `specs/<spec-id>/SPEC.md` and write `specs/<spec-id>/JTBD.md`. Use `--force` to overwrite an existing file, `--agent <name>` to dispatch to a specific agent. |\n\
                     Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets --from-research realtime-collab`"
     }
     /// Build the user-facing status string for a create operation.
@@ -457,6 +503,89 @@ impl SpecCommand {
             new_task_ids.len(),
             task_list,
             spec_id,
+        )
+    }
+
+    // ── JTBD helpers ───────────────────────────────────────────────────────
+
+    /// Build the user-facing status string for a JTBD analysis operation.
+    #[must_use]
+    pub fn build_jtbd_status(spec_id: &str) -> String {
+        format!("spec jtbd: {spec_id}")
+    }
+
+    /// Build the assistant message shown when a JTBD analysis starts.
+    #[must_use]
+    pub fn build_jtbd_message(spec_id: &str) -> String {
+        format!(
+            "From: /spec jtbd\n📋 **Performing JTBD analysis…**\n\n\
+             Analyzing `specs/{spec_id}/SPEC.md` to extract Jobs-To-Be-Done.\n\n\
+             - Reading the spec's overview and numbered requirements\n\
+             - Identifying functional, emotional, and social jobs\n\
+             - Tracing each job to FR/NFR requirement IDs\n\
+             - Writing `specs/{spec_id}/JTBD.md`\n\n\
+             This may take a few moments."
+        )
+    }
+
+    /// Build the log entry for a JTBD analysis operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec_id` — The spec identifier being analyzed.
+    /// * `force` — Whether `--force` was supplied (overwrite existing file).
+    /// * `agent` — Optional override agent name, if `--agent` was supplied.
+    #[must_use]
+    pub fn build_jtbd_log(spec_id: &str, force: bool, agent: Option<&str>) -> String {
+        let force_tag = if force { " --force" } else { "" };
+        match agent {
+            Some(a) => format!(
+                "JTBD analysis for spec '{spec_id}'{force_tag} --agent {a} → specs/{spec_id}/JTBD.md"
+            ),
+            None => {
+                format!("JTBD analysis for spec '{spec_id}'{force_tag} → specs/{spec_id}/JTBD.md")
+            }
+        }
+    }
+
+    /// Build the prompt sent to the explore agent for JTBD analysis.
+    ///
+    /// The prompt instructs the agent to read the spec's `SPEC.md`, extract
+    /// jobs using the JTBD framework, trace each job to requirement IDs, and
+    /// write the result to `specs/<spec_id>/JTBD.md`.
+    ///
+    /// # Arguments
+    ///
+    /// * `spec_id` — The spec identifier (directory name under `specs/`).
+    #[must_use]
+    pub fn build_jtbd_prompt(spec_id: &str) -> String {
+        format!(
+            r#"You are an expert product analyst performing a Jobs-To-Be-Done (JTBD) analysis.
+
+**Spec ID:** {spec_id}
+
+Read the file `specs/{spec_id}/SPEC.md` using the `read` tool. If the file is very large, read it in sections. Then analyse the spec's overview and numbered requirements to identify the underlying "jobs" the feature is hired to do.
+
+Write your analysis to `specs/{spec_id}/JTBD.md` using the `write` tool. The document must contain:
+
+1. **YAML frontmatter** with `status: draft`.
+
+2. A **`## Overview`** section summarising the spec in one or two sentences.
+
+3. A **`## Jobs`** section. For each job, use a `### Job N — <short title>` heading and include:
+
+   - **Job statement** — expressed using the grammar:
+     *"When <situation>, I want to <motivation>, so I can <expected outcome>."*
+   - **Job type** — one of: *functional*, *emotional*, or *social*.
+   - **Performer** — who is hiring the product (the spec's primary user).
+   - **Related requirements** — list every `FR-NNN` and/or `NFR-NNN` identifier from `SPEC.md` that this job traces to. If no requirement traces to the job, write *untraced* explicitly so coverage gaps are visible.
+   - **Success signals** — one or more observable indicators that the job is being fulfilled.
+
+4. A **`## Out-of-Scope Jobs`** section listing jobs explicitly rejected or deferred (if any).
+
+5. A **`## Coverage Matrix`** section with a markdown table mapping each `FR-NNN` / `NFR-NNN` to the job(s) it supports. Requirements with no corresponding job should be marked *unmapped*.
+
+Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is well-formed and every job follows the grammar above."#,
         )
     }
 }

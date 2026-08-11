@@ -65,6 +65,8 @@ impl GatherObserver for GatherEventForwarder {
                 title,
                 search_tool,
                 search_engine,
+                body_preview,
+                language,
             } => {
                 // Forward inline so the UI shows each successfully retrieved
                 // URL as it arrives, rather than only at the end of the
@@ -74,6 +76,8 @@ impl GatherObserver for GatherEventForwarder {
                     title,
                     search_tool,
                     search_engine,
+                    body_preview,
+                    language,
                 });
             }
             // H-002/H-003: retry and circuit-breaker events are forwarded as
@@ -108,7 +112,7 @@ impl GatherObserver for GatherEventForwarder {
 pub struct SessionConfig {
     /// Free-form research topic — used to derive web queries and grep terms.
     ///
-    /// When [`Self::from_url`] is set and `topic` is empty, the topic is
+    /// When [`Self::from_urls`] is non-empty and `topic` is empty, the topic is
     /// derived from the fetched page body (cleaned via `readability-rs` in the
     /// `webfetch` tool) so the rest of the pipeline (query decomposition, local
     /// grep terms, synthesis) has a subject that reflects the page's actual
@@ -128,16 +132,18 @@ pub struct SessionConfig {
     pub disable_local: bool,
     /// When `true`, skip the prior-spec cross-reference phase entirely.
     pub disable_specs: bool,
-    /// `--from-url <URL>`: fetch the URL before gathering and use the returned
-    /// page content as the research subject in place of an explicit topic.
+    /// `--from-url <URL>`: fetch one or more URLs before gathering and use each
+    /// returned page as a research subject. Repeat the flag to seed multiple
+    /// pages.
     ///
-    /// When set, the fetched page is captured as the primary web source and
-    /// (when `topic` is empty) the page body is cleaned by the `readability-rs`
-    /// extractor in the `webfetch` tool, from which a concise topic is derived
-    /// for query decomposition, local-grep term derivation, and synthesis. The
-    /// normal web-search phase still runs, using that derived topic, so
-    /// additional related sources are gathered as usual.
-    pub from_url: Option<String>,
+    /// When one or more URLs are supplied, each fetched page is captured as a
+    /// primary web source and (when `topic` is empty) the *first* page body is
+    /// cleaned by the `readability-rs` extractor in the `webfetch` tool, from
+    /// which a concise topic is derived for query decomposition, local-grep
+    /// term derivation, and synthesis. The normal web-search phase still runs,
+    /// using that derived topic, so additional related sources are gathered as
+    /// usual.
+    pub from_urls: Vec<String>,
     /// `--from-file <PATH>`: extract the local document's content before
     /// gathering and use it as the research subject in place of an explicit
     /// topic. Supported formats include PDF, Microsoft Office (`.docx`,
@@ -256,7 +262,7 @@ impl Default for SessionConfig {
             max_local_sources: 10,
             disable_local: false,
             disable_specs: false,
-            from_url: None,
+            from_urls: Vec::new(),
             from_file: None,
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
             depth: None,
@@ -340,6 +346,16 @@ pub enum SessionEvent {
         /// Backend search engine(s) that returned this URL. Empty for
         /// `--from-url` seeds.
         search_engine: String,
+        /// First [`MIN_EXTRACTABLE_CONTENT_CHARS`] characters of the
+        /// extracted page body, shown in the progress display so the
+        /// user can see the content that was captured for each source.
+        /// Empty for `--from-url` seeds (which emit a separate
+        /// [`FromUrlBodyPreview`] event).
+        body_preview: String,
+        /// Detected human language of the page body in uppercase (e.g.
+        /// `"ENGLISH"`, `"FRENCH"`), or `"UNKNOWN"` when language
+        /// detection was unavailable.
+        language: String,
     },
     /// The `--from-url` primary page was fetched. Carries a short preview of
     /// the extracted article body so the UI can show what topic was derived
@@ -466,8 +482,8 @@ pub enum SessionEvent {
         depth: Option<String>,
         /// Iteration override selected via `--iterations`, if any.
         iterations: Option<u32>,
-        /// `--from-url` primary source, if any.
-        from_url: Option<String>,
+        /// `--from-url` primary sources, if any.
+        from_urls: Vec<String>,
         /// `--from-file` primary source path, if any.
         from_file: Option<String>,
     },
@@ -624,6 +640,17 @@ impl ResearchSession {
         self
     }
 
+    /// Attach a JSONL gather log (`GatherLog`) to the web gatherer so every
+    /// candidate URL and its capture/rejection outcome is recorded.
+    /// No-op when web gathering is not wired.
+    #[must_use]
+    pub fn with_gather_log(mut self, log: crate::gather_log::GatherLog) -> Self {
+        if let Some(web) = self.web.take() {
+            self.web = Some(web.with_gather_log(log));
+        }
+        self
+    }
+
     /// Build a session backed only by a local tool (no web search).
     pub fn with_local_tool(
         manager: ResearchManager,
@@ -677,33 +704,34 @@ impl ResearchSession {
             output_format: config.output_format.as_str().to_string(),
             depth: config.depth.map(|d| d.as_str().to_string()),
             iterations: config.iterations,
-            from_url: config.from_url.clone(),
+            from_urls: config.from_urls.clone(),
             from_file: config.from_file.as_ref().map(|p| p.display().to_string()),
         });
         // ── --from-url pre-step ──────────────────────────────────────────
         //
-        // Fetch the primary page up front and capture it as the first web
-        // source. If no explicit topic was provided, derive the topic from the
-        // page's *body content* (not its `<title>`): the body is cleaned via the
-        // `readability-rs` extractor inside the `webfetch` tool, so nav bars,
-        // cookie notices, and other boilerplate are already removed. The title
-        // is used as the primary topic signal, and a short descriptive sentence
-        // from the body is appended when available so the topic is informative
-        // rather than just the page headline. The page title and URL are only
-        // used as fallbacks when the body yields no usable text.
+        // Fetch each `--from-url` page up front and capture them as the first
+        // web sources. If no explicit topic was provided, derive the topic from
+        // the *first* page's body content (not its `<title>`): the body is
+        // cleaned via the `readability-rs` extractor inside the `webfetch` tool,
+        // so nav bars, cookie notices, and other boilerplate are already
+        // removed. The title is used as the primary topic signal, and a short
+        // descriptive sentence from the body is appended when available so the
+        // topic is informative rather than just the page headline. The page
+        // title and URL are only used as fallbacks when the body yields no
+        // usable text.
         //
         // When the caller supplied no explicit title (or supplied the raw URL
         // because `--from-url` was used without a topic), the cleaned page title
         // replaces the URL in the rendered `RESEARCH.md` header and frontmatter.
         //
         // Crucially, this fetch happens *before* the on-disk item is created so
-        // an inaccessible primary URL aborts the session without leaving an empty
-        // research folder or skeleton `RESEARCH.md` behind.
+        // an inaccessible primary URL aborts the session without leaving an
+        // empty research folder or skeleton `RESEARCH.md` behind.
         let mut topic = config.topic.clone();
         let mut sources = Vec::new();
         let mut web_queries = Vec::new();
         let mut item_title = title.to_string();
-        if let Some(url) = config.from_url.as_deref() {
+        for (idx, url) in config.from_urls.iter().enumerate() {
             let Some(web) = &self.web else {
                 return Err(ResearchError::FromUrlFetchFailed {
                     url: url.to_string(),
@@ -711,7 +739,7 @@ impl ResearchSession {
                 });
             };
             match web.fetch_url_as_source(url).await {
-                Ok((src, _page)) => {
+                Ok((src, page)) => {
                     let src_url = match &src {
                         Source::Web { url, .. } => url.clone(),
                         _ => url.to_string(),
@@ -724,6 +752,11 @@ impl ResearchSession {
                         Source::Web { body, .. } => body.clone(),
                         _ => String::new(),
                     };
+                    let src_language = page
+                        .language
+                        .as_deref()
+                        .map(str::to_uppercase)
+                        .unwrap_or_else(|| "UNKNOWN".to_string());
                     // Emit a short preview of the fetched body so the UI can
                     // show what content was used to derive the topic. Take the
                     // first ~200 characters of the cleaned body, with the
@@ -744,8 +777,13 @@ impl ResearchSession {
                         title: src_title.clone(),
                         search_tool: String::new(),
                         search_engine: String::new(),
+                        body_preview: String::new(),
+                        language: src_language,
                     });
-                    if topic.trim().is_empty() {
+                    // Topic derivation only runs on the first URL (idx == 0)
+                    // when no explicit topic was provided. Subsequent URLs are
+                    // purely additive seed sources.
+                    if idx == 0 && topic.trim().is_empty() {
                         // Prefer the LLM summarizer when available: it reads
                         // the full cleaned body and returns a concise topic
                         // and clean title in one pass, which is dramatically
@@ -966,7 +1004,7 @@ impl ResearchSession {
         // If we didn't have an explicit topic and no from-url/from-file was
         // supplied, fall back to whatever topic is stored on the pre-existing
         // item.
-        if topic.trim().is_empty() && config.from_url.is_none() && config.from_file.is_none() {
+        if topic.trim().is_empty() && config.from_urls.is_empty() && config.from_file.is_none() {
             topic = item.topic.clone();
         }
         // ── Decide single-pass vs. iterative engine ─────────────────────
@@ -1557,12 +1595,26 @@ mod tests {
     use super::*;
     use crate::local_gatherer::{GrepMatch, LocalTool};
     use crate::web_gatherer::{
-        HeuristicQueryDecomposer, WebFetchTool, WebFetchedPage, WebSearchHit, WebSearchTool,
+        HeuristicQueryDecomposer, MIN_EXTRACTABLE_CONTENT_CHARS, WebFetchTool, WebFetchedPage,
+        WebSearchHit, WebSearchTool,
     };
     use async_trait::async_trait;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tempfile::TempDir;
+
+    /// Generate a body string of at least [`MIN_EXTRACTABLE_CONTENT_CHARS`]
+    /// characters so fake fetched pages pass the minimum-content-length guard.
+    fn body256(prefix: &str) -> String {
+        let mut s = String::new();
+        while s.chars().count() < MIN_EXTRACTABLE_CONTENT_CHARS {
+            if !s.is_empty() {
+                s.push(' ');
+            }
+            s.push_str(prefix);
+        }
+        s
+    }
 
     struct FakeSearch {
         hits: Vec<WebSearchHit>,
@@ -1675,7 +1727,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: "body".into(),
+                        body: body256("body").into(),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -1758,7 +1810,7 @@ mod tests {
                     published_at: None,
                     url: "u".into(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -1851,7 +1903,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Example".into(),
-                    body: "body".into(),
+                    body: body256("body").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -1958,7 +2010,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: String::new(),
-            from_url: Some("https://example.com/guide".into()),
+            from_urls: vec!["https://example.com/guide".into()],
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -2013,11 +2065,12 @@ mod tests {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                SessionEvent::WebCaptured { url, title, .. }
+                SessionEvent::WebCaptured { url, title, language, .. }
                     if url == "https://example.com/guide"
                         && title == "Rust Async Programming Guide"
+                        && language == "UNKNOWN"
             )),
-            "expected WebCaptured for --from-url, got {:?}",
+            "expected WebCaptured for --from-url with UNKNOWN language, got {:?}",
             *events
         );
     }
@@ -2073,7 +2126,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: String::new(),
-            from_url: Some("https://example.com/article".into()),
+            from_urls: vec!["https://example.com/article".into()],
             ..SessionConfig::default()
         };
         let outcome = session
@@ -2157,7 +2210,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: String::new(),
-            from_url: Some("https://example.com/boilerplate".into()),
+            from_urls: vec!["https://example.com/boilerplate".into()],
             ..SessionConfig::default()
         };
         let outcome = session
@@ -2195,7 +2248,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "Fetched Page Title".into(),
-                    body: "body text".into(),
+                    body: body256("body text").into(),
                     content_type: None,
                     page_type: None,
                     language: None,
@@ -2213,7 +2266,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: "Custom Topic".into(),
-            from_url: Some("https://example.com/page".into()),
+            from_urls: vec!["https://example.com/page".into()],
             ..SessionConfig::default()
         };
         let outcome = session
@@ -2270,7 +2323,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: String::new(),
-            from_url: Some("https://example.com/x".into()),
+            from_urls: vec!["https://example.com/x".into()],
             ..SessionConfig::default()
         };
         let observer = Arc::new(CollectObserver::default());
@@ -2704,7 +2757,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: "web body".into(),
+                        body: body256("web body").into(),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -2865,7 +2918,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: "web body".into(),
+                        body: body256("web body").into(),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -2980,7 +3033,7 @@ mod tests {
                         published_at: None,
                         url: "https://example.com".into(),
                         title: "Example".into(),
-                        body: "web body".into(),
+                        body: body256("web body").into(),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -3092,7 +3145,7 @@ mod tests {
                         published_at: None,
                         url: url.to_string(),
                         title: "Extra Page".into(),
-                        body: "Extra page body.".into(),
+                        body: body256("Extra page body.").into(),
                         content_type: None,
                         page_type: None,
                         language: None,
@@ -3115,7 +3168,7 @@ mod tests {
         );
         let cfg = SessionConfig {
             topic: "Rust async".into(),
-            from_url: Some("https://example.com/seed".into()),
+            from_urls: vec!["https://example.com/seed".into()],
             ..SessionConfig::default()
         };
         let outcome = session
@@ -3170,6 +3223,101 @@ mod tests {
             "seed URL must appear before extra URL; got seed={:?}, extra={:?}",
             seed_pos,
             extra_pos
+        );
+    }
+
+    /// D-004: When multiple `--from-url` flags are supplied, each page must
+    /// be fetched and captured as a seed source, in the order given.
+    #[tokio::test]
+    async fn multiple_from_urls_all_captured_as_sources() {
+        let tmp = TempDir::new().unwrap();
+        let research_root = tmp.path().join("research");
+        tokio::fs::create_dir_all(&research_root).await.unwrap();
+
+        struct NoSearch;
+        #[async_trait]
+        impl WebSearchTool for NoSearch {
+            async fn search(&self, _: &str, _: usize) -> anyhow::Result<Vec<WebSearchHit>> {
+                Ok(Vec::new())
+            }
+        }
+        struct MultiFetch;
+        #[async_trait]
+        impl WebFetchTool for MultiFetch {
+            async fn fetch(&self, url: &str) -> anyhow::Result<WebFetchedPage> {
+                if url == "https://example.com/first" {
+                    Ok(WebFetchedPage {
+                        published_at: None,
+                        url: url.to_string(),
+                        title: "First Page".into(),
+                        body: "First page about Rust async and Tokio runtime.".into(),
+                        content_type: None,
+                        page_type: None,
+                        language: None,
+                    })
+                } else {
+                    Ok(WebFetchedPage {
+                        published_at: None,
+                        url: url.to_string(),
+                        title: "Second Page".into(),
+                        body: "Second page about Rust concurrency patterns.".into(),
+                        content_type: None,
+                        page_type: None,
+                        language: None,
+                    })
+                }
+            }
+        }
+
+        let manager = ResearchManager::new(&research_root);
+        let web = WebGatherer::new(Arc::new(NoSearch), Arc::new(MultiFetch));
+        let session = ResearchSession::new(
+            manager,
+            Some(web),
+            None,
+            Arc::new(crate::analysis::NoopAnalysisEngine),
+        );
+        let cfg = SessionConfig {
+            topic: String::new(),
+            from_urls: vec![
+                "https://example.com/first".into(),
+                "https://example.com/second".into(),
+            ],
+            ..SessionConfig::default()
+        };
+        let outcome = session
+            .run("multi-url-test", "Multi URL", &cfg, Arc::new(NoopObserver))
+            .await
+            .unwrap();
+
+        // Both seed URLs must appear as web sources, in the order given.
+        let web_urls: Vec<&str> = outcome
+            .sources
+            .iter()
+            .filter_map(|s| match s {
+                Source::Web { url, .. } => Some(url.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            web_urls.iter().any(|u| *u == "https://example.com/first"),
+            "first URL must be in sources: {:?}",
+            web_urls
+        );
+        assert!(
+            web_urls.iter().any(|u| *u == "https://example.com/second"),
+            "second URL must be in sources: {:?}",
+            web_urls
+        );
+        let first_pos = web_urls
+            .iter()
+            .position(|u| *u == "https://example.com/first");
+        let second_pos = web_urls
+            .iter()
+            .position(|u| *u == "https://example.com/second");
+        assert!(
+            first_pos.unwrap() < second_pos.unwrap(),
+            "first URL must appear before second URL"
         );
     }
 
@@ -3477,7 +3625,7 @@ mod tests {
                     published_at: None,
                     url: url.to_string(),
                     title: "t".into(),
-                    body: "b".into(),
+                    body: body256("b").into(),
                     content_type: None,
                     page_type: None,
                     language: None,

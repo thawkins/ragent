@@ -100,10 +100,12 @@ struct CreateResearchRequest {
     title: Option<String>,
     sources_dir: Option<String>,
     template: Option<String>,
-    /// `--from-url <URL>`: fetch the URL and use its content as the research
-    /// subject in place of an explicit topic. The page is captured as the
-    /// primary source; web search still runs.
-    from_url: Option<String>,
+    /// `--from-url <URL>`: fetch one or more URLs and use their content as the
+    /// research subject in place of (or alongside) an explicit topic. Each
+    /// page is captured as a primary source; web search still runs. Pass an
+    /// array of URLs to seed multiple pages.
+    #[serde(default)]
+    from_urls: Vec<String>,
     /// `--from-file <PATH>`: extract a local document and use its content as
     /// the research subject in place of an explicit topic. The extracted
     /// content is captured as the primary `Source::Other`; web search still
@@ -147,7 +149,7 @@ async fn create_research(
     let manager = ResearchManager::new(research_root());
     let config = SessionConfig {
         topic: req.topic.clone(),
-        from_url: req.from_url.clone(),
+        from_urls: req.from_urls.clone(),
         from_file: req.from_file.clone().map(PathBuf::from),
         sources_dir: req.sources_dir.map(PathBuf::from),
         template: req.template,
@@ -171,7 +173,7 @@ async fn create_research(
     let title = req.title.clone().unwrap_or_else(|| {
         ragent_research::derive_title_full(
             &req.topic,
-            req.from_url.as_deref(),
+            req.from_urls.first().map(String::as_str),
             req.from_file.as_deref(),
         )
     });
@@ -216,6 +218,7 @@ async fn create_research(
         Some(Arc::new(cfg)),
         Some(provider_registry),
         active_model,
+        Some(req.name.as_str()),
     );
     match session
         .run(&req.name, &title, &config, Arc::new(observer))

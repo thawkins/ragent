@@ -65,11 +65,12 @@ pub enum ResearchCommands {
         /// becomes the research subject.
         #[arg(value_name = "TOPIC", trailing_var_arg = true, num_args = 0.., required = false)]
         topic: Vec<String>,
-        /// Fetch the URL and use its content as the research subject in
-        /// place of an explicit topic. The page is captured as the primary
-        /// source; web search still runs.
+        /// Fetch one or more URLs and use their content as the research
+        /// subject in place of (or alongside) an explicit topic. Each page is
+        /// captured as a primary source; web search still runs. Repeat the
+        /// flag to seed multiple pages.
         #[arg(long, value_name = "URL")]
-        from_url: Option<String>,
+        from_urls: Vec<String>,
         /// Extract a local document file and use its content as the research
         /// subject in place of an explicit topic. Supported formats: PDF,
         /// DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, and MD. The extracted
@@ -193,7 +194,7 @@ pub async fn handle_research_command(
         ResearchCommands::Create {
             name,
             topic,
-            from_url,
+            from_urls,
             from_file,
             iterations,
             depth,
@@ -213,7 +214,7 @@ pub async fn handle_research_command(
             search_circuit_breaker_threshold,
         } => {
             let topic = topic.join(" ");
-            if topic.is_empty() && from_url.is_none() && from_file.is_none() {
+            if topic.is_empty() && from_urls.is_empty() && from_file.is_none() {
                 eprintln!(
                     "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
                 );
@@ -222,7 +223,7 @@ pub async fn handle_research_command(
             ResearchCliCommand::Create {
                 name,
                 topic,
-                from_url,
+                from_urls,
                 from_file,
                 iterations,
                 depth,
@@ -331,7 +332,7 @@ pub async fn handle_research_command(
         ResearchCliCommand::Create {
             name,
             topic,
-            from_url,
+            from_urls,
             from_file,
             iterations,
             depth,
@@ -364,12 +365,12 @@ pub async fn handle_research_command(
             // when only `--from-file` was supplied, then to "Research".
             let title = ragent_research::derive_title_full(
                 &topic,
-                from_url.as_deref(),
+                from_urls.first().map(String::as_str),
                 from_file.as_deref(),
             );
             let config = SessionConfig {
                 topic: topic.clone(),
-                from_url,
+                from_urls,
                 from_file: from_file.map(std::path::PathBuf::from),
                 sources_dir: sources_dir.map(std::path::PathBuf::from),
                 template,
@@ -414,6 +415,7 @@ pub async fn handle_research_command(
                 config_arc,
                 Some(Arc::new(ragent_agent::provider::create_default_registry())),
                 active_model,
+                Some(name.as_str()),
             );
             match session
                 .run(&name, &title, &config, Arc::new(CliObserver))

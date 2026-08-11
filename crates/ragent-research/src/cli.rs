@@ -19,11 +19,12 @@ pub enum ResearchCliCommand {
         /// `--from-file` is supplied; in that case the fetched/extracted
         /// content becomes the research subject.
         topic: String,
-        /// `--from-url <URL>`: fetch the URL and use its content as the research
-        /// subject in place of (or alongside) an explicit topic. The fetched
-        /// page is captured as the primary web source; the normal web-search
-        /// phase still runs using the derived topic.
-        from_url: Option<String>,
+        /// `--from-url <URL>`: fetch one or more URLs and use their content as
+        /// research subjects in place of (or alongside) an explicit topic.
+        /// Each fetched page is captured as a primary web source; the normal
+        /// web-search phase still runs using the derived topic. Repeat the
+        /// flag to seed multiple pages.
+        from_urls: Vec<String>,
         /// `--from-file <PATH>`: extract the local document and use its content
         /// as the research subject in place of (or alongside) an explicit
         /// topic. The extracted content is captured as the primary
@@ -177,7 +178,7 @@ impl ResearchCliCommand {
                     Self::Create {
                         name,
                         topic,
-                        from_url: None,
+                        from_urls: Vec::new(),
                         from_file: None,
                         iterations: None,
                         depth: None,
@@ -210,7 +211,7 @@ impl ResearchCliCommand {
         let mut i = 0;
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
-        let mut from_url: Option<String> = None;
+        let mut from_urls: Vec<String> = Vec::new();
         let mut from_file: Option<String> = None;
         let mut iterations: Option<u32> = None;
         let mut depth: Option<String> = None;
@@ -233,7 +234,7 @@ impl ResearchCliCommand {
             match arg {
                 "--from-url" => {
                     if let Some(v) = rest.get(i + 1) {
-                        from_url = Some((*v).to_string());
+                        from_urls.push((*v).to_string());
                         i += 2;
                     } else {
                         i += 1;
@@ -380,7 +381,7 @@ impl ResearchCliCommand {
         Self::Create {
             name,
             topic,
-            from_url,
+            from_urls,
             from_file,
             iterations,
             depth,
@@ -469,9 +470,10 @@ impl ResearchCliCommand {
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
                                          [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
-                                         --from-url            Fetch the URL and use its content as the research subject\n\
-                                                               in place of an explicit topic. The page is captured as\n\
-                                                               the primary source; web search still runs.\n\
+                                           --from-url            Fetch one or more URLs and use their content as the research subject\n\
+                                                                 in place of (or alongside) an explicit topic. Each page is captured\n\
+                                                                 as a primary source; web search still runs. Repeat the flag to seed\n\
+                                                                 multiple pages.\n\
                                          --iterations          Override the default maximum number of iterations.\n\
                                          --depth               Choose a preset: shallow, standard, or deep (default: standard).\n\
                                          --format              Select the output artifact format. Values: report, executive-summary, comparison-table, source-bibliography, imrad (default: report).\n\
@@ -517,6 +519,8 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             title,
             search_tool,
             search_engine,
+            body_preview,
+            language,
         } => (
             "web",
             serde_json::json!({
@@ -524,6 +528,8 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "title": title,
                 "search_tool": search_tool,
                 "search_engine": search_engine,
+                "body_preview": body_preview,
+                "language": language,
             }),
         ),
         SessionEvent::FromUrlBodyPreview { url, body_preview } => (
@@ -612,7 +618,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             output_format,
             depth,
             iterations,
-            from_url,
+            from_urls,
             from_file,
         } => (
             "config",
@@ -620,7 +626,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "output_format": output_format,
                 "depth": depth,
                 "iterations": iterations,
-                "from_url": from_url,
+                "from_urls": from_urls,
                 "from_file": from_file,
             }),
         ),
@@ -1213,12 +1219,12 @@ mod tests {
             ResearchCliCommand::Create {
                 name,
                 topic,
-                from_url,
+                from_urls,
                 ..
             } => {
                 assert_eq!(name, "myitem");
                 assert_eq!(topic, "");
-                assert_eq!(from_url.as_deref(), Some("https://example.com/article"));
+                assert_eq!(from_urls, vec!["https://example.com/article".to_string()]);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1232,12 +1238,12 @@ mod tests {
             ResearchCliCommand::Create {
                 name,
                 topic,
-                from_url,
+                from_urls,
                 ..
             } => {
                 assert_eq!(name, "myitem");
                 assert_eq!(topic, "rust async");
-                assert_eq!(from_url.as_deref(), Some("https://example.com/article"));
+                assert_eq!(from_urls, vec!["https://example.com/article".to_string()]);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1251,16 +1257,41 @@ mod tests {
             ResearchCliCommand::Create {
                 name,
                 topic,
-                from_url,
+                from_urls,
                 use_local,
                 iterations,
                 ..
             } => {
                 assert_eq!(name, "myitem");
                 assert_eq!(topic, "");
-                assert_eq!(from_url.as_deref(), Some("https://example.com"));
+                assert_eq!(from_urls, vec!["https://example.com".to_string()]);
                 assert!(use_local);
                 assert_eq!(iterations, Some(3));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_create_with_multiple_from_urls() {
+        let cmd = ResearchCliCommand::parse(
+            "create myitem --from-url https://example.com/a --from-url https://example.com/b",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_urls,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "");
+                assert_eq!(
+                    from_urls,
+                    vec![
+                        "https://example.com/a".to_string(),
+                        "https://example.com/b".to_string()
+                    ]
+                );
             }
             other => panic!("unexpected variant: {other:?}"),
         }

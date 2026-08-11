@@ -192,7 +192,7 @@ fn session_with_engine(
                     published_at: None,
                     url: "https://example.com/async".into(),
                     title: "Rust Async Guide".into(),
-                    body: "Use async/await for concurrent Rust.".into(),
+                    body: "Use async/await for concurrent Rust. ".repeat(10),
                     content_type: None,
                     page_type: None,
                     language: None,

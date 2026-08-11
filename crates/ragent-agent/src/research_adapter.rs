@@ -42,7 +42,10 @@ use ragent_research::{
 /// If `active_model` is supplied and a `ProviderRegistry` is available, an
 /// LLM-backed analysis engine is wired in so the final `RESEARCH.md` contains
 /// synthesized summary/findings/cross-references/open questions.
-#[must_use]
+/// * `research_name` — when `Some`, is sanitised and used in the JSONL
+///   gather-log file name (`log/research-<name>-<ts>-<rand>-web.jsonl`)
+///   recording every considered/captured/rejected URL.
+#[allow(clippy::too_many_arguments)]
 pub fn build_research_session(
     registry: &Arc<ToolRegistry>,
     manager: ResearchManager,
@@ -53,6 +56,7 @@ pub fn build_research_session(
     config: Option<Arc<Config>>,
     provider_registry: Option<Arc<ProviderRegistry>>,
     active_model: Option<ModelRef>,
+    research_name: Option<&str>,
 ) -> ResearchSession {
     let web = build_web_gatherer(
         registry,
@@ -138,6 +142,19 @@ pub fn build_research_session(
         .with_critic(critic);
     let session = match summarizer {
         Some(sum) => session.with_summarizer(sum),
+        None => session,
+    };
+    let session = match research_name
+        .map(|n| ragent_research::gather_log::GatherLog::new(&working_dir.join("log"), n))
+    {
+        Some(Ok(log)) => session.with_gather_log(log),
+        Some(Err(e)) => {
+            tracing::warn!(
+                error = %e,
+                "research: failed to create web URL gather log; continuing without it"
+            );
+            session
+        }
         None => session,
     };
     match model_label {
@@ -268,7 +285,12 @@ fn build_web_gatherer(
                 ctx: ctx.clone(),
                 tool_name: search_tool_name,
             }),
-            Arc::new(AgentWebFetchTool { tool: fetch, ctx }),
+            Arc::new(AgentWebFetchTool {
+                tool: fetch,
+                ctx,
+                #[cfg(test)]
+                legacy_verifier: None,
+            }),
         )
         .with_decomposer(decomposer),
     )
@@ -394,6 +416,12 @@ fn parse_mf_search_metadata(metadata: &serde_json::Value, tool_name: &str) -> Ve
 struct AgentWebFetchTool {
     tool: Arc<dyn AgentTool>,
     ctx: AgentToolContext,
+    /// Verifier hook used to enforce the mandatory readability guarantee on
+    /// the legacy `webfetch` path (which does not report which extraction
+    /// stage produced its output). `None` disables verification (used in
+    /// tests to exercise the bail branch deterministically).
+    #[cfg(test)]
+    legacy_verifier: Option<Box<dyn Fn() -> bool + Send + Sync>>,
 }
 
 /// Maximum number of bytes of raw HTML to download when extracting a
@@ -486,6 +514,80 @@ impl WebFetchTool for AgentWebFetchTool {
             page_type = Some("youtube".to_string());
         }
 
+        // Failed fetch (transcript extraction failed, HTTP/body error, …):
+        // `mf_fetch` reports tool-level failures as `ToolOutput` metadata
+        // (`error`, `content_ok = false`) rather than by aborting the call, so
+        // the previous flow kept a placeholder body (e.g. the
+        // `[YouTube transcript extraction failed: …]` bracket text) and let the
+        // gatherer suppress it later with an opaque "extracted content too
+        // short" message. Bail here instead: the gatherer's existing
+        // `Ok(Err(e))` branch emits `FetchFailed` with the real reason and the
+        // source is suppressed explicitly, never entering the research corpus.
+        if is_mf_fetch && let Some(metadata) = output.metadata.as_ref() {
+            let fetch_error = metadata
+                .get("error")
+                .and_then(|v| v.as_str())
+                .filter(|e| !e.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    let content_ok = metadata
+                        .get("content_ok")
+                        .and_then(serde_json::Value::as_bool);
+                    (content_ok == Some(false)).then(|| {
+                        metadata
+                            .get("next_action")
+                            .and_then(|v| v.as_str())
+                            .filter(|a| !a.is_empty())
+                            .unwrap_or("fetch reported content_ok = false")
+                            .to_string()
+                    })
+                });
+            if let Some(error) = fetch_error {
+                anyhow::bail!("mf_fetch failed for {url}: {error}");
+            }
+        }
+
+        // Mandatory readability guarantee (research web-gather phase): every
+        // HTML page captured as a research source must have been extracted by
+        // the `readability-rs` crate. Pages where readability failed — and the
+        // fetch tool silently fell back to html2text / raw tag-stripping — are
+        // rejected so fallback-extracted noise never enters the research
+        // corpus. PDFs and YouTube transcripts bypass readability entirely by
+        // design, so they are exempt from the check.
+        let media_kind = ragent_research::classify_web_source(url, content_type.as_deref());
+        if media_kind == ragent_research::WebSourceKind::Page {
+            let readability_used = if is_mf_fetch {
+                // `mf_fetch` reports which extraction stage produced the body
+                // via the `extraction_method` envelope signal.
+                output
+                    .metadata
+                    .as_ref()
+                    .and_then(|m| m.get("extraction_method"))
+                    .and_then(|v| v.as_str())
+                    == Some("readability")
+            } else {
+                // The legacy `webfetch` tool does not report which extraction
+                // stage produced its output. Re-verify by re-running
+                // readability on the raw HTML: a second (cheap) fetch keeps
+                // the guarantee honest without trusting the tool implicitly.
+                #[cfg(test)]
+                if let Some(verifier) = self.legacy_verifier.as_ref() {
+                    verifier()
+                } else {
+                    verify_readability_on_raw_html(&self.tool, &self.ctx, url).await
+                }
+                #[cfg(not(test))]
+                verify_readability_on_raw_html(&self.tool, &self.ctx, url).await
+            };
+            if !readability_used {
+                anyhow::bail!(
+                    "readability extraction failed for {url}; \
+                     page rejected because the research web-gather phase requires \
+                     readability-rs-extracted content (fallback extraction is not accepted)"
+                );
+            }
+        }
+
         // Opportunistically fetch the raw HTML head to extract a publication
         // date from the page's embedded metadata. This is a best-effort step:
         // any failure (network error, non-HTML content, missing date) simply
@@ -503,6 +605,67 @@ impl WebFetchTool for AgentWebFetchTool {
             language,
         })
     }
+}
+
+/// Re-verify readability extraction for the legacy `webfetch` tool path.
+///
+/// The legacy tool applies readability → html2text fallbacks internally but
+/// does not report which stage produced its output. To keep the mandatory
+/// readability guarantee for research sources honest, fetch the raw HTML via
+/// the same tool (`format=raw`) and run `readability-rs` on it directly,
+/// applying the same minimum-length threshold the fetch tools use
+/// ([`MIN_READABILITY_EXTRACT_CHARS`]).
+///
+/// Returns `true` when readability successfully extracts article text of at
+/// least the threshold length; `false` on any fetch/parse error or short
+/// extraction.
+async fn verify_readability_on_raw_html(
+    tool: &Arc<dyn AgentTool>,
+    ctx: &AgentToolContext,
+    url: &str,
+) -> bool {
+    let raw_output = tool
+        .execute(json!({"url": url, "format": "raw"}), ctx)
+        .await;
+    let Ok(raw_output) = raw_output else {
+        tracing::warn!(
+            url,
+            "research: legacy webfetch raw-HTML refetch failed; rejecting page"
+        );
+        return false;
+    };
+    readability_extract_ok(&raw_output.content, url)
+}
+
+/// Minimum extracted text length for a readability extraction to count as
+/// successful. Mirrors the threshold used by `webfetch` and the masterfetch
+/// extractor so the research guarantee matches the tools' own acceptance
+/// criteria.
+pub const MIN_READABILITY_EXTRACT_CHARS: usize = 500;
+
+/// Run the `readability-rs` extractor on `html` and return `true` when it
+/// produces non-trivial article text (≥ [`MIN_READABILITY_EXTRACT_CHARS`]
+/// characters). Wrapped in `catch_unwind` so a parser panic degrades to
+/// `false` instead of aborting the gather task.
+///
+/// Exposed for the integration tests in
+/// `crates/ragent-agent/tests/test_research_readability.rs`.
+pub fn readability_extract_ok(html: &str, url: &str) -> bool {
+    let result = std::panic::catch_unwind(|| {
+        let Ok(parsed_url) = url::Url::parse(url) else {
+            return false;
+        };
+        let mut input = std::io::Cursor::new(html.as_bytes());
+        let Ok(readable) = readability::extract(
+            &mut input,
+            &parsed_url,
+            readability::ExtractOptions::default(),
+        ) else {
+            return false;
+        };
+        readable.text.trim().chars().count() >= MIN_READABILITY_EXTRACT_CHARS
+    });
+    result.unwrap_or(false)
 }
 
 /// Parse the `mf_fetch` tool's output envelope.
@@ -1074,6 +1237,7 @@ mod tests {
                     )),
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                 },
+                legacy_verifier: None,
             };
             fetcher
                 .fetch("https://www.youtube.com/watch?v=abc")
@@ -1088,6 +1252,436 @@ mod tests {
     }
 
     #[test]
+    fn test_agent_web_fetch_tool_youtube_error_output_fails_fetch() {
+        // A YouTube watch page whose caption extraction failed: `mf_fetch`
+        // reports it via metadata (`error` + `content_ok: false`) rather than
+        // by aborting the tool call. The adapter must turn that into a fetch
+        // error so the gatherer suppresses the video with the real reason
+        // instead of storing the placeholder bracket text as the source body
+        // and suppressing it later with an opaque "content too short" gate.
+        use async_trait::async_trait;
+
+        struct FakeYoutubeErrorTool;
+
+        #[async_trait]
+        impl AgentTool for FakeYoutubeErrorTool {
+            fn name(&self) -> &'static str {
+                "mf_fetch"
+            }
+            fn description(&self) -> &'static str {
+                "fake"
+            }
+            fn parameters_schema(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+            fn permission_category(&self) -> &'static str {
+                "web:read"
+            }
+            async fn execute(
+                &self,
+                _input: serde_json::Value,
+                _ctx: &AgentToolContext,
+            ) -> Result<ToolOutput> {
+                Ok(ToolOutput {
+                    content: "mf_fetch: https://www.youtube.com/watch?v=abc\nStatus: 200\nContent type: text/html\nPage type: youtube\nContent OK: false\nFetcher: http\n\nTitle: Some Video\n\n[YouTube transcript extraction failed: no caption tracks available for this YouTube video]".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "page_type": "youtube",
+                        "content_type": "text/html",
+                        "title": "Some Video",
+                        "content_ok": false,
+                        "next_action": "this video may not have captions; try a different source",
+                        "error": "no caption tracks available for this YouTube video",
+                    })),
+                })
+            }
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: Arc::new(FakeYoutubeErrorTool),
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher
+                .fetch("https://www.youtube.com/watch?v=abc")
+                .await
+                .expect_err("youtube error output must fail the fetch")
+        });
+        assert!(
+            err.to_string().contains("no caption tracks available"),
+            "error should carry the real failure reason, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_agent_web_fetch_tool_content_not_ok_fails_fetch() {
+        // Generic mf_fetch failure metadata (e.g. an HTTP body-read error or a
+        // youtube error output) carries `content_ok: false` without an
+        // `error` string — the adapter falls back to `next_action` as the
+        // failure reason.
+        use async_trait::async_trait;
+
+        struct FakeNotOkTool;
+
+        #[async_trait]
+        impl AgentTool for FakeNotOkTool {
+            fn name(&self) -> &'static str {
+                "mf_fetch"
+            }
+            fn description(&self) -> &'static str {
+                "fake"
+            }
+            fn parameters_schema(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+            fn permission_category(&self) -> &'static str {
+                "web:read"
+            }
+            async fn execute(
+                &self,
+                _input: serde_json::Value,
+                _ctx: &AgentToolContext,
+            ) -> Result<ToolOutput> {
+                Ok(ToolOutput {
+                    content: "mf_fetch: https://example.com\nStatus: 500\nContent type: text/html\nContent OK: false\n\nbroken".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "content_type": "text/html",
+                        "content_ok": false,
+                        "next_action": "retry, check connectivity, or try a different URL",
+                        "extraction_method": "readability",
+                    })),
+                })
+            }
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: Arc::new(FakeNotOkTool),
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher
+                .fetch("https://example.com")
+                .await
+                .expect_err("content_ok=false output must fail the fetch")
+        });
+        assert!(
+            err.to_string().contains("retry, check connectivity"),
+            "error should use next_action as the reason, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_agent_web_fetch_tool_content_not_ok_takes_priority_over_readability() {
+        // A failed HTML fetch (`content_ok: false`, fallback extraction) must
+        // be rejected with the mf_fetch failure reason — not the readability
+        // message — because the page never produced real content at all.
+        use async_trait::async_trait;
+
+        struct FakeFailedHtmlTool;
+
+        #[async_trait]
+        impl AgentTool for FakeFailedHtmlTool {
+            fn name(&self) -> &'static str {
+                "mf_fetch"
+            }
+            fn description(&self) -> &'static str {
+                "fake"
+            }
+            fn parameters_schema(&self) -> serde_json::Value {
+                serde_json::json!({})
+            }
+            fn permission_category(&self) -> &'static str {
+                "web"
+            }
+            async fn execute(
+                &self,
+                _input: serde_json::Value,
+                _ctx: &AgentToolContext,
+            ) -> anyhow::Result<ToolOutput> {
+                Ok(ToolOutput {
+                    content: "error placeholder body".to_string(),
+                    metadata: Some(serde_json::json!({
+                        "content_type": "text/html",
+                        "content_ok": false,
+                        "error": "failed to read response body",
+                        "extraction_method": "html2text",
+                    })),
+                })
+            }
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: Arc::new(FakeFailedHtmlTool),
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher
+                .fetch("https://example.com")
+                .await
+                .expect_err("failed fetch must error out")
+        });
+        let msg = err.to_string();
+        assert!(
+            msg.contains("failed to read response body"),
+            "expected mf_fetch error reason, got: {msg}"
+        );
+        assert!(
+            !msg.contains("readability"),
+            "readability check must not run for failed fetches, got: {msg}"
+        );
+    }
+
+    // ── Mandatory readability enforcement tests ────────────────────────────
+
+    /// Build a minimal `AgentToolContext` for fetch-adapter tests.
+    fn test_tool_context() -> AgentToolContext {
+        AgentToolContext {
+            session_id: "test".to_string(),
+            working_dir: std::env::current_dir().unwrap(),
+            event_bus: Arc::new(crate::event::EventBus::new(8)),
+            storage: None,
+            task_manager: None,
+            active_model: None,
+            team_context: None,
+            team_manager: None,
+            code_index: None,
+            bg_service: None,
+            spec_manager: None,
+            active_spec_id: None,
+            config: None,
+            read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+        }
+    }
+
+    /// A fake `mf_fetch` tool whose `extraction_method` metadata is
+    /// configurable per test.
+    struct FakeMfFetch {
+        extraction_method: Option<&'static str>,
+        content_type: &'static str,
+    }
+
+    #[async_trait::async_trait]
+    impl AgentTool for FakeMfFetch {
+        fn name(&self) -> &'static str {
+            "mf_fetch"
+        }
+        fn description(&self) -> &'static str {
+            "fake"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn permission_category(&self) -> &'static str {
+            "web"
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &AgentToolContext,
+        ) -> anyhow::Result<ToolOutput> {
+            let mut metadata = serde_json::json!({
+                "content_type": self.content_type,
+            });
+            if let Some(method) = self.extraction_method {
+                metadata["extraction_method"] = serde_json::json!(method);
+            }
+            Ok(ToolOutput {
+                content: "Article body text extracted from the page".to_string(),
+                metadata: Some(metadata),
+            })
+        }
+    }
+
+    /// A fake legacy `webfetch` tool.
+    struct FakeLegacyWebfetch;
+
+    #[async_trait::async_trait]
+    impl AgentTool for FakeLegacyWebfetch {
+        fn name(&self) -> &'static str {
+            "webfetch"
+        }
+        fn description(&self) -> &'static str {
+            "fake"
+        }
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        fn permission_category(&self) -> &'static str {
+            "web"
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &AgentToolContext,
+        ) -> anyhow::Result<ToolOutput> {
+            Ok(ToolOutput {
+                content: "Fallback-extracted page text".to_string(),
+                metadata: None,
+            })
+        }
+    }
+
+    #[test]
+    fn test_mf_fetch_readability_method_accepted() {
+        let fake = Arc::new(FakeMfFetch {
+            extraction_method: Some("readability"),
+            content_type: "text/html",
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher.fetch("https://example.com/article").await
+        });
+        assert!(
+            page.is_ok(),
+            "readability-extracted page must be accepted: {page:?}"
+        );
+    }
+
+    #[test]
+    fn test_mf_fetch_html2text_fallback_rejected() {
+        let fake = Arc::new(FakeMfFetch {
+            extraction_method: Some("html2text"),
+            content_type: "text/html",
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher.fetch("https://example.com/article").await
+        });
+        let err = result.expect_err("html2text fallback must be rejected");
+        assert!(
+            err.to_string().contains("readability extraction failed"),
+            "error should explain the readability requirement: {err}"
+        );
+    }
+
+    #[test]
+    fn test_mf_fetch_missing_extraction_method_rejected() {
+        // Older mf_fetch metadata (cache entries without the signal, manual
+        // envelopes) must be treated as non-readability and rejected.
+        let fake = Arc::new(FakeMfFetch {
+            extraction_method: None,
+            content_type: "text/html",
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher.fetch("https://example.com/article").await
+        });
+        assert!(
+            result.is_err(),
+            "missing extraction_method must be rejected as non-readability"
+        );
+    }
+
+    #[test]
+    fn test_mf_fetch_pdf_bypasses_readability_check() {
+        // PDFs are extracted with pdf-extract instead of readability; the
+        // mandatory guarantee only applies to HTML pages.
+        let fake = Arc::new(FakeMfFetch {
+            extraction_method: None,
+            content_type: "application/pdf",
+        });
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: fake,
+                ctx: test_tool_context(),
+                legacy_verifier: None,
+            };
+            fetcher.fetch("https://example.com/paper.pdf").await
+        });
+        assert!(
+            page.is_ok(),
+            "PDF sources must bypass the readability check: {page:?}"
+        );
+    }
+
+    #[test]
+    fn test_legacy_webfetch_fallback_verified_rejected() {
+        // When the legacy webfetch tool is used and the raw-HTML re-check
+        // says readability could not extract, the page must be rejected.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: Arc::new(FakeLegacyWebfetch),
+                ctx: test_tool_context(),
+                legacy_verifier: Some(Box::new(|| false)),
+            };
+            fetcher.fetch("https://example.com/article").await
+        });
+        assert!(
+            result.is_err(),
+            "legacy webfetch page failing the readability re-check must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_legacy_webfetch_fallback_verified_accepted() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let page = rt.block_on(async {
+            let fetcher = AgentWebFetchTool {
+                tool: Arc::new(FakeLegacyWebfetch),
+                ctx: test_tool_context(),
+                legacy_verifier: Some(Box::new(|| true)),
+            };
+            fetcher.fetch("https://example.com/article").await
+        });
+        assert!(
+            page.is_ok(),
+            "legacy webfetch page passing the readability re-check must be accepted: {page:?}"
+        );
+    }
+
+    #[test]
+    fn test_readability_extract_ok_on_article_html() {
+        let body = "Readability is a content-extraction library. ".repeat(40);
+        let html = format!(
+            "<html><head><title>On Readability</title></head>\
+             <body><article><h1>On Readability</h1><p>{body}</p></article></body></html>"
+        );
+        assert!(
+            readability_extract_ok(&html, "https://example.com/on-readability"),
+            "real readability must accept a long article page"
+        );
+    }
+
+    #[test]
+    fn test_readability_extract_ok_rejects_nav_only_html() {
+        // Tiny pages with no article body must not pass the readability check.
+        let html = "<html><head><title>Nav</title></head><body><nav><a href='/'>home</a></nav></body></html>";
+        assert!(
+            !readability_extract_ok(html, "https://example.com/nav"),
+            "nav-only page must fail the readability check"
+        );
+    }
+
+    #[test]
+    fn test_readability_extract_ok_rejects_invalid_url() {
+        let html = "<html><body><article><p>text</p></article></body></html>";
+        assert!(!readability_extract_ok(html, "not-a-url"));
+    }
+
+    #[test]
     fn test_build_research_session_wires_available_tools() {
         use crate::event::EventBus;
         use crate::tool::create_default_registry;
@@ -1099,6 +1693,7 @@ mod tests {
             "test-session".into(),
             std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             Arc::new(EventBus::new(256)),
+            None,
             None,
             None,
             None,

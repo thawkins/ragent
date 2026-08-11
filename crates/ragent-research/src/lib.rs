@@ -46,6 +46,7 @@ pub mod cli;
 pub mod diagram;
 pub mod document;
 pub mod engine;
+pub mod gather_log;
 pub mod io;
 pub mod item;
 pub mod local_gatherer;

@@ -1,5 +1,54 @@
 # Changelog
 
+## Version: 1.0.23
+
+### Added — Jobs-To-Be-Done analysis for specs
+
+- New `/spec jtbd <specname>` sub-command performs a Jobs-To-Be-Done
+  analysis of an existing spec's `SPEC.md` and writes the result to
+  `specs/<specname>/JTBD.md`. Supports `--force` to overwrite an existing
+  analysis and `--agent <name>` to select the analysis agent.
+- Added parsing, dispatch, and tests for the new `Jtbd` spec command
+  variant in `crates/ragent-specs`.
+
+### Changed — Mandatory readability extraction in the research web-gather phase
+
+- Every HTML page captured as a research web source must now have been
+  extracted by the `readability-rs` crate. Pages where readability fails
+  — and would previously have been accepted via the silent html2text /
+  raw tag-strip fallbacks — are rejected with a
+  `readability extraction failed …` fetch error and skipped by the
+  gatherer. PDF and YouTube sources bypass readability by design and are
+  unaffected.
+- `mf_fetch` now reports which stage of the extraction chain produced a
+  page via a new `extraction_method` metadata signal
+  (`readability` / `html2text` / `raw_text` / …); the signal is also
+  recorded in the masterfetch content cache (new
+  `fetch_cache.extraction_method` column) so cached responses keep it.
+- The legacy `webfetch` path (which does not report the extraction
+  stage) is verified by re-running `readability-rs` directly on the raw
+  HTML so the guarantee is enforced rather than trusted.
+
+### Fixed — YouTube transcript capture in research web-gather
+
+- `mf_fetch` now parses real YouTube watch pages correctly: the
+  `ytInitialPlayerResponse` object is extracted with a brace-balanced,
+  string-aware scanner instead of the previous `(\{.*?\});` regex (which
+  broke on nested braces and on `}` characters inside JSON strings), and
+  the caption track list is read from the real
+  `captions.playerCaptionsTracklistRenderer.captionTracks` location
+  (with the legacy flat `captions.captionTracks` layout kept as a
+  fallback). Watch-page transcription data is therefore actually
+  recovered instead of erroring on every real video page.
+- Failed fetches reported by `mf_fetch` metadata (`error` field or
+  `content_ok = false` — e.g. "no caption tracks available for this
+  YouTube video") now abort the research fetch adapter with an explicit
+  error. The gatherer surfaces them as a `FetchFailed` event carrying
+  the real reason and suppresses the video outright; previously the
+  placeholder `[YouTube transcript extraction failed: …]` text was kept
+  as the page body and silently suppressed by the
+  "extracted content too short" gate, hiding why videos were dropped.
+
 ## Version: 1.0.22
 
 ### Fixed — Time-sensitive `test_parse_natural_time_5pm_tomorrow` CI failure

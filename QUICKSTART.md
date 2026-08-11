@@ -1081,7 +1081,13 @@ Run any of these from the TUI prompt:
 /research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
 /spec create async-await Add async/await ergonomics --from-research rust-async
+/spec jtbd async-await
 ```
+
+`/spec jtbd <specname>` performs a Jobs-To-Be-Done analysis of an existing
+spec's `SPEC.md` and writes `JTBD.md` in the same spec folder. Use `--force`
+to overwrite an existing `JTBD.md`, and `--agent <name>` to dispatch to a
+specific agent instead of the default explore agent.
 
 Or from the CLI:
 
@@ -1154,6 +1160,9 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
+| `/spec create <name> <title>` | Create a new spec from a prompt |
+| `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
+| `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
 
 ### Benchmark Workflow
 

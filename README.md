@@ -85,7 +85,8 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   and optional embedding-based semantic search; automatic extraction, decay,
   compression, and knowledge graph support
 - **Spec management** — `/spec` slash commands for creating, listing, searching,
-  validating, and tracking specification lifecycles
+  validating, and tracking specification lifecycles; `/spec jtbd` performs
+  Jobs-To-Be-Done analysis on existing specs
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints

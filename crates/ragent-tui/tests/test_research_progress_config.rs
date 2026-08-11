@@ -13,7 +13,7 @@ fn encode_config_snapshot_shows_format_and_depth() {
         output_format: OutputFormat::Imrad.as_str().to_string(),
         depth: Some(Depth::Standard.as_str().to_string()),
         iterations: Some(2),
-        from_url: None,
+        from_urls: Vec::new(),
         from_file: None,
     };
     let encoded = encode_progress_event("my-run", "topic", &event);
@@ -26,12 +26,12 @@ fn encode_config_snapshot_shows_format_and_depth() {
 }
 
 #[test]
-fn encode_config_snapshot_sanitizes_from_url() {
+fn encode_config_snapshot_sanitizes_from_urls() {
     let event = SessionEvent::ConfigSnapshot {
         output_format: OutputFormat::ComparisonTable.as_str().to_string(),
         depth: None,
         iterations: None,
-        from_url: Some("https://example.com\x1b[31m".to_string()),
+        from_urls: vec!["https://example.com\x1b[31m".to_string()],
         from_file: None,
     };
     let encoded = encode_progress_event("run", "topic", &event);

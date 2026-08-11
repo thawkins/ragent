@@ -51,7 +51,7 @@ impl App {
             ResearchCliCommand::Create {
                 name,
                 topic,
-                from_url,
+                from_urls,
                 from_file,
                 iterations,
                 depth,
@@ -79,10 +79,10 @@ impl App {
                 self.status = format!("⏳ research: {name}…");
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    if from_url.is_some() {
+                    if !from_urls.is_empty() {
                         format!(
-                            "research: create '{name}' from URL: {from_url}",
-                            from_url = from_url.as_deref().unwrap_or("")
+                            "research: create '{name}' from URL(s): {}",
+                            from_urls.join(", ")
                         )
                     } else {
                         format!("research: create '{name}' for topic: {topic}")
@@ -103,12 +103,12 @@ impl App {
                 // from the extracted document when `--from-file` is used.
                 let title = ragent_research::derive_title_full(
                     &topic,
-                    from_url.as_deref(),
+                    from_urls.first().map(String::as_str),
                     from_file.as_deref(),
                 );
                 let config = SessionConfig {
                     topic: topic.clone(),
-                    from_url,
+                    from_urls,
                     from_file: from_file.map(std::path::PathBuf::from),
                     sources_dir: sources_dir.map(std::path::PathBuf::from),
                     template,
@@ -146,6 +146,7 @@ impl App {
                     config_arc,
                     Some(self.provider_registry.clone()),
                     self.agent_info.model.clone(),
+                    Some(name.as_str()),
                 );
                 let observer_clone = Arc::new(TuiResearchObserver {
                     app_event_bus: observer.app_event_bus.clone(),
@@ -155,7 +156,7 @@ impl App {
                 });
                 let name_for_spawn = name.clone();
                 let topic_for_assistant = topic.clone();
-                let from_url_for_msg = config.from_url.clone();
+                let from_urls_for_msg = config.from_urls.clone();
                 let event_bus_for_spawn = self.event_bus.clone();
                 let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
@@ -183,7 +184,11 @@ impl App {
                     .unwrap_or(OutputFormat::Report)
                     .as_str();
                 let subject_line = if topic_for_assistant.is_empty() {
-                    format!("URL: {}", from_url_for_msg.as_deref().unwrap_or(""))
+                    if from_urls_for_msg.is_empty() {
+                        "URL: ".to_string()
+                    } else {
+                        format!("URL(s): {}", from_urls_for_msg.join(", "))
+                    }
                 } else {
                     format!("Topic: {topic_for_assistant}")
                 };
