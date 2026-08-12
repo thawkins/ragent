@@ -106,6 +106,9 @@ pub enum ResearchCommands {
         /// Keep low-relevance web sources instead of filtering them out.
         #[arg(long)]
         use_low_relevance: bool,
+        /// Disable scholarly search engines (e.g. OpenAlex) during web gathering.
+        #[arg(long)]
+        no_scholarly: bool,
         /// Override the maximum number of local scoring/spec-scan tasks that run
         /// in parallel during the local-gathering phase (default 8).
         #[arg(long, value_name = "N")]
@@ -205,6 +208,7 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
+            no_scholarly,
             local_concurrently,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -234,6 +238,7 @@ pub async fn handle_research_command(
                 use_local,
                 use_specs,
                 use_low_relevance,
+                no_scholarly,
                 local_concurrency: local_concurrently,
                 fetch_timeout_secs,
                 web_phase_timeout_secs,
@@ -343,6 +348,7 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
+            no_scholarly,
             local_concurrency,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -388,6 +394,7 @@ pub async fn handle_research_command(
                     OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
                 }),
                 use_low_relevance,
+                disable_scholarly: no_scholarly,
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
                 search_max_retries: search_max_retries

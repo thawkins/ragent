@@ -49,7 +49,10 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
     - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
-      extraction, search, and crawling
+      extraction, search, and crawling; `mf_search` runs DuckDuckGo, Brave,
+      OpenAlex (scholarly works), and Wikipedia (encyclopedia summaries) keyless
+      backends in parallel, plus optional LangSearch / Tavily / Perplexity
+      API-backed engines when configured
     - **Gmail & messaging** — gmail, send_channel_message for external notifications
   - **Terminal UI** — full-screen ratatui interface with provider setup dialog,
     slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
@@ -365,12 +368,20 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.23** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+**v1.0.26** — The core architecture, tool system (~150 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- OpenAlex (scholarly works) and Wikipedia (encyclopedia summaries) keyless
+  search backends added to `mf_search`, running in parallel with DuckDuckGo
+  and Brave; per-engine `relevance_score` and `fetch_relevance` consensus
+  weighting adjusted for more balanced ranking across backends
+- `mf_search` gains an `engine` parameter to restrict the search to a single
+  backend
+  (`duckduckgo` / `brave` / `openalex` / `wikipedia` / `langsearch` /
+  `tavily` / `perplexity`)
 - `/spec update <spec-id>` sub-command re-reads an existing `SPEC.md` and regenerates
   `PLAN.md` and `TESTPLAN.md` (preserving unchanged task IDs)
 - `/spec create` now generates a `TESTPLAN.md` manual test-plan artifact alongside
@@ -418,7 +429,7 @@ Recent highlights:
 - `read` tool instructions clarified (`end_line` is absolute line number)
 - Remote push prohibitions strengthened in `AGENTS.md`; added "no unsafe code" and
   "no `.unwrap()` on user-facing paths" rules
-- SPEC.md audited, reorganized, and updated for v1.0.23
+- SPEC.md audited, reorganized, and updated for v1.0.26
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery
 - Amazon Bedrock provider with AWS SigV4 signing and dual API support

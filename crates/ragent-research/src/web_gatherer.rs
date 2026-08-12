@@ -63,7 +63,7 @@ pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
 /// set of candidate URLs before the synthesis phase.
 /// Default cap on the number of web sources captured when the caller does not
 /// supply an explicit `max_web_results` (FR-011).
-pub const DEFAULT_MAX_WEB_RESULTS: usize = 250;
+pub const DEFAULT_MAX_WEB_RESULTS: usize = 500;
 
 /// Default per-fetch wall-clock timeout. Pages that take longer than this are
 /// treated as a fetch failure so a single slow URL cannot stall the whole
@@ -100,6 +100,77 @@ pub const DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD: u32 = 3;
 /// surfaced in the progress display so a captured source always has at least
 /// a full preview's worth of content.
 pub const MIN_EXTRACTABLE_CONTENT_CHARS: usize = 256;
+
+/// Minimum content length (in characters) for a *scholarly* source captured
+/// directly from the search-engine snippet.
+///
+/// Scholarly backends (e.g. OpenAlex) reconstruct the work's abstract into
+/// the snippet and rank results by their own `relevance_score`. Such hits are
+/// captured as self-contained sources without a URL fetch (the DOI/landing
+/// page is typically a paywalled redirect that readability cannot extract), so
+/// the much shorter, information-dense abstract replaces the full page body.
+/// The threshold is correspondingly lower than [`MIN_EXTRACTABLE_CONTENT_CHARS`]
+/// and only rejects works that expose no abstract at all.
+pub const MIN_SCHOLARLY_CONTENT_CHARS: usize = 80;
+
+/// Minimum content length (in characters) for an *encyclopedia* source
+/// captured directly from the search-engine snippet.
+///
+/// Encyclopedia backends (e.g. Wikipedia) return a concise page summary via
+/// their REST API; the snippet carries that summary as clean, extracted text.
+/// Such hits are captured as self-contained sources without a URL fetch (the
+/// full Wikipedia article HTML is large and readability extraction on it can
+/// fail or produce inconsistent results), so the shorter, information-dense
+/// summary replaces the full page body. The threshold matches
+/// [`MIN_SCHOLARLY_CONTENT_CHARS`] and only rejects summaries that expose no
+/// extract at all.
+pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
+
+/// Returns `true` for scholarly search-engine hits that carry a reconstructed
+/// abstract in their snippet and should be captured as self-contained sources
+/// without a URL fetch.
+///
+/// Scholarly backends (currently OpenAlex) rank results by their own
+/// `relevance_score`; the lexical title/snippet pre-filter is a heuristic for
+/// unranked HTML scrapers (DuckDuckGo, Brave) and would reject most scholarly
+/// titles because they do not lexically overlap with the (often rephrased)
+/// research sub-query. Scholarly hits are therefore exempt from the lexical
+/// filter and from the URL fetch — their snippet is the evidence.
+///
+/// A hit is scholarly only when OpenAlex is the *sole* contributing engine.
+/// When the same URL is also returned by a general web engine (DuckDuckGo,
+/// Brave), the page is a fetchable HTML page and the normal fetch path is
+/// preferred so the richer page body is captured instead of the concise
+/// abstract.
+fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
+    hit.search_engine.split(',').all(|e| e.trim() == "openalex")
+        && hit.search_engine.contains("openalex")
+}
+
+/// Returns `true` for encyclopedia search-engine hits that carry a page
+/// summary in their snippet and should be captured as self-contained sources
+/// without a URL fetch.
+///
+/// Encyclopedia backends (currently Wikipedia) rank results by their own
+/// search relevance; the lexical title/snippet pre-filter is a heuristic for
+/// unranked HTML scrapers (DuckDuckGo, Brave) and would reject most
+/// encyclopedia titles because they use proper names and technical terms
+/// that do not lexically overlap with the (often rephrased) research
+/// sub-query. Encyclopedia hits are therefore exempt from the lexical filter
+/// and from the URL fetch — their snippet (the REST API page summary) is the
+/// evidence.
+///
+/// A hit is encyclopedia only when Wikipedia is the *sole* contributing
+/// engine. When the same URL is also returned by a general web engine
+/// (DuckDuckGo, Brave), the page is a fetchable HTML page and the normal fetch
+/// path is preferred so the richer page body is captured instead of the
+/// concise summary.
+fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
+    hit.search_engine
+        .split(',')
+        .all(|e| e.trim() == "wikipedia")
+        && hit.search_engine.contains("wikipedia")
+}
 
 /// Cap a captured web body at the same byte budget used by the supporting
 /// file renderer so the body stored on the `Source` matches what ends up on
@@ -336,6 +407,10 @@ pub struct WebGatherer {
     /// relevance score, disabling the default filter that discards
     /// "Low"/"Very low" sources. Defaults to `false`.
     keep_low_relevance: bool,
+    /// When `true`, hits from scholarly search engines (e.g. OpenAlex) are
+    /// filtered out during gathering so only general web search results are
+    /// captured. Defaults to `false`.
+    disable_scholarly: bool,
     /// Maximum number of retry attempts for a failed sub-query search
     /// (Milestone H-002). Retries use exponential backoff with a base delay of
     /// [`Self::search_retry_base_delay_ms`]. Defaults to
@@ -387,6 +462,7 @@ impl WebGatherer {
             fetch_concurrency: DEFAULT_FETCH_CONCURRENCY,
             fetch_timeout: DEFAULT_FETCH_TIMEOUT,
             keep_low_relevance: false,
+            disable_scholarly: false,
             search_max_retries: DEFAULT_SEARCH_MAX_RETRIES,
             search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
             search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
@@ -492,6 +568,16 @@ impl WebGatherer {
     #[must_use]
     pub fn with_keep_low_relevance(mut self, keep: bool) -> Self {
         self.keep_low_relevance = keep;
+        self
+    }
+
+    /// Disable scholarly search engines (e.g. OpenAlex) during gathering.
+    ///
+    /// When enabled, [`gather_with_observer`] filters out hits from
+    /// scholarly backends so only general web search results are captured.
+    #[must_use]
+    pub fn with_disable_scholarly(mut self, disable: bool) -> Self {
+        self.disable_scholarly = disable;
         self
     }
 
@@ -820,6 +906,26 @@ impl WebGatherer {
                         if !seen_urls.insert(url_key) {
                             continue;
                         }
+                        // Filter out scholarly hits when --no-scholarly is set.
+                        if self.disable_scholarly && is_scholarly_hit(&hit) {
+                            excluded_count += 1;
+                            let reason = "scholarly engine excluded by --no-scholarly";
+                            tracing::info!(
+                                query = %query,
+                                url = %hit.url,
+                                "research: skipping scholarly hit due to --no-scholarly"
+                            );
+                            log_rejected(
+                                &hit.url,
+                                &query,
+                                &hit.title,
+                                &hit.search_tool,
+                                &hit.search_engine,
+                                reason,
+                                None,
+                            );
+                            continue;
+                        }
                         considered_count += 1;
                         hit.matched_query = query.clone();
                         self.log_url_outcome(
@@ -832,6 +938,32 @@ impl WebGatherer {
                             "",
                             None,
                         );
+                        // Scholarly hits (e.g. OpenAlex) are already ranked by
+                        // the source engine's own relevance score and carry a
+                        // reconstructed abstract in the snippet. The lexical
+                        // pre-filter is a heuristic for unranked HTML scrapers
+                        // and would wrongly reject scholarly titles that do not
+                        // lexically overlap the (often rephrased) sub-query, so
+                        // these hits bypass it entirely.
+                        if is_scholarly_hit(&hit) {
+                            hit.matched_query =
+                                format!("{query} [Scholarly — engine-ranked abstract]");
+                            hits_by_url.push((query.clone(), hit));
+                            continue;
+                        }
+                        // Encyclopedia hits (e.g. Wikipedia) are already ranked
+                        // by the source engine's own search relevance and carry
+                        // a clean page summary in the snippet. The lexical
+                        // pre-filter is a heuristic for unranked HTML scrapers
+                        // and would wrongly reject encyclopedia titles (proper
+                        // names, technical terms) that do not lexically overlap
+                        // the sub-query, so these hits bypass it entirely.
+                        if is_encyclopedia_hit(&hit) {
+                            hit.matched_query =
+                                format!("{query} [Encyclopedia — engine-ranked summary]");
+                            hits_by_url.push((query.clone(), hit));
+                            continue;
+                        }
                         // Pre-filter by title/snippet relevance before any
                         // expensive full-page fetch (B-001).
                         if let Some((label, retained)) = self.filter_hit(&query, &hit) {
@@ -965,6 +1097,48 @@ impl WebGatherer {
         let fetch_futures = candidates.into_iter().map(|(index, query, hit)| {
             let fetch_tool = fetch_tool.clone();
             async move {
+                // Scholarly hits are captured as self-contained sources from
+                // the reconstructed abstract in the snippet — the DOI/landing
+                // page is typically a paywalled redirect that readability
+                // cannot extract, so a URL fetch would drop nearly every
+                // scholarly result. Synthesize a page directly from the hit.
+                if is_scholarly_hit(&hit) {
+                    let page = WebFetchedPage {
+                        url: hit.url.clone(),
+                        title: hit.title.clone(),
+                        body: hit.snippet.clone(),
+                        published_at: None,
+                        content_type: None,
+                        page_type: Some("scholarly".to_string()),
+                        language: None,
+                    };
+                    let result: Result<
+                        Result<WebFetchedPage, anyhow::Error>,
+                        tokio::time::error::Elapsed,
+                    > = Ok(Ok(page));
+                    return (index, query, hit, result);
+                }
+                // Encyclopedia hits are captured as self-contained sources from
+                // the page summary in the snippet — the full Wikipedia article
+                // HTML is large and readability extraction on it can fail or
+                // produce inconsistent results. Synthesize a page directly from
+                // the hit so the concise summary is used as evidence.
+                if is_encyclopedia_hit(&hit) {
+                    let page = WebFetchedPage {
+                        url: hit.url.clone(),
+                        title: hit.title.clone(),
+                        body: hit.snippet.clone(),
+                        published_at: None,
+                        content_type: None,
+                        page_type: Some("encyclopedia".to_string()),
+                        language: None,
+                    };
+                    let result: Result<
+                        Result<WebFetchedPage, anyhow::Error>,
+                        tokio::time::error::Elapsed,
+                    > = Ok(Ok(page));
+                    return (index, query, hit, result);
+                }
                 let result = tokio::time::timeout(
                     fetch_timeout,
                     fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
@@ -978,11 +1152,23 @@ impl WebGatherer {
         while let Some((index, query, hit, result)) = stream.next().await {
             match result {
                 Ok(Ok(page)) => {
+                    let scholarly = page.page_type.as_deref() == Some("scholarly");
+                    let encyclopedia = page.page_type.as_deref() == Some("encyclopedia");
                     let title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
-                    let (relevance, retained) =
-                        compute_relevance_label(&query, &title, &hit.snippet, &page.url);
+                    // Scholarly and encyclopedia sources are already ranked by
+                    // the source engine (e.g. OpenAlex's `relevance_score`,
+                    // Wikipedia's search relevance); skip the lexical
+                    // post-fetch filter, which would reject them for the same
+                    // lack of query-term overlap as the pre-filter.
+                    let (relevance, retained) = if scholarly {
+                        ("Scholarly — engine-ranked abstract".to_string(), true)
+                    } else if encyclopedia {
+                        ("Encyclopedia — engine-ranked summary".to_string(), true)
+                    } else {
+                        compute_relevance_label(&query, &title, &hit.snippet, &page.url)
+                    };
                     if !retained && !self.keep_low_relevance {
                         excluded_count += 1;
                         tracing::info!(
@@ -1013,13 +1199,34 @@ impl WebGatherer {
                     // minimum extractable content length. Near-empty
                     // extractions (paywalls, JS-only renders, soft 404s, empty
                     // PDFs) add noise to the synthesis prompt without
-                    // contributing usable evidence.
+                    // contributing usable evidence. Scholarly sources use a
+                    // lower threshold — their body is the concise reconstructed
+                    // abstract, not a full page.
                     let content_chars = page.body.chars().count();
-                    if content_chars < MIN_EXTRACTABLE_CONTENT_CHARS {
+                    let min_chars = if scholarly || encyclopedia {
+                        if scholarly {
+                            MIN_SCHOLARLY_CONTENT_CHARS
+                        } else {
+                            MIN_ENCYCLOPEDIA_CONTENT_CHARS
+                        }
+                    } else {
+                        MIN_EXTRACTABLE_CONTENT_CHARS
+                    };
+                    if content_chars < min_chars {
                         excluded_count += 1;
-                        let error = format!(
-                            "extracted content too short ({content_chars} < {MIN_EXTRACTABLE_CONTENT_CHARS} chars)"
-                        );
+                        let error = if scholarly {
+                            format!(
+                                "scholarly abstract too short ({content_chars} < {min_chars} chars)"
+                            )
+                        } else if encyclopedia {
+                            format!(
+                                "encyclopedia summary too short ({content_chars} < {min_chars} chars)"
+                            )
+                        } else {
+                            format!(
+                                "extracted content too short ({content_chars} < {min_chars} chars)"
+                            )
+                        };
                         tracing::info!(
                             query = %query,
                             url = %page.url,
@@ -1429,6 +1636,282 @@ mod tests {
         assert!(
             !calls.contains(&"https://bad.example".to_string()),
             "bad URL must not be fetched"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_captures_scholarly_hit_without_fetch() {
+        // An OpenAlex hit carries a reconstructed abstract in the snippet and
+        // is captured as a self-contained source. The DOI/landing-page URL is
+        // never fetched (it would be a paywalled redirect readability cannot
+        // extract), and the lexical relevance pre-filter is bypassed because
+        // OpenAlex already ranked the result by its own relevance score.
+        let abstract_text = "We present a novel approach to async runtime \
+             scheduling in Rust using a work-stealing executor that improves \
+             throughput by thirty percent on benchmarks.";
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1000/rust-async".into(),
+            title: "Work-Stealing Async Scheduling in Rust".into(),
+            snippet: format!("{abstract_text} (Year: 2024 | Cited: 17 | OA: yes | Source: ACM)"),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "openalex".into(),
+        }];
+        let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        let sources = g.gather("free keyless open search APIs", 5).await.unwrap();
+        assert_eq!(sources.len(), 1, "scholarly hit should be captured");
+        match &sources[0] {
+            Source::Web {
+                url,
+                title,
+                relevance,
+                page_type,
+                search_engine,
+                ..
+            } => {
+                assert_eq!(url, "https://doi.org/10.1000/rust-async");
+                assert_eq!(title, "Work-Stealing Async Scheduling in Rust");
+                assert_eq!(page_type.as_deref(), Some("scholarly"));
+                assert_eq!(search_engine, "openalex");
+                assert!(
+                    relevance.contains("Scholarly"),
+                    "scholarly sources use the engine-ranked relevance label"
+                );
+            }
+            other => panic!("expected Source::Web, got {other:?}"),
+        }
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "scholarly hit must not trigger a URL fetch (no network), got {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_filters_scholarly_hit_when_no_scholarly_set() {
+        // With --no-scholarly, OpenAlex hits should be filtered out before
+        // any fetch or capture.
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1000/rust-async".into(),
+            title: "Work-Stealing Async Scheduling in Rust".into(),
+            snippet: format!(
+                "We present a novel approach to async runtime \
+                 scheduling in Rust using a work-stealing executor that improves \
+                 throughput by thirty percent on benchmarks. \
+                 (Year: 2024 | Cited: 17 | OA: yes | Source: ACM)"
+            ),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "openalex".into(),
+        }];
+        let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        let g = g.with_disable_scholarly(true);
+        let sources = g.gather("free keyless open search APIs", 5).await.unwrap();
+        assert_eq!(
+            sources.len(),
+            0,
+            "scholarly hit should be filtered out by --no-scholarly"
+        );
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "no fetch should be attempted for filtered scholarly hit"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_rejects_scholarly_hit_with_no_abstract() {
+        // An OpenAlex work with no abstract produces a snippet shorter than
+        // `MIN_SCHOLARLY_CONTENT_CHARS`; it should be rejected rather than
+        // admitted as near-empty noise.
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1000/no-abstract".into(),
+            title: "Untitled Work With No Abstract".into(),
+            snippet: "(Year: 2024 | Cited: 0 | OA: no)".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "openalex".into(),
+        }];
+        let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        let sources = g.gather("anything at all", 5).await.unwrap();
+        assert!(
+            sources.is_empty(),
+            "abstract-less scholarly hit should be rejected"
+        );
+        let calls = fetch.calls.lock().unwrap();
+        assert!(calls.is_empty(), "no fetch should be attempted");
+    }
+
+    #[tokio::test]
+    async fn gather_fetches_shared_engine_url_instead_of_treating_as_scholarly() {
+        // When the same URL is returned by OpenAlex *and* a general web engine,
+        // the page is a fetchable HTML page. The gatherer must take the normal
+        // fetch path (capturing the richer page body) rather than treating it
+        // as a scholarly snippet-only source.
+        let hits = vec![WebSearchHit {
+            url: "https://shared.example/paper".into(),
+            title: "Rust async runtime".into(),
+            snippet: "Rust async runtime tokio".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "duckduckgo, openalex".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://shared.example/paper".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://shared.example/paper".into(),
+                title: "Rust async runtime".into(),
+                body: body256("full page body for the shared URL"),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust async runtime", 5).await.unwrap();
+        assert_eq!(sources.len(), 1, "shared-engine hit should be captured");
+        match &sources[0] {
+            Source::Web { page_type, .. } => {
+                assert_ne!(
+                    page_type.as_deref(),
+                    Some("scholarly"),
+                    "shared-engine URL must not be treated as scholarly"
+                );
+            }
+            other => panic!("expected Source::Web, got {other:?}"),
+        }
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            calls.contains(&"https://shared.example/paper".to_string()),
+            "shared-engine URL must be fetched normally, got {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_captures_encyclopedia_hit_without_fetch() {
+        // A Wikipedia hit carries a page summary in the snippet and is captured
+        // as a self-contained source. The article URL is never fetched (the
+        // full Wikipedia HTML is large and readability extraction on it can
+        // fail), and the lexical relevance pre-filter is bypassed because
+        // Wikipedia's search API already ranked the result by its own
+        // relevance score.
+        let summary = "DuckDuckGo is an internet search engine that emphasizes \
+             protecting searchers' privacy and avoiding the filter bubble of \
+             personalized search results.";
+        let hits = vec![WebSearchHit {
+            url: "https://en.wikipedia.org/wiki/DuckDuckGo".into(),
+            title: "DuckDuckGo".into(),
+            snippet: summary.to_string(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "wikipedia".into(),
+        }];
+        let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        // Query terms that do NOT lexically overlap with "DuckDuckGo" — this
+        // would be rejected by the pre-filter if the encyclopedia bypass were
+        // not in place.
+        let sources = g
+            .gather("free keyless web search APIs no API key required", 5)
+            .await
+            .unwrap();
+        assert_eq!(sources.len(), 1, "encyclopedia hit should be captured");
+        match &sources[0] {
+            Source::Web {
+                url,
+                title,
+                relevance,
+                page_type,
+                search_engine,
+                ..
+            } => {
+                assert_eq!(url, "https://en.wikipedia.org/wiki/DuckDuckGo");
+                assert_eq!(title, "DuckDuckGo");
+                assert_eq!(page_type.as_deref(), Some("encyclopedia"));
+                assert_eq!(search_engine, "wikipedia");
+                assert!(
+                    relevance.contains("Encyclopedia"),
+                    "encyclopedia sources use the engine-ranked relevance label"
+                );
+            }
+            other => panic!("expected Source::Web, got {other:?}"),
+        }
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "encyclopedia hit must not trigger a URL fetch (no network), got {calls:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_rejects_encyclopedia_hit_with_no_summary() {
+        // A Wikipedia article with no extract produces a snippet shorter than
+        // `MIN_ENCYCLOPEDIA_CONTENT_CHARS`; it should be rejected rather than
+        // admitted as near-empty noise.
+        let hits = vec![WebSearchHit {
+            url: "https://en.wikipedia.org/wiki/No_Summary".into(),
+            title: "No Summary".into(),
+            snippet: "[thumbnail: https://example.com/thumb.png]".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "wikipedia".into(),
+        }];
+        let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        let sources = g.gather("anything at all", 5).await.unwrap();
+        assert!(
+            sources.is_empty(),
+            "summary-less encyclopedia hit should be rejected"
+        );
+        let calls = fetch.calls.lock().unwrap();
+        assert!(calls.is_empty(), "no fetch should be attempted");
+    }
+
+    #[tokio::test]
+    async fn gather_fetches_shared_wikipedia_engine_url_instead_of_treating_as_encyclopedia() {
+        // When the same URL is returned by Wikipedia *and* a general web engine,
+        // the page is a fetchable HTML page. The gatherer must take the normal
+        // fetch path (capturing the richer page body) rather than treating it
+        // as an encyclopedia snippet-only source.
+        let hits = vec![WebSearchHit {
+            url: "https://en.wikipedia.org/wiki/Rust_(programming_language)".into(),
+            title: "Rust (programming language)".into(),
+            snippet: "Rust programming language".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "duckduckgo, wikipedia".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://en.wikipedia.org/wiki/Rust_(programming_language)".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://en.wikipedia.org/wiki/Rust_(programming_language)".into(),
+                title: "Rust (programming language)".into(),
+                body: body256("full page body for the shared Wikipedia URL"),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
+        let sources = g.gather("Rust programming language", 5).await.unwrap();
+        assert_eq!(sources.len(), 1, "shared-engine hit should be captured");
+        match &sources[0] {
+            Source::Web { page_type, .. } => {
+                assert_ne!(
+                    page_type.as_deref(),
+                    Some("encyclopedia"),
+                    "shared-engine URL must not be treated as encyclopedia"
+                );
+            }
+            other => panic!("expected Source::Web, got {other:?}"),
+        }
+        let calls = fetch.calls.lock().unwrap();
+        assert!(
+            calls
+                .contains(&"https://en.wikipedia.org/wiki/Rust_(programming_language)".to_string()),
+            "shared-engine URL must be fetched normally, got {calls:?}"
         );
     }
 

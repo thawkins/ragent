@@ -11,6 +11,9 @@
 //! - [`langsearch`] — LangSearch API-backed backend (T-003).
 //! - [`tavily`] — Tavily API-backed backend (T-001, T-002).
 //! - [`perplexity`] — Perplexity Sonar API-backed backend.
+//! - [`openalex`] — OpenAlex keyless scholarly-works backend (spec `openalex`).
+//! - [`wikipedia`] — Wikipedia REST API keyless encyclopedia backend (spec
+//!   `wikisearch`).
 //! - [`consensus`] — merge, dedup, consensus boost, and ranking (T-015).
 //! - [`SearchOrchestrator`] — run all backends in parallel, merge, cache
 //!   (T-016).
@@ -45,8 +48,10 @@ pub mod consensus;
 pub mod duckduckgo;
 pub mod engine;
 pub mod langsearch;
+pub mod openalex;
 pub mod perplexity;
 pub mod tavily;
+pub mod wikipedia;
 
 // Re-export commonly used types at the module level.
 pub use consensus::{ConsensusResult, MergeOutput, merge_and_rank, merge_and_rank_with_cap};
@@ -66,6 +71,14 @@ use std::time::{Duration, Instant};
 
 /// Search-result cache TTL: 5 minutes (NFR-001).
 pub const SEARCH_CACHE_TTL: Duration = Duration::from_mins(5);
+
+/// Per-engine timeout. If a single backend does not respond within this
+/// duration it is dropped from the merge and reported as an error. This keeps
+/// the overall search well within the 15-second NFR-001 budget even if one
+/// engine hangs. The shared HTTP client already has a 30-second timeout; this
+/// per-engine timeout is a shorter safety net so one slow engine cannot block
+/// the entire search.
+pub const ENGINE_TIMEOUT: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------
 // SearchOutput
@@ -194,6 +207,20 @@ impl SearchOrchestrator {
         self.engines.iter().map(|e| e.name()).collect()
     }
 
+    /// Return a new orchestrator containing only the engine with the given
+    /// name, or `None` if no registered engine matches.
+    ///
+    /// The returned orchestrator has its own (empty) cache. This is intended
+    /// for the `mf_search` `engine` parameter, which restricts the search to
+    /// a single backend.
+    #[must_use]
+    pub fn select_engine(&self, name: &str) -> Option<Self> {
+        self.engines
+            .iter()
+            .find(|e| e.name() == name)
+            .map(|e| Self::with_engines(vec![e.clone()]))
+    }
+
     /// Execute a search query across all backends in parallel, merge the
     /// results, and return the ranked output.
     ///
@@ -236,21 +263,47 @@ impl SearchOrchestrator {
 
         let start = Instant::now();
 
-        // Run all backends in parallel.
+        // Build per-engine options: each backend receives `per_engine_results`
+        // as its `max_results` request count, while the overall merge cap
+        // remains `opts.max_results`.
+        let per_engine_opts = {
+            let mut pe = opts.clone();
+            pe.max_results = opts.per_engine_results;
+            pe
+        };
+
+        // Run all backends in parallel, each wrapped in a per-engine timeout.
+        // Engines that exceed ENGINE_TIMEOUT are dropped from the merge.
         let futures: Vec<_> = self
             .engines
             .iter()
             .map(|engine| {
                 let engine = engine.clone();
                 let query = query.to_string();
-                let opts = opts.clone();
-                async move { engine.search(&query, &opts).await }
+                let opts = per_engine_opts.clone();
+                async move {
+                    let name = engine.name().to_string();
+                    match tokio::time::timeout(ENGINE_TIMEOUT, engine.search(&query, &opts)).await {
+                        Ok(report) => report,
+                        Err(_) => {
+                            tracing::warn!(
+                                engine = %name,
+                                timeout_secs = ENGINE_TIMEOUT.as_secs(),
+                                "search engine timed out, dropping from merge"
+                            );
+                            EngineReport::error(
+                                name,
+                                format!("engine timed out after {}s", ENGINE_TIMEOUT.as_secs()),
+                            )
+                        }
+                    }
+                }
             })
             .collect();
 
         let reports = futures::future::join_all(futures).await;
 
-        // Merge and rank.
+        // Merge and rank with the overall cap.
         let merge = merge_and_rank_with_cap(&reports, query, opts.max_results);
 
         let elapsed = start.elapsed().as_millis() as u64;
@@ -300,7 +353,23 @@ impl SearchOrchestrator {
                 let engine = engine.clone();
                 let query = query.to_string();
                 let opts = opts.clone();
-                async move { engine.search(&query, &opts).await }
+                async move {
+                    let name = engine.name().to_string();
+                    match tokio::time::timeout(ENGINE_TIMEOUT, engine.search(&query, &opts)).await {
+                        Ok(report) => report,
+                        Err(_) => {
+                            tracing::warn!(
+                                engine = %name,
+                                timeout_secs = ENGINE_TIMEOUT.as_secs(),
+                                "search engine timed out, dropping from results"
+                            );
+                            EngineReport::error(
+                                name,
+                                format!("engine timed out after {}s", ENGINE_TIMEOUT.as_secs()),
+                            )
+                        }
+                    }
+                }
             })
             .collect();
 
@@ -368,9 +437,10 @@ impl Default for SearchOrchestrator {
 #[must_use]
 pub fn build_cache_key(query: &str, opts: &SearchOptions) -> String {
     format!(
-        "{}|{}|{}|{}|{:?}|{}",
+        "{}|{}|{}|{}|{:?}|{}|{}",
         query.trim().to_ascii_lowercase(),
         opts.max_results,
+        opts.per_engine_results,
         opts.site,
         opts.exclude_sites.join(","),
         opts.freshness,
@@ -433,6 +503,15 @@ mod tests {
     fn test_build_cache_key_includes_max_results() {
         let opts1 = SearchOptions::new(5);
         let opts2 = SearchOptions::new(10);
+        let key1 = build_cache_key("rust", &opts1);
+        let key2 = build_cache_key("rust", &opts2);
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_build_cache_key_includes_per_engine_results() {
+        let opts1 = SearchOptions::new(10).with_per_engine_results(50);
+        let opts2 = SearchOptions::new(10).with_per_engine_results(75);
         let key1 = build_cache_key("rust", &opts1);
         let key2 = build_cache_key("rust", &opts2);
         assert_ne!(key1, key2);
@@ -646,7 +725,145 @@ mod tests {
     }
 
     #[test]
+    fn test_orchestrator_select_engine_found() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "alpha",
+                results: vec![RawResult::new("A", "https://a.com", "", "alpha")],
+            }),
+            Arc::new(MockEngine {
+                name: "beta",
+                results: vec![RawResult::new("B", "https://b.com", "", "beta")],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator
+            .select_engine("beta")
+            .expect("beta should be found");
+        assert_eq!(filtered.engine_count(), 1);
+        assert_eq!(filtered.engine_names(), vec!["beta"]);
+    }
+
+    #[test]
+    fn test_orchestrator_select_engine_not_found() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![Arc::new(MockEngine {
+            name: "alpha",
+            results: vec![],
+        })];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+        assert!(orchestrator.select_engine("gamma").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_select_engine_returns_only_that_engine() {
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "alpha",
+                results: vec![RawResult::new("A", "https://a.com", "", "alpha")],
+            }),
+            Arc::new(MockEngine {
+                name: "beta",
+                results: vec![RawResult::new("B", "https://b.com", "", "beta")],
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let filtered = orchestrator
+            .select_engine("alpha")
+            .expect("alpha should be found");
+        let output = filtered.search("test", &SearchOptions::default()).await;
+
+        assert_eq!(output.merge.results.len(), 1);
+        assert_eq!(output.merge.results[0].title, "A");
+        assert_eq!(output.merge.total_engines, 1);
+    }
+
+    #[test]
     fn test_search_cache_ttl_is_5_minutes() {
         assert_eq!(SEARCH_CACHE_TTL, Duration::from_mins(5));
+    }
+
+    #[test]
+    fn test_engine_timeout_is_10_seconds() {
+        assert_eq!(ENGINE_TIMEOUT, Duration::from_secs(10));
+    }
+
+    /// An engine that sleeps longer than `ENGINE_TIMEOUT`.
+    struct SlowMockEngine {
+        name: &'static str,
+        results: Vec<RawResult>,
+        delay: Duration,
+    }
+
+    #[async_trait::async_trait]
+    impl SearchEngine for SlowMockEngine {
+        fn name(&self) -> &str {
+            self.name
+        }
+        async fn search(&self, _query: &str, _opts: &SearchOptions) -> EngineReport {
+            tokio::time::sleep(self.delay).await;
+            EngineReport::ok(self.name, self.results.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_slow_engine_timed_out() {
+        // One fast engine returns a result; one slow engine exceeds the
+        // per-engine timeout and is dropped from the merge.
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(MockEngine {
+                name: "fast",
+                results: vec![RawResult::new("A", "https://a.com", "", "fast")],
+            }),
+            Arc::new(SlowMockEngine {
+                name: "slow",
+                results: vec![RawResult::new("B", "https://b.com", "", "slow")],
+                delay: ENGINE_TIMEOUT + Duration::from_millis(500),
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let output = orchestrator.search("test", &SearchOptions::default()).await;
+
+        // Fast engine's result is present.
+        assert_eq!(output.merge.results.len(), 1);
+        assert_eq!(output.merge.results[0].title, "A");
+
+        // Slow engine is reported as blocked/errored (it contributed no results).
+        assert!(
+            output.merge.blocked_engines.contains(&"slow".to_string()),
+            "expected 'slow' in blocked_engines, got {:?}",
+            output.merge.blocked_engines
+        );
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_all_engines_timed_out() {
+        // All engines exceed the timeout — merge should be empty.
+        let engines: Vec<Arc<dyn SearchEngine>> = vec![
+            Arc::new(SlowMockEngine {
+                name: "slow1",
+                results: vec![RawResult::new("A", "https://a.com", "", "slow1")],
+                delay: ENGINE_TIMEOUT + Duration::from_secs(1),
+            }),
+            Arc::new(SlowMockEngine {
+                name: "slow2",
+                results: vec![RawResult::new("B", "https://b.com", "", "slow2")],
+                delay: ENGINE_TIMEOUT + Duration::from_secs(2),
+            }),
+        ];
+        let orchestrator = SearchOrchestrator::with_engines(engines);
+
+        let start = Instant::now();
+        let output = orchestrator.search("test", &SearchOptions::default()).await;
+        let elapsed = start.elapsed();
+
+        // Should complete in roughly ENGINE_TIMEOUT, not ENGINE_TIMEOUT + 2s.
+        assert!(
+            elapsed < ENGINE_TIMEOUT + Duration::from_secs(1),
+            "search took {elapsed:?}, expected ~{ENGINE_TIMEOUT:?}"
+        );
+        assert!(output.merge.results.is_empty());
     }
 }

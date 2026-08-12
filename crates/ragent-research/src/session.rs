@@ -172,6 +172,10 @@ pub struct SessionConfig {
     /// every fetched page regardless of its query-match relevance score,
     /// disabling the default filter that discards "Low"/"Very low" sources.
     pub use_low_relevance: bool,
+    /// `--no-scholarly`: when `true`, the web-gathering phase filters out
+    /// hits from scholarly search engines (e.g. OpenAlex) so only general
+    /// web search results are captured.
+    pub disable_scholarly: bool,
     /// Maximum wall-clock time in seconds for a single page fetch. Pages that
     /// take longer are treated as a fetch failure so a slow URL cannot stall the
     /// whole gather pass. Defaults to 30 seconds.
@@ -269,6 +273,7 @@ impl Default for SessionConfig {
             iterations: None,
             output_format: OutputFormat::Report,
             use_low_relevance: false,
+            disable_scholarly: false,
             fetch_timeout_secs: 30,
             local_concurrency: crate::local_gatherer::DEFAULT_LOCAL_CONCURRENCY,
             max_synthesis_sources: None,
@@ -1067,6 +1072,7 @@ impl ResearchSession {
                             config.fetch_timeout_secs,
                         ))
                         .with_keep_low_relevance(config.use_low_relevance)
+                        .with_disable_scholarly(config.disable_scholarly)
                         .with_search_max_retries(config.search_max_retries)
                         .with_search_retry_base_delay_ms(config.search_retry_base_delay_ms)
                         .with_search_circuit_breaker_threshold(

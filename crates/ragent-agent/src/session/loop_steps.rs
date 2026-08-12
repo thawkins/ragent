@@ -14,11 +14,9 @@
 //! 4. [`Self::run_inline_init_acknowledgement`] — AGENTS.md init exchange.
 //! 5. (loop) [`Self::call_llm_step`] — call the LLM with retry + stream
 //!    event handling.
-//! 6. (loop) [`Self::handle_no_tool_decision`] — stall / planning / incomplete
-//!    nudge.
-//! 7. (loop) [`Self::dispatch_tool_calls`] — execute tool calls and collect
+//! 6. (loop) [`Self::dispatch_tool_calls`] — execute tool calls and collect
 //!    results.
-//! 8. [`Self::finalize_assistant_message`] — final save + timing + hooks.
+//! 7. [`Self::finalize_assistant_message`] — final save + timing + hooks.
 
 #![allow(dead_code)]
 
@@ -38,9 +36,8 @@ use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
 use crate::session::history::{
-    PendingToolCall, chat_request_payload_bytes, detect_incomplete_file_task,
-    history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
-    is_token_overflow_error_message, should_retry_stream_error,
+    PendingToolCall, chat_request_payload_bytes, history_to_chat_messages, history_version_of,
+    is_permanent_llm_api_error, is_token_overflow_error_message, should_retry_stream_error,
     stream_has_meaningful_partial_output,
 };
 use crate::session::processor::SessionProcessor;
@@ -49,7 +46,7 @@ use crate::session::prompt_builders::{
     build_codeindex_guidance_section_disabled, build_detailed_tool_reference_section,
     build_tool_reference_section,
 };
-use crate::session::stream_buffer::{StreamBuffer, stall_pattern_set};
+use crate::session::stream_buffer::StreamBuffer;
 use crate::tool::TeamContext;
 
 // Re-imports for pub(crate) items used within the steps.
@@ -87,8 +84,6 @@ pub(crate) struct LoopState {
     pub agent_switch_requested: bool,
     /// Set when a tool returns `task_complete` metadata.
     pub task_complete_requested: bool,
-    /// Set once after the file-task-completeness nudge fires.
-    pub task_completeness_nudged: bool,
     /// Content hash of `assistant_parts` from the last interim save.
     pub last_interim_hash: Option<u64>,
     /// Cumulative milliseconds spent waiting for the LLM.
@@ -99,8 +94,6 @@ pub(crate) struct LoopState {
     /// this turn. Prevents repeated user-visible "compaction skipped" notices
     /// and wasted re-serialisation when the runner bails out.
     pub compaction_attempted_this_turn: bool,
-    /// Set once after a post-compaction continuation nudge fires.
-    pub compaction_nudged: bool,
     /// Last LLM-reported input token count (0 if provider omits usage).
     pub last_reported_input_tokens: u64,
 }
@@ -115,8 +108,6 @@ pub(crate) struct LlmStepResult {
     pub llm_request_start: Instant,
     /// `true` if the step should break the main loop (fatal error).
     pub should_break: bool,
-    /// `true` if the step should `continue` the main loop (nudge injected).
-    pub should_continue: bool,
 }
 
 impl SessionProcessor {
@@ -795,7 +786,7 @@ impl SessionProcessor {
     /// in the agent loop.
     ///
     /// Returns the text/reasoning/tool-call buffers and token counts, or
-    /// `should_break` / `should_continue` signals for the orchestrator.
+    /// `should_break` signal for the orchestrator.
     pub(crate) async fn call_llm_step(
         &self,
         session_id: &str,
@@ -1274,127 +1265,7 @@ impl SessionProcessor {
             last_output_tokens,
             llm_request_start,
             should_break: false,
-            should_continue: false,
         })
-    }
-
-    /// Handle the no-tool-call decision: detect stall/planning/incomplete
-    /// responses and inject a nudge, or break the loop.
-    ///
-    /// Returns `true` if the orchestrator should `continue` the loop
-    /// (nudge injected), or `false` if it should `break`.
-    pub(crate) fn handle_no_tool_decision(
-        &self,
-        session_id: &str,
-        step: usize,
-        model_ref: &crate::agent::ModelRef,
-        tool_definitions: &Arc<Vec<ToolDefinition>>,
-        user_msg: &Message,
-        loop_state: &mut LoopState,
-        text_buffer: &str,
-    ) -> bool {
-        let (should_nudge_stall, should_nudge_planning, should_nudge_incomplete) = {
-            let is_ollama = matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
-            let trimmed_text = text_buffer.trim();
-            let looks_like_stall = !trimmed_text.is_empty()
-                && !tool_definitions.is_empty()
-                && trimmed_text
-                    .chars()
-                    .all(|c| c == '.' || c == ' ' || c == '\n');
-            let looks_like_planning = !text_buffer.is_empty()
-                && !tool_definitions.is_empty()
-                && stall_pattern_set().is_match(text_buffer);
-            let should_nudge_stall = looks_like_stall && step <= 8;
-            let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
-
-            let should_nudge_incomplete = !loop_state.task_completeness_nudged
-                && !tool_definitions.is_empty()
-                && detect_incomplete_file_task(
-                    &user_msg.text_content(),
-                    &loop_state.assistant_parts,
-                );
-
-            (
-                should_nudge_stall,
-                should_nudge_planning,
-                should_nudge_incomplete,
-            )
-        };
-
-        if should_nudge_stall || should_nudge_planning || should_nudge_incomplete {
-            let reason = if should_nudge_stall {
-                "stall (dots-only output)"
-            } else if should_nudge_planning {
-                "planning text without tool calls"
-            } else {
-                loop_state.task_completeness_nudged = true;
-                "task incomplete — file output requested but not created"
-            };
-            tracing::warn!(
-                session_id = %session_id,
-                step,
-                %reason,
-                "No-tool nudge injected — agent loop will re-prompt the model"
-            );
-            self.event_bus.publish(Event::AgentNotice {
-                session_id: session_id.to_string(),
-                message: format!("Loop nudge (step {step}): {reason} — re-prompting"),
-            });
-            // P-6: `Arc::make_mut` clones the history only when another `Arc`
-            // reference is live (e.g. a still-owned `ChatRequest`). On the
-            // no-tool path the retry request has already been dropped, so
-            // this is a cheap in-place push.
-            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
-                role: "assistant".to_string(),
-                content: ChatContent::Text(text_buffer.to_string()),
-            });
-            let nudge_text = if should_nudge_incomplete {
-                "You have not completed the requested task. The user asked \
-                 you to create or write a file, but no file-writing tool \
-                 was called. Please use the appropriate tool (e.g. \
-                 write_file, create_file) to produce the requested output \
-                 now."
-            } else {
-                "Please continue — use tool calls to proceed with the task. \
-                 Do not output dots or placeholder text."
-            };
-            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text(nudge_text.to_string()),
-            });
-            return true; // continue
-        }
-
-        // Post-compaction continuation nudge: when context compaction ran
-        // this turn and the LLM responds without tool calls, it may have
-        // lost track of the in-progress task. Inject a one-time nudge to
-        // resume work rather than letting the loop stop prematurely.
-        if loop_state.compressed_this_turn && !loop_state.compaction_nudged {
-            loop_state.compaction_nudged = true;
-            tracing::info!(
-                session_id = %session_id,
-                step,
-                "No tool calls after compaction — injecting continuation nudge"
-            );
-            if !text_buffer.is_empty() {
-                Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
-                    role: "assistant".to_string(),
-                    content: ChatContent::Text(text_buffer.to_string()),
-                });
-            }
-            Arc::make_mut(&mut loop_state.chat_messages).push(ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text(
-                    "Context was compacted to fit the token limit. \
-                     Please continue with your task using the appropriate \
-                     tool calls."
-                        .to_string(),
-                ),
-            });
-            return true; // continue
-        }
-
-        false // break
     }
 
     /// Final save of the assistant message, timing breakdown, and

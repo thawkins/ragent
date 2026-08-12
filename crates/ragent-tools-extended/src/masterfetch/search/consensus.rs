@@ -328,7 +328,10 @@ fn group_by_url(results: &[RawResult]) -> HashMap<String, Vec<GroupEntry>> {
 /// Score a group of results (all sharing the same normalised URL).
 ///
 /// The score combines:
-/// - Best rank-position score across all engines.
+/// - Best entry score across all engines. When an engine provides its own
+///   relevance score (`RawResult.score`, e.g. OpenAlex's `relevance_score`),
+///   that engine-provided score is used directly. Otherwise a positional
+///   rank score is derived from the entry's flattened-list position.
 /// - Consensus boost: +0.15 per additional engine beyond the first.
 fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) -> ScoredResult {
     // Count distinct engines.
@@ -336,12 +339,12 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
         entries.iter().map(|e| e.result.source.as_str()).collect();
     let engine_count = distinct_engines.len();
 
-    // Best rank score: use the flattened-list position (lower = better
-    // rank) to compute a positional score. The entry with the smallest
-    // flat_index had the best position across all engines.
-    let best_rank_score = entries
+    // Best entry score: use the engine-provided score when available (e.g.
+    // OpenAlex's normalised `relevance_score`); fall back to a positional
+    // rank score for keyless backends that do not provide scores.
+    let best_entry_score = entries
         .iter()
-        .map(|e| rank_score(e.flat_index))
+        .map(|e| e.result.score.unwrap_or_else(|| rank_score(e.flat_index)))
         .fold(0.0_f64, f64::max);
 
     // Consensus boost.
@@ -349,7 +352,7 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
 
     // Final score (unclamped — may exceed 1.0 for strong consensus).
     // Clamping to [0, 1] happens after sorting, in the ConsensusResult.
-    let score = best_rank_score + consensus_boost;
+    let score = best_entry_score + consensus_boost;
 
     // Use the first entry's title, URL, and snippet.
     let first = entries.first().expect("group must have at least one entry");

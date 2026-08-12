@@ -64,8 +64,17 @@ use crate::masterfetch::urlnorm::normalise_url;
 /// Default maximum number of results to request from each engine (FR-008).
 pub const DEFAULT_MAX_RESULTS: usize = 10;
 
-/// Maximum allowed `max_results` value (engines may cap lower).
-pub const MAX_MAX_RESULTS: usize = 50;
+/// Maximum allowed `max_results` value — the overall merge cap across all
+/// engines (engines may cap lower).
+pub const MAX_MAX_RESULTS: usize = 500;
+
+/// Default per-engine result cap. Each engine is asked for at most this many
+/// results before the consensus merger deduplicates and caps to
+/// `max_results`.
+pub const DEFAULT_PER_ENGINE_RESULTS: usize = 75;
+
+/// Maximum allowed `per_engine_results` value.
+pub const MAX_PER_ENGINE_RESULTS: usize = 200;
 
 /// Default result page (0 = first page).
 pub const DEFAULT_PAGE: usize = 0;
@@ -148,8 +157,13 @@ impl std::str::FromStr for Freshness {
 /// translates these into its own query-string syntax.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchOptions {
-    /// Maximum results to request from this engine (1–50, default 10).
+    /// Maximum results to return after merge/dedup (1–500, default 10).
+    /// This is the overall cap applied by `merge_and_rank_with_cap`.
     pub max_results: usize,
+    /// Maximum results to request from each individual engine
+    /// (1–200, default 75). Each backend receives an opts copy with
+    /// `max_results` set to this value.
+    pub per_engine_results: usize,
     /// Restrict results to this domain (site: filter). Empty = no restriction.
     pub site: String,
     /// Domains to exclude from results. Empty = no exclusions.
@@ -161,12 +175,14 @@ pub struct SearchOptions {
 }
 
 impl SearchOptions {
-    /// Create a new `SearchOptions` with the given `max_results` and all other
-    /// fields at their defaults.
+    /// Create a new `SearchOptions` with the given `max_results` (the overall
+    /// merge cap) and all other fields at their defaults. `per_engine_results`
+    /// defaults to [`DEFAULT_PER_ENGINE_RESULTS`] (75).
     #[must_use]
     pub fn new(max_results: usize) -> Self {
         Self {
             max_results: max_results.clamp(1, MAX_MAX_RESULTS),
+            per_engine_results: DEFAULT_PER_ENGINE_RESULTS,
             ..Self::default()
         }
     }
@@ -198,12 +214,20 @@ impl SearchOptions {
         self.page = page;
         self
     }
+
+    /// Builder: set the per-engine result cap (1–200).
+    #[must_use]
+    pub fn with_per_engine_results(mut self, n: usize) -> Self {
+        self.per_engine_results = n.clamp(1, MAX_PER_ENGINE_RESULTS);
+        self
+    }
 }
 
 impl Default for SearchOptions {
     fn default() -> Self {
         Self {
             max_results: DEFAULT_MAX_RESULTS,
+            per_engine_results: DEFAULT_PER_ENGINE_RESULTS,
             site: String::new(),
             exclude_sites: Vec::new(),
             freshness: Freshness::Any,
@@ -707,6 +731,7 @@ mod tests {
     fn test_search_options_default() {
         let opts = SearchOptions::default();
         assert_eq!(opts.max_results, DEFAULT_MAX_RESULTS);
+        assert_eq!(opts.per_engine_results, DEFAULT_PER_ENGINE_RESULTS);
         assert!(opts.site.is_empty());
         assert!(opts.exclude_sites.is_empty());
         assert_eq!(opts.freshness, Freshness::Any);
@@ -718,11 +743,29 @@ mod tests {
         let opts = SearchOptions::new(0);
         assert_eq!(opts.max_results, 1);
 
-        let opts = SearchOptions::new(100);
+        let opts = SearchOptions::new(1000);
         assert_eq!(opts.max_results, MAX_MAX_RESULTS);
 
         let opts = SearchOptions::new(6);
         assert_eq!(opts.max_results, 6);
+    }
+
+    #[test]
+    fn test_search_options_per_engine_results_default() {
+        let opts = SearchOptions::new(10);
+        assert_eq!(opts.per_engine_results, DEFAULT_PER_ENGINE_RESULTS);
+    }
+
+    #[test]
+    fn test_search_options_with_per_engine_results_clamps() {
+        let opts = SearchOptions::new(10).with_per_engine_results(0);
+        assert_eq!(opts.per_engine_results, 1);
+
+        let opts = SearchOptions::new(10).with_per_engine_results(300);
+        assert_eq!(opts.per_engine_results, MAX_PER_ENGINE_RESULTS);
+
+        let opts = SearchOptions::new(10).with_per_engine_results(50);
+        assert_eq!(opts.per_engine_results, 50);
     }
 
     #[test]
@@ -731,8 +774,10 @@ mod tests {
             .with_site("example.com")
             .with_exclude_sites(vec!["spam.com".into()])
             .with_freshness(Freshness::Week)
-            .with_page(2);
+            .with_page(2)
+            .with_per_engine_results(50);
         assert_eq!(opts.max_results, 5);
+        assert_eq!(opts.per_engine_results, 50);
         assert_eq!(opts.site, "example.com");
         assert_eq!(opts.exclude_sites, vec!["spam.com"]);
         assert_eq!(opts.freshness, Freshness::Week);

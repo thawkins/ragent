@@ -1,5 +1,72 @@
 # Changelog
 
+## Version: 1.0.26
+
+### Added — OpenAlex and Wikipedia search backends for `mf_search`
+
+- New **OpenAlex** keyless search backend queries the scholarly-works
+  catalog (papers, articles, datasets). Results include title, authors,
+  publication year, venue, citation count, open-access URL, and relevance
+  score. Set `OPENALEX_EMAIL` in the environment or `ragent.json` to join
+  the polite pool.
+- New **Wikipedia** keyless search backend queries the English Wikipedia
+  REST API for encyclopedia-style summaries. Results include the page
+  title, extract, and canonical URL.
+- Both backends run in parallel with the existing DuckDuckGo and Brave
+  engines by default; optional LangSearch / Tavily / Perplexity
+  API-backed engines continue to be supported when configured.
+- The `mf_search` tool gains an `engine` parameter to restrict the
+  search to a single backend
+  (`duckduckgo` / `brave` / `openalex` / `wikipedia` / `langsearch` /
+  `tavily` / `perplexity`).
+- New modules `crates/ragent-tools-extended/src/masterfetch/search/openalex.rs`
+  and `.../wikipedia.rs` implementing the backends.
+- New tests `test_mf_openalex.rs`, `test_mf_openalex_live.rs`,
+  `test_mf_wikipedia.rs`, `test_mf_wikipedia_live.rs` covering unit and
+  live integration paths.
+
+### Changed — Search consensus and relevancy adjustments
+
+- The consensus merge in `mf_search` now weights per-engine relevance
+  scores and `fetch_relevance` signals more evenly, reducing
+  DuckDuckGo-dominated ranking when multiple backends contribute.
+- `mf_search` `engine.rs` and `search/mod.rs` refactored to share a
+  common `SearchResult` builder path so all backends produce consistent
+  field sets (title, url, snippet, score, source engine, extra metadata).
+- The search-tool JSON schema now documents the `engine` enum and
+  the `per_engine_results` cap.
+
+### Changed — Research web-gatherer enhancements
+
+- `crates/ragent-research/src/web_gatherer.rs` extended to handle the
+  new backend result shapes and to pass through OpenAlex/Wikipedia
+  metadata into `RESEARCH.md` source entries.
+- `crates/ragent-research/src/cli.rs` and `session.rs` updated for the
+  new gatherer flow.
+- `crates/ragent-server/src/routes/research.rs` and
+  `crates/ragent-tui/src/app/research.rs` wired to the updated research
+  session.
+- New `--use-low-relevance` style flags consolidated in the research
+  CLI.
+
+### Fixed — Compaction loop and processor stability
+
+- `crates/ragent-agent/src/session/loop_steps.rs` simplified (removed
+  ~100 lines of duplicated nudge logic) to fix repeated
+  post-compaction continuation nudges across loop iterations.
+- `crates/ragent-agent/src/session/processor.rs` updated to thread the
+  `last_task_completed_at` guard so autopilot auto-continue is
+  suppressed after `task_complete`.
+- `crates/ragent-agent/tests/test_compaction_integration.rs` updated
+  to match the simplified loop.
+
+### Changed — Config and CLI
+
+- `crates/ragent-config/src/config.rs` extended with the new search
+  backend option fields.
+- `src/cli.rs` and `crates/ragent-research/src/cli.rs` updated for
+  the new research/search flags.
+
 ## Version: 1.0.25
 
 ### Fixed — cargo-deny CI and security audit

@@ -656,14 +656,12 @@ impl SessionProcessor {
         let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> = std::sync::Arc::new(Vec::new());
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
-        let mut task_completeness_nudged = false;
         let mut last_interim_hash: Option<u64> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compressed_this_turn = compressed_this_turn;
         let mut compaction_attempted_this_turn = false;
         let mut last_reported_input_tokens = last_reported_input_tokens;
-        let mut compaction_nudged = false;
         // P-17: reuse the per-step ContentPart buffers across loop iterations
         // to avoid reallocating two `Vec<ContentPart>`s on every step. They
         // are emptied via `std::mem::take` when pushed into `chat_messages`,
@@ -858,12 +856,10 @@ impl SessionProcessor {
                 assistant_parts: std::sync::Arc::clone(&assistant_parts),
                 agent_switch_requested,
                 task_complete_requested,
-                task_completeness_nudged,
                 last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
                 compaction_attempted_this_turn,
-                compaction_nudged,
                 last_reported_input_tokens,
             };
             let llm_result = self
@@ -921,44 +917,9 @@ impl SessionProcessor {
                 }
             }
 
-            // No-tool decision: stall/planning/incomplete nudge (P-5).
-            // The `handle_no_tool_decision` helper mutates the supplied
-            // `LoopState` in place — pushing nudge messages into
-            // `chat_messages` and updating `task_completeness_nudged` — so the
-            // orchestrator trusts its return value and reads back the mutated
-            // fields instead of recomputing the three nudge booleans inline.
+            // No tool calls — the loop ends here. The agent's text response
+            // is the final answer for this turn.
             if llm_result.tool_calls.is_empty() {
-                let mut loop_state = crate::session::loop_steps::LoopState {
-                    chat_messages: std::mem::take(&mut chat_messages),
-                    assistant_parts: std::sync::Arc::clone(&assistant_parts),
-                    agent_switch_requested,
-                    task_complete_requested,
-                    task_completeness_nudged,
-                    last_interim_hash,
-                    cumulative_model_wait_ms,
-                    compressed_this_turn,
-                    compaction_attempted_this_turn,
-                    compaction_nudged,
-                    last_reported_input_tokens,
-                };
-                let should_continue = self.handle_no_tool_decision(
-                    session_id,
-                    step,
-                    &turn.model_ref,
-                    &tool_definitions,
-                    &user_msg,
-                    &mut loop_state,
-                    &llm_result.text_buffer,
-                );
-                // Read back the mutations the helper performed.
-                chat_messages = std::mem::take(&mut loop_state.chat_messages);
-                task_completeness_nudged = loop_state.task_completeness_nudged;
-                compressed_this_turn = loop_state.compressed_this_turn;
-                compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
-                compaction_nudged = loop_state.compaction_nudged;
-                if should_continue {
-                    continue;
-                }
                 break;
             }
 

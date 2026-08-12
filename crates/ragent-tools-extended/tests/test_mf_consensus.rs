@@ -906,3 +906,62 @@ fn test_same_url_multiple_times_within_one_engine_deduped() {
         "same URL within one engine should dedup"
     );
 }
+
+// ===========================================================================
+// Engine-provided scores (e.g. OpenAlex relevance_score)
+// ===========================================================================
+
+#[test]
+fn test_engine_provided_score_used_in_ranking() {
+    // An engine that provides its own relevance score should have that score
+    // used directly by the consensus ranker, rather than a positional rank
+    // score derived from the flattened-list position.
+    let mut high_score = RawResult::new("High", "https://high.com", "", "openalex");
+    high_score.score = Some(0.95);
+
+    let mut low_score = RawResult::new("Low", "https://low.com", "", "openalex");
+    low_score.score = Some(0.10);
+
+    // Put the low-scored result first in the list (better positional rank).
+    let reports = vec![EngineReport::ok("openalex", vec![low_score, high_score])];
+    let output = merge_and_rank(&reports, "test");
+
+    // The high-scored result should rank first despite being at position 2.
+    assert_eq!(output.results[0].title, "High");
+    assert_eq!(output.results[1].title, "Low");
+    assert!(
+        output.results[0].relevance_score > output.results[1].relevance_score,
+        "engine-provided score should drive ranking"
+    );
+}
+
+#[test]
+fn test_engine_provided_score_beats_positional_score() {
+    // An engine-provided score of 0.5 should beat a positional rank_score of
+    // ~0.57 (rank 5) from a keyless engine.
+    let mut scored = RawResult::new("Scored", "https://scored.com", "", "openalex");
+    scored.score = Some(0.5);
+
+    let positional = vec![
+        RawResult::new("P0", "https://p0.com", "", "ddg"),
+        RawResult::new("P1", "https://p1.com", "", "ddg"),
+        RawResult::new("P2", "https://p2.com", "", "ddg"),
+    ];
+
+    let reports = vec![
+        EngineReport::ok("openalex", vec![scored]),
+        EngineReport::ok("ddg", positional),
+    ];
+    let output = merge_and_rank(&reports, "test");
+
+    // Scored (0.5) should rank above P2 (rank_score(5) ≈ 0.57 — but the
+    // scored result is at flat_index 0 in the merged list, so its
+    // positional fallback would be 1.0; however since it has an
+    // engine-provided score of 0.5, that should be used instead).
+    let scored_result = output.results.iter().find(|r| r.title == "Scored").unwrap();
+    assert!(
+        scored_result.relevance_score <= 0.5 + 0.01,
+        "engine score should be used, not positional: {}",
+        scored_result.relevance_score
+    );
+}

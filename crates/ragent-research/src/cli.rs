@@ -11,7 +11,7 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-scholarly]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
@@ -64,6 +64,11 @@ pub enum ResearchCliCommand {
         /// threshold; this flag disables that filter so every fetched page is
         /// retained regardless of relevance score.
         use_low_relevance: bool,
+        /// `--no-scholarly` — disable scholarly search engines (e.g. OpenAlex)
+        /// during the web-gathering phase. When set, hits from scholarly
+        /// backends are filtered out so only general web search results are
+        /// captured.
+        no_scholarly: bool,
         /// `--fetch-timeout-secs N` — override the per-page fetch timeout.
         /// Pages that take longer than this are treated as a fetch failure so
         /// one slow URL cannot stall the whole gather pass. The default is
@@ -189,6 +194,7 @@ impl ResearchCliCommand {
                         use_local: false,
                         use_specs: false,
                         use_low_relevance: false,
+                        no_scholarly: false,
                         fetch_timeout_secs: None,
                         local_concurrency: None,
                         web_phase_timeout_secs: None,
@@ -229,6 +235,7 @@ impl ResearchCliCommand {
         let mut use_local = false;
         let mut use_specs = false;
         let mut use_low_relevance = false;
+        let mut no_scholarly = false;
         while i < rest.len() {
             let arg = rest[i];
             match arg {
@@ -364,6 +371,10 @@ impl ResearchCliCommand {
                     use_low_relevance = true;
                     i += 1;
                 }
+                "--no-scholarly" => {
+                    no_scholarly = true;
+                    i += 1;
+                }
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
@@ -392,6 +403,7 @@ impl ResearchCliCommand {
             use_local,
             use_specs,
             use_low_relevance,
+            no_scholarly,
             fetch_timeout_secs,
             local_concurrency,
             web_phase_timeout_secs,
@@ -468,7 +480,7 @@ impl ResearchCliCommand {
                SUBCOMMANDS:\n\
                                    create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
-                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance]\n\
+                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-scholarly]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
                                            --from-url            Fetch one or more URLs and use their content as the research subject\n\
                                                                  in place of (or alongside) an explicit topic. Each page is captured\n\
@@ -482,6 +494,7 @@ impl ResearchCliCommand {
                                          --use-local           Enable local-file scanning (in-project + extras).\n\
                                          --use-specs           Enable prior-spec cross-referencing.\n\
                                          --use-low-relevance   Keep low-relevance web sources instead of filtering them out.\n\
+                                           --no-scholarly        Disable scholarly search engines (e.g. OpenAlex) during web gathering.\n\
                    continue <name> [message] Resume an in-progress research item.\n\
                    list [--all]                  List every research item.\n\
                  open <name>                   Print the absolute path of RESEARCH.md.\n\
@@ -1009,6 +1022,35 @@ mod tests {
                 use_low_relevance, ..
             } => {
                 assert!(!use_low_relevance);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_no_scholarly_flag() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --no-scholarly");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                no_scholarly,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert!(no_scholarly);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_no_scholarly_defaults_false() {
+        let cmd = ResearchCliCommand::parse("create foo a topic");
+        match cmd {
+            ResearchCliCommand::Create { no_scholarly, .. } => {
+                assert!(!no_scholarly);
             }
             other => panic!("unexpected variant: {other:?}"),
         }

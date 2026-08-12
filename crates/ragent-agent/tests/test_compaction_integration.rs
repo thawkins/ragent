@@ -222,14 +222,15 @@ async fn test_pre_send_compaction_fires_and_persists_compaction_message() {
     assert!(reply.text_content().contains("proceed"));
 
     let captured = captured_requests.lock().expect("captured requests lock");
-    // Three requests, in order:
+    // Two requests, in order:
     //   (1) the summarisation call (no tools),
-    //   (2) the real conversation call (has tools),
-    //   (3) the post-compaction continuation nudge (has tools).
+    //   (2) the real conversation call (has tools).
+    // No post-compaction nudge — the loop breaks immediately on a no-tool
+    // response.
     assert_eq!(
         captured.len(),
-        3,
-        "expected summarisation + real request + post-compaction nudge, got {}",
+        2,
+        "expected summarisation + real request, got {}",
         captured.len()
     );
 
@@ -585,15 +586,16 @@ async fn test_emergency_overflow_compaction_retries_once() {
     );
 
     let captured = captured_requests.lock().expect("captured requests lock");
-    // Four requests, in order:
+    // Three requests, in order:
     //   (1) the first real conversation attempt that overflowed (has tools),
     //   (2) the emergency summarisation call (no tools),
-    //   (3) the retry that succeeded (has tools),
-    //   (4) the post-compaction continuation nudge (has tools).
+    //   (3) the retry that succeeded (has tools).
+    // No post-compaction nudge — the loop breaks immediately on a no-tool
+    // response.
     assert_eq!(
         captured.len(),
-        4,
-        "expected overflow + summarisation + retry + post-compaction nudge, got {}",
+        3,
+        "expected overflow + summarisation + retry, got {}",
         captured.len()
     );
 
@@ -621,12 +623,11 @@ async fn test_emergency_overflow_compaction_retries_once() {
         "summarisation request should carry the compaction prompt"
     );
 
-    // Exactly three real conversation calls: the overflow, the retry, and the
-    // post-compaction continuation nudge.
+    // Exactly two real conversation calls: the overflow and the retry.
     assert_eq!(
         real_call_count.load(Ordering::SeqCst),
-        3,
-        "emergency compaction must retry the turn, then nudge once after compaction"
+        2,
+        "emergency compaction must retry the turn after overflow"
     );
 }
 

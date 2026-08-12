@@ -76,6 +76,16 @@ pub struct Config {
     /// is masked in diagnostics and never logged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perplexity_api_key: Option<String>,
+    /// OpenAlex polite-pool email for the `mf_search` tool.
+    ///
+    /// OpenAlex is a keyless backend (no API key required), but appending a
+    /// `mailto=<email>` query parameter to each request participates in the
+    /// OpenAlex polite pool and raises the daily request limit. Can also be
+    /// set via the `OPENALEX_EMAIL` environment variable; the environment
+    /// variable takes precedence over this config field. The email is masked
+    /// in diagnostics and never logged in plain text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openalex_email: Option<String>,
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,
@@ -1717,6 +1727,11 @@ impl Config {
         // perplexity_api_key: overlay overrides base
         if overlay.perplexity_api_key.is_some() {
             base.perplexity_api_key = overlay.perplexity_api_key;
+        }
+
+        // openalex_email: overlay overrides base
+        if overlay.openalex_email.is_some() {
+            base.openalex_email = overlay.openalex_email;
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)

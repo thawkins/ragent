@@ -119,6 +119,10 @@ struct CreateResearchRequest {
     /// filtering them out.
     #[serde(default)]
     use_low_relevance: bool,
+    /// `--no-scholarly`: disable scholarly search engines (e.g. OpenAlex)
+    /// during web gathering.
+    #[serde(default)]
+    no_scholarly: bool,
     /// Override the maximum number of candidate pages fetched in parallel
     /// during the web-gathering phase. When `None` the engine default
     /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
@@ -164,6 +168,7 @@ async fn create_research(
             OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
         }),
         use_low_relevance: req.use_low_relevance,
+        disable_scholarly: req.no_scholarly,
         fetch_timeout_secs: req.fetch_timeout_secs.unwrap_or(30),
         local_concurrency: req
             .local_concurrency
