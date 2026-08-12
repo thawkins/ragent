@@ -44,6 +44,10 @@ ignore = [
     # RUSTSEC-2025-0052: async-std has been discontinued.
     # async-std is pulled in by opentelemetry_sdk 0.28; upgrading OTEL is tracked separately.
     { id = "RUSTSEC-2025-0052", reason = "transitive via opentelemetry_sdk 0.28; upgrade tracked separately" },
+    # RUSTSEC-2026-0253: lru LruCache::pop() use-after-free due to lack of panic safety.
+    # lru 0.12.5 is a transitive dep (via ratatui 0.29, tantivy 0.22); ragent does not call pop().
+    # Fixed in lru 0.18.2 but ratatui 0.29 pins lru 0.12.
+    { id = "RUSTSEC-2026-0253", reason = "transitive via ratatui 0.29 / tantivy 0.22; ragent does not call LruCache::pop(); upgrade blocked by ratatui" },
 ]
 
 [licenses]

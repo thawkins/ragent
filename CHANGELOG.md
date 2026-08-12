@@ -1,5 +1,18 @@
 # Changelog
 
+## Version: 1.0.25
+
+### Fixed — cargo-deny CI and security audit
+
+- Add RUSTSEC-2026-0253 (lru `LruCache::pop()` use-after-free) to `deny.toml`
+  `[advisories].ignore` — transitive via ratatui 0.29 / tantivy 0.22; ragent does
+  not call `pop()`; upgrade blocked by ratatui's lru 0.12 pin
+- Add `--ignore RUSTSEC-2026-0253` to the `cargo audit` step in
+  `security-audit.yml`, keeping it in sync with `deny.toml`
+- Pin `cargo-deny` to `0.18.12` in the CI workflow to avoid
+  `bug[unresolved-workspace-dependency]` false-positives that appeared in later
+  cargo-deny versions when resolving root-crate `{ workspace = true }` deps
+
 ## Version: 1.0.24
 
 ### Added — `/spec update` subcommand and TESTPLAN.md artifact
