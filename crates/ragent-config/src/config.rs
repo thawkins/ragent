@@ -86,6 +86,15 @@ pub struct Config {
     /// in diagnostics and never logged in plain text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub openalex_email: Option<String>,
+    /// Exa Search API key for the `mf_search` tool.
+    ///
+    /// Stored in `ragent.json` (global or project). When present, `mf_search`
+    /// will query the Exa Search API as an additional backend. Can also be
+    /// set via the `EXA_API_KEY` environment variable; the environment
+    /// variable takes precedence over this config field. The key is masked
+    /// in diagnostics and never logged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exa_api_key: Option<String>,
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,
@@ -1732,6 +1741,11 @@ impl Config {
         // openalex_email: overlay overrides base
         if overlay.openalex_email.is_some() {
             base.openalex_email = overlay.openalex_email;
+        }
+
+        // exa_api_key: overlay overrides base
+        if overlay.exa_api_key.is_some() {
+            base.exa_api_key = overlay.exa_api_key;
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)

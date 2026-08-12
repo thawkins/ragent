@@ -14,6 +14,7 @@
 //! - [`openalex`] — OpenAlex keyless scholarly-works backend (spec `openalex`).
 //! - [`wikipedia`] — Wikipedia REST API keyless encyclopedia backend (spec
 //!   `wikisearch`).
+//! - [`exa`] — Exa Search API-backed backend (spec `exasearch`).
 //! - [`consensus`] — merge, dedup, consensus boost, and ranking (T-015).
 //! - [`SearchOrchestrator`] — run all backends in parallel, merge, cache
 //!   (T-016).
@@ -47,6 +48,7 @@ pub mod brave;
 pub mod consensus;
 pub mod duckduckgo;
 pub mod engine;
+pub mod exa;
 pub mod langsearch;
 pub mod openalex;
 pub mod perplexity;

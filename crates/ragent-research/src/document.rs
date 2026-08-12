@@ -10,6 +10,7 @@
 //!
 //!    ## Topic
 //!    ## Search Queries
+//!    ### Search Engine Summary   (after gathering, per-engine source counts)
 //!    ## Executive Summary
 //!    ## Top 5 Implications
 //!    ## Findings
@@ -272,6 +273,18 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
+    // ── Search Engine Summary ──────────────────────────────────────────
+    // Per-engine breakdown of acquired web sources by media type (pages,
+    // PDFs, videos). Emitted only when at least one web source carries a
+    // non-empty search_engine field, so the section is absent for skeletons
+    // and pre-gathering documents.
+    let engine_summary = render_search_engine_summary(&doc.item.sources);
+    if !engine_summary.is_empty() {
+        body.push_str("### Search Engine Summary\n\n");
+        body.push_str(&engine_summary);
+        body.push('\n');
+    }
+
     // ── Executive Summary ─────────────────────────────────────────────────
     body.push_str("## Executive Summary\n\n");
     if doc.summary.trim().is_empty() {
@@ -403,6 +416,17 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         }
         body.push('\n');
     }
+
+    // ── Search Engine Summary (IMRaD Methods sub-section) ─────────────
+    // Per-engine breakdown of acquired web sources by media type. Only
+    // emitted when at least one web source has a non-empty search_engine.
+    let engine_summary = render_search_engine_summary(&doc.item.sources);
+    if !engine_summary.is_empty() {
+        body.push_str("### Search Engine Summary\n\n");
+        body.push_str(&engine_summary);
+        body.push('\n');
+    }
+
     body.push_str("### Research Configuration\n\n");
     body.push_str(
         "Evidence was gathered through automated web search and local cross-reference \
@@ -1150,6 +1174,84 @@ fn normalize_finding_labels(finding: &str) -> String {
     }
     out.trim().to_string()
 }
+/// Render a "Search Engine Summary" table showing, per backend engine, the
+/// number of web sources acquired broken down by media type (pages, PDFs,
+/// videos).
+///
+/// Each [`Source::Web`] carries a comma-separated `search_engine` field (e.g.
+/// `"duckduckgo, brave"`). This function splits that field, counts the
+/// `media_type` (`"page"`, `"pdf"`, `"youtube"`) per engine, and emits a
+/// Markdown table:
+///
+/// ```text
+/// | Engine | Pages | PDFs | Videos | Total |
+/// |--------|-------|------|--------|-------|
+/// | duckduckgo | 5 | 1 | 0 | 6 |
+/// ```
+///
+/// Returns an empty string when no web sources have a non-empty
+/// `search_engine` value, so callers can unconditionally append the result
+/// without producing a stray empty section.
+#[must_use]
+pub fn render_search_engine_summary(sources: &[Source]) -> String {
+    use std::collections::BTreeMap;
+
+    /// Per-engine media-type counts.
+    #[derive(Default, Clone, Copy)]
+    struct Counts {
+        pages: usize,
+        pdfs: usize,
+        videos: usize,
+    }
+
+    impl Counts {
+        const fn total(&self) -> usize {
+            self.pages + self.pdfs + self.videos
+        }
+    }
+
+    let mut by_engine: BTreeMap<String, Counts> = BTreeMap::new();
+    for source in sources {
+        if let Source::Web {
+            search_engine,
+            media_type,
+            ..
+        } = source
+        {
+            for engine in search_engine.split(',') {
+                let name = engine.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let entry = by_engine.entry(name.to_string()).or_default();
+                match media_type.as_str() {
+                    "pdf" => entry.pdfs += 1,
+                    "youtube" => entry.videos += 1,
+                    _ => entry.pages += 1,
+                }
+            }
+        }
+    }
+
+    if by_engine.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from("| Engine | Pages | PDFs | Videos | Total |\n");
+    out.push_str("|--------|-------|------|--------|-------|\n");
+    for (engine, counts) in &by_engine {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            escape_pipe(engine),
+            counts.pages,
+            counts.pdfs,
+            counts.videos,
+            counts.total(),
+        ));
+    }
+    out
+}
+
 /// Render a standalone sources appendix / bibliography for the
 /// `--format source-bibliography` artifact (T-011).
 ///
@@ -1373,6 +1475,127 @@ mod tests {
             assembled
                 .body
                 .contains("| `src/lib.rs` | Main library entry |")
+        );
+    }
+
+    /// Helper: build a `Source::Web` with the given search engine and media type.
+    fn web_source(search_engine: &str, media_type: &str) -> Source {
+        use chrono::Utc;
+        Source::Web {
+            url: format!("https://example.com/{media_type}"),
+            title: format!("Test {media_type}"),
+            captured_at: Utc::now(),
+            published_at: None,
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: String::new(),
+            relevance: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: search_engine.into(),
+            content_type: None,
+            page_type: None,
+            media_type: media_type.into(),
+            language: None,
+        }
+    }
+
+    #[test]
+    fn render_search_engine_summary_counts_pages_pdfs_videos() {
+        let sources = vec![
+            web_source("duckduckgo, brave", "page"),
+            web_source("duckduckgo", "page"),
+            web_source("brave", "pdf"),
+            web_source("exa", "youtube"),
+            web_source("exa", "page"),
+        ];
+        let table = render_search_engine_summary(&sources);
+        assert!(table.contains("| Engine | Pages | PDFs | Videos | Total |"));
+        // brave: 1 page (from multi-engine source) + 1 pdf = 1 page, 1 pdf, 0 videos, 2 total
+        assert!(table.contains("| brave | 1 | 1 | 0 | 2 |"));
+        // duckduckgo: 2 pages (one from multi-engine, one single) = 2 pages
+        assert!(table.contains("| duckduckgo | 2 | 0 | 0 | 2 |"));
+        // exa: 1 youtube + 1 page = 1 page, 0 pdfs, 1 video, 2 total
+        assert!(table.contains("| exa | 1 | 0 | 1 | 2 |"));
+    }
+
+    #[test]
+    fn render_search_engine_summary_empty_when_no_web_sources() {
+        let sources: Vec<Source> = vec![];
+        let table = render_search_engine_summary(&sources);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn render_search_engine_summary_empty_when_no_engine_field() {
+        // Web sources with empty search_engine should produce no table.
+        let sources = vec![web_source("", "page")];
+        let table = render_search_engine_summary(&sources);
+        assert!(table.is_empty());
+    }
+
+    #[test]
+    fn assemble_document_renders_search_engine_summary_after_queries() {
+        let mut item = sample_item();
+        item.sources = vec![web_source("duckduckgo", "page"), web_source("brave", "pdf")];
+        let mut doc = sample_doc(item);
+        doc.decomposed_queries = vec!["test query".into()];
+        let assembled = assemble_document(&doc);
+        // The summary heading should appear after Search Queries and before
+        // Executive Summary.
+        let queries_pos = assembled.body.find("## Search Queries").unwrap();
+        let summary_pos = assembled
+            .body
+            .find("### Search Engine Summary")
+            .expect("Search Engine Summary section should be present");
+        let exec_pos = assembled.body.find("## Executive Summary").unwrap();
+        assert!(
+            queries_pos < summary_pos,
+            "Search Engine Summary should come after Search Queries"
+        );
+        assert!(
+            summary_pos < exec_pos,
+            "Search Engine Summary should come before Executive Summary"
+        );
+        assert!(assembled.body.contains("| duckduckgo | 1 | 0 | 0 | 1 |"));
+        assert!(assembled.body.contains("| brave | 0 | 1 | 0 | 1 |"));
+    }
+
+    #[test]
+    fn assemble_document_imrad_renders_search_engine_summary() {
+        let mut item = sample_item();
+        item.sources = vec![web_source("exa", "page"), web_source("exa", "youtube")];
+        let mut doc = sample_doc(item);
+        doc.decomposed_queries = vec!["test query".into()];
+        doc.output_format = crate::run_config::OutputFormat::Imrad;
+        let assembled = assemble_document(&doc);
+        // In IMRaD layout the summary appears under Methods after Search Queries.
+        let methods_pos = assembled.body.find("## Methods").unwrap();
+        let queries_pos = assembled.body.find("### Search Queries").unwrap();
+        let summary_pos = assembled
+            .body
+            .find("### Search Engine Summary")
+            .expect("Search Engine Summary should be present in IMRaD layout");
+        let config_pos = assembled.body.find("### Research Configuration").unwrap();
+        assert!(methods_pos < queries_pos);
+        assert!(
+            queries_pos < summary_pos,
+            "Search Engine Summary should come after Search Queries in IMRaD"
+        );
+        assert!(
+            summary_pos < config_pos,
+            "Search Engine Summary should come before Research Configuration in IMRaD"
+        );
+        assert!(assembled.body.contains("| exa | 1 | 0 | 1 | 2 |"));
+    }
+
+    #[test]
+    fn assemble_document_omits_search_engine_summary_for_skeleton() {
+        // A skeleton (no sources) should NOT contain the Search Engine Summary.
+        let doc = sample_doc(sample_item());
+        let assembled = assemble_document(&doc);
+        assert!(
+            !assembled.body.contains("### Search Engine Summary"),
+            "skeleton should not contain Search Engine Summary: {}",
+            assembled.body
         );
     }
 

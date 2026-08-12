@@ -253,6 +253,19 @@ impl Source {
         }
     }
 
+    /// Name(s) of the backend search engine(s) that returned this URL.
+    ///
+    /// Only [`Source::Web`] carries a `search_engine` value (e.g.
+    /// `"duckduckgo, brave"`, `"exa"`, `"tavily"`). Local, spec, and other
+    /// sources do not have a search engine and return an empty string.
+    #[must_use]
+    pub fn search_engine(&self) -> &str {
+        match self {
+            Self::Web { search_engine, .. } => search_engine,
+            _ => "",
+        }
+    }
+
     /// Optional relevance note for local, spec, and web sources.
     #[must_use]
     pub fn relevance(&self) -> Option<&str> {

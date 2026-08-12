@@ -75,6 +75,23 @@ fn ctx_with_perplexity_key(key: &str) -> ToolContext {
     }
 }
 
+/// Build a `ToolContext` with the given Exa API key in its config.
+fn ctx_with_exa_key(key: &str) -> ToolContext {
+    let mut config = Config::default();
+    config.exa_api_key = Some(key.to_string());
+    ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    }
+}
+
 #[test]
 fn test_tool_name_is_mf_search() {
     let tool = MfSearchTool;
@@ -116,6 +133,11 @@ fn test_description_mentions_key_features() {
     assert!(
         desc.contains("perplexity_api_key"),
         "description should mention the optional Perplexity API key"
+    );
+    assert!(desc.contains("Exa"), "description should mention Exa");
+    assert!(
+        desc.contains("exa_api_key"),
+        "description should mention the optional Exa API key"
     );
     assert!(
         desc.contains("relevance_score"),
@@ -239,6 +261,68 @@ fn test_orchestrator_with_all_three_keys_adds_all_optional_engines() {
 }
 
 #[test]
+fn test_orchestrator_with_exa_key_adds_exa_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_exa_key("exa-test-key"));
+    assert_eq!(orchestrator.engine_count(), 5);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"exa"));
+}
+
+#[test]
+fn test_orchestrator_with_empty_exa_key_omits_exa_engine() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_exa_key(""));
+    assert_eq!(orchestrator.engine_count(), 4);
+    let names = orchestrator.engine_names();
+    assert!(!names.contains(&"exa"));
+}
+
+#[test]
+fn test_orchestrator_with_all_four_keys_adds_all_optional_engines() {
+    let mut config = Config::default();
+    config.langsearch_api_key = Some("ls-test-key".to_string());
+    config.tavily_api_key = Some("tvly-test-key".to_string());
+    config.perplexity_api_key = Some("pplx-test-key".to_string());
+    config.exa_api_key = Some("exa-test-key".to_string());
+    let ctx = ToolContext {
+        session_id: "test".to_string(),
+        working_dir: std::env::temp_dir(),
+        event_bus: std::sync::Arc::new(ragent_types::event::EventBus::new(64)),
+        storage: None,
+        code_index: None,
+        config: Some(std::sync::Arc::new(config)),
+        read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
+            std::collections::HashMap::new(),
+        )),
+    };
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx);
+    assert_eq!(orchestrator.engine_count(), 8);
+    let names = orchestrator.engine_names();
+    assert!(names.contains(&"langsearch"));
+    assert!(names.contains(&"tavily"));
+    assert!(names.contains(&"perplexity"));
+    assert!(names.contains(&"exa"));
+    assert!(names.contains(&"openalex"));
+    assert!(names.contains(&"wikipedia"));
+}
+
+#[test]
+fn test_orchestrator_select_engine_exa() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx_with_exa_key("exa-test-key"));
+    let selected = orchestrator
+        .select_engine("exa")
+        .expect("select_engine should find 'exa' when key is present");
+    assert_eq!(selected.engine_count(), 1);
+    let names = selected.engine_names();
+    assert_eq!(names, vec!["exa"]);
+}
+
+#[test]
+fn test_orchestrator_select_engine_exa_returns_none_when_no_key() {
+    let orchestrator = MfSearchTool::build_orchestrator(&ctx());
+    assert!(orchestrator.select_engine("exa").is_none());
+}
+
+#[test]
 fn test_parameters_schema_has_required_query() {
     let tool = MfSearchTool;
     let schema = tool.parameters_schema();
@@ -285,6 +369,7 @@ fn test_parameters_schema_includes_engine_enum() {
     assert!(engine_enum.contains(&"langsearch".to_string()));
     assert!(engine_enum.contains(&"tavily".to_string()));
     assert!(engine_enum.contains(&"perplexity".to_string()));
+    assert!(engine_enum.contains(&"exa".to_string()));
 }
 
 #[test]
@@ -378,7 +463,7 @@ fn test_build_search_metadata_populates_search_tool_and_engine() {
 #[test]
 fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
     let status = MfSearchTool::engine_status(&ctx());
-    assert_eq!(status.len(), 7);
+    assert_eq!(status.len(), 8);
     let by_name: std::collections::HashMap<&str, &EngineStatus> =
         status.iter().map(|e| (e.name, e)).collect();
 
@@ -402,6 +487,9 @@ fn test_engine_status_without_keys_shows_keyless_engines_enabled() {
 
     let ppx = by_name["Perplexity"];
     assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
+
+    let exa = by_name["Exa"];
+    assert!(!exa.enabled && !exa.in_use && exa.failed);
 }
 
 #[test]
@@ -431,6 +519,28 @@ fn test_engine_status_with_tavily_key_enables_tavily() {
 
     let lang = by_name["LangSearch"];
     assert!(!lang.enabled && !lang.in_use && lang.failed);
+
+    let ppx = by_name["Perplexity"];
+    assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
+
+    let exa = by_name["Exa"];
+    assert!(!exa.enabled && !exa.in_use && exa.failed);
+}
+
+#[test]
+fn test_engine_status_with_exa_key_enables_exa() {
+    let status = MfSearchTool::engine_status(&ctx_with_exa_key("exa-test-key"));
+    let by_name: std::collections::HashMap<&str, &EngineStatus> =
+        status.iter().map(|e| (e.name, e)).collect();
+
+    let exa = by_name["Exa"];
+    assert!(exa.enabled && exa.in_use && !exa.failed);
+
+    let lang = by_name["LangSearch"];
+    assert!(!lang.enabled && !lang.in_use && lang.failed);
+
+    let tav = by_name["Tavily"];
+    assert!(!tav.enabled && !tav.in_use && tav.failed);
 
     let ppx = by_name["Perplexity"];
     assert!(!ppx.enabled && !ppx.in_use && ppx.failed);
@@ -495,4 +605,6 @@ fn test_engine_status_with_empty_keys_treats_keys_as_missing() {
     assert!(!by_name["Tavily"].enabled);
     assert!(by_name["Perplexity"].failed);
     assert!(!by_name["Perplexity"].enabled);
+    assert!(by_name["Exa"].failed);
+    assert!(!by_name["Exa"].enabled);
 }

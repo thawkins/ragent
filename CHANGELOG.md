@@ -1,5 +1,53 @@
 # Changelog
 
+## Version: 1.0.27
+
+### Added — Exa Search API backend for `mf_search`
+
+- New **Exa** search engine added to `mf_search`, configured via
+  `exa_api_key` in `ragent.json` (global or project) or the
+  `EXA_API_KEY` environment variable; the environment variable takes
+  precedence. The key is masked in diagnostics and never logged.
+- New module
+  `crates/ragent-tools-extended/src/masterfetch/search/exa.rs`
+  implementing the `ExaEngine` backend.
+- The `mf_search` `engine` parameter now accepts `"exa"` to restrict
+  searches to the Exa backend only. The JSON schema `engine` enum and
+  tool description updated to include `exa`.
+- `MfSearchTool::resolve_search_keys` now returns a 4-tuple including
+  the Exa key; `build_orchestrator` and `engine_status` wired to
+  include the Exa engine when a key is present.
+- `Config::exa_api_key` field added to `ragent-config` with
+  `#[serde(default, skip_serializing_if = "Option::is_none")]` and
+  merge support in `Config::merge`.
+- New tests `test_mf_exa.rs` and extended `test_mf_search_tool.rs`
+  covering orchestrator wiring, engine selection, engine status, and
+  schema enum for Exa.
+
+### Changed — Research document `Search Engine Summary` section
+
+- `crates/ragent-research/src/document.rs` now renders a
+  **Search Engine Summary** table in `RESEARCH.md` (both Report and
+  IMRaD layouts) showing, per backend engine, the number of web
+  sources acquired broken down by media type (pages, PDFs, videos).
+  The section is emitted only when at least one web source has a
+  non-empty `search_engine` field, so skeletons and pre-gathering
+  documents remain unchanged.
+- `crates/ragent-research/src/source.rs` gains a
+  `Source::search_engine()` accessor returning the comma-separated
+  backend engine list for `Source::Web` (empty string for other
+  variants).
+- New unit tests for `render_search_engine_summary` covering
+  multi-engine source splitting, media-type counting, empty-state,
+  and section ordering in both Report and IMRaD layouts.
+
+### Changed — Documentation and statistics
+
+- README.md updated to mention Exa in the MasterFetch feature list,
+  recent highlights, and `engine` parameter enum.
+- STATS.md updated with current line/file/test counts reflecting the
+  new Exa module and research document changes.
+
 ## Version: 1.0.26
 
 ### Added — OpenAlex and Wikipedia search backends for `mf_search`
