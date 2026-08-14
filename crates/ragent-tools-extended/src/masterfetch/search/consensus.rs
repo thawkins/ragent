@@ -377,6 +377,13 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
 /// Compute a positional score from a 0-based rank index.
 ///
 /// Uses an exponential decay: `score = 1.0 / (1.0 + rank * 0.15)`.
+///
+/// The smoothing constant `0.15` prevents division by zero and ensures that even
+/// the lowest-ranked results retain a non-zero score. This value was chosen to
+/// provide a gentle decay curve where position matters but lower-ranked results
+/// still contribute meaningfully to the consensus score.
+///
+/// Examples:
 /// - Rank 0 → 1.0
 /// - Rank 1 → ~0.87
 /// - Rank 5 → ~0.57

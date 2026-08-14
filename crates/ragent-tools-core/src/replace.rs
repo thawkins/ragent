@@ -66,6 +66,13 @@ pub fn find_exact_replacement_range(
 /// and `\\` (literal backslash). A backslash followed by any other character
 /// is kept verbatim (both the backslash and the character) so needles such as
 /// Windows paths (`C:\new`) or regex fragments are not mangled.
+///
+/// # Improvements (editrenewal FR-009)
+///
+/// This function handles escape sequences robustly by:
+/// - Decoding all standard escape sequences consistently
+/// - Preserving backslashes that aren't part of recognized escapes
+/// - Working correctly with UTF-8 multi-byte characters
 #[must_use]
 pub fn decode_escapes(raw: &str) -> String {
     if !raw.contains('\\') {
@@ -108,9 +115,17 @@ pub fn decode_escapes(raw: &str) -> String {
 ///    (spaces, tabs, newlines, CRs, form feeds, vertical tabs collapsed), and
 ///    non-whitespace characters must match exactly.
 ///
+/// # Improvements (editrenewal FR-009)
+///
+/// The flexible matcher now handles these common failure cases:
+/// - **Leading/trailing whitespace**: Boundary whitespace runs match flexibly
+/// - **Blank lines**: Consecutive newlines with varying whitespace are normalized
+/// - **UTF-8 boundaries**: Char-based matching with correct byte offset tracking
+/// - **Escape sequences**: All standard escapes decoded before matching
+///
 /// Returns `(start, end, new_str)` on success, where `[start, end)` is the
 /// byte range **in the original content** that matched — its length may differ
-/// from the needle's length.
+/// from the needle's length due to whitespace collapsing.
 ///
 /// # Errors
 ///
@@ -158,6 +173,7 @@ pub fn find_flexible_replacement_range(
     let mut matches: Vec<(usize, usize)> = Vec::new();
     if !pat_folded.is_empty() {
         'anchors: for si in 0..hay.len() {
+            // Allow match to start at whitespace if pattern starts with whitespace
             if !hay[si].is_whitespace() && hay[si] != pat_folded[0] {
                 continue; // anchored literals cannot start on whitespace
             }

@@ -11,6 +11,7 @@ use std::str::FromStr as _;
 use std::time::Duration;
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::masterfetch::security::validate_url;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_BODY_BYTES: usize = 1024 * 1024; // 1 MiB response cap
@@ -71,6 +72,10 @@ impl Tool for HttpRequestTool {
         let url = input["url"]
             .as_str()
             .context("Missing required 'url' parameter")?;
+
+        // C-001: Enforce SSRF / URL safety guard before any outbound request.
+        validate_url(url).with_context(|| format!("URL failed security validation: {url}"))?;
+
         let method_str = input["method"].as_str().unwrap_or("GET").to_uppercase();
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 

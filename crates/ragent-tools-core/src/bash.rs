@@ -31,7 +31,7 @@ use crate::event::Event;
 ///
 /// Replaces any character that is not alphanumeric or `-` with `_` so that
 /// the result is safe to embed directly in a file path.
-fn safe_session_id(session_id: &str) -> String {
+pub(crate) fn safe_session_id(session_id: &str) -> String {
     session_id
         .chars()
         .map(|c| {
@@ -235,6 +235,22 @@ fn script_file_path(session_id: &str, shell: &ShellType) -> Result<String> {
 /// are interpreted as escape characters by bash.
 fn to_posix_path(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+/// Escape a string for safe embedding in a POSIX single-quoted string literal.
+///
+/// The result can be placed between single quotes in a shell script without
+/// allowing metacharacters or quote injection to alter the surrounding syntax.
+pub(crate) fn sh_quote_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Escape a string for safe embedding in a PowerShell single-quoted string literal.
+///
+/// In PowerShell single-quoted strings, the only special character is the
+/// single quote itself, which must be doubled to escape it.
+pub(crate) fn ps_quote_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
 }
 
 // ── State parsing ──────────────────────────────────────────────────────────
@@ -844,7 +860,7 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
 /// 3. Saves exported variables via `export -p`.
 /// 4. Appends `RAGENT_PWD=<cwd>` as an unambiguous marker.
 /// 5. Cleans up the temporary script file.
-fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
+pub(crate) fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
     // Use forward slashes even on Windows (Git Bash understands them)
     let state_file_posix = if is_windows() {
         to_posix_path(state_file)
@@ -857,17 +873,23 @@ fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
         script_file.to_string()
     };
 
+    // Escape the file paths so malicious characters in session IDs or temp
+    // directories cannot break out of the generated wrapper script.
+    let state_quoted = sh_quote_single(&state_file_posix);
+    let script_quoted = sh_quote_single(&script_file_posix);
+
     format!(
-        "STATE_FILE=\"{state_file_posix}\"\n\
+        "STATE_FILE={state_quoted}\n\
+         SCRIPT_FILE={script_quoted}\n\
          if [ -f \"$STATE_FILE\" ]; then\n\
            . \"$STATE_FILE\" 2>/dev/null\n\
            cd \"${{RAGENT_PWD:-}}\" 2>/dev/null || true\n\
          fi\n\
-         bash \"{script_file_posix}\"\n\
+         bash \"$SCRIPT_FILE\"\n\
          EXIT_CODE=$?\n\
          export -p 2>/dev/null > \"$STATE_FILE\" || true\n\
          printf 'RAGENT_PWD=%s\\n' \"$(pwd)\" >> \"$STATE_FILE\"\n\
-         rm -f \"{script_file_posix}\"\n\
+         rm -f \"$SCRIPT_FILE\"\n\
          exit $EXIT_CODE\n"
     )
 }
@@ -881,14 +903,18 @@ fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
 /// 4. Persists user-set environment variables to the state script.
 /// 5. Appends the `RAGENT_PWD` marker.
 /// 6. Cleans up the temporary script file.
-fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
-    // PowerShell wrapper: dot-source state, run command, save state
+pub(crate) fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
+    // Escape the file paths so malicious characters in session IDs or temp
+    // directories cannot break out of the generated wrapper script.
+    let state_quoted = ps_quote_single(state_file);
+    let script_quoted = ps_quote_single(script_file);
+
     format!(
         "$ErrorActionPreference = 'Continue'\n\
-         $StateFile = '{state_file}'\n\
+         $StateFile = {state_quoted}\n\
          if (Test-Path $StateFile) {{ . $StateFile }}\n\
          if ($env:RAGENT_PWD) {{ Set-Location $env:RAGENT_PWD }}\n\
-         $UserCmd = Get-Content -Raw '{script_file}'\n\
+         $UserCmd = Get-Content -Raw {script_quoted}\n\
          try {{\n\
            Invoke-Expression $UserCmd\n\
          }} finally {{\n\
@@ -901,7 +927,7 @@ fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
            $envLines += \"Set-Location -Path '\\`\" + (Get-Location).Path + \"\\`'\"\n\
            $envLines += 'RAGENT_PWD=' + (Get-Location).Path\n\
            Set-Content -Path $StateFile -Value $envLines\n\
-           Remove-Item -Force '{script_file}' -ErrorAction SilentlyContinue\n\
+           Remove-Item -Force {script_quoted} -ErrorAction SilentlyContinue\n\
            exit $exitCode\n\
          }}\n"
     )

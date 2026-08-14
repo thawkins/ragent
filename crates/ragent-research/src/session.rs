@@ -172,7 +172,7 @@ pub struct SessionConfig {
     /// every fetched page regardless of its query-match relevance score,
     /// disabling the default filter that discards "Low"/"Very low" sources.
     pub use_low_relevance: bool,
-    /// `--no-scholarly`: when `true`, the web-gathering phase filters out
+    /// `--no-papers`: when `true`, the web-gathering phase filters out
     /// hits from scholarly search engines (e.g. OpenAlex) so only general
     /// web search results are captured.
     pub disable_scholarly: bool,

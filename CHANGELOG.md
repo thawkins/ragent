@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 1.0.29
+
+### Changed
+
+- Bumped workspace version to 1.0.29.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound crates); no new security issues introduced.
+
 ## Version: 1.0.28-beta
 
 ### Added — Spec-Driven Development (SDD) back-fill

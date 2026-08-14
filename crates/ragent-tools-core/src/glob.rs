@@ -76,6 +76,9 @@ impl Tool for GlobTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
+        // C-002: glob must stay inside the working root even when `path` is provided.
+        super::check_path_within_root(&base_dir, &ctx.working_dir)?;
+
         let glob = globset::GlobBuilder::new(pattern)
             .case_insensitive(false)
             .build()

@@ -906,14 +906,14 @@ impl WebGatherer {
                         if !seen_urls.insert(url_key) {
                             continue;
                         }
-                        // Filter out scholarly hits when --no-scholarly is set.
+                        // Filter out scholarly hits when --no-papers is set.
                         if self.disable_scholarly && is_scholarly_hit(&hit) {
                             excluded_count += 1;
-                            let reason = "scholarly engine excluded by --no-scholarly";
+                            let reason = "scholarly engine excluded by --no-papers";
                             tracing::info!(
                                 query = %query,
                                 url = %hit.url,
-                                "research: skipping scholarly hit due to --no-scholarly"
+                                "research: skipping scholarly hit due to --no-papers"
                             );
                             log_rejected(
                                 &hit.url,
@@ -1688,8 +1688,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gather_filters_scholarly_hit_when_no_scholarly_set() {
-        // With --no-scholarly, OpenAlex hits should be filtered out before
+    async fn gather_filters_scholarly_hit_when_no_papers_set() {
+        // With --no-papers, OpenAlex hits should be filtered out before
         // any fetch or capture.
         let hits = vec![WebSearchHit {
             url: "https://doi.org/10.1000/rust-async".into(),
@@ -1710,7 +1710,7 @@ mod tests {
         assert_eq!(
             sources.len(),
             0,
-            "scholarly hit should be filtered out by --no-scholarly"
+            "scholarly hit should be filtered out by --no-papers"
         );
         let calls = fetch.calls.lock().unwrap();
         assert!(

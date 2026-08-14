@@ -238,7 +238,7 @@ pub async fn handle_research_command(
                 use_local,
                 use_specs,
                 use_low_relevance,
-                no_scholarly,
+                no_papers: no_scholarly,
                 local_concurrency: local_concurrently,
                 fetch_timeout_secs,
                 web_phase_timeout_secs,
@@ -348,7 +348,7 @@ pub async fn handle_research_command(
             use_local,
             use_specs,
             use_low_relevance,
-            no_scholarly,
+            no_papers,
             local_concurrency,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -394,7 +394,7 @@ pub async fn handle_research_command(
                     OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
                 }),
                 use_low_relevance,
-                disable_scholarly: no_scholarly,
+                disable_scholarly: no_papers,
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
                 search_max_retries: search_max_retries

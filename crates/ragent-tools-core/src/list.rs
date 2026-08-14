@@ -66,6 +66,9 @@ impl Tool for ListTool {
             |p| resolve_path(&ctx.working_dir, p),
         );
 
+        // C-002: directory listings must stay inside the working root.
+        super::check_path_within_root(&dir, &ctx.working_dir)?;
+
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 
         if !dir.is_dir() {

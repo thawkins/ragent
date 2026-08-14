@@ -1214,13 +1214,13 @@ mod tests {
         let fake = Arc::new(FakeMfFetchTool {
             called_with_youtube: AtomicBool::new(false),
         });
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let page = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: fake.clone(),
                 ctx: AgentToolContext {
                     session_id: "test".to_string(),
-                    working_dir: std::env::current_dir().unwrap(),
+                    working_dir: std::env::current_dir().expect("current_dir"),
                     event_bus: Arc::new(crate::event::EventBus::new(8)),
                     storage: None,
                     task_manager: None,
@@ -1296,7 +1296,7 @@ mod tests {
             }
         }
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let err = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: Arc::new(FakeYoutubeErrorTool),
@@ -1355,7 +1355,7 @@ mod tests {
             }
         }
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let err = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: Arc::new(FakeNotOkTool),
@@ -1413,7 +1413,7 @@ mod tests {
             }
         }
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let err = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: Arc::new(FakeFailedHtmlTool),
@@ -1442,7 +1442,7 @@ mod tests {
     fn test_tool_context() -> AgentToolContext {
         AgentToolContext {
             session_id: "test".to_string(),
-            working_dir: std::env::current_dir().unwrap(),
+            working_dir: std::env::current_dir().expect("current_dir"),
             event_bus: Arc::new(crate::event::EventBus::new(8)),
             storage: None,
             task_manager: None,
@@ -1554,7 +1554,7 @@ mod tests {
             extraction_method: Some("html2text"),
             content_type: "text/html",
         });
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let result = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: fake,
@@ -1578,7 +1578,7 @@ mod tests {
             extraction_method: None,
             content_type: "text/html",
         });
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let result = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: fake,
@@ -1601,7 +1601,7 @@ mod tests {
             extraction_method: None,
             content_type: "application/pdf",
         });
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let page = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: fake,
@@ -1620,7 +1620,7 @@ mod tests {
     fn test_legacy_webfetch_fallback_verified_rejected() {
         // When the legacy webfetch tool is used and the raw-HTML re-check
         // says readability could not extract, the page must be rejected.
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let result = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: Arc::new(FakeLegacyWebfetch),
@@ -1637,7 +1637,7 @@ mod tests {
 
     #[test]
     fn test_legacy_webfetch_fallback_verified_accepted() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("create runtime");
         let page = rt.block_on(async {
             let fetcher = AgentWebFetchTool {
                 tool: Arc::new(FakeLegacyWebfetch),
@@ -1691,7 +1691,7 @@ mod tests {
             &registry,
             manager,
             "test-session".into(),
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            std::env::current_dir().expect("current_dir"),
             Arc::new(EventBus::new(256)),
             None,
             None,

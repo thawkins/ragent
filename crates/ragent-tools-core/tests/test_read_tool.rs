@@ -8,18 +8,37 @@ use ragent_tools_core::read::ReadTool;
 use ragent_tools_core::{Tool, ToolContext, ToolOutput};
 use ragent_types::event::EventBus;
 
-fn make_ctx() -> ToolContext {
+fn make_ctx(dir: &std::path::Path) -> ToolContext {
     ToolContext {
         session_id: "test".to_string(),
-        working_dir: std::env::current_dir().unwrap(),
+        working_dir: dir.to_path_buf(),
         event_bus: Arc::new(EventBus::new(1024)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
     }
 }
 
+/// Helper: create a temp directory under the current working directory so the
+/// read tool's path-containment check is satisfied.
+fn temp_dir() -> std::path::PathBuf {
+    let dir = std::env::current_dir()
+        .unwrap()
+        .join("target")
+        .join("temp")
+        .join(format!(
+            "read_tool_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
 /// Helper: execute the read tool and return the output.
-async fn read_file_with(input: serde_json::Value) -> ToolOutput {
-    ReadTool.execute(input, &make_ctx()).await.unwrap()
+async fn read_file_with(input: serde_json::Value, dir: &std::path::Path) -> ToolOutput {
+    ReadTool.execute(input, &make_ctx(dir)).await.unwrap()
 }
 
 /// Build input JSON for read tool.
@@ -35,19 +54,20 @@ fn read_input(path: &str, extra: serde_json::Value) -> serde_json::Value {
 
 #[tokio::test]
 async fn test_read_num_lines_basic() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=500 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 201, "num_lines": 100 }),
     );
-    let out = read_file_with(input).await;
+    let out = read_file_with(input, &dir).await;
 
     // Should contain lines 201–300
     assert!(out.content.contains("Line 201"));
@@ -63,19 +83,20 @@ async fn test_read_num_lines_basic() {
 
 #[tokio::test]
 async fn test_read_end_line_takes_precedence_over_num_lines() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=500 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 201, "end_line": 250, "num_lines": 100 }),
     );
-    let out = read_file_with(input).await;
+    let out = read_file_with(input, &dir).await;
 
     // end_line=250 should win, so only lines 201–250
     assert!(out.content.contains("Line 201"));
@@ -89,19 +110,20 @@ async fn test_read_end_line_takes_precedence_over_num_lines() {
 
 #[tokio::test]
 async fn test_read_num_lines_clamped_to_total_lines() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=50 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 40, "num_lines": 100 }),
     );
-    let out = read_file_with(input).await;
+    let out = read_file_with(input, &dir).await;
 
     // Only 50 lines total, starting at 40 → should read 40–50 (11 lines)
     assert!(out.content.contains("Line 40"));
@@ -115,19 +137,20 @@ async fn test_read_num_lines_clamped_to_total_lines() {
 
 #[tokio::test]
 async fn test_read_num_lines_with_start_line_one() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=100 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 1, "num_lines": 10 }),
     );
-    let out = read_file_with(input).await;
+    let out = read_file_with(input, &dir).await;
 
     assert!(out.content.contains("Line 1"));
     assert!(out.content.contains("Line 10"));
@@ -141,16 +164,17 @@ async fn test_read_num_lines_with_start_line_one() {
 
 #[tokio::test]
 async fn test_read_num_lines_without_start_line_is_ignored() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=10 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
-    let input = read_input(tmp.path().to_str().unwrap(), json!({ "num_lines": 5 }));
-    let out = read_file_with(input).await;
+    let input = read_input(tmp.to_str().unwrap(), json!({ "num_lines": 5 }));
+    let out = read_file_with(input, &dir).await;
 
     // Without start_line, num_lines is ignored; full file returned (≤100 lines)
     assert!(out.content.contains("Line 1"));
@@ -164,17 +188,18 @@ async fn test_read_num_lines_without_start_line_is_ignored() {
 
 #[tokio::test]
 async fn test_read_num_lines_zero_is_error() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         writeln!(f, "Line 1").unwrap();
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 1, "num_lines": 0 }),
     );
-    let result = ReadTool.execute(input, &make_ctx()).await;
+    let result = ReadTool.execute(input, &make_ctx(&dir)).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -188,19 +213,20 @@ async fn test_read_end_line_smaller_than_start_line_gives_actionable_error() {
     // meaning "give me 100 lines starting at 200".  The old behaviour produced
     // a generic "start_line must be <= end_line" error.  The new behaviour
     // recognises the likely intent and tells the caller to use num_lines.
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=500 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 200, "end_line": 100 }),
     );
-    let result = ReadTool.execute(input, &make_ctx()).await;
+    let result = ReadTool.execute(input, &make_ctx(&dir)).await;
 
     assert!(result.is_err(), "expected error for end_line < start_line");
     let err = result.unwrap_err().to_string();
@@ -217,19 +243,20 @@ async fn test_read_end_line_smaller_than_start_line_with_explicit_num_lines_stil
     // end_line < start_line check still applies but the diagnostic doesn't
     // suggest num_lines (the caller already has it right).  We just report the
     // range error normally.
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         for i in 1..=500 {
             writeln!(f, "Line {i}").unwrap();
         }
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 200, "end_line": 50, "num_lines": 100 }),
     );
-    let result = ReadTool.execute(input, &make_ctx()).await;
+    let result = ReadTool.execute(input, &make_ctx(&dir)).await;
 
     assert!(
         result.is_err(),
@@ -239,17 +266,18 @@ async fn test_read_end_line_smaller_than_start_line_with_explicit_num_lines_stil
 
 #[tokio::test]
 async fn test_read_end_line_zero_is_error() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         writeln!(f, "Line 1").unwrap();
     }
 
     let input = read_input(
-        tmp.path().to_str().unwrap(),
+        tmp.to_str().unwrap(),
         json!({ "start_line": 1, "end_line": 0 }),
     );
-    let result = ReadTool.execute(input, &make_ctx()).await;
+    let result = ReadTool.execute(input, &make_ctx(&dir)).await;
 
     assert!(result.is_err());
 }
@@ -260,29 +288,27 @@ async fn test_read_end_line_zero_is_error() {
 /// `read_timestamps` map so that edit tools can detect stale-file edits.
 #[tokio::test]
 async fn test_read_records_timestamp() {
-    let tmp = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp = dir.join("test.txt");
     {
-        let mut f = std::fs::File::create(tmp.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp).unwrap();
         writeln!(f, "Line 1").unwrap();
     }
 
-    let ctx = make_ctx();
+    let ctx = make_ctx(&dir);
     assert!(
         ctx.read_timestamps.read().unwrap().is_empty(),
         "timestamp map should start empty"
     );
 
-    let input = read_input(tmp.path().to_str().unwrap(), json!({}));
+    let input = read_input(tmp.to_str().unwrap(), json!({}));
     let _ = ReadTool.execute(input, &ctx).await.unwrap();
 
     let map = ctx.read_timestamps.read().unwrap();
-    let canonical = tmp
-        .path()
-        .canonicalize()
-        .unwrap_or_else(|_| tmp.path().to_path_buf());
+    let canonical = tmp.canonicalize().unwrap_or_else(|_| tmp.to_path_buf());
     let recorded = map.get(&canonical).or_else(|| {
         // The read tool may store the unresolved path; check both.
-        map.iter().find(|(p, _)| *p == tmp.path()).map(|(_, v)| v)
+        map.iter().find(|(p, _)| **p == tmp).map(|(_, v)| v)
     });
     assert!(
         recorded.is_some(),
@@ -300,22 +326,23 @@ async fn test_read_records_timestamp() {
 /// reading two different files must record both.
 #[tokio::test]
 async fn test_read_timestamp_two_files() {
-    let tmp1 = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
-    let tmp2 = tempfile::NamedTempFile::with_suffix(".txt").unwrap();
+    let dir = temp_dir();
+    let tmp1 = dir.join("alpha.txt");
+    let tmp2 = dir.join("beta.txt");
     {
-        let mut f = std::fs::File::create(tmp1.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp1).unwrap();
         writeln!(f, "alpha").unwrap();
-        let mut f = std::fs::File::create(tmp2.path()).unwrap();
+        let mut f = std::fs::File::create(&tmp2).unwrap();
         writeln!(f, "beta").unwrap();
     }
 
-    let ctx = make_ctx();
+    let ctx = make_ctx(&dir);
     let _ = ReadTool
-        .execute(read_input(tmp1.path().to_str().unwrap(), json!({})), &ctx)
+        .execute(read_input(tmp1.to_str().unwrap(), json!({})), &ctx)
         .await
         .unwrap();
     let _ = ReadTool
-        .execute(read_input(tmp2.path().to_str().unwrap(), json!({})), &ctx)
+        .execute(read_input(tmp2.to_str().unwrap(), json!({})), &ctx)
         .await
         .unwrap();
 

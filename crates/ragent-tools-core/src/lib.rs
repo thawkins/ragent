@@ -124,46 +124,51 @@ pub trait Tool: Send + Sync {
 
 /// Verify that `path` resolves within `root` after canonicalization.
 ///
+/// Canonicalises both `path` and `root` and checks that the canonical path is
+/// either the root itself or a true child of it using path-component equality,
+/// which avoids the string-prefix confusion where `/foo` appears to contain
+/// `/foobar`.
+///
+/// For paths that do not yet exist, the function canonicalises the longest
+/// existing prefix and then appends the remaining, normalised components.  This
+/// catches traversal attempts in non-existent paths such as `../etc/passwd`.
+///
 /// # Errors
 ///
 /// Returns an error if the path escapes the given root.
 pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
-    let canonical = if path.exists() {
-        path.canonicalize()?
+    let canonical_root = root
+        .canonicalize()
+        .unwrap_or_else(|_| root.to_path_buf().clean_path());
+
+    // Canonicalise the existing portion of `path`.  We cannot call
+    // `canonicalize` directly on a non-existent path, so we walk up until we
+    // find something that exists, record the missing tail components, then
+    // reconstruct the path from the canonical base.
+    let canonical = if let Ok(c) = path.canonicalize() {
+        c
     } else {
-        let parent = path.parent().unwrap_or(path);
-        let canonical_parent = if parent.exists() {
-            parent.canonicalize()?
-        } else {
-            let mut p = parent;
-            let mut parts = vec![];
-            loop {
-                if p.exists() {
-                    let mut base = p.canonicalize()?;
-                    for part in parts.iter().rev() {
-                        base = base.join(part);
-                    }
-                    break base;
+        let mut existing: &Path = path;
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        loop {
+            if existing.exists() {
+                let mut base = existing.canonicalize()?;
+                for part in tail.iter().rev() {
+                    base = base.join(part);
                 }
-                if let Some(name) = p.file_name() {
-                    parts.push(name.to_os_string());
-                }
-                p = match p.parent() {
-                    Some(pp) => pp,
-                    None => break root.to_path_buf(),
-                };
+                break base;
             }
-        };
-        if let Some(filename) = path.file_name() {
-            canonical_parent.join(filename)
-        } else {
-            canonical_parent
+            if let Some(name) = existing.file_name() {
+                tail.push(name);
+            }
+            match existing.parent() {
+                Some(parent) => existing = parent,
+                None => break canonical_root.clone(),
+            }
         }
     };
 
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-
-    if !canonical.starts_with(&canonical_root) {
+    if !is_path_within(&canonical, &canonical_root) {
         anyhow::bail!(
             "Path escape rejected: '{}' resolves outside project root '{}'",
             path.display(),
@@ -171,6 +176,41 @@ pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Returns true when `child` is `root` or a descendant of `root`, using path
+/// components rather than string prefixing.
+fn is_path_within(child: &Path, root: &Path) -> bool {
+    if child == root {
+        return true;
+    }
+    let root_components: Vec<_> = root.components().collect();
+    let child_components: Vec<_> = child.components().collect();
+    child_components.len() >= root_components.len()
+        && child_components[..root_components.len()] == root_components[..]
+}
+
+/// Lightweight in-place path cleaning that removes `.` and `..` components
+/// without touching the filesystem.  Used only as a fallback when canonicalising
+/// the root itself fails.
+trait CleanPath {
+    fn clean_path(&self) -> PathBuf;
+}
+
+impl CleanPath for Path {
+    fn clean_path(&self) -> PathBuf {
+        let mut out = PathBuf::new();
+        for comp in self.components() {
+            match comp {
+                std::path::Component::ParentDir => {
+                    out.pop();
+                }
+                std::path::Component::CurDir => {}
+                _ => out.push(comp),
+            }
+        }
+        out
+    }
 }
 
 /// Tool registry for managing available tools by name.

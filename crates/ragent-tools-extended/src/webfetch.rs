@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::masterfetch::security::validate_url;
 
 /// Fetches web content from a URL, with optional HTML-to-text conversion.
 pub struct WebFetchTool;
@@ -100,6 +101,9 @@ impl Tool for WebFetchTool {
         let url = input["url"]
             .as_str()
             .context("Missing required 'url' parameter")?;
+
+        // C-001: Enforce SSRF / URL safety guard before any outbound request.
+        validate_url(url).with_context(|| format!("URL failed security validation: {url}"))?;
 
         // Validate URL scheme
         if !url.starts_with("http://") && !url.starts_with("https://") {

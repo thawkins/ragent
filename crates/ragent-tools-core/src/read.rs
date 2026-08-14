@@ -152,6 +152,9 @@ impl Tool for ReadTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
+        // C-002: reads must stay inside the working root.
+        super::check_path_within_root(&path, &ctx.working_dir)?;
+
         if path.is_dir() {
             anyhow::bail!(
                 "'{}' is a directory, not a file. Use the 'list' tool to view directory contents.",

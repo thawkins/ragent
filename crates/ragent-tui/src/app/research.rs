@@ -62,7 +62,7 @@ impl App {
                 use_local,
                 use_specs,
                 use_low_relevance,
-                no_scholarly,
+                no_papers,
                 fetch_timeout_secs,
                 local_concurrency,
                 web_phase_timeout_secs,
@@ -124,7 +124,7 @@ impl App {
                         .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
                         .unwrap_or(OutputFormat::Report),
                     use_low_relevance,
-                    disable_scholarly: no_scholarly,
+                    disable_scholarly: no_papers,
                     fetch_timeout_secs: fetch_timeout_secs.unwrap_or(30),
                     local_concurrency: local_concurrency
                         .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
