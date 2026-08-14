@@ -14,7 +14,7 @@ fn parse_help() {
 fn parse_create() {
     let cmd = SpecCommand::parse("create my-spec Add auth");
     assert!(
-        matches!(cmd, SpecCommand::Create { specname, feature } if specname == "my-spec" && feature == "Add auth")
+        matches!(cmd, SpecCommand::Create { specname, feature, from_research: None } if specname == "my-spec" && feature == "Add auth")
     );
 }
 
@@ -191,7 +191,7 @@ fn create_message_contains_paths() {
 
 #[test]
 fn create_prompt_contains_feature_and_files() {
-    let p = SpecCommand::build_create_prompt("qux", "quux");
+    let p = SpecCommand::build_create_prompt("qux", "quux", None);
     assert!(p.contains("quux"));
     assert!(p.contains("specs/qux/SPEC.md"));
 }

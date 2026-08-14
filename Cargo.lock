@@ -2483,6 +2483,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4181,6 +4187,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5467,7 +5483,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "clap",
@@ -5493,7 +5509,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5507,6 +5523,7 @@ dependencies = [
  "dashmap",
  "dirs 6.0.0",
  "docx-rust",
+ "flate2",
  "fs2",
  "futures",
  "glob",
@@ -5552,6 +5569,7 @@ dependencies = [
  "sha2",
  "similar",
  "spreadsheet-ods",
+ "tar",
  "tempfile",
  "thiserror 2.0.19",
  "tokenizers",
@@ -5560,12 +5578,13 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "walkdir",
  "zip 7.2.0",
 ]
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5592,7 +5611,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5667,6 +5686,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -5681,7 +5701,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5709,7 +5729,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5770,7 +5790,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5907,7 +5927,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.27"
+version = "1.0.28"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5942,6 +5962,7 @@ dependencies = [
  "ragent-types",
  "rand 0.9.5",
  "ratatui",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
@@ -7369,13 +7390,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -7763,6 +7795,11 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "http-range-header",
+ "httpdate",
+ "mime",
+ "mime_guess",
+ "percent-encoding",
  "pin-project-lite",
  "tokio",
  "tokio-util",
@@ -8936,6 +8973,16 @@ name = "x11rb-protocol"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
+]
 
 [[package]]
 name = "xml5ever"

@@ -493,6 +493,13 @@ pub struct CronEvent {
     pub created_at: DateTime<Utc>,
     /// When the event last fired, or `None` if it has never fired.
     pub last_fired: Option<DateTime<Utc>>,
+    /// Whether this event runs in stateful loop mode (FR-004).
+    ///
+    /// When `true`, the scheduler maintains a cross-run state file and
+    /// parses `<loop-state>` / `<inbox>` output protocol tags from the
+    /// sub-agent's response.
+    #[serde(default)]
+    pub stateful: bool,
 }
 
 impl CronEvent {
@@ -526,6 +533,7 @@ impl CronEvent {
             next_due,
             created_at: Utc::now(),
             last_fired: None,
+            stateful: false,
         }
     }
 }

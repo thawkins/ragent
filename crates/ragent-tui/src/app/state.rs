@@ -19,6 +19,7 @@ use ragent_agent::permission::PermissionRequest;
 use ragent_agent::provider::ProviderRegistry;
 use ragent_agent::session::processor::SessionProcessor;
 use ragent_agent::storage::Storage;
+use ragent_agent::trigger::TriggerRuntime;
 use ragent_config::OtelProtocol;
 use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
 use serde::Serialize;
@@ -574,6 +575,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Summarise and compact the conversation history",
     },
     SlashCommandDef {
+        trigger: "inbox",
+        description: "Triage inbox: /inbox list|claim <id>|dismiss <id>|clear|help",
+    },
+    SlashCommandDef {
         trigger: "cost",
         description: "Show session token usage and estimated cost",
     },
@@ -640,6 +645,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "system",
         description: "Override the agent system prompt (/system <prompt>)",
+    },
+    SlashCommandDef {
+        trigger: "template",
+        description: "List and apply reusable prompt templates: /template [name] [args]",
+    },
+    SlashCommandDef {
+        trigger: "goal",
+        description: "Goal-based autonomous stop: /goal set|clear|show|test",
     },
     SlashCommandDef {
         trigger: "tools",
@@ -788,6 +801,22 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "actionloop",
         description: "Agent action-loop timing: /actionloop [help|clip]",
+    },
+    SlashCommandDef {
+        trigger: "bug-report",
+        description: "Generate diagnostic bug report with redacted session data (output to log/)",
+    },
+    SlashCommandDef {
+        trigger: "triggers",
+        description: "Manage trigger rules: /triggers [list|enable|disable|remove|status|help]",
+    },
+    SlashCommandDef {
+        trigger: "undo",
+        description: "Remove the last user/assistant turn pair from the conversation",
+    },
+    SlashCommandDef {
+        trigger: "name",
+        description: "Set a human-readable display name for the session: /name <display-name>",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.
@@ -1553,6 +1582,13 @@ pub struct App {
     pub run_cost_banner: Option<String>,
     /// When the run-cost banner was first shown, for auto-dismissal.
     pub run_cost_banner_at: Option<std::time::Instant>,
+
+    // ── Trigger runtime (FR-002, FR-003) ───────────────────────────────────
+    /// Shared trigger runtime for dynamic trigger rules and MCP notification
+    /// push events. `None` until the trigger system is initialised (which
+    /// happens lazily when the first session is created or when the user
+    /// issues `/triggers`).
+    pub trigger_runtime: Option<TriggerRuntime>,
 }
 
 /// State for the `/research open` markdown viewer overlay.

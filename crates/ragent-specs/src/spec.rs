@@ -262,6 +262,10 @@ pub struct Spec {
     pub reviewers: Vec<String>,
     /// Review comments text (contents of REVIEW.md if it exists).
     pub review_md: String,
+    /// Production feedback notes (contents of FEEDBACK.md if it exists).
+    /// Populated by the `/spec feedback` command (T-032) and surfaced during
+    /// `/spec plan` regeneration (FR-017, T-031).
+    pub feedback_md: String,
     /// Research names referenced from this spec (T-041, T-043). Populated
     /// from the SPEC.md frontmatter `research:` field and the PLAN.md
     /// `research: <name>` declarations.
@@ -296,6 +300,7 @@ impl Spec {
             )],
             reviewers: Vec::new(),
             review_md: String::new(),
+            feedback_md: String::new(),
             research: Vec::new(),
             modified_at: now,
             path: None,
@@ -318,6 +323,12 @@ impl Spec {
     #[must_use]
     pub fn plan_md_path(&self, specs_root: &Path) -> PathBuf {
         self.dir_path(specs_root).join("PLAN.md")
+    }
+
+    /// Get the path to FEEDBACK.md.
+    #[must_use]
+    pub fn feedback_md_path(&self, specs_root: &Path) -> PathBuf {
+        self.dir_path(specs_root).join("FEEDBACK.md")
     }
 
     /// Compute implementation coverage as a percentage.

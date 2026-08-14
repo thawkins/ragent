@@ -1004,11 +1004,36 @@ impl SessionProcessor {
                 let _scope = profiler.scope("loop.llm.stream");
                 loop {
                     let wait_started = Instant::now();
-                    // H1: stall detection lives inside each provider stream
-                    // (e.g. ollama.rs wraps `stream.next()` in its own timeout),
-                    // so we poll the stream directly instead of layering a
-                    // redundant `tokio::select!` + sleep wrapper here.
-                    let next_event = stream.next().await;
+                    // Per-chunk stall safety net. The H1 optimisation assumed
+                    // every provider wraps `stream.next()` in its own timeout,
+                    // but only Ollama does — all other providers (OpenAI,
+                    // Anthropic, Gemini, Bedrock, Copilot, Azure, Router, etc.)
+                    // have an unguarded `stream.next().await` that hangs forever
+                    // on a stalled connection (low CPU, no progress). We wrap the
+                    // poll in `stream_config.timeout_secs` (default 120s) and
+                    // synthesise a retryable `StreamEvent::Error` on timeout so
+                    // the existing retry logic can re-attempt the call.
+                    let stall_secs = self.stream_config.timeout_secs;
+                    let next_event = match tokio::time::timeout(
+                        std::time::Duration::from_secs(stall_secs),
+                        stream.next(),
+                    )
+                    .await
+                    {
+                        Ok(event) => event,
+                        Err(_) => {
+                            debug!(
+                                stall_secs,
+                                "Stream stalled — no data for {stall_secs}s, \
+                                 treating as retryable error"
+                            );
+                            Some(StreamEvent::Error {
+                                message: format!(
+                                    "stream stalled — no data received for {stall_secs}s"
+                                ),
+                            })
+                        }
+                    };
                     if first_stream_event_pending {
                         if next_event.is_some() {
                             first_event_arrived.store(true, Ordering::Relaxed);

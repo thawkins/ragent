@@ -96,6 +96,18 @@ optional = true
 version = "0.17"
 optional = true
 
+[dependencies.flate2]
+version = "1.0"
+
+[dependencies.tar]
+version = "0.4"
+
+[dependencies.walkdir]
+version = "2.3"
+
+[dependencies.tempfile]
+version = "3.5"
+
 [dev-dependencies]
 anyhow = { workspace = true }
 tempfile = "3.5"

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 use futures::StreamExt;
@@ -51,6 +51,26 @@ pub use crate::session::history::{
 };
 pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
+
+/// Maximum wall-clock time a single tool call may run before the watchdog
+/// aborts it and terminates the agent run (600 seconds).
+const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_mins(10); // = 600s
+
+/// Error type for a spawned tool-execution task in the agent loop.
+///
+/// Distinguishes a tokio join failure (panic or external abort) from a
+/// watchdog-forced abort after [`TOOL_WATCHDOG_TIMEOUT`]. The loop must tell
+/// these apart because a watchdog abort terminates the whole run while a
+/// join failure is logged and skipped.
+#[derive(Debug, thiserror::Error)]
+enum ToolTaskError {
+    /// The spawned tool task failed to join (panic or external abort).
+    #[error("tool task join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
+    /// The tool task exceeded the watchdog timeout and was aborted.
+    #[error("tool execution aborted: exceeded the watchdog timeout")]
+    WatchdogAbort,
+}
 
 /// Drives the agentic conversation loop for a single session.///
 /// Holds shared references to the session manager, LLM provider registry,
@@ -656,6 +676,9 @@ impl SessionProcessor {
         let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> = std::sync::Arc::new(Vec::new());
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
+        // Set when a tool call stalls past `TOOL_WATCHDOG_TIMEOUT`; the run is
+        // terminated after the tool phase.
+        let mut watchdog_timed_out = false;
         let mut last_interim_hash: Option<u64> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
@@ -978,7 +1001,7 @@ impl SessionProcessor {
                         String,
                         Option<Value>,
                     ),
-                    tokio::task::JoinError,
+                    ToolTaskError,
                 >;
                 let result_profiler = profiler.clone();
                 // P-15: collect one `ToolCallBatchEntry` per tool call so a
@@ -1461,9 +1484,59 @@ impl SessionProcessor {
                         )
                     });
                     if parallel_tool_calls {
-                        futures.push(fut);
-                    } else if handle_tool_execution_result(fut.await) {
-                        break;
+                        // Capture a human-readable descriptor for the watchdog
+                        // timeout path before `tc` is borrowed/moved.
+                        let watchdog_tool_desc = format!("'{}' ({})", tc.name, tc.id);
+                        let abort_handle = fut.abort_handle();
+                        futures.push(async move {
+                            match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {
+                                Ok(result) => (result.map_err(ToolTaskError::Join), None),
+                                Err(_) => {
+                                    abort_handle.abort();
+                                    (Err(ToolTaskError::WatchdogAbort), Some(watchdog_tool_desc))
+                                }
+                            }
+                        });
+                    } else {
+                        let watchdog_tool_desc = format!("'{}' ({})", tc.name, tc.id);
+                        let watchdog_call_id = tc.id.clone();
+                        let watchdog_tool_name = tc.name.clone();
+                        let abort_handle = fut.abort_handle();
+                        let result = match tokio::time::timeout(TOOL_WATCHDOG_TIMEOUT, fut).await {
+                            Ok(result) => result.map_err(ToolTaskError::Join),
+                            Err(_) => {
+                                abort_handle.abort();
+                                watchdog_timed_out = true;
+                                let msg = format!(
+                                    "Tool call {watchdog_tool_desc} stalled for over {}s \
+                                     (watchdog timeout); aborting the run.",
+                                    TOOL_WATCHDOG_TIMEOUT.as_secs()
+                                );
+                                warn!("{}", msg);
+                                // Close out the tool call in the UI: no `ToolCallEnd`
+                                // was published because the spawned task was aborted.
+                                self.event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id.to_string(),
+                                    call_id: watchdog_call_id,
+                                    tool: watchdog_tool_name,
+                                    error: Some(msg.clone()),
+                                    duration_ms: TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
+                                });
+                                self.event_bus.publish(Event::AgentError {
+                                    session_id: session_id.to_string(),
+                                    error: msg.clone(),
+                                });
+                                self.event_bus.publish(Event::AgentNotice {
+                                    session_id: session_id.to_string(),
+                                    message: msg,
+                                });
+                                // Stop processing further tool calls for this turn.
+                                break;
+                            }
+                        };
+                        if handle_tool_execution_result(result) {
+                            break;
+                        }
                     }
                 }
                 if parallel_tool_calls {
@@ -1471,9 +1544,35 @@ impl SessionProcessor {
                         let _scope = profiler.scope("loop.tool_phase.join_parallel");
                         futures::future::join_all(futures).await
                     };
-                    for result in results {
-                        if handle_tool_execution_result(result) {
+                    for (result, stalled_tool) in results {
+                        if let Some(ref tool_desc) = stalled_tool {
+                            watchdog_timed_out = true;
+                            let msg = format!(
+                                "Tool call {tool_desc} stalled for over {}s \
+                                 (watchdog timeout); aborting the run.",
+                                TOOL_WATCHDOG_TIMEOUT.as_secs()
+                            );
+                            warn!("{}", msg);
+                            self.event_bus.publish(Event::AgentError {
+                                session_id: session_id.to_string(),
+                                error: msg.clone(),
+                            });
+                            self.event_bus.publish(Event::AgentNotice {
+                                session_id: session_id.to_string(),
+                                message: msg,
+                            });
                             break;
+                        }
+                        match result {
+                            Ok(ok) => {
+                                if handle_tool_execution_result(Ok(ok)) {
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Tool execution task failed to join");
+                                break;
+                            }
                         }
                     }
                 }
@@ -1486,7 +1585,7 @@ impl SessionProcessor {
                         calls: batch_entries,
                     });
                 }
-                if agent_switch_requested || task_complete_requested {
+                if agent_switch_requested || task_complete_requested || watchdog_timed_out {
                     break;
                 }
                 // Auto task status updates (P-10: reuse the `active_spec_id`
@@ -1692,6 +1791,31 @@ impl SessionProcessor {
                     last_interim_hash = Some(current_hash);
                 }
             }
+        }
+
+        // Watchdog termination: persist the accumulated assistant parts, end the
+        // message with the cancelled reason (the closest existing variant to a
+        // watchdog-forced stop), and return a fatal error for the run.
+        if watchdog_timed_out {
+            let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
+            let parts_owned =
+                std::sync::Arc::try_unwrap(assistant_parts).unwrap_or_else(|arc| (*arc).clone());
+            let mut assistant_msg = Message::new(session_id, Role::Assistant, parts_owned);
+            assistant_msg.id = assistant_msg_id;
+            let msg_id = assistant_msg.id.clone();
+            let _ = self
+                .storage_op(move |s| s.update_message(&assistant_msg))
+                .await;
+            self.event_bus.publish(Event::MessageEnd {
+                session_id: session_id.to_string(),
+                message_id: msg_id,
+                reason: FinishReason::Cancelled,
+            });
+            publish_run_cost_summary(total_elapsed_ms);
+            return Err(anyhow::anyhow!(
+                "agent run terminated: tool call stalled beyond the {}s watchdog timeout",
+                TOOL_WATCHDOG_TIMEOUT.as_secs()
+            ));
         }
 
         // 8. Finalize

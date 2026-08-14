@@ -307,7 +307,17 @@ async fn fire_cron_event(
     let is_repeating = event.duration_secs.is_some() && event.schedule_form != "one_shot";
 
     // Attempt to spawn a background agent run via the new_task path.
-    let spawn_result = spawn_agent_run(session_processor, event, working_dir).await;
+    // For stateful events, load the cross-run loop state and inject it
+    // into the prompt (FR-004).
+    let effective_prompt = if event.stateful {
+        let state =
+            ragent_agent::loop_state::LoopState::load(working_dir, &event.id).unwrap_or_default();
+        ragent_agent::loop_state::inject_state_into_prompt(&event.prompt, &state)
+    } else {
+        event.prompt.clone()
+    };
+    let spawn_result =
+        spawn_agent_run(session_processor, event, &effective_prompt, working_dir).await;
 
     // Always advance/disable after the spawn attempt, so the event does not
     // fire again on the next tick regardless of spawn success or failure.
@@ -340,6 +350,8 @@ async fn fire_cron_event(
                     &task_entry.id,
                     event.id.clone(),
                     Arc::clone(running_events),
+                    event.stateful,
+                    working_dir.to_path_buf(),
                 );
             }
 
@@ -383,6 +395,7 @@ async fn fire_cron_event(
 async fn spawn_agent_run(
     session_processor: &ragent_agent::session::processor::SessionProcessor,
     event: &ragent_storage::CronEventRow,
+    prompt: &str,
     working_dir: &std::path::Path,
 ) -> anyhow::Result<ragent_agent::task::TaskEntry> {
     let task_manager = session_processor
@@ -394,7 +407,7 @@ async fn spawn_agent_run(
         .spawn_background(
             CRON_PARENT_SESSION_ID,
             &event.agent_type,
-            &event.prompt,
+            prompt,
             None, // no model override — use the configured default
             working_dir,
         )
@@ -413,6 +426,8 @@ fn spawn_completion_monitor(
     task_id: &str,
     event_id: String,
     running_events: RunningEvents,
+    stateful: bool,
+    working_dir: PathBuf,
 ) {
     let task_manager = match session_processor.task_manager.get().cloned() {
         Some(tm) => tm,
@@ -446,6 +461,50 @@ fn spawn_completion_monitor(
                     task_id = %task_id,
                     "Cron background run completed; removed from running_events",
                 );
+
+                // FR-004: For stateful events, parse the completed task's
+                // output for `<loop-state>` and `<inbox>` tags.
+                if stateful {
+                    if let Some(entry) = task_manager.get_task(&task_id).await {
+                        if let Some(result) = &entry.result {
+                            let parsed = ragent_agent::loop_state::parse_tags(result);
+                            if !parsed.loop_state.is_empty() {
+                                let state = ragent_agent::loop_state::LoopState {
+                                    content: parsed.loop_state.clone(),
+                                };
+                                if let Err(e) = state.save(&working_dir, &event_id) {
+                                    tracing::warn!(
+                                        event_id = %event_id,
+                                        error = %e,
+                                        "Failed to save loop state for stateful cron event",
+                                    );
+                                }
+                            }
+                            if !parsed.inbox_entries.is_empty() {
+                                let entries: Vec<_> = parsed
+                                    .inbox_entries
+                                    .iter()
+                                    .map(|content| {
+                                        ragent_agent::loop_state::InboxEntry::new(
+                                            &event_id, content,
+                                        )
+                                    })
+                                    .collect();
+                                if let Err(e) = ragent_agent::loop_state::write_inbox_entries(
+                                    &working_dir,
+                                    &entries,
+                                ) {
+                                    tracing::warn!(
+                                        event_id = %event_id,
+                                        error = %e,
+                                        "Failed to write inbox entries for stateful cron event",
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
                 break;
             }
         }

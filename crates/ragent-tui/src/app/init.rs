@@ -350,6 +350,7 @@ impl App {
             skill_registry_last_refresh: std::time::Instant::now(),
             run_cost_banner: None,
             run_cost_banner_at: None,
+            trigger_runtime: None,
         }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {

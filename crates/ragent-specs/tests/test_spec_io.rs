@@ -147,3 +147,108 @@ async fn test_extract_status() {
     let draft_fm = "---\nstatus: draft\n---\n";
     assert_eq!(SpecIo::extract_status(draft_fm), Some(SpecStatus::Draft));
 }
+// ── FEEDBACK.md I/O tests (T-031, FR-017) ──────────────────────────────────
+
+#[tokio::test]
+async fn test_read_spec_loads_feedback_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("feedback-test").unwrap();
+    SpecIo::create_spec_dir(root, &id, "# Test\n", "# Plan\n")
+        .await
+        .unwrap();
+    SpecIo::atomic_write(
+        root.join("feedback-test/FEEDBACK.md"),
+        "# Feedback: Test\n\nSome notes.\n",
+    )
+    .await
+    .unwrap();
+    let spec = SpecIo::read_spec(root, &id).await.unwrap();
+    assert_eq!(spec.feedback_md, "# Feedback: Test\n\nSome notes.\n");
+}
+
+#[tokio::test]
+async fn test_read_spec_without_feedback_md_defaults_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("no-feedback").unwrap();
+    SpecIo::create_spec_dir(root, &id, "# Test\n", "# Plan\n")
+        .await
+        .unwrap();
+    let spec = SpecIo::read_spec(root, &id).await.unwrap();
+    assert!(spec.feedback_md.is_empty());
+}
+
+#[tokio::test]
+async fn test_write_spec_persists_feedback_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("write-feedback").unwrap();
+    let mut spec = Spec::new(id.clone(), "Write Test");
+    spec.spec_md = "# Spec\n".to_string();
+    spec.plan_md = "# Plan\n".to_string();
+    spec.feedback_md = "# Feedback: Test\n\nProduction note.\n".to_string();
+    SpecIo::write_spec(root, &spec).await.unwrap();
+
+    let feedback_path = root.join("write-feedback/FEEDBACK.md");
+    assert!(feedback_path.is_file());
+    assert_eq!(
+        fs::read_to_string(feedback_path).await.unwrap(),
+        "# Feedback: Test\n\nProduction note.\n"
+    );
+}
+
+#[tokio::test]
+async fn test_write_spec_omits_feedback_md_when_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("no-write-feedback").unwrap();
+    let mut spec = Spec::new(id.clone(), "Write Test");
+    spec.spec_md = "# Spec\n".to_string();
+    spec.plan_md = "# Plan\n".to_string();
+    spec.feedback_md = String::new();
+    SpecIo::write_spec(root, &spec).await.unwrap();
+
+    let feedback_path = root.join("no-write-feedback/FEEDBACK.md");
+    assert!(!feedback_path.exists());
+}
+
+#[tokio::test]
+async fn test_discover_specs_loads_feedback_md() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = SpecId::new("disc-feedback").unwrap();
+    SpecIo::create_spec_dir(root, &id, "# Test\n", "# Plan\n")
+        .await
+        .unwrap();
+    SpecIo::atomic_write(
+        root.join("disc-feedback/FEEDBACK.md"),
+        "# Feedback: Test\n\nDiscovered.\n",
+    )
+    .await
+    .unwrap();
+    let specs = SpecIo::discover_specs(root).await.unwrap();
+    let spec = specs
+        .iter()
+        .find(|s| s.id.as_str() == "disc-feedback")
+        .expect("spec should be discovered");
+    assert_eq!(spec.feedback_md, "# Feedback: Test\n\nDiscovered.\n");
+}
+
+#[test]
+fn test_spec_feedback_md_path() {
+    let id = SpecId::new("path-test").unwrap();
+    let spec = Spec::new(id, "Test");
+    let root = std::path::Path::new("specs");
+    assert_eq!(
+        spec.feedback_md_path(root),
+        std::path::Path::new("specs/path-test/FEEDBACK.md")
+    );
+}
+
+#[test]
+fn test_spec_new_feedback_md_empty() {
+    let id = SpecId::new("new-test").unwrap();
+    let spec = Spec::new(id, "Test");
+    assert!(spec.feedback_md.is_empty());
+}

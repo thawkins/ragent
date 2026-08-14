@@ -16,6 +16,14 @@
 //!     {
 //!       "trigger": "on_error",
 //!       "command": "notify-send 'ragent error' '$RAGENT_ERROR'"
+//!     },
+//!     {
+//!       "trigger": "on_turn_start",
+//!       "command": "echo 'Turn starting' >> ~/.ragent/turns.log"
+//!     },
+//!     {
+//!       "trigger": "on_compaction",
+//!       "command": "echo 'Context compacted' >> ~/.ragent/compaction.log"
 //!     }
 //!   ]
 //! }
@@ -26,6 +34,8 @@
 //! - `RAGENT_TRIGGER` — the trigger name (e.g., `on_session_start`)
 //! - `RAGENT_WORKING_DIR` — the session working directory
 //! - `RAGENT_ERROR` — error message (only for `on_error` trigger)
+//! - `RAGENT_TURN_NUMBER` — current turn/iteration number (for `on_turn_start`/`on_turn_end`)
+//! - `RAGENT_COMPACTION_REASON` — reason for compaction (for `on_compaction`)
 
 use ragent_types::event::EventBus;
 use serde::{Deserialize, Serialize};
@@ -54,6 +64,12 @@ pub enum HookTrigger {
     OnError,
     /// Fired when a tool call is rejected due to a permission rule.
     OnPermissionDenied,
+    /// Fired at the start of each agent turn/iteration.
+    OnTurnStart,
+    /// Fired at the end of each agent turn/iteration.
+    OnTurnEnd,
+    /// Fired when context compaction is performed.
+    OnCompaction,
     /// Fired before a tool is executed, allowing hooks to approve/deny/modify/block.
     ///
     /// Hooks triggered by `PreToolUse` receive additional environment variables:
@@ -99,6 +115,9 @@ impl std::fmt::Display for HookTrigger {
             Self::OnSessionEnd => write!(f, "on_session_end"),
             Self::OnError => write!(f, "on_error"),
             Self::OnPermissionDenied => write!(f, "on_permission_denied"),
+            Self::OnTurnStart => write!(f, "on_turn_start"),
+            Self::OnTurnEnd => write!(f, "on_turn_end"),
+            Self::OnCompaction => write!(f, "on_compaction"),
             Self::PreToolUse => write!(f, "pre_tool_use"),
             Self::PostToolUse => write!(f, "post_tool_use"),
         }
@@ -634,4 +653,67 @@ pub fn fire_hooks(
             }
         }
     });
+}
+
+/// Fire hooks for turn start event.
+///
+/// # Arguments
+///
+/// * `hooks` - Parsed hook configurations
+/// * `working_dir` - Working directory for hook execution
+/// * `turn_number` - Current turn/iteration number
+pub fn fire_turn_start_hooks(hooks: &[HookConfig], working_dir: &Path, turn_number: usize) {
+    fire_hooks(
+        hooks,
+        HookTrigger::OnTurnStart,
+        working_dir,
+        &[("RAGENT_TURN_NUMBER", &turn_number.to_string())],
+    );
+}
+
+/// Fire hooks for turn end event.
+///
+/// # Arguments
+///
+/// * `hooks` - Parsed hook configurations
+/// * `working_dir` - Working directory for hook execution
+/// * `turn_number` - Current turn/iteration number
+pub fn fire_turn_end_hooks(hooks: &[HookConfig], working_dir: &Path, turn_number: usize) {
+    fire_hooks(
+        hooks,
+        HookTrigger::OnTurnEnd,
+        working_dir,
+        &[("RAGENT_TURN_NUMBER", &turn_number.to_string())],
+    );
+}
+
+/// Fire hooks for compaction event.
+///
+/// # Arguments
+///
+/// * `hooks` - Parsed hook configurations
+/// * `working_dir` - Working directory for hook execution
+/// * `reason` - Reason for compaction (e.g., "auto", "manual")
+/// * `tokens_before` - Token count before compaction
+/// * `tokens_after` - Token count after compaction
+pub fn fire_compaction_hooks(
+    hooks: &[HookConfig],
+    working_dir: &Path,
+    reason: &str,
+    tokens_before: usize,
+    tokens_after: usize,
+) {
+    fire_hooks(
+        hooks,
+        HookTrigger::OnCompaction,
+        working_dir,
+        &[
+            ("RAGENT_COMPACTION_REASON", reason),
+            (
+                "RAGENT_COMPACTION_TOKENS_BEFORE",
+                &tokens_before.to_string(),
+            ),
+            ("RAGENT_COMPACTION_TOKENS_AFTER", &tokens_after.to_string()),
+        ],
+    );
 }

@@ -26,6 +26,7 @@ use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 use ragent_agent::{
     Config,
@@ -126,9 +127,15 @@ pub fn router(state: AppState) -> Router {
             auth_middleware,
         ));
 
+    // Serve static web UI files from the embedded static directory
+    let static_files =
+        ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static"))
+            .append_index_html_on_directories(true);
+
     Router::new()
         .route("/health", get(health))
         .merge(protected)
+        .nest_service("/", static_files)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

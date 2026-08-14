@@ -1,5 +1,138 @@
 # Changelog
 
+## Version: 1.0.28-beta
+
+### Added — Spec-Driven Development (SDD) back-fill
+
+Back-fills missing Spec-Driven Development capabilities from GitHub's
+`spec-kit/spec-driven.md` into ragent's `/spec` feature set. All new
+capabilities are opt-in via configuration flags (FR-019) and backward
+compatible with existing spec directories (FR-018). See
+`specs/reqeng/SPEC.md` for the full specification and `specs/reqeng/PLAN.md`
+for the implementation plan with gap-resolution tracking (FR-020).
+
+#### New `/spec` subcommands (ragent-specs)
+
+- **`/spec specify <specname> <feature>`** — New `SpecCommand::Specify`
+  variant and parser (T-001, FR-001). Creates a `SPEC.md` with structured
+  requirements, user stories, and acceptance criteria without
+  simultaneously generating a `PLAN.md`, separating the specification
+  stage from the planning stage.
+- **`/spec plan <spec-id> <tech-context>`** — New `SpecCommand::Plan`
+  variant with technology-context argument (T-003, FR-004). Generates
+  (or regenerates) `PLAN.md` from an existing `SPEC.md` using the
+  provided technology context as guidance. Coexists with the existing
+  `/spec update` and `/spec add` commands.
+- **`/spec tasks <spec-id>`** — New `SpecCommand::Tasks` variant and
+  parser (T-005, FR-005). Generates a `TASKS.md` file containing an
+  ordered task list derived from the existing `PLAN.md`.
+
+#### `[NEEDS CLARIFICATION]` marker support (ragent-specs)
+
+- New `detect_clarification_markers` function and `ClarificationMarker`
+  struct (T-007, FR-002). Case-insensitive regex detects
+  `[NEEDS CLARIFICATION: <question>]` markers in `SPEC.md` content and
+  returns each with its 1-based line number and captured question text.
+- New validation `Category::Clarification` for reporting unresolved
+  clarification markers.
+
+#### Quality checklists in templates (ragent-specs)
+
+- `SpecTemplate::generate_with_checklist` (T-010, FR-006) — Embeds an
+  optional `## Quality Checklist` section in `SPEC.md` covering
+  requirement completeness, testability, and absence of speculative
+  features. Existing `generate` and `generate_with_research` delegate
+  with `include_checklist = false`, preserving existing output.
+- `PlanTemplate::generate_with_checklist` (T-011, FR-006) — Embeds an
+  optional `## Quality Checklist` section in `PLAN.md` covering
+  requirement traceability, testability, and absence of speculative
+  tasks. Existing `generate` delegates with `include_checklist = false`.
+
+#### Constitution artifact (ragent-specs)
+
+- New `crates/ragent-specs/src/constitution.rs` module (T-013, FR-007)
+  implementing `Constitution`, `Article`, and `Amendment` structs with
+  `parse_constitution` parser. Parses `CONSTITUTION.md` files containing
+  immutable architectural principles (`## Article N: Title` headings)
+  and an optional `## Amendment Log` table. `Constitution::empty()`
+  returns a no-articles value for backward compatibility (FR-018).
+- Exported `Constitution`, `Article`, `Amendment`, and
+  `parse_constitution` from the crate root.
+
+#### Consistency validation — ambiguity detection (ragent-specs)
+
+- New `detect_ambiguity` function, `AmbiguityIssue` struct, and
+  `AmbiguityKind` enum (T-026, FR-015). Detects vague terms (e.g.,
+  "maybe", "possibly", "might") and undefined cross-references in
+  `SPEC.md` content.
+- New validation `Category::Ambiguity` for reporting ambiguous language.
+
+#### `FEEDBACK.md` file support (ragent-specs)
+
+- New `FeedbackTemplate` struct with `generate(title)` method (T-031,
+  FR-017). Produces a default `FEEDBACK.md` template with a feedback
+  notes table (Date | Source | Note) and an advisory notice.
+- `Spec` struct gains a `feedback_md: String` field and
+  `feedback_md_path()` method. `SpecIo::discover_specs`, `read_spec`,
+  and `write_spec` load and persist `FEEDBACK.md` following the same
+  pattern as `REVIEW.md` — loaded if present, written only when
+  non-empty (FR-018 backward compatibility).
+- Exported `FeedbackTemplate` from the crate root.
+
+#### SDD configuration flags (ragent-config)
+
+- New `SddConfig` struct (T-035, FR-019) with 13 opt-in boolean flags
+  gating SDD capabilities: `clarification_markers` (FR-002),
+  `quality_checklists` (FR-006), `constitution` (FR-007),
+  `phase_minus_one_gates` (FR-008), `branch_per_spec` (FR-009),
+  `research_artifacts` (FR-010), `data_model` (FR-011), `contracts`
+  (FR-012), `quickstart` (FR-013), `test_first_ordering` (FR-014),
+  `consistency_checks` (FR-015), `amendment_process` (FR-016), and
+  `feedback_loop` (FR-017).
+- All flags default to `false` (opt-in). `SddConfig::merge` uses OR
+  semantics — a flag enabled in either base or overlay stays enabled.
+- Serialized under the `sdd` key in `ragent.json` with
+  `skip_serializing_if` on each field; an all-false `sdd` block is
+  omitted entirely from serialized output.
+- `Config::merge` wires `base.sdd.merge(&overlay.sdd)`.
+- 12 integration tests in
+  `crates/ragent-config/tests/test_sdd_config.rs` covering defaults,
+  parsing, serialization, and merge semantics.
+- Exported `SddConfig` from the `ragent-config` crate root.
+
+#### Gap resolution tracking (specs/reqeng)
+
+- `specs/reqeng/PLAN.md` Gap Resolution Tracking section enhanced with
+  a Status column (T-037, FR-020) showing per-gap resolution state
+  (✅ Resolved / ⏳ Partial / ⬜ Not started), a progress summary, and a
+  completed-task summary table linking each completed task to its gap
+  and deliverable.
+
+### Changed — ragent-tui slash command handling
+
+- `crates/ragent-tui/src/app/slash.rs` match arms extended to cover
+  `SpecCommand::Specify`, `SpecCommand::Plan`, and `SpecCommand::Tasks`
+  variants, fixing a non-exhaustive match that would have prevented
+  compilation once the new variants were added.
+
+### Tests — SDD back-fill
+
+- `crates/ragent-specs/tests/test_templates.rs` — 10 new tests for
+  `SpecTemplate::generate_with_checklist`, `PlanTemplate::generate_with_checklist`,
+  and `FeedbackTemplate::generate`.
+- `crates/ragent-specs/tests/test_spec_io.rs` — 7 new tests for
+  `FEEDBACK.md` load, read, write, discover, and path resolution.
+- `crates/ragent-specs/tests/test_slash_spec.rs` — 6 new tests for
+  `SpecCommand::Specify`, `SpecCommand::Plan`, and `SpecCommand::Tasks`
+  parsing and help text.
+- `crates/ragent-specs/tests/inline/validate.rs` — 12 new tests for
+  `detect_clarification_markers` and `detect_ambiguity`.
+- `crates/ragent-config/tests/test_sdd_config.rs` — 12 new tests for
+  `SddConfig` defaults, parsing, serialization, and merge semantics.
+- `crates/ragent-specs/src/constitution.rs` — 13 inline tests for
+  constitution parsing (articles, amendments, em-dash headings,
+  multiline bodies, path resolution).
+
 ## Version: 1.0.27
 
 ### Added — Exa Search API backend for `mf_search`

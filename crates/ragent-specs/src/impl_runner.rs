@@ -394,6 +394,12 @@ impl SpecImplRunner {
             ));
         }
 
+        // Append advisory file-order warning if present (FR-014, T-025)
+        if let Some(warning) = self.build_file_order_warning() {
+            lines.push(String::new());
+            lines.push(warning);
+        }
+
         lines.join("\n")
     }
 
@@ -433,6 +439,12 @@ impl SpecImplRunner {
         lines.push(
             "No tasks were executed. Remove `--dry-run` to begin implementation.".to_string(),
         );
+
+        // Append advisory file-order warning if present (FR-014, T-025)
+        if let Some(warning) = self.build_file_order_warning() {
+            lines.push(String::new());
+            lines.push(warning);
+        }
 
         lines.join("\n")
     }
@@ -495,6 +507,145 @@ impl SpecImplRunner {
             }
         }
         resolved
+    }
+
+    // ── File Creation Order (FR-014, T-025) ──────────────────────────────
+
+    /// Build an advisory warning when tasks in the execution order violate the
+    /// test-first file creation order (FR-014).
+    ///
+    /// The expected order is: contracts → contract tests → integration tests
+    /// → e2e tests → unit tests → source files. Each task is categorised into
+    /// a tier by analysing its title and requirement text for keywords. If a
+    /// lower-numbered tier task appears after a higher-numbered tier task, a
+    /// violation is recorded.
+    ///
+    /// Returns `None` when no violations are detected (or when fewer than two
+    /// tasks are to execute). The warning is advisory only — it does not block
+    /// execution.
+    #[must_use]
+    pub fn build_file_order_warning(&self) -> Option<String> {
+        if self.execution_order.len() < 2 {
+            return None;
+        }
+
+        let tiered: Vec<(usize, &PlanTask, usize)> = self
+            .execution_order
+            .iter()
+            .enumerate()
+            .map(|(rank, &idx)| {
+                let task = &self.tasks[idx];
+                let tier = file_creation_tier(task);
+                (rank, task, tier)
+            })
+            .collect();
+
+        let mut violations: Vec<String> = Vec::new();
+        let mut max_tier_seen = tiered[0].2;
+
+        for &(rank, task, tier) in tiered.iter().skip(1) {
+            if tier < max_tier_seen {
+                // Find the task that established the higher tier
+                let offender = tiered
+                    .iter()
+                    .take(rank)
+                    .rfind(|&&(_, _, t)| t == max_tier_seen);
+                let (offender_rank, offender_task, _) = offender.unwrap();
+                violations.push(format!(
+                    "  - `{}` (step {}) appears after `{}` (step {}): \
+                     {} should come before {} per the test-first ordering",
+                    task.id,
+                    rank + 1,
+                    offender_task.id,
+                    offender_rank + 1,
+                    tier_label(tier),
+                    tier_label(max_tier_seen)
+                ));
+            } else {
+                max_tier_seen = tier;
+            }
+        }
+
+        if violations.is_empty() {
+            return None;
+        }
+
+        let mut warning = String::from(
+            "### ⚠️ File Creation Order Advisory\n\n\
+             The following tasks may violate the test-first file creation order \
+             (contracts → contract tests → integration tests → e2e tests → unit \
+             tests → source files). Consider reordering tasks to maintain \
+             test-first discipline:\n",
+        );
+        for v in &violations {
+            warning.push_str(v);
+            warning.push('\n');
+        }
+        warning.push_str(
+            "\nThis is advisory only — implementation will proceed in the listed \
+             order. To suppress this warning, reorder tasks in PLAN.md or adjust \
+             task titles to clearly indicate file type.",
+        );
+        Some(warning)
+    }
+}
+
+/// Categorise a task into a file-creation tier (1–6) based on its title and
+/// requirement text (FR-014, T-025).
+///
+/// | Tier | Category | Keywords |
+/// |------|----------|----------|
+/// | 1 | Contracts | `contract`, `api spec`, `schema`, `interface` |
+/// | 2 | Contract tests | `contract test` |
+/// | 3 | Integration tests | `integration test` |
+/// | 4 | E2E tests | `e2e`, `end-to-end`, `end to end` |
+/// | 5 | Unit tests | `unit test`, `test` |
+/// | 6 | Source files | (default — no test/contract keywords) |
+///
+/// More specific patterns are checked first so that "contract test" is not
+/// mis-categorised as "contract".
+#[must_use]
+fn file_creation_tier(task: &PlanTask) -> usize {
+    let text = format!("{} {}", task.title, task.requirement).to_lowercase();
+
+    // Check most specific patterns first
+    if text.contains("contract test") || text.contains("contract-test") {
+        return 2;
+    }
+    if text.contains("integration test") {
+        return 3;
+    }
+    if text.contains("e2e") || text.contains("end-to-end test") || text.contains("end to end test")
+    {
+        return 4;
+    }
+    if text.contains("unit test") {
+        return 5;
+    }
+    if text.contains("contract")
+        || text.contains("api spec")
+        || text.contains("schema definition")
+        || text.contains("interface definition")
+    {
+        return 1;
+    }
+    if text.contains("test") {
+        return 5;
+    }
+    // Default: source files
+    6
+}
+
+/// Human-readable label for a file-creation tier.
+#[must_use]
+const fn tier_label(tier: usize) -> &'static str {
+    match tier {
+        1 => "contracts",
+        2 => "contract tests",
+        3 => "integration tests",
+        4 => "e2e tests",
+        5 => "unit tests",
+        _ => "source files",
     }
 }
 
@@ -813,5 +964,253 @@ mod tests {
         };
         let summary = runner.effort_summary();
         assert_eq!(summary, "1×S, 1×M, 1×L");
+    }
+
+    // ── File Creation Order tests (FR-014, T-025) ────────────────────────
+
+    /// Helper: build a runner with the given task titles in execution order.
+    fn runner_with_titles(titles: &[&str]) -> SpecImplRunner {
+        let tasks: Vec<PlanTask> = titles
+            .iter()
+            .enumerate()
+            .map(|(i, title)| PlanTask {
+                id: format!("T-{:03}", i + 1),
+                title: (*title).to_string(),
+                requirement: format!("FR-{:03}", i + 1),
+                effort: Effort::S,
+                priority: Priority::Medium,
+                dependencies: vec![],
+                status: TaskStatus::Pending,
+            })
+            .collect();
+        let execution_order: Vec<usize> = (0..tasks.len()).collect();
+        SpecImplRunner {
+            spec_name: "test".into(),
+            specs_root: PathBuf::from("/tmp"),
+            tasks,
+            execution_order,
+            options: ImplOptions::default(),
+        }
+    }
+
+    #[test]
+    fn test_file_order_warning_no_violation() {
+        let runner = runner_with_titles(&[
+            "Define API contracts in contracts/",
+            "Write contract tests",
+            "Write integration tests",
+            "Write unit tests",
+            "Implement source files",
+        ]);
+        assert!(
+            runner.build_file_order_warning().is_none(),
+            "no warning expected for correct order"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_source_before_tests() {
+        let runner = runner_with_titles(&["Implement source files", "Write unit tests"]);
+        let warning = runner
+            .build_file_order_warning()
+            .expect("warning expected when source precedes tests");
+        assert!(warning.contains("File Creation Order Advisory"));
+        assert!(warning.contains("T-002"));
+        assert!(warning.contains("T-001"));
+    }
+
+    #[test]
+    fn test_file_order_warning_tests_before_contracts() {
+        let runner =
+            runner_with_titles(&["Write unit tests", "Define API contracts in contracts/"]);
+        let warning = runner
+            .build_file_order_warning()
+            .expect("warning expected when tests precede contracts");
+        assert!(warning.contains("contracts"));
+        assert!(warning.contains("unit tests"));
+    }
+
+    #[test]
+    fn test_file_order_warning_single_task_no_warning() {
+        let runner = runner_with_titles(&["Implement source files"]);
+        assert!(
+            runner.build_file_order_warning().is_none(),
+            "no warning for single task"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_empty_no_warning() {
+        let runner = runner_with_titles(&[]);
+        assert!(
+            runner.build_file_order_warning().is_none(),
+            "no warning for zero tasks"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_advisory_text_present() {
+        let runner = runner_with_titles(&["Implement source files", "Write contract tests"]);
+        let warning = runner.build_file_order_warning().expect("warning expected");
+        assert!(
+            warning.contains("advisory only"),
+            "warning should state it is advisory: {warning}"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_correct_full_order() {
+        let runner = runner_with_titles(&[
+            "Define API contracts and schema definitions",
+            "Write contract tests for API endpoints",
+            "Write integration tests for cross-component flows",
+            "Write e2e tests for user-facing flows",
+            "Write unit tests for individual functions",
+            "Implement source code modules",
+        ]);
+        assert!(
+            runner.build_file_order_warning().is_none(),
+            "no warning for full correct test-first order"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_e2e_before_integration() {
+        let runner =
+            runner_with_titles(&["Write e2e tests for user flows", "Write integration tests"]);
+        let warning = runner
+            .build_file_order_warning()
+            .expect("warning expected when e2e precedes integration tests");
+        assert!(warning.contains("integration tests"));
+        assert!(warning.contains("e2e tests"));
+    }
+
+    #[test]
+    fn test_file_creation_tier_contracts() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Define API contracts".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 1);
+    }
+
+    #[test]
+    fn test_file_creation_tier_contract_tests() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Write contract tests".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 2);
+    }
+
+    #[test]
+    fn test_file_creation_tier_integration_tests() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Write integration tests".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 3);
+    }
+
+    #[test]
+    fn test_file_creation_tier_e2e_tests() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Write end-to-end tests".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 4);
+    }
+
+    #[test]
+    fn test_file_creation_tier_unit_tests() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Write unit tests".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 5);
+    }
+
+    #[test]
+    fn test_file_creation_tier_source_files() {
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Implement the feature".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 6);
+    }
+
+    #[test]
+    fn test_file_creation_tier_contract_test_not_misclassified() {
+        // "contract test" should be tier 2, not tier 1 (contract)
+        let task = PlanTask {
+            id: "T-001".into(),
+            title: "Write contract tests for endpoints".into(),
+            requirement: "FR-001".into(),
+            effort: Effort::S,
+            priority: Priority::Medium,
+            dependencies: vec![],
+            status: TaskStatus::Pending,
+        };
+        assert_eq!(file_creation_tier(&task), 2);
+    }
+
+    #[test]
+    fn test_file_order_warning_included_in_summary() {
+        let runner = runner_with_titles(&["Implement source files", "Write unit tests"]);
+        let summary = runner.build_summary();
+        assert!(
+            summary.contains("File Creation Order Advisory"),
+            "summary should include advisory warning: {summary}"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_included_in_dry_run() {
+        let runner = runner_with_titles(&["Implement source files", "Write unit tests"]);
+        let display = runner.build_dry_run_display();
+        assert!(
+            display.contains("File Creation Order Advisory"),
+            "dry-run display should include advisory warning: {display}"
+        );
+    }
+
+    #[test]
+    fn test_file_order_warning_not_included_when_no_violation() {
+        let runner = runner_with_titles(&["Write unit tests", "Implement source files"]);
+        let summary = runner.build_summary();
+        assert!(
+            !summary.contains("File Creation Order Advisory"),
+            "summary should not include warning when order is correct: {summary}"
+        );
     }
 }

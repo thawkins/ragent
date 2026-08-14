@@ -368,84 +368,16 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.27** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+**v1.0.28-beta** — The core architecture, tool system (~150 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- OpenAlex (scholarly works) and Wikipedia (encyclopedia summaries) keyless
-  search backends added to `mf_search`, running in parallel with DuckDuckGo
-  and Brave; per-engine `relevance_score` and `fetch_relevance` consensus
-  weighting adjusted for more balanced ranking across backends
-- Exa Search API-backed engine added to `mf_search` (configured via
-  `exa_api_key` in `ragent.json` or the `EXA_API_KEY` environment variable);
-  `engine` parameter now accepts `"exa"` to restrict searches to Exa only
-- `mf_search` gains an `engine` parameter to restrict the search to a single
-  backend
-  (`duckduckgo` / `brave` / `openalex` / `wikipedia` / `langsearch` /
-  `tavily` / `perplexity` / `exa`)
-- `/spec update <spec-id>` sub-command re-reads an existing `SPEC.md` and regenerates
-  `PLAN.md` and `TESTPLAN.md` (preserving unchanged task IDs)
-- `/spec create` now generates a `TESTPLAN.md` manual test-plan artifact alongside
-  `SPEC.md` and `PLAN.md`
-- `/spec add` now regenerates `PLAN.md` + `TESTPLAN.md` after the incremental add
-- `/spec jtbd` Jobs-To-Be-Done analysis on existing specs
-- Research web-gather now requires readability extraction and fixes YouTube transcript capture
-- `memory_store` now reports a clear `stored` result and the TUI summary correctly shows
-  successful structured-memory writes
-- Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
-- Startup timing instrumentation with `/startup` slash command
-- Copilot `gh auth token` cached process-wide via `OnceLock`
-- Code-index SQLite WAL mode and direct `file_id` symbol queries
-- First printable keystroke after run-cost banner no longer swallowed
-- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools
-- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions
-- TODO side panel added (`Alt+T`) with `/todo` slash alias
-- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F)
-- All 279 compiler warnings eliminated (build, tests, benches, examples)
-- Model Router cluster provider with downstream-model status bar and terminal-signal guarantee
-- `/provider` now always prompts for the API key (pre-filled with the existing key) so keys can be edited without removing the provider
-- `/model` jumps straight to the model list when a provider is already configured
-- API-key and GitLab token fields shown unmasked with a wider dialog for full visibility
-- `/config show`, `/config save`, and `/config list` slash commands for inspecting and
-  snapshotting configuration
-- Research `--use-low-relevance` flag retains low-relevance web sources instead of filtering them out
-- Compaction bail paths now publish user-visible `AgentNotice` events instead of silently failing
-- Post-compaction continuation nudge threaded across loop iterations (no repeated nudges)
-- Autopilot auto-continue suppressed after `task_complete` (new `last_task_completed_at` guard)
-- Router status bar shows the actual downstream model and tier: `Model Router ({model}) / {tier}`
-- Autopilot status indicator (`AutoPilot:✓/✗`) in the TUI status bar
-- Skill discovery tests isolated by `SkillScope` and `bundled_count()`
-- Doctest build breakages fixed in `session::permissions` and `tool::ToolRegistry`
-- Startup blocking fixes: MCP servers, code-index, and provider health checks moved to background tasks
-- Startup timing instrumentation with `/startup` slash command
-- Copilot `gh auth token` cached process-wide via `OnceLock`
-- Code-index SQLite WAL mode and direct `file_id` symbol queries
-- First printable keystroke after run-cost banner no longer swallowed
-- Conversation search (`conversation_search`) and cross-session search (`session_search`) tools
-- Browser automation tool (`browser`) with Chrome DevTools Protocol (CDP) backend — 14 actions
-- TODO side panel added (Alt+T) with `/todo` slash alias
-- Agentic-loop performance upgrade (PERFPLAN.md milestones A–F)
-- All 279 compiler warnings eliminated (build, tests, benches, examples)
-- Context compaction pipeline added (`/compact` slash command; `compaction` config block in `ragent.json`)
-- `read` tool instructions clarified (`end_line` is absolute line number)
-- Remote push prohibitions strengthened in `AGENTS.md`; added "no unsafe code" and
-  "no `.unwrap()` on user-facing paths" rules
-- SPEC.md audited, reorganized, and updated for v1.0.27
-- Azure Resource (File) provider with `azureresources.json` support
-- Azure AI Foundry provider with dynamic model discovery
-- Amazon Bedrock provider with AWS SigV4 signing and dual API support
-- Startup ASCII art banner with compile timestamp
-- Instruction file discovery logging
-- Cron scheduler: `/cron add <cronname> <agent> <schedule> "<prompt>"` with
-  `enable`/`disable`/`detail` sub-commands and natural-language timestamps
-  (`5pm`, `5:30pm`, `17:00`, `5am tomorrow`)
-- LLM-callable cron tools (`cron_add`, `cron_remove`, `cron_list`,
-  `cron_enable`, `cron_disable`) for model-driven scheduling
-- Sub-agent and background-agent model resolution now uses the user's
-  persisted `selected_model` setting instead of falling back to
-  `Config::default()`
+- **Spec-Driven Development (SDD) back-fill** — New `/spec specify` (SPEC.md only), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md), and `/spec feedback` (FEEDBACK.md) subcommands; clarification marker detection; quality checklists in templates; `CONSTITUTION.md` support; ambiguity/consistency validation; opt-in via `sdd` config flags
+- **Exa Search API backend** — Added Exa Search API-backed engine to `mf_search` with `exa_api_key` configuration; `engine` parameter accepts `"exa"` to restrict searches to Exa only
+- **OpenAlex and Wikipedia backends** — OpenAlex (scholarly works) and Wikipedia (encyclopedia summaries) keyless search backends added to `mf_search`, running in parallel with DuckDuckGo and Brave; per-engine `relevance_score` and `fetch_relevance` consensus weighting adjusted for balanced ranking
+- **Research document format** — Updated `Search Engine Summary` section in RESEARCH.md outputs to show per-engine result counts and relevance scores
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

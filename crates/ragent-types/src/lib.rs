@@ -23,6 +23,7 @@ pub mod sanitize;
 pub mod startup;
 pub mod strutil;
 pub mod thinking;
+pub mod trigger;
 
 // Re-export commonly used types
 pub use cron::{
@@ -42,3 +43,7 @@ pub use startup::StartupTimings;
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 // Re-export string utilities for convenient access
 pub use strutil::{truncate_bytes, truncate_bytes_no_ellipsis, truncate_chars};
+pub use trigger::{
+    TriggerActionKind, TriggerEnvelope, TriggerFired, TriggerRule, TriggerRuleId,
+    TriggerRuleStatus, TriggerSourceKind,
+};

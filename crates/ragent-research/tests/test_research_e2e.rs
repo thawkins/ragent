@@ -47,7 +47,11 @@ fn end_to_end_research_then_spec() {
     // TUI user would type.
     let cmd = SpecCommand::parse("create async-await Add async/await ergonomics");
     match cmd {
-        SpecCommand::Create { specname, feature } => {
+        SpecCommand::Create {
+            specname,
+            feature,
+            from_research: _,
+        } => {
             assert_eq!(specname, "async-await");
             assert!(feature.contains("async/await ergonomics"));
         }

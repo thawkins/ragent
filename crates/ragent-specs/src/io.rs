@@ -85,6 +85,12 @@ impl SpecIo {
             } else {
                 String::new()
             };
+            let feedback_md_path = path.join("FEEDBACK.md");
+            let feedback_md = if feedback_md_path.is_file() {
+                Self::read_file(&feedback_md_path).await.unwrap_or_default()
+            } else {
+                String::new()
+            };
             let modified_at = Self::modified_time(&spec_md_path).await?;
             // Parse title from first H1 in SPEC.md
             let title = Self::extract_title(&spec_md);
@@ -99,6 +105,7 @@ impl SpecIo {
             spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
             spec.plan_md = plan_md;
             spec.review_md = review_md;
+            spec.feedback_md = feedback_md;
             spec.reviewers = reviewers;
             spec.modified_at = modified_at;
             spec.path = Some(path);
@@ -126,6 +133,12 @@ impl SpecIo {
         } else {
             String::new()
         };
+        let feedback_md_path = dir.join("FEEDBACK.md");
+        let feedback_md = if feedback_md_path.is_file() {
+            Self::read_file(&feedback_md_path).await.unwrap_or_default()
+        } else {
+            String::new()
+        };
         let modified_at = Self::modified_time(&spec_md_path).await?;
         let title = Self::extract_title(&spec_md);
         let status = Self::extract_status(&spec_md).unwrap_or(SpecStatus::Draft);
@@ -137,13 +150,15 @@ impl SpecIo {
         spec.requirements = Self::build_requirements(&spec_md, &spec.tasks);
         spec.plan_md = plan_md;
         spec.review_md = review_md;
+        spec.feedback_md = feedback_md;
         spec.reviewers = reviewers;
         spec.modified_at = modified_at;
         spec.path = Some(dir);
         Ok(spec)
     }
 
-    /// Write a `Spec` back to disk (SPEC.md, PLAN.md, and optionally REVIEW.md).
+    /// Write a `Spec` back to disk (SPEC.md, PLAN.md, and optionally
+    /// REVIEW.md and FEEDBACK.md).
     pub async fn write_spec(specs_root: &Path, spec: &Spec) -> Result<(), SpecError> {
         let dir = spec.dir_path(specs_root);
         if !dir.exists() {
@@ -153,6 +168,9 @@ impl SpecIo {
         Self::atomic_write(dir.join("PLAN.md"), &spec.plan_md).await?;
         if !spec.review_md.is_empty() {
             Self::atomic_write(dir.join("REVIEW.md"), &spec.review_md).await?;
+        }
+        if !spec.feedback_md.is_empty() {
+            Self::atomic_write(dir.join("FEEDBACK.md"), &spec.feedback_md).await?;
         }
         Ok(())
     }

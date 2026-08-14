@@ -55,4 +55,25 @@ pub enum SpecError {
         /// The current status string.
         status: String,
     },
+
+    /// A spec cannot transition to `approved` while unresolved
+    /// `[NEEDS CLARIFICATION]` markers remain in SPEC.md (FR-003).
+    #[error("cannot approve spec: {count} unresolved [NEEDS CLARIFICATION] marker(s) remain")]
+    UnresolvedClarifications {
+        /// Number of unresolved clarification markers.
+        count: usize,
+    },
+
+    /// A spec cannot transition to `in_progress` when Phase -1 gates
+    /// (Simplicity, Anti-Abstraction, Integration-First) are unchecked or
+    /// missing in PLAN.md (FR-008).
+    #[error("cannot start implementation: {} Phase -1 gate(s) unchecked or missing: {}", gates.len(), gates.join(", "))]
+    UncheckedPhaseGates {
+        /// Names of the unchecked or missing required gates.
+        gates: Vec<String>,
+    },
+
+    /// A constitutional amendment is invalid (FR-016).
+    #[error("amendment error: {0}")]
+    AmendmentError(String),
 }

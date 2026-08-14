@@ -56,6 +56,7 @@ impl DiscoveredMcpServer {
             url: None,
             headers: HashMap::new(),
             disabled: true, // discovered servers are disabled until the user opts in
+            notification: ragent_config::McpNotificationMode::None,
         }
     }
 }

@@ -18,6 +18,7 @@ pub mod mock_llm_client;
 pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
+pub mod openai_responses;
 pub mod router;
 pub mod router_classifier;
 pub mod router_client;
@@ -421,6 +422,7 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(copilot::CopilotProvider::new()));
     registry.register(Box::new(gemini::GeminiProvider));
     registry.register(Box::new(openai::OpenAiProvider));
+    registry.register(Box::new(openai_responses::ResponsesApiProvider));
     registry.register(Box::new(huggingface::HuggingFaceProvider));
     registry.register(Box::new(generic_openai::GenericOpenAiProvider));
     registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));

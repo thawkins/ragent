@@ -4,7 +4,9 @@
 
 use crate::error::SpecError;
 use crate::io::SpecIo;
+use crate::plan_parser::PlanParser;
 use crate::spec::{Spec, SpecId, SpecStatus};
+use crate::validate::{SddFlags, detect_clarification_markers};
 use std::path::{Path, PathBuf};
 
 // ── Transition graph ──────────────────────────────────────────────────────
@@ -112,12 +114,32 @@ impl SpecManager {
     /// Transition a spec to a new status.
     ///
     /// Validates the transition, updates the in-memory spec, updates frontmatter,
-    /// and writes back to disk.
+    /// and writes back to disk. All SDD checks run unconditionally (backward
+    /// compatible). Use [`SpecManager::transition_with_flags`] to gate SDD
+    /// checks via configuration (FR-019).
     pub async fn transition(
         &self,
         spec: &mut Spec,
         new_status: SpecStatus,
         actor: impl Into<String>,
+    ) -> Result<(), SpecError> {
+        self.transition_with_flags(spec, new_status, actor, &SddFlags::all_enabled())
+            .await
+    }
+
+    /// Transition a spec to a new status with SDD capability flags gating
+    /// pre-transition checks (FR-019).
+    ///
+    /// When `flags.clarification_markers` is `false`, the FR-003 clarification
+    /// gate is skipped, allowing approval even when `[NEEDS CLARIFICATION]`
+    /// markers are present. This preserves existing workflows for users who
+    /// have not opted in to the clarification-marker capability.
+    pub async fn transition_with_flags(
+        &self,
+        spec: &mut Spec,
+        new_status: SpecStatus,
+        actor: impl Into<String>,
+        flags: &SddFlags,
     ) -> Result<(), SpecError> {
         if !is_valid_transition(spec.status, new_status) {
             return Err(SpecError::InvalidStatusTransition {
@@ -125,6 +147,32 @@ impl SpecManager {
                 to: new_status.as_str().to_string(),
             });
         }
+
+        // FR-003: Block `approved` transition when unresolved clarification
+        // markers remain in SPEC.md (gated by FR-019 flag).
+        if new_status == SpecStatus::Approved && flags.clarification_markers {
+            let markers = detect_clarification_markers(&spec.spec_md);
+            if !markers.is_empty() {
+                return Err(SpecError::UnresolvedClarifications {
+                    count: markers.len(),
+                });
+            }
+        }
+
+        // FR-008: Block `in_progress` transition when Phase -1 gates are
+        // unchecked or missing in PLAN.md (gated by FR-019 flag).
+        if new_status == SpecStatus::InProgress && flags.phase_minus_one_gates {
+            let gates = PlanParser::parse_phase_minus_one_gates(&spec.plan_md);
+            let unchecked: Vec<String> = gates
+                .unchecked_required_gates()
+                .into_iter()
+                .map(String::from)
+                .collect();
+            if !unchecked.is_empty() {
+                return Err(SpecError::UncheckedPhaseGates { gates: unchecked });
+            }
+        }
+
         spec.transition(new_status, actor);
         self.write_spec(spec).await
     }
@@ -743,6 +791,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_transition_approved_blocked_by_clarifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-block").unwrap();
+        let spec_md =
+            "---\nstatus: in_review\n---\n\n# Clar Block\n\n[NEEDS CLARIFICATION: what scale?]\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        // Force in_review so transition to approved is graph-valid
+        spec.status = SpecStatus::InReview;
+
+        let result = mgr
+            .transition(&mut spec, SpecStatus::Approved, "alice")
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, SpecError::UnresolvedClarifications { count } if count == 1),
+            "expected UnresolvedClarifications error, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_approved_allowed_without_clarifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-ok").unwrap();
+        let spec_md = "---\nstatus: in_review\n---\n\n# Clar OK\n\nNo markers here.\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        spec.status = SpecStatus::InReview;
+
+        mgr.transition(&mut spec, SpecStatus::Approved, "alice")
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn test_transition_non_approved_ignores_clarifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-non-approved").unwrap();
+        let spec_md =
+            "---\nstatus: draft\n---\n\n# Non Approved\n\n[NEEDS CLARIFICATION: something?]\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        // Draft -> InReview should succeed even with clarification markers
+        mgr.transition(&mut spec, SpecStatus::InReview, "alice")
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::InReview);
+    }
+
+    #[tokio::test]
     async fn test_manager_list_sorting() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -801,5 +919,332 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(with_archived.len(), 2);
+    }
+
+    // ── transition_with_flags tests (T-036, FR-019) ─────────────────────────
+
+    #[tokio::test]
+    async fn test_transition_with_flags_disabled_allows_clarifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-flag-off").unwrap();
+        let spec_md = "---\nstatus: in_review\n---\n\n# Clar Flag Off\n\n[NEEDS CLARIFICATION: what scale?]\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        spec.status = SpecStatus::InReview;
+
+        // With clarification_markers disabled, transition should succeed
+        // even though markers are present.
+        let flags = crate::validate::SddFlags::all_disabled();
+        mgr.transition_with_flags(&mut spec, SpecStatus::Approved, "alice", &flags)
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::Approved);
+    }
+
+    #[tokio::test]
+    async fn test_transition_with_flags_enabled_blocks_clarifications() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-flag-on").unwrap();
+        let spec_md =
+            "---\nstatus: in_review\n---\n\n# Clar Flag On\n\n[NEEDS CLARIFICATION: what scale?]\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        spec.status = SpecStatus::InReview;
+
+        // With clarification_markers enabled, transition should be blocked.
+        let flags = crate::validate::SddFlags {
+            clarification_markers: true,
+            ..crate::validate::SddFlags::all_disabled()
+        };
+        let result = mgr
+            .transition_with_flags(&mut spec, SpecStatus::Approved, "alice", &flags)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, SpecError::UnresolvedClarifications { count } if count == 1),
+            "expected UnresolvedClarifications error, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_backward_compat_blocks_clarifications() {
+        // The legacy transition() should still block (all_enabled flags).
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let id = SpecId::new("clar-compat").unwrap();
+        let spec_md =
+            "---\nstatus: in_review\n---\n\n# Clar Compat\n\n[NEEDS CLARIFICATION: what?]\n";
+        SpecIo::create_spec_dir(root, &id, spec_md, "# Plan\n")
+            .await
+            .unwrap();
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr.read_spec(&id).await.unwrap();
+        spec.status = SpecStatus::InReview;
+
+        let result = mgr
+            .transition(&mut spec, SpecStatus::Approved, "alice")
+            .await;
+        assert!(result.is_err());
+    }
+
+    // ── Phase -1 gate transition tests (T-017, FR-008) ──────────────────────
+
+    /// Helper: create a spec dir with a PLAN.md containing the given gate
+    /// markdown.
+    async fn make_gate_spec(root: &Path, id: &str, plan_md: &str) {
+        let spec_id = SpecId::new(id).unwrap();
+        let spec_md = "---\nstatus: draft\n---\n\n# Gate Test\n\nSome requirement.\n";
+        SpecIo::create_spec_dir(root, &spec_id, spec_md, plan_md)
+            .await
+            .unwrap();
+    }
+
+    const GATES_ALL_CHECKED: &str = "\
+# Plan
+
+## Phase -1 Gates
+
+- [x] **Simplicity**: The design is minimal.
+- [x] **Anti-Abstraction**: No speculative abstractions.
+- [x] **Integration-First**: Integration points identified.
+
+## Tasks
+
+| ID | Description | Status |
+|----|-------------|--------|
+| T-001 | Do something | pending |
+";
+
+    const GATES_ONE_UNCHECKED: &str = "\
+# Plan
+
+## Phase -1 Gates
+
+- [x] **Simplicity**: The design is minimal.
+- [ ] **Anti-Abstraction**: No speculative abstractions.
+- [x] **Integration-First**: Integration points identified.
+
+## Tasks
+
+| ID | Description | Status |
+|----|-------------|--------|
+| T-001 | Do something | pending |
+";
+
+    const GATES_ALL_UNCHECKED: &str = "\
+# Plan
+
+## Phase -1 Gates
+
+- [ ] **Simplicity**: The design is minimal.
+- [ ] **Anti-Abstraction**: No speculative abstractions.
+- [ ] **Integration-First**: Integration points identified.
+
+## Tasks
+
+| ID | Description | Status |
+|----|-------------|--------|
+| T-001 | Do something | pending |
+";
+
+    const GATES_SECTION_MISSING: &str = "\
+# Plan
+
+## Tasks
+
+| ID | Description | Status |
+|----|-------------|--------|
+| T-001 | Do something | pending |
+";
+
+    #[tokio::test]
+    async fn test_transition_in_progress_blocked_when_gates_unchecked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-unchecked", GATES_ONE_UNCHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-unchecked").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        let flags = SddFlags {
+            phase_minus_one_gates: true,
+            ..SddFlags::all_disabled()
+        };
+        let result = mgr
+            .transition_with_flags(&mut spec, SpecStatus::InProgress, "alice", &flags)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SpecError::UncheckedPhaseGates { gates } if gates.len() == 1 && gates[0] == "Anti-Abstraction"),
+            "expected UncheckedPhaseGates with Anti-Abstraction, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_in_progress_blocked_when_all_gates_unchecked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-all-unchecked", GATES_ALL_UNCHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-all-unchecked").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        let flags = SddFlags {
+            phase_minus_one_gates: true,
+            ..SddFlags::all_disabled()
+        };
+        let result = mgr
+            .transition_with_flags(&mut spec, SpecStatus::InProgress, "alice", &flags)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SpecError::UncheckedPhaseGates { gates } if gates.len() == 3),
+            "expected 3 unchecked gates, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_in_progress_blocked_when_gate_section_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-missing", GATES_SECTION_MISSING).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-missing").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        let flags = SddFlags {
+            phase_minus_one_gates: true,
+            ..SddFlags::all_disabled()
+        };
+        let result = mgr
+            .transition_with_flags(&mut spec, SpecStatus::InProgress, "alice", &flags)
+            .await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            matches!(&err, SpecError::UncheckedPhaseGates { gates } if gates.len() == 3),
+            "expected 3 missing gates, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_in_progress_allowed_when_gates_checked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-checked", GATES_ALL_CHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-checked").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        let flags = SddFlags {
+            phase_minus_one_gates: true,
+            ..SddFlags::all_disabled()
+        };
+        mgr.transition_with_flags(&mut spec, SpecStatus::InProgress, "alice", &flags)
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn test_transition_in_progress_allowed_when_gate_flag_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-flag-off", GATES_ALL_UNCHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-flag-off").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        // With phase_minus_one_gates disabled, transition should succeed
+        // even though all gates are unchecked.
+        let flags = SddFlags::all_disabled();
+        mgr.transition_with_flags(&mut spec, SpecStatus::InProgress, "alice", &flags)
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn test_transition_backward_compat_blocks_unchecked_gates() {
+        // The legacy transition() uses all_enabled flags, so it should block.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-compat", GATES_ONE_UNCHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-compat").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::Approved;
+
+        let result = mgr
+            .transition(&mut spec, SpecStatus::InProgress, "alice")
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_transition_non_in_progress_not_blocked_by_gates() {
+        // Transitions to statuses other than in_progress should not be
+        // affected by Phase -1 gate checks.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        make_gate_spec(root, "gate-other", GATES_ALL_UNCHECKED).await;
+
+        let mgr = SpecManager::new(root);
+        let mut spec = mgr
+            .read_spec(&SpecId::new("gate-other").unwrap())
+            .await
+            .unwrap();
+        spec.status = SpecStatus::InReview;
+
+        // Transition to Approved should not be blocked by gates (only by
+        // clarification markers, which are disabled here).
+        let flags = SddFlags {
+            phase_minus_one_gates: true,
+            ..SddFlags::all_disabled()
+        };
+        mgr.transition_with_flags(&mut spec, SpecStatus::Approved, "alice", &flags)
+            .await
+            .unwrap();
+        assert_eq!(spec.status, SpecStatus::Approved);
     }
 }

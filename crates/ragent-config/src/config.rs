@@ -170,6 +170,29 @@ pub struct Config {
     /// (never in this file).
     #[serde(default, skip_serializing_if = "GmailConfig::is_empty")]
     pub gmail: GmailConfig,
+    /// Spec-Driven Development (SDD) capability toggles (FR-019).
+    ///
+    /// All flags default to `false` (opt-in). New SDD artifacts and gates are
+    /// generated only when the corresponding flag is enabled, so existing
+    /// workflows are not disrupted.
+    #[serde(default, skip_serializing_if = "SddConfig::is_empty")]
+    pub sdd: SddConfig,
+    /// Dynamic trigger rule system configuration (spec `piegap` FR-002).
+    ///
+    /// Controls the poll interval, feature gate, and maximum rules per session
+    /// for natural-language trigger rules.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::trigger::TriggerConfig::is_empty"
+    )]
+    pub trigger: crate::trigger::TriggerConfig,
+    /// Pie feature gap toggles (spec `piegap` FR-016, FR-018).
+    ///
+    /// Each flag gates a standalone pie-derived feature so that existing
+    /// workflows are not disrupted. All flags default to `false` — features are
+    /// opt-in. When a flag is disabled, the corresponding feature is inactive.
+    #[serde(default, skip_serializing_if = "PieGapConfig::is_empty")]
+    pub piegap: PieGapConfig,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -1044,6 +1067,13 @@ pub struct McpServerConfig {
     /// If `true`, this server is configured but will not be started.
     #[serde(default)]
     pub disabled: bool,
+    /// How push notifications from this server should be handled (FR-003).
+    ///
+    /// When set to `inject_summary` or `inject_and_run`, the MCP notification
+    /// adapter normalizes pushed notification frames into trigger envelopes
+    /// and routes them through the trigger runtime. Default: `none`.
+    #[serde(default)]
+    pub notification: crate::trigger::McpNotificationMode,
 }
 
 impl Default for McpServerConfig {
@@ -1056,6 +1086,7 @@ impl Default for McpServerConfig {
             url: None,
             headers: HashMap::new(),
             disabled: false,
+            notification: crate::trigger::McpNotificationMode::None,
         }
     }
 }
@@ -1827,6 +1858,14 @@ impl Config {
             base.edit_log = overlay.edit_log;
         }
 
+        // SDD flags: OR semantics — a flag enabled in either base or overlay
+        // stays enabled. All flags default to false (opt-in, FR-019).
+        base.sdd.merge(&overlay.sdd);
+
+        // Pie gap flags: OR semantics — a flag enabled in either base or overlay
+        // stays enabled. All flags default to false (opt-in, FR-016/FR-018).
+        base.piegap.merge(&overlay.piegap);
+
         base
     }
 
@@ -2312,6 +2351,11 @@ fn is_true(v: &bool) -> bool {
     *v
 }
 
+/// Return `true` if the value is `false` — used for `skip_serializing_if`.
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
 /// External messaging channel configuration for the `send_channel_message` tool
 /// (JCODEPLAN M7, T-061).
 ///
@@ -2415,5 +2459,201 @@ impl GmailConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.client_id.is_none() && self.client_secret.is_none() && self.base_url.is_none()
+    }
+}
+
+/// Spec-Driven Development (SDD) capability toggles (FR-019).
+///
+/// Each flag gates a new SDD artifact or validation check so that existing
+/// workflows are not disrupted. All flags default to `false` — capabilities are
+/// opt-in. When a flag is disabled, the corresponding artifact is not generated
+/// and the corresponding validation check is skipped.
+///
+/// Configured under the `sdd` key in `ragent.json`:
+///
+/// ```json
+/// {
+///   "sdd": {
+///     "clarification_markers": true,
+///     "quality_checklists": true,
+///     "constitution": true
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SddConfig {
+    /// Enable `[NEEDS CLARIFICATION]` marker detection and reporting (FR-002).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub clarification_markers: bool,
+    /// Embed quality checklists in spec and plan templates (FR-006).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub quality_checklists: bool,
+    /// Generate and parse `CONSTITUTION.md` architectural-principles artifact (FR-007).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub constitution: bool,
+    /// Enable Phase -1 pre-implementation gate validation (FR-008).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub phase_minus_one_gates: bool,
+    /// Create a git branch per spec (FR-009).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub branch_per_spec: bool,
+    /// Link research artifacts into SPEC.md frontmatter (FR-010).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub research_artifacts: bool,
+    /// Generate `data-model.md` during `/spec plan` (FR-011).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub data_model: bool,
+    /// Generate `contracts/` directory during `/spec plan` (FR-012).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub contracts: bool,
+    /// Generate `quickstart.md` validation scenarios (FR-013).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub quickstart: bool,
+    /// Enforce test-first file creation ordering in plans (FR-014).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub test_first_ordering: bool,
+    /// Run ambiguity, contradiction, and gap consistency checks (FR-015).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub consistency_checks: bool,
+    /// Enable constitutional amendment process with dated changelog (FR-016).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub amendment_process: bool,
+    /// Enable production feedback loop (`FEEDBACK.md` surfacing) (FR-017).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub feedback_loop: bool,
+}
+
+impl SddConfig {
+    /// Returns `true` when no SDD flags are enabled.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.clarification_markers
+            && !self.quality_checklists
+            && !self.constitution
+            && !self.phase_minus_one_gates
+            && !self.branch_per_spec
+            && !self.research_artifacts
+            && !self.data_model
+            && !self.contracts
+            && !self.quickstart
+            && !self.test_first_ordering
+            && !self.consistency_checks
+            && !self.amendment_process
+            && !self.feedback_loop
+    }
+
+    /// Merge another config into `self` using OR semantics — a flag enabled in
+    /// either config remains enabled. This matches the opt-in nature of the
+    /// flags: once enabled at any config layer, the capability stays on.
+    pub fn merge(&mut self, other: &Self) {
+        self.clarification_markers |= other.clarification_markers;
+        self.quality_checklists |= other.quality_checklists;
+        self.constitution |= other.constitution;
+        self.phase_minus_one_gates |= other.phase_minus_one_gates;
+        self.branch_per_spec |= other.branch_per_spec;
+        self.research_artifacts |= other.research_artifacts;
+        self.data_model |= other.data_model;
+        self.contracts |= other.contracts;
+        self.quickstart |= other.quickstart;
+        self.test_first_ordering |= other.test_first_ordering;
+        self.consistency_checks |= other.consistency_checks;
+        self.amendment_process |= other.amendment_process;
+        self.feedback_loop |= other.feedback_loop;
+    }
+}
+
+// ── Pie gap feature toggles ─────────────────────────────────────────────────────
+
+/// Pie feature gap toggles (spec `piegap` FR-016, FR-018).
+///
+/// Each flag gates a standalone pie-derived feature so that existing
+/// workflows are not disrupted. All flags default to `false` — features are
+/// opt-in. When a flag is disabled, the corresponding feature is inactive.
+///
+/// Configured under the `piegap` key in `ragent.json`:
+///
+/// ```json
+/// {
+///   "piegap": {
+///     "triggers": true,
+///     "hooks": true,
+///     "inbox": true,
+///     "archive": true,
+///     "bug_report": true,
+///     "templates": true,
+///     "goal": true,
+///     "web_ui": true
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PieGapConfig {
+    /// Enable dynamic trigger rules (G-01, FR-002).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub triggers: bool,
+    /// Enable MCP notification push events (G-02, FR-003).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mcp_notifications: bool,
+    /// Enable stateful loops + triage inbox (G-03, FR-004).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inbox: bool,
+    /// Enable lifecycle hooks (G-04, FR-005).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hooks: bool,
+    /// Enable portable session archive export/import (G-05, FR-006).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub archive: bool,
+    /// Enable bug report generation (G-06, FR-007).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub bug_report: bool,
+    /// Enable reusable prompt templates (G-07, FR-008).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub templates: bool,
+    /// Enable goal-based autonomous stop hook (G-10, FR-011).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub goal: bool,
+    /// Enable browser-based web UI (G-12, FR-013).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub web_ui: bool,
+    /// Enable `/undo` slash command (G-13, FR-014).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub undo: bool,
+    /// Enable `/name` session naming (G-14, FR-015).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub session_naming: bool,
+}
+
+impl PieGapConfig {
+    /// Returns `true` when no piegap flags are enabled.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.triggers
+            && !self.mcp_notifications
+            && !self.inbox
+            && !self.hooks
+            && !self.archive
+            && !self.bug_report
+            && !self.templates
+            && !self.goal
+            && !self.web_ui
+            && !self.undo
+            && !self.session_naming
+    }
+
+    /// Merge another config into `self` using OR semantics — a flag enabled in
+    /// either config remains enabled. This matches the opt-in nature of the
+    /// flags: once enabled at any config layer, the capability stays on.
+    pub fn merge(&mut self, other: &Self) {
+        self.triggers |= other.triggers;
+        self.mcp_notifications |= other.mcp_notifications;
+        self.inbox |= other.inbox;
+        self.hooks |= other.hooks;
+        self.archive |= other.archive;
+        self.bug_report |= other.bug_report;
+        self.templates |= other.templates;
+        self.goal |= other.goal;
+        self.web_ui |= other.web_ui;
+        self.undo |= other.undo;
+        self.session_naming |= other.session_naming;
     }
 }

@@ -4,6 +4,7 @@
 //! scoped to a working directory. [`SessionManager`] provides CRUD operations
 //! backed by persistent [`Storage`] and emits lifecycle events via [`EventBus`].
 
+pub mod archive;
 pub mod cache;
 pub mod history;
 pub mod loop_steps;

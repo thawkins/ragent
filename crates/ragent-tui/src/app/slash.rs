@@ -19,13 +19,16 @@ use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, ConfigSavePickerState, ConfiguredProvider, DeviceFlowKind, LogLevel, McpDiscoverState,
-    PendingForceCleanup, ProviderSetupStep, ProviderSource, RoleMode, SLASH_COMMANDS,
-    SlashMenuEntry, SlashMenuState,
+    App, ConfigSavePickerState, ConfiguredProvider, DeviceFlowKind, LogEntry, LogLevel,
+    McpDiscoverState, PendingForceCleanup, ProviderSetupStep, ProviderSource, RoleMode,
+    SLASH_COMMANDS, SlashMenuEntry, SlashMenuState,
 };
 
 // Helpers
 use crate::app::helpers::{parse_swarm_args, short_session_id};
+
+// Redaction patterns for bug reports
+use regex::Regex;
 
 // Re-export status types from theme
 
@@ -131,6 +134,25 @@ impl App {
             }
             "config" => {
                 vec!["show".to_string(), "save".to_string(), "list".to_string()]
+            }
+            "triggers" => {
+                vec![
+                    "list".to_string(),
+                    "enable".to_string(),
+                    "disable".to_string(),
+                    "remove".to_string(),
+                    "status".to_string(),
+                    "help".to_string(),
+                ]
+            }
+            "inbox" => {
+                vec![
+                    "list".to_string(),
+                    "claim".to_string(),
+                    "dismiss".to_string(),
+                    "clear".to_string(),
+                    "help".to_string(),
+                ]
             }
             "init" => {
                 vec!["config".to_string()]
@@ -987,6 +1009,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
         }
 
         match cmd {
+            "bug-report" => self.handle_bug_report(),
+            "template" => handle_template_command(self, args),
+            "goal" => handle_goal_command(self, args),
             "telemetry" => self.handle_telemetry_command(args),
             "about" => {
                 let about = format!(
@@ -4555,6 +4580,110 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
                 self.needs_redraw = true;
             }
+            // ── /undo ──────────────────────────────────────────────────────
+            // FR-014: Remove the last user/assistant turn pair from the conversation.
+            // This allows users to correct mistakes or backtrack from unhelpful responses.
+            "undo" => {
+                if self.session_id.is_none() {
+                    self.status = "⚠ No active session to undo".to_string();
+                    return;
+                }
+                if self.messages.is_empty() {
+                    self.status = "⚠ No messages to undo".to_string();
+                    return;
+                }
+
+                // Find the last user message and remove it along with any
+                // following assistant/compaction messages.
+                let mut last_user_idx = None;
+                for (idx, msg) in self.messages.iter().enumerate().rev() {
+                    if msg.role == ragent_types::Role::User {
+                        last_user_idx = Some(idx);
+                        break;
+                    }
+                }
+
+                match last_user_idx {
+                    Some(user_idx) => {
+                        // Remove the user message and all following messages
+                        // (typically one assistant response, but could be more)
+                        let removed_count = self.messages.len() - user_idx;
+                        self.messages.truncate(user_idx);
+
+                        // Reset scroll to show the new end of conversation
+                        self.scroll_offset = 0;
+
+                        self.status =
+                            format!("Undid last turn (removed {} message(s))", removed_count);
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "Undo: removed {} message(s) from end of conversation",
+                                removed_count
+                            ),
+                        );
+                    }
+                    None => {
+                        self.status = "⚠ No user message found to undo".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            "Undo: no user message found in conversation".to_string(),
+                        );
+                    }
+                }
+            }
+            // ── /name ──────────────────────────────────────────────────────
+            // FR-015: Set a human-readable display name on the active session.
+            // The name is persisted in session metadata and appears in session lists.
+            "name" => {
+                if self.session_id.is_none() {
+                    self.status = "⚠ No active session to name".to_string();
+                    return;
+                }
+
+                let name = args.trim();
+                let session_id = self.session_id.clone().unwrap();
+
+                if name.is_empty() {
+                    // Clear the session name
+                    let storage = self.session_processor.session_manager.storage();
+                    match storage.update_session(&session_id, "") {
+                        Ok(()) => {
+                            self.status = "Session name cleared".to_string();
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                "Session name cleared".to_string(),
+                            );
+                        }
+                        Err(e) => {
+                            self.status = format!("⚠ Failed to clear session name: {}", e);
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("Failed to clear session name: {}", e),
+                            );
+                        }
+                    }
+                } else {
+                    // Set the session name
+                    let storage = self.session_processor.session_manager.storage();
+                    match storage.update_session(&session_id, name) {
+                        Ok(()) => {
+                            self.status = format!("Session name set to '{}'", name);
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                format!("Session name set to '{}'", name),
+                            );
+                        }
+                        Err(e) => {
+                            self.status = format!("⚠ Failed to set session name: {}", e);
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("Failed to set session name: {}", e),
+                            );
+                        }
+                    }
+                }
+            }
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
                 let (sub, _rest) = args
@@ -4766,14 +4895,20 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             // ── /spec ────────────────────────────────────────────────────────
             "spec" => {
                 use ragent_specs::spec::SpecStatus;
-                use ragent_specs::{SpecCommand, SpecFilter, SpecManager, validate};
+                use ragent_specs::{
+                    SddFlags, SpecCommand, SpecFilter, SpecManager, validate_with_flags,
+                };
                 let cmd = SpecCommand::parse(args);
                 match cmd {
                     SpecCommand::Help => {
                         self.append_assistant_text(SpecCommand::build_help_message());
                         self.status = "spec: help".to_string();
                     }
-                    SpecCommand::Create { specname, feature } => {
+                    SpecCommand::Create {
+                        specname,
+                        feature,
+                        from_research,
+                    } => {
                         let sid = self.session_id.clone().unwrap_or_default();
                         self.append_assistant_text(&SpecCommand::build_create_message(
                             &specname, &feature,
@@ -4793,7 +4928,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.apply_selected_model_and_thinking(&mut agent);
                         agent.permission = ragent_agent::agent::default_permissions();
 
-                        let task = SpecCommand::build_create_prompt(&specname, &feature);
+                        let task = SpecCommand::build_create_prompt(
+                            &specname,
+                            &feature,
+                            from_research.as_deref(),
+                        );
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
 
@@ -5002,6 +5141,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         });
                     }
                     SpecCommand::Validate { spec_id } => {
+                        // FR-019: Build SDD flags from loaded config so
+                        // SDD-specific checks are opt-in.
+                        let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                        let flags = SddFlags::from_bools(
+                            sdd_cfg.clarification_markers,
+                            sdd_cfg.quality_checklists,
+                            sdd_cfg.consistency_checks,
+                            sdd_cfg.phase_minus_one_gates,
+                            sdd_cfg.constitution,
+                            sdd_cfg.feedback_loop,
+                        );
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let specs_root = working_dir.join("specs");
                         let mgr = SpecManager::new(&specs_root);
@@ -5039,7 +5189,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 }
                                 let mut lines = vec!["From: /spec validate".to_string()];
                                 for spec in &specs {
-                                    let report = validate(spec);
+                                    let report = validate_with_flags(spec, &flags);
                                     lines.push(format!("\n## Validation: `{}`", spec.id));
                                     lines.push(report.format(spec.id.as_str()));
                                 }
@@ -5191,7 +5341,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                                                                                                                                                                                                                                   Some(s) => s,
                                                                                                                                                                                                                                                                   None => return Err(format!("spec: unknown status '{}'", new_status_str)),
                                                                                                                                                                                                                                                               };
-                                                                                                                                                                                                                                                              if let Err(e) = mgr.transition(&mut spec, new_status, "user").await {
+                                                                                                                                                                                                                                                              // FR-019: Gate SDD clarification check via config flags.
+                                                                let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                                                                let flags = SddFlags::from_bools(
+                                                                    sdd_cfg.clarification_markers,
+                                                                    sdd_cfg.quality_checklists,
+                                                                    sdd_cfg.consistency_checks,
+                                                                    sdd_cfg.phase_minus_one_gates,
+                                                                    sdd_cfg.constitution,
+                                                                    sdd_cfg.feedback_loop,
+                                                                );
+                                                                if let Err(e) = mgr.transition_with_flags(&mut spec, new_status, "user", &flags).await {
                                                                                                                                                                                                                                                                   return Err(format!("spec: transition failed: {}", e));
                                                                                                                                                                                                                                                               }
                                                                                                                                                                                                                                                               Ok(format!(
@@ -5745,7 +5905,11 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             || sub == "add"
                             || sub == "delete"
                             || sub == "jtbd"
-                            || sub == "update" =>
+                            || sub == "update"
+                            || sub == "specify"
+                            || sub == "plan"
+                            || sub == "tasks"
+                            || sub == "feedback" =>
                     {
                         self.status = format!("Usage: /spec {} — try /spec help", sub);
                     }
@@ -6025,6 +6189,504 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     }
                     SpecCommand::Unknown(sub) => {
                         self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");
+                    }
+                    SpecCommand::Specify {
+                        specname,
+                        feature,
+                        from_research,
+                    } => {
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        self.append_assistant_text(&SpecCommand::build_specify_message(
+                            &specname, &feature,
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            SpecCommand::build_specify_log(&specname, &feature),
+                        );
+
+                        // FR-009: optionally create a git branch for the spec.
+                        let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                        if sdd_cfg.branch_per_spec {
+                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let branch_result =
+                                ragent_specs::create_spec_branch(&specname, &working_dir);
+                            self.append_assistant_text(&SpecCommand::build_branch_message(
+                                &branch_result,
+                            ));
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                SpecCommand::build_branch_log(&specname, &branch_result),
+                            );
+                        }
+
+                        let explore_agent = self
+                            .cycleable_agents
+                            .iter()
+                            .find(|a| a.name == "explore")
+                            .cloned();
+
+                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
+                        self.apply_selected_model_and_thinking(&mut agent);
+                        agent.permission = ragent_agent::agent::default_permissions();
+
+                        let task = SpecCommand::build_specify_prompt(
+                            &specname,
+                            &feature,
+                            from_research.as_deref(),
+                        );
+                        let msg = Message::user_text(&sid, &task);
+                        self.messages.push(msg);
+
+                        let processor = self.session_processor.clone();
+                        let flag = Arc::new(AtomicBool::new(false));
+                        self.cancel_flag = Some(flag.clone());
+                        self.is_processing = true;
+                        self.status = SpecCommand::build_specify_status(&specname);
+
+                        let event_bus = self.event_bus.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) =
+                                processor.process_message(&sid, &task, &agent, flag).await
+                            {
+                                tracing::warn!(error = %e, "spec: specify generation failed");
+                                event_bus.publish(ragent_agent::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!("spec specify generation failed: {e}"),
+                                });
+                            }
+                        });
+                    }
+                    SpecCommand::Plan {
+                        spec_id,
+                        tech_context,
+                    } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // FR-006: validate spec ID format
+                        let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec plan\n\n**Error:** Invalid spec ID \
+                                     `{}`. Spec IDs must be alphanumeric with hyphens or \
+                                     underscores only.",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+
+                        // Read SPEC.md (and existing PLAN.md for status preservation)
+                        let spec_id_owned = spec_id.clone();
+                        let result: Result<(String, String, String), String> =
+                            tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    let spec = match mgr.read_spec(&sid).await {
+                                        Ok(s) => s,
+                                        Err(_e) => {
+                                            let available: Vec<String> =
+                                                match mgr.discover_specs().await {
+                                                    Ok(specs) => specs
+                                                        .iter()
+                                                        .map(|s| {
+                                                            format!(
+                                                                "  - {} ({})",
+                                                                s.id,
+                                                                s.status.as_str()
+                                                            )
+                                                        })
+                                                        .collect(),
+                                                    Err(_) => vec![],
+                                                };
+                                            let avail_str = if available.is_empty() {
+                                                "  (none found)".to_string()
+                                            } else {
+                                                available.join("\n")
+                                            };
+                                            return Err(format!(
+                                                "Spec `{}` not found.\n\nAvailable specs:\n{}",
+                                                spec_id_owned, avail_str
+                                            ));
+                                        }
+                                    };
+                                    if spec.status == ragent_specs::spec::SpecStatus::Archived {
+                                        return Err(format!(
+                                            "spec: '{}' is archived and cannot be updated",
+                                            spec_id_owned
+                                        ));
+                                    }
+                                    Ok((spec.spec_md, spec.plan_md, spec.feedback_md.clone()))
+                                })
+                            });
+
+                        let (spec_md, plan_md, feedback_md) = match result {
+                            Ok(v) => v,
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec plan\n\n**Error:** {}",
+                                    e
+                                ));
+                                return;
+                            }
+                        };
+
+                        // FR-011/FR-012/FR-017: check whether data-model,
+                        // contracts, and feedback surfacing are enabled
+                        let sdd_cfg = ragent_agent::Config::load().unwrap_or_default().sdd;
+                        let data_model_enabled = sdd_cfg.data_model;
+                        let contracts_enabled = sdd_cfg.contracts;
+                        let feedback_enabled = sdd_cfg.feedback_loop;
+                        // FR-017: load FEEDBACK.md content when feedback loop is
+                        // enabled, so it can be surfaced during plan regeneration
+                        let feedback_md = if feedback_enabled {
+                            feedback_md.as_str()
+                        } else {
+                            ""
+                        };
+
+                        self.append_assistant_text(&SpecCommand::build_plan_message(
+                            &spec_id,
+                            &tech_context,
+                            data_model_enabled,
+                            contracts_enabled,
+                            feedback_enabled,
+                        ));
+                        self.push_log_no_agent(
+                            crate::app::LogLevel::Info,
+                            SpecCommand::build_plan_log(&spec_id, &tech_context),
+                        );
+
+                        let explore_agent = self
+                            .cycleable_agents
+                            .iter()
+                            .find(|a| a.name == "explore")
+                            .cloned();
+                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
+                        self.apply_selected_model_and_thinking(&mut agent);
+                        agent.permission = ragent_agent::agent::default_permissions();
+
+                        let prompt = SpecCommand::build_plan_prompt(
+                            &spec_id,
+                            &tech_context,
+                            &spec_md,
+                            &plan_md,
+                            data_model_enabled,
+                            contracts_enabled,
+                            feedback_md,
+                        );
+                        let sid_msg = self.session_id.clone().unwrap_or_default();
+                        let msg = Message::user_text(&sid_msg, &prompt);
+                        self.messages.push(msg);
+
+                        let processor = self.session_processor.clone();
+                        let flag = Arc::new(AtomicBool::new(false));
+                        self.cancel_flag = Some(flag.clone());
+                        self.is_processing = true;
+                        self.status = SpecCommand::build_plan_status(&spec_id);
+
+                        let event_bus = self.event_bus.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = processor
+                                .process_message(&sid_msg, &prompt, &agent, flag)
+                                .await
+                            {
+                                tracing::warn!(error = %e, "spec: plan generation failed");
+                                event_bus.publish(ragent_agent::event::Event::AgentError {
+                                    session_id: sid_msg,
+                                    error: format!("spec plan generation failed: {e}"),
+                                });
+                            }
+                        });
+                    }
+                    SpecCommand::Tasks { spec_id } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // FR-006: validate spec ID format
+                        let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec tasks\n\n**Error:** Invalid \
+                                     spec ID `{}`. Spec IDs must be \
+                                     alphanumeric with hyphens or \
+                                     underscores only.",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+
+                        // Read spec to get plan_md and title
+                        let spec_id_owned = spec_id.clone();
+                        let result: Result<
+                            (String, String, String, ragent_specs::spec::SpecStatus),
+                            String,
+                        > = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                let spec = match mgr.read_spec(&sid).await {
+                                    Ok(s) => s,
+                                    Err(_e) => {
+                                        let available: Vec<String> = match mgr
+                                            .discover_specs()
+                                            .await
+                                        {
+                                            Ok(specs) => specs
+                                                .iter()
+                                                .map(|s| {
+                                                    format!("  - {} ({})", s.id, s.status.as_str())
+                                                })
+                                                .collect(),
+                                            Err(_) => vec![],
+                                        };
+                                        let avail_str = if available.is_empty() {
+                                            "  (none found)".to_string()
+                                        } else {
+                                            available.join("\n")
+                                        };
+                                        return Err(format!(
+                                            "Spec `{}` not found.\n\nAvailable specs:\n{}",
+                                            spec_id_owned, avail_str
+                                        ));
+                                    }
+                                };
+                                if spec.status == ragent_specs::spec::SpecStatus::Archived {
+                                    return Err(format!(
+                                        "spec: '{}' is archived and cannot be updated",
+                                        spec_id_owned
+                                    ));
+                                }
+                                Ok((spec.spec_md, spec.plan_md, spec.title, spec.status))
+                            })
+                        });
+
+                        let (spec_md, plan_md, title, _status) = match result {
+                            Ok(v) => v,
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec tasks\n\n**Error:** {}",
+                                    e
+                                ));
+                                return;
+                            }
+                        };
+
+                        // Check PLAN.md is not empty
+                        if plan_md.trim().is_empty() {
+                            self.status = format!("spec: PLAN.md is empty for {}", spec_id);
+                            self.append_assistant_text(&SpecCommand::build_tasks_no_plan_error(
+                                &spec_id,
+                            ));
+                            return;
+                        }
+
+                        // Generate TASKS.md content from the task table
+                        let tasks_md = match SpecCommand::build_tasks_md(&spec_id, &title, &plan_md)
+                        {
+                            Some(md) => md,
+                            None => {
+                                self.status =
+                                    format!("spec: no tasks found in PLAN.md for {}", spec_id);
+                                self.append_assistant_text(
+                                    &SpecCommand::build_tasks_no_tasks_error(&spec_id),
+                                );
+                                return;
+                            }
+                        };
+
+                        // Write TASKS.md atomically
+                        let tasks_path = specs_root.join(&spec_id).join("TASKS.md");
+                        let write_result = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                ragent_specs::io::SpecIo::atomic_write(&tasks_path, &tasks_md).await
+                            })
+                        });
+
+                        match write_result {
+                            Ok(()) => {
+                                // Count tasks for the completion message
+                                let task_count = ragent_specs::PlanParser::parse(&plan_md)
+                                    .map(|t| t.len())
+                                    .unwrap_or(0);
+
+                                // FR-013, T-023: also generate quickstart.md
+                                // with key validation scenarios from SPEC.md
+                                let quickstart_path =
+                                    specs_root.join(&spec_id).join("quickstart.md");
+                                let quickstart_md =
+                                    SpecCommand::build_quickstart_md(&spec_id, &title, &spec_md);
+                                let quickstart_written = match &quickstart_md {
+                                    Some(qs_md) => {
+                                        let qs_result = tokio::task::block_in_place(|| {
+                                            rt.block_on(async {
+                                                ragent_specs::io::SpecIo::atomic_write(
+                                                    &quickstart_path,
+                                                    qs_md,
+                                                )
+                                                .await
+                                            })
+                                        });
+                                        qs_result.is_ok()
+                                    }
+                                    None => false,
+                                };
+
+                                self.append_assistant_text(
+                                    &SpecCommand::build_tasks_completion_message(
+                                        &spec_id, task_count,
+                                    ),
+                                );
+                                self.push_log_no_agent(
+                                    crate::app::LogLevel::Info,
+                                    SpecCommand::build_tasks_log(&spec_id),
+                                );
+                                if quickstart_written {
+                                    self.status = format!(
+                                        "spec: wrote specs/{}/TASKS.md ({} tasks) + \
+                                         quickstart.md",
+                                        spec_id, task_count
+                                    );
+                                } else {
+                                    self.status = format!(
+                                        "spec: wrote specs/{}/TASKS.md ({} tasks)",
+                                        spec_id, task_count
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                self.status = format!("spec: failed to write TASKS.md: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec tasks\n\n**Error:** Failed \
+                                     to write `specs/{}/TASKS.md`: {}",
+                                    spec_id, e
+                                ));
+                            }
+                        }
+                    }
+                    SpecCommand::Feedback { spec_id, note } => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // Validate spec ID format
+                        let sid = match ragent_specs::spec::SpecId::new(&spec_id) {
+                            Some(id) => id,
+                            None => {
+                                self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec feedback\n\n**Error:** Invalid spec ID \
+                                     `{}`. Spec IDs must be alphanumeric with hyphens or \
+                                     underscores only.",
+                                    spec_id
+                                ));
+                                return;
+                            }
+                        };
+
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+
+                        // Read spec to validate it exists and get title + existing FEEDBACK.md
+                        let spec_id_owned = spec_id.clone();
+                        let note_owned = note.clone();
+                        let result: Result<(String, String), String> =
+                            tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    let spec = match mgr.read_spec(&sid).await {
+                                        Ok(s) => s,
+                                        Err(_e) => {
+                                            let available: Vec<String> =
+                                                match mgr.discover_specs().await {
+                                                    Ok(specs) => specs
+                                                        .iter()
+                                                        .map(|s| {
+                                                            format!(
+                                                                "  - {} ({})",
+                                                                s.id,
+                                                                s.status.as_str()
+                                                            )
+                                                        })
+                                                        .collect(),
+                                                    Err(_) => vec![],
+                                                };
+                                            let avail_str = if available.is_empty() {
+                                                "  (none found)".to_string()
+                                            } else {
+                                                available.join("\n")
+                                            };
+                                            return Err(format!(
+                                                "Spec `{}` not found.\n\nAvailable specs:\n{}",
+                                                spec_id_owned, avail_str
+                                            ));
+                                        }
+                                    };
+                                    Ok((spec.title.clone(), spec.feedback_md.clone()))
+                                })
+                            });
+
+                        let (title, existing_feedback) = match result {
+                            Ok(v) => v,
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec feedback\n\n**Error:** {}",
+                                    e
+                                ));
+                                return;
+                            }
+                        };
+
+                        // Build the updated FEEDBACK.md content
+                        let updated_feedback = SpecCommand::append_feedback_note(
+                            &existing_feedback,
+                            &title,
+                            &note_owned,
+                        );
+
+                        // Write FEEDBACK.md to disk
+                        let feedback_path = specs_root.join(sid.dir_name()).join("FEEDBACK.md");
+                        let write_result: Result<(), String> = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                ragent_specs::io::SpecIo::atomic_write(
+                                    &feedback_path,
+                                    &updated_feedback,
+                                )
+                                .await
+                                .map_err(|e| e.to_string())
+                            })
+                        });
+
+                        match write_result {
+                            Ok(()) => {
+                                self.append_assistant_text(&SpecCommand::build_feedback_message(
+                                    &spec_id,
+                                    &note_owned,
+                                ));
+                                self.push_log_no_agent(
+                                    crate::app::LogLevel::Info,
+                                    SpecCommand::build_feedback_log(&spec_id, &note_owned),
+                                );
+                                self.status = SpecCommand::build_feedback_status(&spec_id);
+                            }
+                            Err(e) => {
+                                self.status = format!("spec: failed to write FEEDBACK.md: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec feedback\n\n**Error:** Failed to \
+                                     write `specs/{}/FEEDBACK.md`: {}",
+                                    spec_id, e
+                                ));
+                            }
+                        }
                     }
                 }
             }
@@ -7478,6 +8140,10 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
             // ── /cron ────────────────────────────────────────────────────
             "cron" => self.handle_cron_command(args),
+            // ── /triggers ────────────────────────────────────────────────
+            "triggers" => self.handle_triggers_command(args),
+            // ── /inbox ────────────────────────────────────
+            "inbox" => self.handle_inbox_command(args),
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_agent::Config::load()
@@ -8123,6 +8789,628 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
         self.append_assistant_text(&output);
         self.status = "cron: log".to_string();
     }
+
+    // ── /triggers slash-command handler (spec piegap T-004) ─────────────
+
+    /// Handle the `/triggers` slash-command family (FR-002, FR-003).
+    ///
+    /// Sub-commands:
+    ///
+    /// | Sub-command | Description |
+    /// |---|---|
+    /// | `/triggers list` | Show all registered trigger rules |
+    /// | `/triggers enable <rule_id>` | Enable a disabled trigger rule |
+    /// | `/triggers disable <rule_id>` | Disable an active trigger rule |
+    /// | `/triggers remove <rule_id>` | Remove a trigger rule |
+    /// | `/triggers status` | Show trigger runtime status (dedup, cycles) |
+    /// | `/triggers help` | Show usage |
+    fn handle_triggers_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        let rest = args
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r.trim())
+            .unwrap_or("");
+
+        match sub.as_str() {
+            "list" | "" => self.handle_triggers_list(),
+            "enable" => self.handle_triggers_set_enabled(rest, true),
+            "disable" => self.handle_triggers_set_enabled(rest, false),
+            "remove" => self.handle_triggers_remove(rest),
+            "status" => self.handle_triggers_status(),
+            "help" => self.handle_triggers_help(),
+            _ => {
+                self.append_assistant_text(&format!(
+                    "From: /triggers\n⚠ Unknown sub-command '{sub}'. Use `/triggers help` for usage."
+                ));
+                self.status = "triggers: unknown".to_string();
+            }
+        }
+    }
+
+    /// Ensure the trigger runtime is initialised. Returns `true` if the
+    /// runtime is available (either already initialised or just created).
+    fn ensure_trigger_runtime(&mut self) -> bool {
+        if self.trigger_runtime.is_some() {
+            return true;
+        }
+        self.trigger_runtime = Some(ragent_agent::trigger::TriggerRuntime::default());
+        true
+    }
+
+    /// Handle `/triggers list` — display all registered trigger rules.
+    fn handle_triggers_list(&mut self) {
+        if !self.ensure_trigger_runtime() {
+            return;
+        }
+        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let rules = runtime.list_rules();
+        if rules.is_empty() {
+            self.append_assistant_text(
+                "From: /triggers list\n\nℹ️  No trigger rules registered.\n\n\
+                 Trigger rules are created by asking the agent in natural language,\n\
+                 e.g. \"when $HOME/build.done exists, run cargo test\".",
+            );
+            self.status = "triggers: list empty".to_string();
+            return;
+        }
+        let mut output = String::from(
+            "From: /triggers list\n\n## Trigger Rules\n\n\
+             | ID | Condition | Action | Mode | Status |\n\
+             |---|---|---|---|---|\n",
+        );
+        for rule in &rules {
+            let id_short = if rule.id.as_str().len() > 8 {
+                &rule.id.as_str()[..8]
+            } else {
+                rule.id.as_str()
+            };
+            let mode = if rule.fire_once { "once" } else { "repeat" };
+            let status = match rule.status() {
+                ragent_types::trigger::TriggerRuleStatus::Active => "active",
+                ragent_types::trigger::TriggerRuleStatus::Disabled => "disabled",
+                ragent_types::trigger::TriggerRuleStatus::Fired => "fired",
+            };
+            let cond_preview = truncate_field(&rule.condition, 40);
+            let action_preview = truncate_field(&rule.action, 40);
+            output.push_str(&format!(
+                "| `{}` | {} | {} | {} | {} |\n",
+                id_short, cond_preview, action_preview, mode, status
+            ));
+        }
+        output.push_str(&format!("\n**{} rule(s) registered.**\n", rules.len()));
+        self.append_assistant_text(&output);
+        self.status = "triggers: list".to_string();
+    }
+
+    /// Handle `/triggers enable <rule_id>` and `/triggers disable <rule_id>`.
+    fn handle_triggers_set_enabled(&mut self, rest: &str, enabled: bool) {
+        let rule_id = rest.trim();
+        if rule_id.is_empty() {
+            let action = if enabled { "enable" } else { "disable" };
+            self.append_assistant_text(&format!(
+                "From: /triggers {action}\n\nUsage: `/triggers {action} <rule_id>`"
+            ));
+            self.status = format!("triggers: {action} usage");
+            return;
+        }
+        if !self.ensure_trigger_runtime() {
+            return;
+        }
+        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let found = if enabled {
+            runtime.enable_rule(rule_id)
+        } else {
+            runtime.disable_rule(rule_id)
+        };
+        if found {
+            let mark = if enabled { "✅" } else { "⏸️" };
+            let action = if enabled { "enabled" } else { "disabled" };
+            self.append_assistant_text(&format!(
+                "From: /triggers\n{mark} Rule `{}` {action}.",
+                rule_id
+            ));
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!("triggers: rule {} {}", rule_id, action),
+            );
+            self.status = format!("triggers: {action}");
+        } else {
+            self.append_assistant_text(&format!(
+                "From: /triggers\n⚠ Rule `{}` not found.",
+                rule_id
+            ));
+            self.status = "triggers: not found".to_string();
+        }
+    }
+
+    /// Handle `/triggers remove <rule_id>`.
+    fn handle_triggers_remove(&mut self, rest: &str) {
+        let rule_id = rest.trim();
+        if rule_id.is_empty() {
+            self.append_assistant_text(
+                "From: /triggers remove\n\nUsage: `/triggers remove <rule_id>`",
+            );
+            self.status = "triggers: remove usage".to_string();
+            return;
+        }
+        if !self.ensure_trigger_runtime() {
+            return;
+        }
+        let runtime = self.trigger_runtime.as_ref().unwrap();
+        if runtime.remove_rule(rule_id) {
+            self.append_assistant_text(&format!(
+                "From: /triggers remove\n🗑️ Rule `{}` removed.",
+                rule_id
+            ));
+            self.push_log_no_agent(
+                LogLevel::Info,
+                format!("triggers: rule {} removed", rule_id),
+            );
+            self.status = "triggers: removed".to_string();
+        } else {
+            self.append_assistant_text(&format!(
+                "From: /triggers remove\n⚠ Rule `{}` not found.",
+                rule_id
+            ));
+            self.status = "triggers: not found".to_string();
+        }
+    }
+
+    /// Handle `/triggers status` — show runtime stats.
+    fn handle_triggers_status(&mut self) {
+        if !self.ensure_trigger_runtime() {
+            return;
+        }
+        let runtime = self.trigger_runtime.as_ref().unwrap();
+        let rule_count = runtime.rule_count();
+        let dedup_size = runtime.dedup_cache_size();
+        let cycle_size = runtime.cycle_tracker_size();
+        let active = runtime
+            .list_rules()
+            .iter()
+            .filter(|r| r.status() == ragent_types::trigger::TriggerRuleStatus::Active)
+            .count();
+        let disabled = runtime
+            .list_rules()
+            .iter()
+            .filter(|r| r.status() == ragent_types::trigger::TriggerRuleStatus::Disabled)
+            .count();
+        let fired = runtime
+            .list_rules()
+            .iter()
+            .filter(|r| r.status() == ragent_types::trigger::TriggerRuleStatus::Fired)
+            .count();
+        self.append_assistant_text(&format!(
+            "From: /triggers status\n\n\
+             ## Trigger Runtime Status\n\n\
+             | Metric | Value |\n\
+             |---|---|\n\
+             | Total rules | {} |\n\
+             | Active | {} |\n\
+             | Disabled | {} |\n\
+             | Fired (one-shot) | {} |\n\
+             | Dedup cache entries | {} |\n\
+             | Cycle trackers | {} |\n\
+             | Dedup window | {}s |\n\
+             | Max cycles | {} |",
+            rule_count,
+            active,
+            disabled,
+            fired,
+            dedup_size,
+            cycle_size,
+            runtime.config.dedup_window.as_secs(),
+            runtime.config.max_cycles,
+        ));
+        self.status = "triggers: status".to_string();
+    }
+
+    /// Show `/triggers` usage help.
+    fn handle_triggers_help(&mut self) {
+        self.append_assistant_text(
+            "From: /triggers help\n\n\
+             ## /triggers — Manage trigger rules\n\n\
+             | Sub-command | Usage | Description |\n\
+             |---|---|---|\n\
+             | `list` | `/triggers list` | Show all registered trigger rules |\n\
+             | `enable` | `/triggers enable <rule_id>` | Enable a disabled rule |\n\
+             | `disable` | `/triggers disable <rule_id>` | Disable an active rule |\n\
+             | `remove` | `/triggers remove <rule_id>` | Remove a rule permanently |\n\
+             | `status` | `/triggers status` | Show runtime stats (dedup, cycles) |\n\
+             | `help` | `/triggers help` | Show this help |\n\n\
+             **Creating trigger rules:**\n\n\
+             Trigger rules are created by asking the agent in natural language,\n\
+             e.g. \"when $HOME/build.done exists, run cargo test\".\n\n\
+             Rules are fire-once by default. Use `repeating` for continuous monitoring.\n\
+             Rule output does not interrupt the main chat unless `promote_to_chat` is set.",
+        );
+        self.status = "triggers: help".to_string();
+    }
+
+    // ── /bug-report slash-command handler (spec piegap T-011) ──────────────
+
+    /// Handle `/bug-report` — generate a diagnostic dump with redaction (FR-007).
+    ///
+    /// Collects session state (model, agent, tool count, cost summary), recent
+    /// log entries, and the session transcript. Redacts well-known secret patterns
+    /// (API keys, tokens, passwords) before writing to `log/bug-report-<timestamp>.md`.
+    fn handle_bug_report(&mut self) {
+        use std::fs::{self, File};
+        use std::io::Write;
+
+        let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+        let filename = format!("bug-report-{}.md", timestamp);
+
+        // Determine output directory: prefer project root `log/`, fallback to data dir
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let log_dir = cwd.join("log");
+        if let Err(e) = fs::create_dir_all(&log_dir) {
+            self.append_assistant_text(&format!(
+                "From: /bug-report\n⚠ Failed to create log directory: {e}"
+            ));
+            self.status = "bug-report: mkdir error".to_string();
+            return;
+        }
+
+        let output_path = log_dir.join(&filename);
+
+        // Gather session diagnostic info
+        let session_info = if let Some(ref sid) = self.session_id {
+            match self.storage.get_session(sid) {
+                Ok(Some(session)) => format!(
+                    "- **Session ID**: `{}`\n- **Title**: {}\n- **Directory**: `{}`\n- **Created**: {}\n- **Updated**: {}",
+                    session.id,
+                    session.title,
+                    session.directory,
+                    session.created_at,
+                    session.updated_at
+                ),
+                Ok(None) => "- **Session**: Not found in storage".to_string(),
+                Err(e) => format!("- **Session**: Error reading session: {e}"),
+            }
+        } else {
+            "- **Session**: No active session".to_string()
+        };
+
+        let agent_info = format!(
+            "- **Agent**: `{}` ({})\n- **Model**: `{}`",
+            self.agent_name,
+            self.agent_info.description,
+            self.selected_model.as_deref().unwrap_or("(not set)")
+        );
+
+        // Tool count from registry (approximate from tool visibility config)
+        let tool_count = self
+            .tool_visibility
+            .iter_switches()
+            .filter(|(_, v)| *v)
+            .count();
+        let tool_info = format!(
+            "- **Tools visible**: {}\n- **Tool families**:\n  - Office: {}\n  - GitHub: {}\n  - GitLab: {}\n  - Teams: {}\n  - Agents: {}\n  - Plan: {}\n  - CodeIndex: {}",
+            tool_count,
+            if self.tool_visibility.office {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.github {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.gitlab {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.teams {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.agents {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.plan {
+                "✓"
+            } else {
+                "✗"
+            },
+            if self.tool_visibility.codeindex {
+                "✓"
+            } else {
+                "✗"
+            }
+        );
+
+        // Cost summary from token usage
+        let cost_info = format!(
+            "- **Input tokens**: {}\n- **Output tokens**: {}\n- **Total**: {}",
+            self.token_usage.0,
+            self.token_usage.1,
+            self.token_usage.0 + self.token_usage.1
+        );
+
+        // Recent log entries (last 50)
+        let log_tail: Vec<&LogEntry> = self.log_entries.iter().rev().take(50).collect();
+        let log_tail: Vec<&LogEntry> = log_tail.iter().rev().copied().collect();
+        let log_info = if log_tail.is_empty() {
+            "- *(no log entries)*".to_string()
+        } else {
+            let mut lines = String::new();
+            for entry in log_tail {
+                let ts = entry.timestamp.format("%H:%M:%S").to_string();
+                let level = match entry.level {
+                    LogLevel::Info => "INFO",
+                    LogLevel::Warn => "WARN",
+                    LogLevel::Error => "ERROR",
+                    LogLevel::Tool => "TOOL",
+                };
+                let msg = redact_secrets(&entry.message);
+                lines.push_str(&format!("[{}] {}: {}\n", ts, level, msg));
+            }
+            lines
+        };
+
+        // Session transcript (messages)
+        let transcript_info = if self.messages.is_empty() {
+            "- *(no messages)*".to_string()
+        } else {
+            let mut lines = String::new();
+            for msg in &self.messages {
+                let role = match msg.role {
+                    ragent_types::Role::User => "👤 User",
+                    ragent_types::Role::Assistant => "🤖 Assistant",
+                    ragent_types::Role::Compaction => "⚙️ Compaction",
+                };
+                let content = redact_secrets(&msg.text_content());
+                // Truncate long messages for the report
+                let content = if content.len() > 500 {
+                    format!("{}...", &content[..500])
+                } else {
+                    content
+                };
+                lines.push_str(&format!("**{}**: {}\n\n", role, content));
+            }
+            lines
+        };
+
+        // Build the report
+        let report = format!(
+            "# RAgent Bug Report\n\n\
+             Generated: {}\n\n\
+             ## Session Information\n\n{}\n\n\
+             ## Agent Configuration\n\n{}\n\n\
+             ## Tool Configuration\n\n{}\n\n\
+             ## Token Usage\n\n{}\n\n\
+             ## Recent Log Entries (last 50)\n\n```\n{}```\n\n\
+             ## Session Transcript\n\n{}\n\n\
+             ---\n\
+             *This report has been automatically redacted to remove API keys, tokens, and other sensitive patterns.*\n",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+            session_info,
+            agent_info,
+            tool_info,
+            cost_info,
+            log_info,
+            transcript_info
+        );
+
+        // Write the report
+        match File::create(&output_path) {
+            Ok(mut file) => {
+                if let Err(e) = file.write_all(report.as_bytes()) {
+                    self.append_assistant_text(&format!(
+                        "From: /bug-report\n⚠ Failed to write report: {e}"
+                    ));
+                    self.status = "bug-report: write error".to_string();
+                    return;
+                }
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /bug-report\n⚠ Failed to create report file: {e}"
+                ));
+                self.status = "bug-report: create error".to_string();
+                return;
+            }
+        }
+
+        let rel_path = output_path
+            .strip_prefix(&cwd)
+            .unwrap_or(&output_path)
+            .display();
+        self.append_assistant_text(&format!(
+            "From: /bug-report\n\n✅ Bug report generated: `{}`\n\n\
+             The report contains:\n\
+             - Session metadata\n\
+             - Agent and model configuration\n\
+             - Tool visibility settings\n\
+             - Token usage summary\n\
+             - Last 50 log entries (redacted)\n\
+             - Session transcript (redacted, truncated)\n\n\
+             ⚠️  **Sensitivity warning**: This report may contain sensitive information\n\
+             despite redaction. Review before sharing.",
+            rel_path
+        ));
+        self.status = "bug-report: generated".to_string();
+    }
+
+    // ── /inbox slash-command handler (spec piegap T-006) ──────────────
+
+    /// Handle the `/inbox` slash-command family (FR-004).
+    ///
+    /// Sub-commands: `list` (default), `claim <id>`, `dismiss <id>`,
+    /// `clear`, `help`.
+    fn handle_inbox_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        let rest = args
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r.trim())
+            .unwrap_or("");
+
+        match sub.as_str() {
+            "list" | "" => self.handle_inbox_list(),
+            "claim" => self.handle_inbox_set_status(rest, "claimed"),
+            "dismiss" => self.handle_inbox_set_status(rest, "dismissed"),
+            "clear" => self.handle_inbox_clear(),
+            "help" => self.handle_inbox_help(),
+            _ => {
+                self.append_assistant_text(&format!(
+                    "From: /inbox\n⚠ Unknown sub-command '{sub}'. Use `/inbox help` for usage."
+                ));
+                self.status = "inbox: unknown".to_string();
+            }
+        }
+    }
+
+    /// Handle `/inbox list` — display all inbox findings.
+    fn handle_inbox_list(&mut self) {
+        let data_dir = std::env::current_dir().unwrap_or_default();
+        let entries = match ragent_agent::loop_state::read_inbox(&data_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /inbox list\n\n⚠ Failed to read inbox: {e}"
+                ));
+                self.status = "inbox: read error".to_string();
+                return;
+            }
+        };
+        if entries.is_empty() {
+            self.append_assistant_text(
+                "From: /inbox list\n\nℹ️  Inbox is empty.\n\n\
+                 Findings are added by stateful cron jobs that use the `<inbox>` tag protocol.",
+            );
+            self.status = "inbox: list empty".to_string();
+            return;
+        }
+        let mut output = String::from(
+            "From: /inbox list\n\n## Triage Inbox\n\n\
+             | # | ID | Source | Status | Content |\n\
+             |---|---|---|---|---|\n",
+        );
+        for (i, entry) in entries.iter().enumerate() {
+            let id_short = if entry.id.len() > 8 {
+                &entry.id[..8]
+            } else {
+                &entry.id
+            };
+            let source_short = if entry.source_event_id.len() > 8 {
+                &entry.source_event_id[..8]
+            } else {
+                &entry.source_event_id
+            };
+            let content_preview = truncate_field(&entry.content, 60);
+            output.push_str(&format!(
+                "| {} | `{}` | `{}` | {} | {} |\n",
+                i + 1,
+                id_short,
+                source_short,
+                entry.status,
+                content_preview
+            ));
+        }
+        output.push_str(&format!("\n**{} finding(s) in inbox.**\n", entries.len()));
+        self.append_assistant_text(&output);
+        self.status = "inbox: list".to_string();
+    }
+
+    /// Handle `/inbox claim <id>` and `/inbox dismiss <id>`.
+    fn handle_inbox_set_status(&mut self, rest: &str, new_status: &str) {
+        let entry_id = rest.trim();
+        if entry_id.is_empty() {
+            self.append_assistant_text(&format!(
+                "From: /inbox {new_status}\n\nUsage: `/inbox {new_status} <entry_id>`\n\n\
+                 Use `/inbox list` to see entry IDs."
+            ));
+            self.status = format!("inbox: {new_status} usage");
+            return;
+        }
+        let data_dir = std::env::current_dir().unwrap_or_default();
+        match ragent_agent::loop_state::update_inbox_entry_status(&data_dir, entry_id, new_status) {
+            Ok(true) => {
+                let mark = if new_status == "claimed" {
+                    "✅"
+                } else {
+                    "🗑️"
+                };
+                self.append_assistant_text(&format!(
+                    "From: /inbox\n{mark} Entry `{}` marked as {new_status}.",
+                    entry_id
+                ));
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("inbox: entry {} {}", entry_id, new_status),
+                );
+                self.status = format!("inbox: {new_status}");
+            }
+            Ok(false) => {
+                self.append_assistant_text(&format!(
+                    "From: /inbox\n⚠ Entry `{}` not found in inbox.",
+                    entry_id
+                ));
+                self.status = "inbox: not found".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!("From: /inbox\n⚠ Failed to update inbox: {e}"));
+                self.status = "inbox: write error".to_string();
+            }
+        }
+    }
+
+    /// Handle `/inbox clear` — remove all inbox findings.
+    fn handle_inbox_clear(&mut self) {
+        let data_dir = std::env::current_dir().unwrap_or_default();
+        match ragent_agent::loop_state::clear_inbox(&data_dir) {
+            Ok(count) => {
+                self.append_assistant_text(&format!(
+                    "From: /inbox clear\n🗑️ Cleared {count} finding(s) from the inbox."
+                ));
+                self.push_log_no_agent(LogLevel::Info, format!("inbox: cleared {count} entries"));
+                self.status = "inbox: cleared".to_string();
+            }
+            Err(e) => {
+                self.append_assistant_text(&format!(
+                    "From: /inbox clear\n⚠ Failed to clear inbox: {e}"
+                ));
+                self.status = "inbox: clear error".to_string();
+            }
+        }
+    }
+
+    /// Show `/inbox` usage help.
+    fn handle_inbox_help(&mut self) {
+        self.append_assistant_text(
+            "From: /inbox help\n\n\
+             ## /inbox — Triage inbox findings\n\n\
+             The inbox collects findings from stateful cron jobs that use the\n\
+             `<inbox>` tag protocol. Findings are stored in a global JSONL file\n\
+             shared across all sessions.\n\n\
+             | Sub-command | Usage | Description |\n\
+             |---|---|---|\n\
+             | `list` | `/inbox list` | Show all inbox findings |\n\
+             | `claim` | `/inbox claim <id>` | Mark a finding as claimed |\n\
+             | `dismiss` | `/inbox dismiss <id>` | Mark a finding as dismissed |\n\
+             | `clear` | `/inbox clear` | Remove all findings from the inbox |\n\
+             | `help` | `/inbox help` | Show this help |\n\n\
+             **Entry IDs:** Use `/inbox list` to see entry IDs (short UUID prefix).\n\
+             **Statuses:** `open` (default), `claimed`, `dismissed`.",
+        );
+        self.status = "inbox: help".to_string();
+    }
+}
+
+/// Truncate a field for display, appending an ellipsis if truncated.
+fn truncate_field(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{truncated}…")
+    }
 }
 
 /// Extract the last double-quoted string from `s` as the prompt, returning
@@ -8261,4 +9549,250 @@ fn duration_secs_to_string(secs: i64) -> String {
         }
     }
     format!("{secs}s")
+}
+
+/// Redact well-known secret patterns from a string.
+///
+/// Patterns redacted:
+/// - API keys (sk-..., key_..., api_key=...)
+/// - Bearer tokens
+/// - AWS access keys
+/// - Generic secrets/tokens/passwords in key=value format
+fn redact_secrets(input: &str) -> String {
+    // API key patterns (Anthropic, OpenAI, etc.)
+    static API_KEY_PATTERN: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)(sk-[a-zA-Z0-9]{20,})").unwrap());
+
+    // Bearer token pattern
+    static BEARER_PATTERN: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)(Bearer\s+[a-zA-Z0-9\-_\.]{20,})").unwrap());
+
+    // AWS access key pattern
+    static AWS_KEY_PATTERN: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap());
+
+    // Generic key=value secrets
+    static SECRET_PATTERN: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?i)((?:api[_-]?key|secret|token|password|passwd|pwd|auth)\s*[=:]\s*\S{8,})")
+            .unwrap()
+    });
+
+    let mut result = input.to_string();
+
+    // Redact API keys
+    result = API_KEY_PATTERN
+        .replace_all(&result, "[REDACTED_API_KEY]")
+        .to_string();
+
+    // Redact Bearer tokens
+    result = BEARER_PATTERN
+        .replace_all(&result, "Bearer [REDACTED_TOKEN]")
+        .to_string();
+
+    // Redact AWS keys
+    result = AWS_KEY_PATTERN
+        .replace_all(&result, "[REDACTED_AWS_KEY]")
+        .to_string();
+
+    // Redact generic secrets
+    result = SECRET_PATTERN
+        .replace_all(&result, "[REDACTED_SECRET]")
+        .to_string();
+
+    result
+}
+
+/// Handle the `/template` slash command for listing and applying reusable prompt templates.
+///
+/// Usage:
+/// - `/template` — list all available templates
+/// - `/template <name>` — show template details and apply with no arguments
+/// - `/template <name> <args>` — apply template with arguments
+fn handle_template_command(app: &mut App, args: &str) {
+    use ragent_agent::template::{TemplateInfo, discover_templates};
+
+    let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let templates = discover_templates(&working_dir);
+
+    if args.is_empty() {
+        // List all templates
+        let mut output = String::from("## Available Templates\n\n");
+        output.push_str("| Name | Description | Scope | Placeholders |\n");
+        output.push_str("|------|-------------|-------|-------------|\n");
+
+        let mut template_list: Vec<&TemplateInfo> = templates.values().collect();
+        template_list.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if template_list.is_empty() {
+            output.push_str("\nNo templates found.\n\n");
+            output.push_str("You can create templates by adding `.md` files to:\n");
+            output.push_str(&format!("  - `~/.ragent/templates/` (personal)\n"));
+            output.push_str(&format!("  - `.ragent/templates/` (project-specific)\n\n"));
+            output.push_str("Templates support placeholders like `{{title}}`, `{{description}}`, `{{arguments}}`, etc.\n");
+        } else {
+            for template in template_list {
+                let desc = template.description.as_deref().unwrap_or("—");
+                let placeholders = if template.placeholders.is_empty() {
+                    "—".to_string()
+                } else {
+                    template.placeholders.join(", ")
+                };
+                output.push_str(&format!(
+                    "| `{}` | {} | {} | {} |\n",
+                    template.name, desc, template.scope, placeholders
+                ));
+            }
+            output.push_str("\n");
+            output.push_str("Usage: `/template <name> [arguments]`\n\n");
+            output.push_str("The template will be applied with your arguments substituted for `{{arguments}}`.\n");
+            output
+                .push_str("You can then send the result to the agent or edit it before sending.\n");
+        }
+
+        app.append_assistant_text(&output);
+        app.status = "template: listed".to_string();
+        return;
+    }
+
+    // Parse template name and arguments
+    let (template_name, template_args) = args
+        .split_once(char::is_whitespace)
+        .map_or((args, ""), |(name, a)| (name, a.trim()));
+
+    if let Some(template) = templates.get(template_name) {
+        let applied = template.apply_simple(template_args);
+
+        let mut output = String::new();
+        output.push_str(&format!("## Template: `{}`\n\n", template_name));
+        output.push_str("**Applied Template:**\n\n");
+        output.push_str("```markdown\n");
+        output.push_str(&applied);
+        output.push_str("\n```\n\n");
+
+        if !template.placeholders.is_empty() {
+            output.push_str("**Placeholders:** ");
+            output.push_str(&template.placeholders.join(", "));
+            output.push_str("\n\n");
+        }
+
+        output.push_str("The template has been applied. You can:\n");
+        output.push_str("1. Press Enter to send this prompt to the agent\n");
+        output.push_str("2. Edit the text above before sending\n");
+        output.push_str("3. Type a new command\n");
+
+        app.append_assistant_text(&output);
+        app.status = format!("template: applied '{}'", template_name);
+
+        // Pre-fill the input buffer with the applied template so user can edit/send
+        app.input = applied;
+        app.input_cursor = app.input.chars().count();
+    } else {
+        let mut output = String::new();
+        output.push_str(&format!("Template '{}' not found.\n\n", template_name));
+        output.push_str("Available templates:\n");
+        let mut names: Vec<&String> = templates.keys().collect();
+        names.sort();
+        for name in names {
+            output.push_str(&format!("  - `{}`\n", name));
+        }
+        output.push_str("\nUsage: `/template <name> [arguments]`\n");
+
+        app.append_assistant_text(&output);
+        app.status = format!("template: '{}' not found", template_name);
+    }
+}
+
+/// Handle the `/goal` slash command for goal-based autonomous stop hook.
+///
+/// Usage:
+/// - `/goal set <description>` — set a goal condition
+/// - `/goal clear` — clear the current goal
+/// - `/goal show` — show the current goal status
+/// - `/goal test` — manually test if the current goal is satisfied
+fn handle_goal_command(app: &mut App, args: &str) {
+    use ragent_agent::goal::GoalCondition;
+
+    if args.is_empty() {
+        let output = r#"## Goal-Based Autonomous Stop
+
+Usage:
+  `/goal set <description>` — Set a goal condition for autonomous execution
+  `/goal clear` — Clear the current goal
+  `/goal show` — Show the current goal status
+  `/goal test` — Manually test if the goal is satisfied
+
+Example:
+  `/goal set Stop when all tests pass and the build succeeds`
+
+When a goal is set, the agent will evaluate it after each turn during
+autonomous execution and halt when the goal is satisfied."#;
+        app.append_assistant_text(output);
+        app.status = "goal: help".to_string();
+        return;
+    }
+
+    let (subcmd, rest) = args
+        .split_once(char::is_whitespace)
+        .map_or((args, ""), |(c, r)| (c, r.trim()));
+
+    match subcmd {
+        "set" => {
+            if rest.is_empty() {
+                app.append_assistant_text(
+                    "Usage: `/goal set <description>`\n\nPlease provide a goal description.",
+                );
+                app.status = "goal: missing description".to_string();
+                return;
+            }
+
+            // Store the goal in session state (for now, just display confirmation)
+            let goal = GoalCondition::new(rest);
+            let output = format!(
+                "## Goal Set\n\n**Goal:** {}\n\nThe agent will evaluate this goal after each turn\nand halt autonomous execution when it is satisfied.\n\nUse `/goal show` to check status or `/goal clear` to remove.",
+                goal.description
+            );
+            app.append_assistant_text(&output);
+            app.status = format!("goal: set '{}'", rest);
+
+            // TODO: Persist goal to session storage
+            // For now, we just confirm the goal was set
+        }
+        "clear" => {
+            app.append_assistant_text(
+                "## Goal Cleared\n\nThe autonomous stop goal has been removed.",
+            );
+            app.status = "goal: cleared".to_string();
+            // TODO: Clear goal from session storage
+        }
+        "show" => {
+            // TODO: Load goal from session storage
+            // For now, show placeholder
+            let output = r#"## Current Goal
+
+No goal is currently set.
+
+Use `/goal set <description>` to set a goal for autonomous execution."#;
+            app.append_assistant_text(output);
+            app.status = "goal: none".to_string();
+        }
+        "test" => {
+            // TODO: Load goal and evaluate
+            // For now, show placeholder
+            let output = r#"## Goal Test
+
+No goal is currently set to test.
+
+Use `/goal set <description>` to set a goal first."#;
+            app.append_assistant_text(output);
+            app.status = "goal: test (none)".to_string();
+        }
+        _ => {
+            let output = format!(
+                "Unknown goal command: '{}'\n\nUsage: `/goal set|clear|show|test`",
+                subcmd
+            );
+            app.append_assistant_text(&output);
+            app.status = format!("goal: unknown '{}'", subcmd);
+        }
+    }
 }

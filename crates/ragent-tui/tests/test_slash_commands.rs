@@ -83,23 +83,48 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
     )
 }
 
-struct CwdGuard(std::path::PathBuf);
+struct CwdGuard {
+    prev: std::path::PathBuf,
+    _lock: MutexGuard<'static, ()>,
+    /// Optional tempdir, declared last so it is deleted only after cwd has
+    /// been restored (drop order = field declaration order).
+    _temp: Option<tempfile::TempDir>,
+}
+
+impl CwdGuard {
+    /// Path of the guard's working directory (the tempdir when present).
+    #[allow(dead_code)]
+    fn path(&self) -> std::path::PathBuf {
+        self._temp
+            .as_ref()
+            .map(|t| t.path().to_path_buf())
+            .unwrap_or_else(|| std::env::current_dir().expect("current dir"))
+    }
+}
 
 impl Drop for CwdGuard {
     fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
+        let _ = std::env::set_current_dir(&self.prev);
     }
 }
 
 /// Change the process working directory to `dir`, returning a guard that
-/// restores the previous cwd on drop. Uses the same global mutex as
-/// `cwd_lock()` so it composes safely with tests that call `enter_temp_config_dir`.
+/// restores the previous cwd on drop.
+///
+/// The guard acquires the shared cwd mutex before changing directory and
+/// **keeps it held** until dropped, so only one test manipulates cwd at a
+/// time. Callers MUST NOT also hold `cwd_lock()` (that would deadlock, since
+/// `std::sync::Mutex` is not re-entrant).
 #[allow(dead_code)] // used by tests that require cwd manipulation
 fn with_cwd(dir: &std::path::Path) -> CwdGuard {
     let _lock = cwd_lock();
     let prev = std::env::current_dir().expect("current dir");
     std::env::set_current_dir(dir).expect("set_current_dir");
-    CwdGuard(prev)
+    CwdGuard {
+        prev,
+        _lock,
+        _temp: None,
+    }
 }
 
 /// Write `content` to `<dir>/.ragent/memory/MEMORY.md` (creating parent dirs).
@@ -144,6 +169,23 @@ fn enter_temp_config_dir() -> tempfile::TempDir {
     temp
 }
 
+/// Create a tempdir, chdir into it, and return a guard that restores the
+/// previous cwd on drop. The shared cwd mutex is held for the guard's whole
+/// lifetime, and the tempdir is deleted only after cwd has been restored
+/// (field drop order). Declared `_temp` and `_lock` locals are not needed at
+/// the call site, which removes a common cause of cwd-mutex deadlock.
+fn enter_with_cwd() -> CwdGuard {
+    let _lock = cwd_lock();
+    let prev = std::env::current_dir().expect("current dir");
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    std::env::set_current_dir(temp.path()).expect("set_current_dir");
+    CwdGuard {
+        prev,
+        _lock,
+        _temp: Some(temp),
+    }
+}
+
 fn cwd_test_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
@@ -164,7 +206,11 @@ fn test_alt_e_toggles_edit_log_and_status_bar_indicator() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
     ragent_config::edit_log::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
@@ -216,7 +262,11 @@ fn test_slash_editlog_toggles_and_persists() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
     ragent_config::edit_log::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
@@ -705,6 +755,247 @@ fn test_slash_compress_alias_forwards_to_compact() {
         app.status.contains("No messages"),
         "/compress should behave like /compact when there is nothing to compact: {}",
         app.status
+    );
+}
+
+// ── /undo ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_undo_no_session_shows_warning() {
+    let mut app = make_app();
+    assert!(app.session_id.is_none());
+
+    app.execute_slash_command("/undo");
+    // The ensure_session() gate runs before the undo handler, so a session
+    // will be created. The undo logic then checks for empty messages.
+    assert!(
+        app.status.contains("No messages"),
+        "should warn about no messages after session creation: {}",
+        app.status
+    );
+    assert!(app.session_id.is_some(), "session should be created");
+}
+
+#[test]
+fn test_slash_undo_no_messages_shows_warning() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    assert!(app.messages.is_empty());
+
+    app.execute_slash_command("/undo");
+    assert!(
+        app.status.contains("No messages"),
+        "should warn about no messages: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_slash_undo_removes_last_user_assistant_pair() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    // Build a conversation: user, assistant, user, assistant
+    app.messages.push(ragent_agent::message::Message::user_text(
+        "s1",
+        "first question",
+    ));
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1",
+            "first answer",
+        ));
+    app.messages.push(ragent_agent::message::Message::user_text(
+        "s1",
+        "second question",
+    ));
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1",
+            "second answer",
+        ));
+
+    assert_eq!(app.messages.len(), 4);
+
+    app.execute_slash_command("/undo");
+
+    // Should have removed the last user message and its assistant response
+    assert_eq!(app.messages.len(), 2);
+    assert_eq!(app.messages[0].text_content(), "first question");
+    assert_eq!(app.messages[1].text_content(), "first answer");
+    assert_eq!(app.scroll_offset, 0);
+    assert!(app.status.contains("Undid last turn"));
+    assert!(app.status.contains("removed 2 message(s)"));
+}
+
+#[test]
+fn test_slash_undo_no_user_message_warns() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    // Only assistant messages (no user messages to undo)
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1",
+            "orphan answer",
+        ));
+
+    app.execute_slash_command("/undo");
+
+    assert!(
+        app.status.contains("No user message found"),
+        "should warn about no user message: {}",
+        app.status
+    );
+    assert_eq!(app.messages.len(), 1); // unchanged
+}
+
+#[test]
+fn test_slash_undo_removes_multiple_following_messages() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    // User message followed by multiple assistant messages
+    app.messages
+        .push(ragent_agent::message::Message::user_text("s1", "question"));
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1",
+            "answer part 1",
+        ));
+    app.messages
+        .push(ragent_agent::message::Message::assistant_text(
+            "s1",
+            "answer part 2",
+        ));
+
+    assert_eq!(app.messages.len(), 3);
+
+    app.execute_slash_command("/undo");
+
+    // Should remove user message and all following messages
+    assert_eq!(app.messages.len(), 0);
+    assert!(app.status.contains("removed 3 message(s)"));
+}
+
+// ── /name ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_name_no_session_shows_warning() {
+    let mut app = make_app();
+    assert!(app.session_id.is_none());
+
+    app.execute_slash_command("/name My Session");
+    // The ensure_session() gate runs before the name handler, so a session
+    // will be created. The name is then set on that session.
+    assert!(app.session_id.is_some(), "session should be created");
+    assert!(
+        app.status.contains("Session name set to"),
+        "should confirm name was set: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_slash_name_sets_session_name() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    // Create the session in storage first
+    let storage = app.session_processor.session_manager.storage();
+    storage
+        .create_session("s1", "/tmp/test")
+        .expect("create session");
+    let _ = storage;
+
+    app.execute_slash_command("/name My Test Session");
+
+    assert!(
+        app.status.contains("Session name set to 'My Test Session'"),
+        "should confirm name was set: {}",
+        app.status
+    );
+
+    // Verify the name was persisted
+    let storage = app.session_processor.session_manager.storage();
+    let session = storage
+        .get_session("s1")
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(session.title, "My Test Session");
+}
+
+#[test]
+fn test_slash_name_clears_with_empty_argument() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let storage = app.session_processor.session_manager.storage();
+    storage
+        .create_session("s1", "/tmp/test")
+        .expect("create session");
+
+    // First set a name
+    storage
+        .update_session("s1", "Initial Name")
+        .expect("set name");
+    let _ = storage;
+
+    // Then clear it with empty argument
+    app.execute_slash_command("/name ");
+
+    assert!(
+        app.status.contains("Session name cleared"),
+        "should confirm name was cleared: {}",
+        app.status
+    );
+
+    // Verify the name was cleared
+    let storage = app.session_processor.session_manager.storage();
+    let session = storage
+        .get_session("s1")
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(session.title, "");
+}
+
+#[test]
+fn test_slash_name_trims_whitespace() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    let storage = app.session_processor.session_manager.storage();
+    storage
+        .create_session("s1", "/tmp/test")
+        .expect("create session");
+    let _ = storage;
+
+    app.execute_slash_command("/name   Trimmed Name   ");
+
+    assert!(
+        app.status.contains("Session name set to 'Trimmed Name'"),
+        "should trim whitespace: {}",
+        app.status
+    );
+
+    let storage = app.session_processor.session_manager.storage();
+    let session = storage
+        .get_session("s1")
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(session.title, "Trimmed Name");
+}
+
+#[test]
+fn test_help_shows_name_command() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/name"),
+        "help should document /name command: {text}"
     );
 }
 
@@ -2030,13 +2321,12 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
 fn test_slash_tools_office_on_shows_office_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // Declare `_temp` before `_guard` so that on drop `_guard` (which restores
-    // cwd) runs BEFORE `_temp` (which deletes the tempdir). The reverse order
-    // would delete the directory while the process cwd still points inside
-    // it, leaving subsequent tests in a ghost directory where
-    // `std::env::current_dir()` fails with `NotFound`.
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -2075,10 +2365,12 @@ fn test_slash_tools_office_on_shows_office_tools() {
 fn test_slash_tools_teams_on_shows_team_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // `_temp` before `_guard` so cwd is restored before the tempdir is
-    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -2118,10 +2410,12 @@ fn test_slash_tools_teams_on_shows_team_tools() {
 fn test_slash_tools_agents_on_shows_agent_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // `_temp` before `_guard` so cwd is restored before the tempdir is
-    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -2161,10 +2455,12 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
 fn test_slash_tools_plan_on_shows_plan_tools() {
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // `_temp` before `_guard` so cwd is restored before the tempdir is
-    // deleted (see test_slash_tools_office_on_shows_office_tools for details).
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
@@ -2900,12 +3196,12 @@ fn test_alt_y_toggles_yolo_mode_and_status_bar_indicator() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // `_temp` before `_guard` so cwd is restored before the tempdir is
-    // deleted. Without `_guard` the process cwd is left pointing at the
-    // (now-deleted) tempdir, which makes `std::env::current_dir()` fail in
-    // every subsequent test in this binary.
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
     ragent_config::yolo::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
@@ -2957,10 +3253,12 @@ fn test_slash_yolo_toggles_and_persists() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
-    // `_temp` before `_guard` so cwd is restored before the tempdir is
-    // deleted (see test_alt_y_toggles_yolo_mode_and_status_bar_indicator).
     let _temp = enter_temp_config_dir();
-    let _guard = CwdGuard(original_cwd);
+    let _guard = CwdGuard {
+        prev: original_cwd,
+        _lock,
+        _temp: None,
+    };
     ragent_config::yolo::set_enabled(false);
 
     let mut app = make_app_with_storage(storage);
@@ -3264,4 +3562,485 @@ fn test_slash_actionloop_with_samples_shows_timings() {
     );
     // Leave the shared profiler clean for other tests.
     profiler.reset();
+}
+// ── /triggers slash command tests ─────────────────────────────────────
+
+#[test]
+fn test_triggers_list_empty() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("No trigger rules registered"),
+        "empty list should say so: {text}"
+    );
+    assert_eq!(app.status, "triggers: list empty");
+}
+
+#[test]
+fn test_triggers_list_with_rules() {
+    let mut app = make_app();
+    let runtime = ragent_agent::trigger::TriggerRuntime::default();
+    let rule =
+        ragent_types::trigger::TriggerRule::new("when $HOME/build.done exists", "run cargo test");
+    let rule_id = rule.id.as_str().to_string();
+    runtime.add_rule(rule);
+    app.trigger_runtime = Some(runtime);
+
+    app.execute_slash_command("/triggers list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains(&rule_id[..8]),
+        "list should show rule id prefix: {text}"
+    );
+    assert!(
+        text.contains("when $HOME/build.done exists"),
+        "list should show condition: {text}"
+    );
+    assert!(
+        text.contains("run cargo test"),
+        "list should show action: {text}"
+    );
+    assert_eq!(app.status, "triggers: list");
+}
+
+#[test]
+fn test_triggers_no_subcommand_defaults_to_list() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("No trigger rules registered"),
+        "bare /triggers should default to list: {text}"
+    );
+}
+
+#[test]
+fn test_triggers_enable_existing_rule() {
+    let mut app = make_app();
+    let runtime = ragent_agent::trigger::TriggerRuntime::default();
+    let rule = ragent_types::trigger::TriggerRule::new("cond-a", "act-a");
+    let rule_id = rule.id.as_str().to_string();
+    runtime.add_rule(rule);
+    runtime.disable_rule(&rule_id);
+    app.trigger_runtime = Some(runtime);
+
+    app.execute_slash_command(&format!("/triggers enable {rule_id}"));
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("enabled"), "enable should confirm: {text}");
+    assert_eq!(app.status, "triggers: enabled");
+}
+
+#[test]
+fn test_triggers_enable_not_found() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers enable nonexistent-id");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("not found"),
+        "enable on missing rule should say not found: {text}"
+    );
+    assert_eq!(app.status, "triggers: not found");
+}
+
+#[test]
+fn test_triggers_enable_no_id() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers enable");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Usage"),
+        "enable with no id should show usage: {text}"
+    );
+    assert_eq!(app.status, "triggers: enable usage");
+}
+
+#[test]
+fn test_triggers_disable_existing_rule() {
+    let mut app = make_app();
+    let runtime = ragent_agent::trigger::TriggerRuntime::default();
+    let rule = ragent_types::trigger::TriggerRule::new("cond-b", "act-b");
+    let rule_id = rule.id.as_str().to_string();
+    runtime.add_rule(rule);
+    app.trigger_runtime = Some(runtime);
+
+    app.execute_slash_command(&format!("/triggers disable {rule_id}"));
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("disabled"), "disable should confirm: {text}");
+    assert_eq!(app.status, "triggers: disabled");
+}
+
+#[test]
+fn test_triggers_disable_not_found() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers disable nonexistent-id");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("not found"),
+        "disable on missing rule should say not found: {text}"
+    );
+    assert_eq!(app.status, "triggers: not found");
+}
+
+#[test]
+fn test_triggers_remove_existing_rule() {
+    let mut app = make_app();
+    app.trigger_runtime = Some(ragent_agent::trigger::TriggerRuntime::default());
+    let runtime = ragent_agent::trigger::TriggerRuntime::default();
+    let rule = ragent_types::trigger::TriggerRule::new("cond-c", "act-c");
+    let rule_id = rule.id.as_str().to_string();
+    runtime.add_rule(rule);
+    app.trigger_runtime = Some(runtime);
+
+    app.execute_slash_command(&format!("/triggers remove {rule_id}"));
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("removed"), "remove should confirm: {text}");
+    assert_eq!(app.status, "triggers: removed");
+    assert_eq!(app.trigger_runtime.as_ref().unwrap().rule_count(), 0);
+}
+
+#[test]
+fn test_triggers_remove_not_found() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers remove nonexistent-id");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("not found"),
+        "remove on missing rule should say not found: {text}"
+    );
+    assert_eq!(app.status, "triggers: not found");
+}
+
+#[test]
+fn test_triggers_remove_no_id() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers remove");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Usage"),
+        "remove with no id should show usage: {text}"
+    );
+    assert_eq!(app.status, "triggers: remove usage");
+}
+
+#[test]
+fn test_triggers_status_empty() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers status");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Trigger Runtime Status"),
+        "status should show header: {text}"
+    );
+    assert!(
+        text.contains("Total rules") && text.contains("0"),
+        "status should show zero rules: {text}"
+    );
+    assert_eq!(app.status, "triggers: status");
+}
+
+#[test]
+fn test_triggers_status_with_rules() {
+    let mut app = make_app();
+    let runtime = ragent_agent::trigger::TriggerRuntime::default();
+    runtime.add_rule(ragent_types::trigger::TriggerRule::new("cond-1", "act-1"));
+    runtime.add_rule(ragent_types::trigger::TriggerRule::new("cond-2", "act-2"));
+    app.trigger_runtime = Some(runtime);
+
+    app.execute_slash_command("/triggers status");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Total rules") && text.contains("2"),
+        "status should show 2 rules: {text}"
+    );
+    assert!(
+        text.contains("Active") && text.contains("2"),
+        "status should show 2 active: {text}"
+    );
+    assert_eq!(app.status, "triggers: status");
+}
+
+#[test]
+fn test_triggers_help() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/triggers"),
+        "help should mention /triggers: {text}"
+    );
+    assert!(
+        text.contains("list") && text.contains("enable") && text.contains("disable"),
+        "help should list sub-commands: {text}"
+    );
+    assert!(
+        text.contains("remove") && text.contains("status"),
+        "help should list remove and status: {text}"
+    );
+    assert_eq!(app.status, "triggers: help");
+}
+
+#[test]
+fn test_triggers_unknown_subcommand() {
+    let mut app = make_app();
+    app.execute_slash_command("/triggers frobnicate");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Unknown sub-command"),
+        "unknown sub-command should warn: {text}"
+    );
+    assert_eq!(app.status, "triggers: unknown");
+}
+// ── /inbox slash command tests ────────────────────────────────────────
+
+#[test]
+fn test_inbox_list_empty() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Inbox is empty"),
+        "empty inbox should say so: {text}"
+    );
+    assert_eq!(app.status, "inbox: list empty");
+}
+
+#[test]
+fn test_inbox_no_subcommand_defaults_to_list() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Inbox is empty"),
+        "bare /inbox should default to list: {text}"
+    );
+}
+
+#[test]
+fn test_inbox_list_with_entries() {
+    let _guard = enter_with_cwd();
+
+    // Write some inbox entries directly to the JSONL file
+    let entries = vec![
+        ragent_agent::loop_state::InboxEntry::new("event-abc", "first finding"),
+        ragent_agent::loop_state::InboxEntry::new("event-xyz", "second finding"),
+    ];
+    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &entries).expect("write entries");
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Triage Inbox"),
+        "list should show header: {text}"
+    );
+    assert!(
+        text.contains("first finding"),
+        "list should show first entry content: {text}"
+    );
+    assert!(
+        text.contains("second finding"),
+        "list should show second entry content: {text}"
+    );
+    assert!(
+        text.contains("2 finding(s)"),
+        "list should show count: {text}"
+    );
+    assert_eq!(app.status, "inbox: list");
+}
+
+#[test]
+fn test_inbox_claim_existing() {
+    let _guard = enter_with_cwd();
+
+    let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
+    let entry_id = entry.id.clone();
+    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+
+    let mut app = make_app();
+    app.execute_slash_command(&format!("/inbox claim {entry_id}"));
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("claimed"), "claim should confirm: {text}");
+    assert_eq!(app.status, "inbox: claimed");
+
+    // Verify the status was persisted
+    let read = ragent_agent::loop_state::read_inbox(&_guard.path()).unwrap();
+    assert_eq!(read[0].status, "claimed");
+}
+
+#[test]
+fn test_inbox_claim_not_found() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox claim nonexistent-id");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("not found"),
+        "claim on missing entry should say not found: {text}"
+    );
+    assert_eq!(app.status, "inbox: not found");
+}
+
+#[test]
+fn test_inbox_claim_no_id() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox claim");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Usage"),
+        "claim with no id should show usage: {text}"
+    );
+    assert_eq!(app.status, "inbox: claimed usage");
+}
+
+#[test]
+fn test_inbox_dismiss_existing() {
+    let _guard = enter_with_cwd();
+
+    let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "to dismiss");
+    let entry_id = entry.id.clone();
+    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+
+    let mut app = make_app();
+    app.execute_slash_command(&format!("/inbox dismiss {entry_id}"));
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("dismissed"), "dismiss should confirm: {text}");
+    assert_eq!(app.status, "inbox: dismissed");
+
+    // Verify the status was persisted
+    let read = ragent_agent::loop_state::read_inbox(&_guard.path()).unwrap();
+    assert_eq!(read[0].status, "dismissed");
+}
+
+#[test]
+fn test_inbox_dismiss_not_found() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox dismiss nonexistent-id");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("not found"),
+        "dismiss on missing entry should say not found: {text}"
+    );
+    assert_eq!(app.status, "inbox: not found");
+}
+
+#[test]
+fn test_inbox_dismiss_no_id() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox dismiss");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Usage"),
+        "dismiss with no id should show usage: {text}"
+    );
+    assert_eq!(app.status, "inbox: dismissed usage");
+}
+
+#[test]
+fn test_inbox_clear_with_entries() {
+    let _guard = enter_with_cwd();
+
+    let entries = vec![
+        ragent_agent::loop_state::InboxEntry::new("event-1", "first"),
+        ragent_agent::loop_state::InboxEntry::new("event-2", "second"),
+    ];
+    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &entries).expect("write entries");
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox clear");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Cleared 2 finding(s)"),
+        "clear should report count: {text}"
+    );
+    assert_eq!(app.status, "inbox: cleared");
+
+    // Verify the file is gone
+    assert!(
+        !_guard
+            .path()
+            .join("log")
+            .join("inbox")
+            .join("inbox.jsonl")
+            .exists()
+    );
+}
+
+#[test]
+fn test_inbox_clear_empty() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox clear");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Cleared 0 finding(s)"),
+        "clear on empty inbox should report 0: {text}"
+    );
+    assert_eq!(app.status, "inbox: cleared");
+}
+
+#[test]
+fn test_inbox_help() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("/inbox"),
+        "help should mention /inbox: {text}"
+    );
+    assert!(
+        text.contains("list") && text.contains("claim") && text.contains("dismiss"),
+        "help should list sub-commands: {text}"
+    );
+    assert!(text.contains("clear"), "help should mention clear: {text}");
+    assert_eq!(app.status, "inbox: help");
+}
+
+#[test]
+fn test_inbox_unknown_subcommand() {
+    let _guard = enter_with_cwd();
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox frobnicate");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Unknown sub-command"),
+        "unknown sub-command should warn: {text}"
+    );
+    assert_eq!(app.status, "inbox: unknown");
+}
+
+#[test]
+fn test_inbox_list_shows_status() {
+    let _guard = enter_with_cwd();
+
+    let entry = ragent_agent::loop_state::InboxEntry::new("event-1", "test finding");
+    let entry_id = entry.id.clone();
+    ragent_agent::loop_state::write_inbox_entries(&_guard.path(), &[entry]).expect("write entry");
+
+    // Claim it first
+    ragent_agent::loop_state::update_inbox_entry_status(&_guard.path(), &entry_id, "claimed")
+        .expect("update status");
+
+    let mut app = make_app();
+    app.execute_slash_command("/inbox list");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("claimed"),
+        "list should show updated status: {text}"
+    );
 }

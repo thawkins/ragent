@@ -7,7 +7,9 @@
 //! - Atomic file read/write for spec files
 
 pub mod commands;
+pub mod constitution;
 pub mod error;
+pub mod git;
 pub mod id_scanner;
 pub mod impl_runner;
 pub mod io;
@@ -18,15 +20,26 @@ pub mod templates;
 pub mod validate;
 
 pub use commands::SpecCommand;
+pub use constitution::{
+    Amendment, AmendmentIssue, AmendmentRequest, Article, Constitution, parse_constitution,
+};
 pub use error::SpecError;
+pub use git::{BranchResult, create_spec_branch, spec_branch_name};
 pub use impl_runner::{ImplOptions, ImplResult, SpecImplRunner};
 pub use io::SpecIo;
 pub use manager::{
     SortBy, SpecFilter, SpecManager, SpecSearchResult, is_valid_transition, next_statuses,
 };
-pub use plan_parser::{Effort, PlanParser, PlanTask, Priority};
+pub use plan_parser::{
+    Effort, PhaseMinusOneGate, PhaseMinusOneGates, PlanParser, PlanTask, Priority,
+    REQUIRED_GATE_NAMES,
+};
 pub use spec::{Plan, Requirement, Spec, SpecId, SpecStatus, Task, TaskStatus};
-pub use templates::{PlanTemplate, SpecTemplate};
+pub use templates::{ConstitutionTemplate, FeedbackTemplate, PlanTemplate, SpecTemplate};
 pub use validate::{
-    Category, Issue, Report, Severity, detect_ears_template, parse_requirements, validate,
+    AmbiguityIssue, AmbiguityKind, Category, ClarificationMarker, ContradictionIssue,
+    ContradictionKind, GapIssue, GapKind, Issue, Report, SddFlags, Severity, detect_ambiguity,
+    detect_clarification_markers, detect_contradictions, detect_ears_template, detect_gaps,
+    parse_requirements, validate, validate_clarifications, validate_consistency,
+    validate_with_flags,
 };

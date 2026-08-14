@@ -13,6 +13,7 @@ pub mod event;
 pub use ragent_types::event::{Event, EventBus, FinishReason};
 pub use ragent_types::startup::StartupTimings;
 pub mod file_ops;
+pub mod goal;
 pub mod hooks;
 pub mod id;
 pub mod mcp;
@@ -29,6 +30,9 @@ pub mod reference;
 /// Previously duplicated as a local `resource.rs` file; now a single source of
 /// truth lives in `ragent_types::resource`.
 pub use ragent_types::resource;
+/// Stateful loop cron mode — cross-run state and triage inbox tag protocol
+/// (spec `piegap` FR-004, T-005).
+pub mod loop_state;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
 pub mod session;
@@ -38,7 +42,9 @@ pub mod storage;
 pub mod task;
 pub mod team;
 pub mod telemetry;
+pub mod template;
 pub mod tool;
+pub mod trigger;
 pub mod updater;
 
 /// Background shell task service (M3).

@@ -49,6 +49,7 @@ ragent-llm = { path = "../ragent-llm" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }
+regex = { workspace = true }
 
 [features]
 default = []

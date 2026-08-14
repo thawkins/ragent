@@ -164,18 +164,23 @@ enum SessionCommands {
         /// Session ID
         id: String,
     },
-    /// Export a session
-    Export {
+    /// Export a session to a portable archive
+    ExportArchive {
         /// Session ID
         id: String,
-        /// Include persisted run-cost summaries in the export (FR-018).
-        ///
-        /// By default the export is a JSON array of messages only; per-run
-        /// dollar costs are omitted. When this flag is set the output is a
-        /// JSON object of the form `{"messages":[...],"cost_summaries":[...]}`
-        /// where each `cost_summaries` entry carries `input_tokens`,
-        /// `output_tokens`, `total_cost_usd`, `duration_ms`, `model_id` and
-        /// `created_at` for a single run.
+        /// Output path for the archive file
+        #[arg(long, short = 'o', default_value = "session_archive.tar.gz")]
+        output: String,
+        /// Exclude trigger rules from the archive
+        #[arg(long)]
+        no_triggers: bool,
+        /// Exclude cron jobs from the archive
+        #[arg(long)]
+        no_cron: bool,
+        /// Exclude loop state files from the archive
+        #[arg(long)]
+        no_loop_state: bool,
+        /// Include run-cost summaries in the transcript
         #[arg(long)]
         include_cost: bool,
     },
@@ -790,52 +795,70 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            SessionCommands::Export { id, include_cost } => {
-                let messages = storage.get_messages(&id)?;
-                if include_cost {
-                    // FR-018: attach persisted run-cost summaries only when the
-                    // caller explicitly opts in. Default export remains a plain
-                    // JSON array of messages (no dollar costs).
-                    let cost_summaries = storage.list_run_cost_summaries(&id)?;
-                    let export = serde_json::json!({
-                        "messages": messages,
-                        "cost_summaries": cost_summaries,
-                    });
-                    let json = serde_json::to_string_pretty(&export)?;
-                    writeln!(std::io::stdout(), "{json}")?;
-                } else {
-                    let json = serde_json::to_string_pretty(&messages)?;
-                    writeln!(std::io::stdout(), "{json}")?;
+            SessionCommands::ExportArchive {
+                id,
+                output,
+                no_triggers,
+                no_cron,
+                no_loop_state,
+                include_cost: _,
+            } => {
+                use ragent_agent::session::archive::{ArchiveConfig, export_session_archive};
+                use std::path::Path;
+
+                let config = ArchiveConfig {
+                    include_triggers: !no_triggers,
+                    include_cron: !no_cron,
+                    include_loop_state: !no_loop_state,
+                    include_cost: false,
+                };
+
+                let output_path = Path::new(&output);
+                match export_session_archive(&storage, None, &id, output_path, &config) {
+                    Ok(archive_path) => {
+                        writeln!(
+                            std::io::stdout(),
+                            "Exported session {} to {}",
+                            &id,
+                            archive_path.display()
+                        )?;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to export session: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
             SessionCommands::Import { file } => {
-                let content = std::fs::read_to_string(&file)?;
-                let messages: Vec<ragent_agent::message::Message> = serde_json::from_str(&content)?;
+                use ragent_agent::session::archive::{ImportConfig, import_session_archive};
+                use std::path::Path;
 
-                let dir = std::fs::canonicalize(".")?;
-                let session = session_manager.create_session(dir)?;
+                let archive_path = Path::new(&file);
+                let config = ImportConfig {
+                    verify_checksums: true,
+                    import_triggers: false,
+                    activate_triggers: false,
+                    activate_cron: false,
+                    restore_loop_state: true,
+                };
 
-                let mut imported = 0u64;
-                for msg in &messages {
-                    // Re-parent each message into the new session with a fresh ID
-                    let imported_msg = ragent_agent::message::Message {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        session_id: session.id.clone(),
-                        role: msg.role.clone(),
-                        parts: msg.parts.clone(),
-                        created_at: msg.created_at,
-                        updated_at: msg.updated_at,
-                    };
-                    storage.create_message(&imported_msg)?;
-                    imported += 1;
+                match import_session_archive(&storage, None, archive_path, &config).await {
+                    Ok(result) => {
+                        writeln!(
+                            std::io::stdout(),
+                            "Imported session {} ({} messages, {} triggers, {} cron jobs, {} loop state files)",
+                            result.session_id,
+                            result.messages_imported,
+                            result.triggers_imported,
+                            result.cron_jobs_imported,
+                            result.loop_state_files_restored
+                        )?;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to import session archive: {}", e);
+                        std::process::exit(1);
+                    }
                 }
-
-                writeln!(
-                    std::io::stdout(),
-                    "Imported {} messages into session {}",
-                    imported,
-                    &session.id[..8.min(session.id.len())]
-                )?;
             }
         },
         Some(Commands::Auth { provider, key }) => {

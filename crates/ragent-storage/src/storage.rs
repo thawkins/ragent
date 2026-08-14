@@ -617,7 +617,11 @@ impl Storage {
             ",
         )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
-        for (table, col) in &[("memories", "embedding"), ("sessions", "format_version")] {
+        for (table, col) in &[
+            ("memories", "embedding"),
+            ("sessions", "format_version"),
+            ("cron_events", "stateful"),
+        ] {
             let has_col: bool = conn
                 .prepare(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{col}'"
@@ -628,6 +632,8 @@ impl Storage {
             if !has_col {
                 let sql = if *table == "sessions" && *col == "format_version" {
                     "ALTER TABLE sessions ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;"
+                } else if *table == "cron_events" && *col == "stateful" {
+                    "ALTER TABLE cron_events ADD COLUMN stateful INTEGER NOT NULL DEFAULT 0;"
                 } else {
                     &format!("ALTER TABLE {table} ADD COLUMN {col} BLOB;")
                 };
@@ -1762,8 +1768,8 @@ impl Storage {
         conn.execute(
             "INSERT INTO cron_events \
            (id, agent_type, prompt, schedule_form, start_at, duration_secs, \
-           schedule_raw, enabled, next_due, created_at, last_fired) \
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+           schedule_raw, enabled, next_due, created_at, last_fired, stateful) \
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 event.id,
                 event.agent_type,
@@ -1776,6 +1782,7 @@ impl Storage {
                 next_due,
                 created_at,
                 last_fired,
+                i64::from(event.stateful),
             ],
         )?;
         Ok(())
@@ -1790,7 +1797,7 @@ impl Storage {
             .query_row(
                 "SELECT id, agent_type, prompt, schedule_form, start_at, \
                duration_secs, schedule_raw, enabled, next_due, created_at, \
-               last_fired FROM cron_events WHERE id = ?1",
+               last_fired, stateful FROM cron_events WHERE id = ?1",
                 params![id],
                 cron_event_from_row,
             )
@@ -1806,7 +1813,7 @@ impl Storage {
         let mut stmt = conn.prepare(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
-           last_fired FROM cron_events ORDER BY next_due",
+           last_fired, stateful FROM cron_events ORDER BY next_due",
         )?;
         let rows = stmt
             .query_map([], cron_event_from_row)?
@@ -1824,7 +1831,7 @@ impl Storage {
         let mut stmt = conn.prepare(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
-           last_fired FROM cron_events WHERE enabled = 1 AND next_due <= ?1 \
+           last_fired, stateful FROM cron_events WHERE enabled = 1 AND next_due <= ?1 \
            ORDER BY next_due",
         )?;
         let rows = stmt
@@ -1844,7 +1851,7 @@ impl Storage {
         let mut stmt = conn.prepare(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
-           last_fired FROM cron_events WHERE enabled = 0 AND next_due <= ?1 \
+           last_fired, stateful FROM cron_events WHERE enabled = 0 AND next_due <= ?1 \
            ORDER BY next_due",
         )?;
         let rows = stmt
@@ -3936,11 +3943,16 @@ pub struct CronEventRow {
     pub created_at: String,
     /// Last-fired timestamp (ISO-8601), or `None` if never fired.
     pub last_fired: Option<String>,
+    /// Whether this event runs in stateful loop mode (FR-004).
+    pub stateful: bool,
 }
 
 /// Row-mapping helper for `cron_events` queries.
 fn cron_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronEventRow> {
     let enabled_i: i64 = row.get(7)?;
+    // The `stateful` column was added via migration; handle the case where
+    // it doesn't exist yet by defaulting to `false`.
+    let stateful_i: i64 = row.get(11).unwrap_or(0);
     Ok(CronEventRow {
         id: row.get(0)?,
         agent_type: row.get(1)?,
@@ -3953,5 +3965,6 @@ fn cron_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronEventRow
         next_due: row.get(8)?,
         created_at: row.get(9)?,
         last_fired: row.get(10)?,
+        stateful: stateful_i != 0,
     })
 }

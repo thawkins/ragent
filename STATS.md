@@ -1,6 +1,6 @@
 # Project Statistics
 
-**Version:** 1.0.27
+**Version:** 1.0.28-beta
 
 **Update prompt:** Update @STATS.md to show the composition of the project, show breakdown by crate
 

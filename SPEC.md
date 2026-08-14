@@ -4,9 +4,9 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-    <strong>Version:</strong> 1.0.23</p>
+    <strong>Version:</strong> 1.0.28-beta</p>
   <p style="font-size: 1.1em;">
-    <strong>Date:</strong> 2026-08-01
+    <strong>Date:</strong> 2026-08-13
   </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -108,6 +108,7 @@ functional and under active development. The specification below documents the
 current state of all subsystems.
 
 **Current Release Highlights (v1.0.17 → v1.0.23):**
+- **Spec-Driven Development back-fill** — New `/spec specify` (SPEC.md only with clarification markers), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md + quickstart.md), and `/spec feedback` (FEEDBACK.md notes) subcommands; consistency validation (ambiguity, contradiction, gap detection); `CONSTITUTION.md` with amendment process; `data-model.md` and `contracts/` artifacts gated by `sdd` config flags; production feedback loop surfacing in `/spec plan` (v1.0.28)
 - **Spec lifecycle** — `/spec update` regenerates `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md` (preserving unchanged task IDs); `/spec create` now emits a `TESTPLAN.md` manual test-plan artifact; `/spec add` regenerates `PLAN.md` + `TESTPLAN.md` after incremental additions; `/spec jtbd` performs Jobs-To-Be-Done analysis on existing specs (v1.0.23)
 - **Research system maturation** — Mandatory readability extraction in the web-gather phase; `mf_fetch` reports `extraction_method`; YouTube transcript capture fixed with a brace-balanced `ytInitialPlayerResponse` scanner; failed fetches abort with explicit errors (v1.0.23)
 - **Cron scheduling** — LLM-callable `cron_add`/`cron_remove`/`cron_list`/`cron_enable`/`cron_disable` tools; natural-language timestamps (`5pm`, `5:30pm`, `17:00`, `5am tomorrow`); `--force` and `--agent` flags for JTBD; per-run execution logging (v1.0.19–v1.0.20)
@@ -313,7 +314,7 @@ graph TB
 | `ragent-server` | Axum HTTP routes and SSE streaming | ~2,400 |
 | `ragent-tui` | Ratatui terminal interface | ~8,900 |
 | `ragent-bench` | Criterion benchmarks shared between TUI and CLI | ~900 |
-| `ragent-specs` | Spec lifecycle management and validation | ~2,100 |
+| `ragent-specs` | Spec lifecycle management, SDD artifact generation, consistency validation, constitution parsing | ~3,200 |
 | `ragent-prompt_opt` | Prompt optimization templates | ~1,200 |
 | `ragent-research` | Research types, gatherers, and plan-dep parser | ~1,600 |
 
@@ -1117,7 +1118,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/swarm status` | Show active swarm tasks |
 | `/swarm kill` | Cancel active swarm |
 | `/autopilot on\|off` | Toggle autonomous mode |
-| `/spec list\|search\|show\|impl\|implement\|jtbd` | Spec lifecycle commands; `jtbd` performs JTBD analysis |
+| `/spec create\|specify\|plan\|tasks\|update\|add\|feedback\|jtbd\|list\|search\|show\|validate\|status\|task\|impl\|coverage\|activate\|deactivate\|delete` | Spec lifecycle and SDD commands |
 | `/research create\|list\|show\|search\|delete` | Research commands; `create` supports `--from-file`, `--from-url`, `--use-low-relevance` |
 | `/config show` | Show resolved configuration |
 | `/config save` | Snapshot global `ragent.json` to `saves/` (atomic, timestamped) |
@@ -1336,9 +1337,17 @@ Specs live in `specs/<SpecId>/`:
 ```
 specs/
 └── testspec/
-    ├── SPEC.md        # Requirements and status
-    ├── PLAN.md        # Implementation tasks
-    └── REPORT.md      # Optional audit/completion report
+    ├── SPEC.md          # EARS requirements and status
+    ├── PLAN.md          # Implementation tasks and Phase -1 gates
+    ├── TASKS.md         # Ordered task list extracted from PLAN.md
+    ├── TESTPLAN.md      # Manual test-plan with TC-NNN test cases
+    ├── CONSTITUTION.md  # Optional: project constitution with nine articles
+    ├── data-model.md    # Optional: data-model artifact (gated by sdd.data_model)
+    ├── contracts/       # Optional: API contracts directory (gated by sdd.contracts)
+    ├── quickstart.md    # Key validation scenarios derived from SPEC.md
+    ├── FEEDBACK.md      # Optional: production feedback notes
+    ├── JTBD.md          # Optional: Jobs-To-Be-Done analysis
+    └── REPORT.md        # Optional audit/completion report
 ```
 
 ### 10.3 Spec Status Lifecycle
@@ -1367,18 +1376,81 @@ graph LR
 
 | Command | Purpose |
 |---------|---------|
-| `/spec list` | List specs |
-| `/spec search <query>` | Search specs |
-| `/spec show <id>` | Read a spec |
-| `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
-| `/spec add <id> <requirement>` | Add an incremental requirement to an existing spec |
+| `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
+| `/spec specify <name> <feature> [--from-research <name>]` | Generate SPEC.md only (EARS spec with `[NEEDS CLARIFICATION]` markers); optionally creates a git branch when `sdd.branch_per_spec` is enabled |
+| `/spec plan <name> <tech-context>` | Generate or regenerate PLAN.md from existing SPEC.md using technology context as guidance |
+| `/spec tasks <name>` | Generate TASKS.md (ordered task list from PLAN.md) and quickstart.md (validation scenarios from SPEC.md) |
 | `/spec update <specname>` | Re-read `SPEC.md` and regenerate `PLAN.md` + `TESTPLAN.md` (preserves unchanged task IDs) |
-| `/spec jtbd <specname>` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
+| `/spec add <id> <requirement>` | Add an incremental requirement to an existing spec |
+| `/spec feedback <spec-id> <note>` | Append a production feedback note to `FEEDBACK.md` |
+| `/spec impl <id>` / `/spec implement <id>` | Transition spec to `in_progress` and generate plan |
+| `/spec jtbd <specname> [--force] [--agent <name>]` | Perform JTBD analysis and write `JTBD.md` in the spec folder |
+| `/spec list [--status <status>] [--prefix <prefix>]` | List specs with optional filtering |
+| `/spec search <query>` | Search specs by keyword |
+| `/spec show <id>` | Read a spec |
+| `/spec validate [specname]` | Validate EARS compliance, clarification markers, and consistency (ambiguity, contradiction, gap detection) |
+| `/spec status <id> [<new-status>]` | Show or transition spec status |
+| `/spec task <id> [<task-id>] [<new-status>]` | List, show, or update task status |
+| `/spec coverage <id>` | Generate requirement coverage report |
+| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
+| `/spec deactivate` | Deactivate the currently active spec |
+| `/spec delete <id> [--yes]` | Delete a spec directory |
 
 ### 10.6 Research Linkage
 
-Specs can reference research outputs via `--from-research` and `research:`
-lines in `PLAN.md`.
+Specs can reference research outputs via the `--from-research` flag on
+`/spec create` and `/spec specify`. When provided, the spec's `SPEC.md`
+receives a `research:` key in its YAML frontmatter linking to the research
+artifact, and a `## Related Research` section is injected into the body
+summarising the linked research output.
+
+### 10.7 SDD Configuration Flags
+
+The following configuration flags in `ragent.json` under the `sdd` key control
+opt-in Spec-Driven Development capabilities:
+
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `branch_per_spec` | `false` | Create a `spec/<name>` git branch during `/spec specify` |
+| `data_model` | `false` | Generate `data-model.md` during `/spec plan` |
+| `contracts` | `false` | Generate `contracts/` directory during `/spec plan` |
+| `feedback_loop` | `false` | Surface `FEEDBACK.md` notes during `/spec plan` regeneration |
+
+### 10.8 Consistency Validation
+
+`/spec validate` performs three categories of consistency checks in addition
+to EARS compliance:
+
+- **Ambiguity detection** — flags vague terms (e.g. "fast", "efficient") and
+  undefined references in requirement text.
+- **Contradiction detection** — identifies conflicting requirements that
+  specify opposing constraints.
+- **Gap detection** — identifies requirements lacking acceptance criteria.
+
+Consistency warnings are included in the validation report alongside EARS
+errors and `[NEEDS CLARIFICATION]` marker warnings.
+
+### 10.9 Clarification Markers
+
+During `/spec specify`, the LLM is instructed to insert
+`[NEEDS CLARIFICATION]` markers for ambiguous or underspecified requirements.
+These markers are detected during validation and block the `approved` status
+transition until resolved.
+
+### 10.10 Production Feedback Loop
+
+`/spec feedback <spec-id> <note>` appends advisory notes to
+`specs/<spec-id>/FEEDBACK.md`. When the `sdd.feedback_loop` config flag is
+enabled, these notes are automatically surfaced in the `/spec plan` prompt
+so that production feedback (metrics, incidents, user reports) informs plan
+regeneration.
+
+### 10.11 Constitutional Amendment Process
+
+When a spec directory contains a `CONSTITUTION.md`, amendments require
+explicit rationale documentation, a backwards-compatibility assessment, and
+a dated changelog entry within the file. The constitution parser validates
+the nine-article structure and the amendment process.
 
 ---
 
@@ -2322,6 +2394,7 @@ examples.
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v1.0.28 | 2026-08-14 | SDD back-fill: `/spec specify` (SPEC.md only with clarification markers), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md + quickstart.md), `/spec feedback` (FEEDBACK.md notes); consistency validation (ambiguity, contradiction, gap detection); `CONSTITUTION.md` with amendment process; `data-model.md` and `contracts/` artifacts; SDD config flags (`sdd.branch_per_spec`, `sdd.data_model`, `sdd.contracts`, `sdd.feedback_loop`); production feedback loop in `/spec plan`; research frontmatter linking with `## Related Research` section |
 | v1.0.23 | 2026-08-11 | `/spec update` regenerates `PLAN.md` + `TESTPLAN.md` from edited `SPEC.md`; `/spec create` emits `TESTPLAN.md` manual test plan; `/spec add` regenerates plans after incremental add; `/spec jtbd` Jobs-To-Be-Done analysis; research readability extraction mandatory; YouTube transcript capture fixed |
 | v1.0.22 | 2026-08-09 | Fixed time-sensitive `test_parse_natural_time_5pm_tomorrow` CI failure (date-based assertion) |
 | v1.0.21 | 2026-08-09 | Fixed CI clippy failure (`#[allow(clippy::too_many_arguments)]` on `log_cron_execution`) |

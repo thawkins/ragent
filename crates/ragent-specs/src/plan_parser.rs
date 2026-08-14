@@ -120,6 +120,80 @@ pub struct PlanTask {
     pub status: TaskStatus,
 }
 
+// ── Phase -1 Gates (FR-008) ───────────────────────────────────────────────
+
+/// The three required Phase -1 gate names (FR-008).
+pub const REQUIRED_GATE_NAMES: &[&str] = &["Simplicity", "Anti-Abstraction", "Integration-First"];
+
+/// A single Phase -1 gate checkbox parsed from PLAN.md (FR-008).
+///
+/// Each gate corresponds to a constitutional principle that must be
+/// acknowledged before implementation begins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseMinusOneGate {
+    /// Gate name (e.g., "Simplicity", "Anti-Abstraction", "Integration-First").
+    pub name: String,
+    /// Whether the gate checkbox is checked (`[x]` = true, `[ ]` = false).
+    pub checked: bool,
+}
+
+/// Parsed Phase -1 gates from a PLAN.md (FR-008).
+///
+/// Contains all gate checkboxes found in the `## Phase -1 Gates` section
+/// and whether a `## Complexity Tracking` section (for justified exceptions)
+/// is present.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PhaseMinusOneGates {
+    /// All gate checkboxes found in the Phase -1 Gates section.
+    pub gates: Vec<PhaseMinusOneGate>,
+    /// Whether a `## Complexity Tracking` section was present in the PLAN.md.
+    pub has_complexity_tracking: bool,
+}
+
+impl PhaseMinusOneGates {
+    /// Returns `true` if all required gates are present and checked.
+    ///
+    /// The three required gates are defined in [`REQUIRED_GATE_NAMES`].
+    /// Gates that are absent from the PLAN.md are treated as unchecked.
+    #[must_use]
+    pub fn is_all_checked(&self) -> bool {
+        self.unchecked_required_gates().is_empty()
+    }
+
+    /// Returns the names of required gates that are either unchecked or absent.
+    #[must_use]
+    pub fn unchecked_required_gates(&self) -> Vec<&str> {
+        REQUIRED_GATE_NAMES
+            .iter()
+            .filter(|&&required| {
+                !self
+                    .gates
+                    .iter()
+                    .any(|g| g.name.eq_ignore_ascii_case(required) && g.checked)
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Returns `true` if all three required gates are present (regardless of
+    /// checked state). Used to distinguish "section missing" from "gates
+    /// unchecked".
+    #[must_use]
+    pub fn has_all_required_gates(&self) -> bool {
+        REQUIRED_GATE_NAMES.iter().all(|&required| {
+            self.gates
+                .iter()
+                .any(|g| g.name.eq_ignore_ascii_case(required))
+        })
+    }
+
+    /// Returns `true` if the `## Phase -1 Gates` section was not found.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.gates.is_empty() && !self.has_complexity_tracking
+    }
+}
+
 // ── PlanParser ────────────────────────────────────────────────────────────
 
 /// Parser that extracts `PlanTask` structs from a PLAN.md markdown string.
@@ -139,6 +213,102 @@ impl PlanParser {
             ));
         }
         Ok(tasks)
+    }
+
+    /// Parse Phase -1 gate checkboxes from a PLAN.md string (FR-008, T-015).
+    ///
+    /// Locates the `## Phase -1 Gates` section and extracts each
+    /// `- [x]` or `- [ ]` checkbox line as a [`PhaseMinusOneGate`].
+    /// Also detects whether a `## Complexity Tracking` section is present
+    /// (for justified exceptions per FR-008).
+    ///
+    /// Returns an empty [`PhaseMinusOneGates`] (with `is_empty() == true`)
+    /// if the section is absent — callers should treat this as "no gates
+    /// configured" and decide whether to block (T-017).
+    #[must_use]
+    pub fn parse_phase_minus_one_gates(plan_md: &str) -> PhaseMinusOneGates {
+        let gates = Self::parse_gate_checkboxes(plan_md);
+        let has_complexity_tracking = plan_md
+            .lines()
+            .any(|line| line.trim().eq_ignore_ascii_case("## Complexity Tracking"));
+        PhaseMinusOneGates {
+            gates,
+            has_complexity_tracking,
+        }
+    }
+
+    /// Extract `- [x]` / `- [ ]` checkbox lines from the Phase -1 Gates section.
+    fn parse_gate_checkboxes(plan_md: &str) -> Vec<PhaseMinusOneGate> {
+        let mut gates = Vec::new();
+        let mut in_gate_section = false;
+
+        for line in plan_md.lines() {
+            let trimmed = line.trim();
+
+            // Detect ## Phase -1 Gates section (case-insensitive)
+            if trimmed.eq_ignore_ascii_case("## Phase -1 Gates") {
+                in_gate_section = true;
+                continue;
+            }
+
+            // Exit at next ## heading
+            if in_gate_section && trimmed.starts_with("## ") {
+                break;
+            }
+
+            if !in_gate_section {
+                continue;
+            }
+
+            // Parse checkbox lines: - [x] **Name:** ... or - [ ] Name: ...
+            if let Some(gate) = Self::parse_gate_checkbox_line(trimmed) {
+                gates.push(gate);
+            }
+        }
+
+        gates
+    }
+
+    /// Parse a single `- [x] Name` or `- [ ] Name` checkbox line.
+    ///
+    /// The gate name is extracted as the text before the first `:` (if present)
+    /// or the full text after the checkbox marker. Surrounding `**` bold
+    /// markers are stripped.
+    fn parse_gate_checkbox_line(line: &str) -> Option<PhaseMinusOneGate> {
+        // Must start with "- ["
+        if !line.starts_with("- [") {
+            return None;
+        }
+
+        let checked = if line.starts_with("- [x]") || line.starts_with("- [X]") {
+            true
+        } else if line.starts_with("- [ ]") {
+            false
+        } else {
+            return None;
+        };
+
+        // Extract text after "- [x] " or "- [ ] "
+        let rest = &line[5..].trim_start();
+
+        // Strip leading ** if present
+        let rest = rest.trim_start_matches('*');
+
+        // Gate name is text before first ':' or the whole text if no colon
+        let name = if let Some(colon_pos) = rest.find(':') {
+            rest[..colon_pos].trim()
+        } else {
+            rest.trim()
+        };
+
+        // Strip trailing ** from name
+        let name = name.trim_end_matches('*').trim().to_string();
+
+        if name.is_empty() {
+            None
+        } else {
+            Some(PhaseMinusOneGate { name, checked })
+        }
     }
 
     /// Parse tasks, returning an empty vec instead of an error when no rows found.
@@ -771,5 +941,253 @@ mod tests {
         // T-002 should be unblocked since T-001 is now completed
         assert_eq!(resumed.len(), 1);
         assert_eq!(tasks[resumed[0]].id, "T-002");
+    }
+
+    // ── Phase -1 Gates tests (T-015, FR-008) ──────────────────────────────
+
+    #[test]
+    fn test_parse_gates_all_checked() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **Simplicity:** The plan does the simplest thing that works.
+- [x] **Anti-Abstraction:** No premature abstraction.
+- [x] **Integration-First:** Tests written before source files.
+
+## Tasks
+
+| ID | Title | Req | Effort | Priority | Dependencies |
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.gates[0].checked);
+        assert!(gates.gates[1].checked);
+        assert!(gates.gates[2].checked);
+        assert!(gates.is_all_checked());
+        assert!(gates.has_all_required_gates());
+        assert!(!gates.has_complexity_tracking);
+    }
+
+    #[test]
+    fn test_parse_gates_one_unchecked() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **Simplicity:** Done.
+- [x] **Anti-Abstraction:** Done.
+- [ ] **Integration-First:** Not yet.
+
+## Tasks
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(!gates.is_all_checked());
+        let unchecked = gates.unchecked_required_gates();
+        assert_eq!(unchecked, vec!["Integration-First"]);
+    }
+
+    #[test]
+    fn test_parse_gates_all_unchecked() {
+        let md = "\
+## Phase -1 Gates
+
+- [ ] **Simplicity:** Not done.
+- [ ] **Anti-Abstraction:** Not done.
+- [ ] **Integration-First:** Not done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert!(!gates.is_all_checked());
+        assert_eq!(gates.unchecked_required_gates().len(), 3);
+    }
+
+    #[test]
+    fn test_parse_gates_section_missing() {
+        let md = "## Tasks\n\n| ID | Title |\n|---|---|\n| T-001 | Foo |";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert!(gates.is_empty());
+        assert!(!gates.is_all_checked());
+        assert!(!gates.has_all_required_gates());
+        assert_eq!(gates.unchecked_required_gates().len(), 3);
+    }
+
+    #[test]
+    fn test_parse_gates_partial_gates_present() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **Simplicity:** Done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 1);
+        assert!(!gates.has_all_required_gates());
+        assert!(!gates.is_all_checked());
+        let unchecked = gates.unchecked_required_gates();
+        assert_eq!(unchecked, vec!["Anti-Abstraction", "Integration-First"]);
+    }
+
+    #[test]
+    fn test_parse_gates_complexity_tracking_detected() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **Simplicity:** Done.
+- [x] **Anti-Abstraction:** Done.
+- [x] **Integration-First:** Done.
+
+## Complexity Tracking
+
+| Gate | Exception | Rationale |
+|------|-----------|-----------|
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert!(gates.has_complexity_tracking);
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_complexity_tracking_without_gate_section() {
+        let md = "\
+## Complexity Tracking
+
+| Gate | Exception | Rationale |
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert!(gates.has_complexity_tracking);
+        assert_eq!(gates.gates.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_gates_case_insensitive_heading() {
+        let md = "\
+## phase -1 gates
+
+- [x] Simplicity: Done.
+- [x] Anti-Abstraction: Done.
+- [x] Integration-First: Done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_uppercase_x_checkbox() {
+        let md = "\
+## Phase -1 Gates
+
+- [X] **Simplicity:** Done.
+- [X] **Anti-Abstraction:** Done.
+- [X] **Integration-First:** Done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.gates.iter().all(|g| g.checked));
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_without_bold_markers() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] Simplicity: The plan does the simplest thing.
+- [x] Anti-Abstraction: No premature abstraction.
+- [x] Integration-First: Tests before source.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert_eq!(gates.gates[0].name, "Simplicity");
+        assert_eq!(gates.gates[1].name, "Anti-Abstraction");
+        assert_eq!(gates.gates[2].name, "Integration-First");
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_name_without_colon() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] Simplicity
+- [x] Anti-Abstraction
+- [x] Integration-First
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert_eq!(gates.gates[0].name, "Simplicity");
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_extra_non_checkbox_lines_ignored() {
+        let md = "\
+## Phase -1 Gates
+
+Some introductory text about gates.
+
+- [x] **Simplicity:** Done.
+- [x] **Anti-Abstraction:** Done.
+- [x] **Integration-First:** Done.
+
+A trailing comment.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_case_insensitive_gate_names() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] simplicity: Done.
+- [x] anti-abstraction: Done.
+- [x] integration-first: Done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.is_all_checked());
+        assert!(gates.has_all_required_gates());
+    }
+
+    #[test]
+    fn test_parse_gates_stops_at_next_h2_heading() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **Simplicity:** Done.
+- [x] **Anti-Abstraction:** Done.
+- [x] **Integration-First:** Done.
+
+## Tasks
+
+- [x] Simplicity: should not be parsed
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_parse_gates_empty_checkbox_name_skipped() {
+        let md = "\
+## Phase -1 Gates
+
+- [x] **:** Empty name.
+- [x] **Simplicity:** Done.
+- [x] **Anti-Abstraction:** Done.
+- [x] **Integration-First:** Done.
+";
+        let gates = PlanParser::parse_phase_minus_one_gates(md);
+        assert_eq!(gates.gates.len(), 3);
+        assert!(gates.is_all_checked());
+    }
+
+    #[test]
+    fn test_required_gate_names_constant() {
+        assert_eq!(REQUIRED_GATE_NAMES.len(), 3);
+        assert!(REQUIRED_GATE_NAMES.contains(&"Simplicity"));
+        assert!(REQUIRED_GATE_NAMES.contains(&"Anti-Abstraction"));
+        assert!(REQUIRED_GATE_NAMES.contains(&"Integration-First"));
     }
 }

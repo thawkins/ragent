@@ -5,44 +5,7 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-beta.32)
 
-- **Legacy memory system removed** — replaced by the structured-memory store
-  backed by `ragent-storage`. The `memory_store`/`memory_recall` tools and TUI
-  memory panel (`Alt+M`) now use the new store.
-- **Tool-call summaries improved** — bash/read/write/create/edit inputs remain
-  visible even when providers emit unexpected JSON field names by falling back to
-  the raw tool args.
-- **CI workflow improvements** — `check-and-test` reverted to debug builds with
-  an 8 GiB swapfile and 45-minute timeout to avoid OOM during release-linking.
-- **Model Router** — route requests across a local cluster of providers; status bar
-  shows the actual downstream model and tier.
-- **Provider key editing** — `/provider` now pre-fills the existing API key so you
-  can update it without removing the provider.
-- **Configuration snapshots** — `/config show`, `/config save`, and `/config list`
-  let you inspect, back up, and restore your global `ragent.json`.
-- **`memory_store` result clarity** — successful structured-memory writes now
-  report `stored: true` and the TUI summary reflects it.
-- **MasterFetch web tools** — `mf_fetch`, `mf_search`, `mf_crawl`, and
-  `mf_cache_clear` for content extraction, keyless search, and focused crawling.
-- **Gmail and messaging channels** — `gmail` and `send_channel_message` tools for
-  external notifications.
-- **Browser automation** — `browser` tool with 14 CDP actions; toggle with
-  `/tools browser on|off`.
-- **Research system** — `/research create <name>` gathers web and local-file sources,
-  producing a self-contained `RESEARCH.md`.
-- **Teams and swarms** — `/team` and `/swarm` slash commands for multi-agent
-  coordination.
-- **Autopilot** — `/autopilot on` with optional token/time limits and a TUI status
-  indicator.
-- **Context compaction** — `/compact` and the `compaction` config block to keep long
-  sessions within context limits.
-- **Image attachments (Alt+V)** — paste images from clipboard or file URIs; pending
-  attachments are displayed before sending.
-- **New editing tools** — `multiedit`, `patch`, `apply_patch`, and `open` for
-  atomic multi-file edits, diff patching, and desktop opening.
-- **All compiler warnings eliminated** — build, tests, benches, and examples are
-  warning-free.
 
 ## Prerequisites
 
@@ -1081,9 +1044,35 @@ Run any of these from the TUI prompt:
 /research create rust-async --from-url https://example.com/article
 /research continue rust-async focus on io_uring integration
 /spec create async-await Add async/await ergonomics --from-research rust-async
+/spec specify async-await Add async/await ergonomics --from-research rust-async
+/spec plan async-await "Rust 2024 edition, tokio runtime"
+/spec tasks async-await
+/spec feedback async-await "Users report panics on drop"
 /spec jtbd async-await
 /spec update async-await
 ```
+
+`/spec specify <specname> <feature> [--from-research <name>]` generates
+`SPEC.md` only — an EARS spec with requirements and `[NEEDS CLARIFICATION]`
+markers. It does NOT generate `PLAN.md`; use `/spec plan` after clarification.
+When `sdd.branch_per_spec` is enabled, it also creates a `spec/<specname>` git
+branch. `--from-research` links the spec to a research artifact via YAML
+frontmatter and adds a `## Related Research` section to the SPEC.md body.
+
+`/spec plan <spec-id> <tech-context>` generates (or regenerates)
+`specs/<spec-id>/PLAN.md` from the existing `SPEC.md` using the provided
+technology context as guidance. Production feedback notes from `FEEDBACK.md`
+are automatically surfaced in the plan prompt when the `sdd.feedback_loop`
+config flag is enabled.
+
+`/spec tasks <spec-id>` generates `specs/<spec-id>/TASKS.md` (an ordered task
+list derived from `PLAN.md`) and `specs/<spec-id>/quickstart.md` (key
+validation scenarios derived from `SPEC.md` acceptance criteria). Both are
+deterministic extractions — no LLM call required.
+
+`/spec feedback <spec-id> <note>` appends a production feedback note to
+`specs/<spec-id>/FEEDBACK.md`. Notes are advisory and surfaced during
+`/spec plan` regeneration so real-world issues inform plan updates.
 
 `/spec update <specname>` re-reads the existing `specs/<specname>/SPEC.md`
 and regenerates `PLAN.md` and `TESTPLAN.md` to match the current requirements.
@@ -1169,9 +1158,13 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
-| `/spec create <name> <title>` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
+| `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |
+| `/spec specify <name> <feature> [--from-research <name>]` | Generate SPEC.md only (EARS spec with clarification markers) |
+| `/spec plan <name> <tech-context>` | Generate PLAN.md from existing SPEC.md with tech context |
+| `/spec tasks <name>` | Generate TASKS.md + quickstart.md from PLAN.md and SPEC.md |
 | `/spec update <name>` | Regenerate PLAN.md and TESTPLAN.md from an edited SPEC.md |
 | `/spec add <name> <requirement>` | Add an incremental requirement to an existing spec |
+| `/spec feedback <name> <note>` | Append a production feedback note to FEEDBACK.md |
 | `/spec jtbd <name> [--force] [--agent <name>]` | Perform JTBD analysis on an existing spec |
 | `/spec list \|search \|show \|validate \|status \|task` | Spec lifecycle commands |
 
