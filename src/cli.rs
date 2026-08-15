@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 
-use ragent_agent::{Config, event::EventBus, storage::Storage};
+use ragent_agent::{event::EventBus, storage::Storage};
 
 /// small CLI demo for orchestration
 ///
@@ -84,6 +84,9 @@ pub enum ResearchCommands {
         /// Research depth: shallow|standard|deep
         #[arg(long)]
         depth: Option<String>,
+        /// Research tier: light|full|dissertation
+        #[arg(long, value_name = "TIER")]
+        tier: Option<String>,
         /// Output format: report|executive-summary|comparison-table|source-bibliography
         #[arg(long)]
         format: Option<String>,
@@ -186,7 +189,7 @@ pub async fn handle_research_command(
 ) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
     use ragent_research::{
-        Depth, OutputFormat, ResearchManager, SessionConfig, SessionEvent, SessionObserver,
+        Depth, OutputFormat, ResearchManager, SessionConfig, SessionEvent, SessionObserver, Tier,
     };
     use std::sync::Arc;
     let working_dir = std::env::current_dir()?;
@@ -201,6 +204,7 @@ pub async fn handle_research_command(
             from_file,
             iterations,
             depth,
+            tier,
             format,
             sources_dir,
             template,
@@ -231,6 +235,7 @@ pub async fn handle_research_command(
                 from_file,
                 iterations,
                 depth,
+                tier,
                 format,
                 sources_dir,
                 template,
@@ -244,8 +249,8 @@ pub async fn handle_research_command(
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
                 search_max_retries,
-                search_retry_base_delay_ms,
                 search_circuit_breaker_threshold,
+                search_retry_base_delay_ms,
             }
         }
         ResearchCommands::List { all } => ResearchCliCommand::List { all },
@@ -292,7 +297,7 @@ pub async fn handle_research_command(
         }
         ResearchCliCommand::Show { name } => {
             let item = manager.show(&name).await?;
-            let sources: Vec<(String, String, String, String)> = item
+            let sources: Vec<(String, String, String, String, Option<String>)> = item
                 .sources
                 .iter()
                 .map(|s| {
@@ -301,6 +306,7 @@ pub async fn handle_research_command(
                         s.path_or_url().to_string(),
                         s.title().to_string(),
                         s.captured_at().to_rfc3339(),
+                        s.oa_recovery_note(),
                     )
                 })
                 .collect();
@@ -341,6 +347,7 @@ pub async fn handle_research_command(
             from_file,
             iterations,
             depth,
+            tier,
             format,
             sources_dir,
             template,
@@ -374,6 +381,20 @@ pub async fn handle_research_command(
                 from_urls.first().map(String::as_str),
                 from_file.as_deref(),
             );
+            let config_arc = ragent_config::Config::load().ok().map(Arc::new);
+            // Surface the research.* ragent.json config so the CLI honours
+            // FR-011/FR-012 (open-access recovery) even when the caller did
+            // not pass any flags.
+            let (cfg_oa, cfg_contact_email, cfg_oa_min) = config_arc
+                .as_deref()
+                .map(|c| {
+                    (
+                        c.research.open_access_recovery,
+                        c.research.contact_email.clone(),
+                        c.research.oa_min_full_text_chars,
+                    )
+                })
+                .unwrap_or((false, None, ragent_research::DEFAULT_OA_MIN_FULL_TEXT_CHARS));
             let config = SessionConfig {
                 topic: topic.clone(),
                 from_urls,
@@ -389,6 +410,7 @@ pub async fn handle_research_command(
                 fetch_timeout_secs: fetch_timeout_secs
                     .unwrap_or(ragent_research::DEFAULT_FETCH_TIMEOUT.as_secs()),
                 depth: depth.as_deref().and_then(Depth::parse),
+                tier: tier.as_deref().and_then(Tier::parse).unwrap_or(Tier::Full),
                 iterations,
                 output_format: format.as_deref().map_or(OutputFormat::Report, |s| {
                     OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
@@ -403,6 +425,9 @@ pub async fn handle_research_command(
                     .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
                 search_circuit_breaker_threshold: search_circuit_breaker_threshold
                     .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
+                open_access_recovery: cfg_oa,
+                contact_email: cfg_contact_email,
+                oa_min_full_text_chars: cfg_oa_min,
                 ..SessionConfig::default()
             };
             // Build a full research session backed by the default tool
@@ -411,7 +436,6 @@ pub async fn handle_research_command(
             let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
             let event_bus = Arc::new(EventBus::new(256));
             let storage = Arc::new(Storage::open_in_memory()?);
-            let config_arc = Config::load().ok().map(Arc::new);
             let session = ragent_agent::research_adapter::build_research_session(
                 &tool_registry,
                 manager.clone(),

@@ -24,6 +24,20 @@ const fn sample_doc(item: ResearchItem) -> ResearchDocument {
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        contradiction_graph: None,
+        loci: None,
+        depth_investigation: None,
+        evidence_digest: None,
+        triple_draft: None,
+        cross_locus_reconcile: None,
+        source_tensions: None,
+        synthesis_audit: None,
+        corpus_critic: None,
+        gap_fetch: None,
+        surgical_patch: None,
+        cite_check: None,
+        polish: None,
+        readability_audit: None,
         template_body: None,
         decomposed_queries: Vec::new(),
         output_format: OutputFormat::Imrad,
@@ -228,6 +242,7 @@ fn imrad_references_index_unchanged() {
         page_type: None,
         media_type: "page".into(),
         language: None,
+        oa_recovery: None,
     });
 
     let assembled = assemble_document(&doc);

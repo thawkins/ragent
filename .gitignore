@@ -50,3 +50,4 @@ EOF
 !.ragent/skills/
 !.ragent/blueprints/
 
+crates/ragent-tools-core/target/

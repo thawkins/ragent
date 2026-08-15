@@ -46,6 +46,7 @@ fn test_encode_progress_event_sanitizes_web_captured() {
             search_engine: String::new(),
             body_preview: String::new(),
             language: "UNKNOWN".to_string(),
+            oa_recovery: None,
         },
     );
     let decoded = decode_progress_event(&encoded).expect("decode");

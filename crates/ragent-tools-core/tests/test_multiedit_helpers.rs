@@ -16,10 +16,39 @@
 
 use ragent_tools_core::path_util::resolve_path;
 use ragent_tools_core::replace::{
-    FindDiag, FindDiagKind, FindError, decode_escapes, find_exact_replacement_range,
-    find_flexible_replacement_range, format_match_failure,
+    CascadeFail, CascadeMatch, FindDiag, FindDiagKind, FindError, MatchLane, decode_escapes,
+    disambiguation_hint, find_exact_replacement_range, find_flexible_replacement_range,
+    find_replacement_cascade, format_match_failure, nearest_window, not_found_hint,
 };
 use std::path::{Path, PathBuf};
+
+#[test]
+fn not_found_hint_no_near_miss_falls_back_to_plain_message() {
+    let content = "one\ntwo\nthree\n";
+    let needle = "alpha\nbeta\ngamma\n";
+    let hint = not_found_hint(content, needle, Path::new("f.rs"), None, false);
+    assert!(hint.contains("old_string not found"), "got: {hint}");
+    assert!(hint.contains("f.rs"), "path should be named, got: {hint}");
+    assert!(!hint.contains("Edit"), "no edit index, got: {hint}");
+    assert!(
+        !hint.contains("almost matches"),
+        "no near-miss, got: {hint}"
+    );
+}
+
+#[test]
+fn not_found_hint_includes_near_miss_and_collapse_suffix() {
+    let content = "line a\nline b\nline c\nline d\nline e\n";
+    let needle = "line b\nline c\nline d\n";
+    let hint = not_found_hint(content, needle, Path::new("f.rs"), Some(2), true);
+    assert!(hint.starts_with("Edit 2: "), "got: {hint}");
+    assert!(
+        hint.contains("almost matches a block starting at line 2"),
+        "got: {hint}"
+    );
+    assert!(hint.contains("line b"), "snippet included, got: {hint}");
+    assert!(hint.contains("collapse_whitespace mode"), "got: {hint}");
+}
 
 #[test]
 fn resolve_path_relative() {
@@ -171,4 +200,137 @@ fn test_flexible_matcher_not_found() {
     let content = "fn a() { 1 }\n";
     let err = find_flexible_replacement_range(content, "totally absent", "x").unwrap_err();
     assert!(matches!(err, FindError::NotFound));
+}
+
+// ── Match cascade (editplan P2) ──────────────────────────────────────────────
+
+#[test]
+fn cascade_exact_lane_wins_when_present() {
+    let content = "fn a() { 1 }\n";
+    match find_replacement_cascade(content, "fn a() { 1 }", "fn a() { 2 }") {
+        CascadeMatch::Found {
+            lane,
+            start,
+            end,
+            new_str,
+            ..
+        } => {
+            assert_eq!(lane, MatchLane::Exact);
+            assert_eq!(&content[start..end], "fn a() { 1 }");
+            assert_eq!(new_str, "fn a() { 2 }");
+        }
+        other => panic!("expected exact Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_flexible_lane_rescues_whitespace_mismatch() {
+    // Two-space gap in needle vs three-space gap in content: exact fails,
+    // flexible succeeds.
+    let content = "alpha   beta\n";
+    match find_replacement_cascade(content, "alpha beta", "X") {
+        CascadeMatch::Found {
+            lane, start, end, ..
+        } => {
+            assert_eq!(lane, MatchLane::Flexible);
+            assert_eq!(&content[start..end], "alpha   beta");
+        }
+        other => panic!("expected flexible Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_indent_normalised_lane_rescues_trailing_newline_ghost() {
+    // Needle identical to the file block except it adds a trailing "\n" that
+    // the file content does not have (content ends after the final "}").
+    // Exact fails; flexible fails because the trailing whitespace run in the
+    // needle needs a non-empty run in the content (absent at EOF); only the
+    // indent-normalised lane can rescue it.
+    let content = "fn do_work() {\n    work();\n}";
+    let needle = "fn do_work() {\n    work();\n}\n";
+    match find_replacement_cascade(content, needle, "fn do_work() {\n    patched();\n}\n") {
+        CascadeMatch::Found {
+            lane,
+            start,
+            end,
+            new_str,
+        } => {
+            assert_eq!(lane, MatchLane::IndentNormalised);
+            assert_eq!(&content[start..end], "fn do_work() {\n    work();\n}");
+            assert_eq!(new_str, "fn do_work() {\n    patched();\n}\n");
+        }
+        other => panic!("expected indent_normalised Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_not_found_when_needle_is_absent() {
+    let content = "fn a() { 1 }\n";
+    match find_replacement_cascade(content, "totally absent text", "x") {
+        CascadeMatch::Failed(CascadeFail::NotFound) => {}
+        other => panic!("expected Failed(NotFound), got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_multiple_matches_reported_with_offsets() {
+    let content = "dup\nmid\ndup\n";
+    match find_replacement_cascade(content, "dup", "DUP") {
+        CascadeMatch::Failed(CascadeFail::MultipleMatches {
+            count,
+            starts,
+            lane,
+        }) => {
+            assert_eq!(count, 2);
+            assert_eq!(lane, MatchLane::Exact);
+            assert_eq!(starts, vec![0, 8]);
+        }
+        other => panic!("expected Failed(MultipleMatches), got {other:?}"),
+    }
+}
+
+#[test]
+fn nearest_window_finds_close_block() {
+    let content = "line a\nline b\nline c\nline d\nline e\n";
+    let needle = "line b\nline cX\nline d\n";
+    // All three lines exist in content, but only "line b" and "line d" match
+    // verbatim. That's 2/3 ≈ 67 %, below the 75 % threshold for a hint.
+    assert!(nearest_window(content, needle).is_none());
+
+    let needle2 = "line b\nline c\nline d\n";
+    // Exact match — nearest_window is not needed, but the helper should still
+    // find a 100 % window when called (callers only invoke it on NotFound).
+    let (line, _n, matched, total, snippet) =
+        nearest_window(content, needle2).expect("100 % match should hint");
+    assert_eq!(line, 2);
+    assert_eq!(matched, 3);
+    assert_eq!(total, 3);
+    assert!(snippet.contains("line b"));
+}
+
+#[test]
+fn nearest_window_below_threshold_returns_none() {
+    let content = "one\ntwo\nthree\nfour\nfive\n";
+    let needle = "one\nXYZ\nPDQ\nCBA\n";
+    // Only 1/4 lines match (25 %).
+    assert!(nearest_window(content, needle).is_none());
+}
+
+#[test]
+fn disambiguation_hint_lists_offsets_and_lines() {
+    let content = "foo = 1;\nbar();\nfoo = 2;\n";
+    let starts: Vec<usize> = content.match_indices("foo").map(|(i, _)| i).collect();
+    let hint = disambiguation_hint(content, &starts);
+    assert!(
+        hint.contains("offset 0"),
+        "should list first offset: {hint}"
+    );
+    assert!(
+        hint.contains("offset 16"),
+        "should list second offset: {hint}"
+    );
+    assert!(hint.contains("line 1"), "should name line numbers: {hint}");
+    assert!(hint.contains("line 3"), "should name line numbers: {hint}");
+    assert!(hint.contains("foo = 1;"), "should show context: {hint}");
+    assert!(hint.contains("foo = 2;"), "should show context: {hint}");
 }

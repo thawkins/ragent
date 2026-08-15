@@ -193,6 +193,13 @@ pub struct Config {
     /// opt-in. When a flag is disabled, the corresponding feature is inactive.
     #[serde(default, skip_serializing_if = "PieGapConfig::is_empty")]
     pub piegap: PieGapConfig,
+    /// Research subsystem configuration (spec `hyperresearch` FR-011, FR-012).
+    ///
+    /// Controls open-access recovery, Unpaywall contact email, and the
+    /// minimum full-text length that triggers OA recovery. All fields default to
+    /// disabled / empty so existing workflows are not disrupted.
+    #[serde(default, skip_serializing_if = "ResearchConfig::is_empty")]
+    pub research: ResearchConfig,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -1866,6 +1873,17 @@ impl Config {
         // stays enabled. All flags default to false (opt-in, FR-016/FR-018).
         base.piegap.merge(&overlay.piegap);
 
+        // Research settings: overlay takes precedence for explicitly set fields.
+        // Contact email and OA threshold override base when present; the recovery
+        // flag uses OR semantics because it is opt-in.
+        base.research.open_access_recovery |= overlay.research.open_access_recovery;
+        if overlay.research.contact_email.is_some() {
+            base.research.contact_email = overlay.research.contact_email.clone();
+        }
+        if overlay.research.oa_min_full_text_chars != default_oa_min_full_text_chars() {
+            base.research.oa_min_full_text_chars = overlay.research.oa_min_full_text_chars;
+        }
+
         base
     }
 
@@ -2655,5 +2673,67 @@ impl PieGapConfig {
         self.web_ui |= other.web_ui;
         self.undo |= other.undo;
         self.session_naming |= other.session_naming;
+    }
+}
+
+// ── Research subsystem configuration ─────────────────────────────────────────────
+
+/// Research subsystem configuration (spec `hyperresearch` FR-011, FR-012).
+///
+/// Configured under the `research` key in `ragent.json`:
+///
+/// ```json
+/// {
+///   "research": {
+///     "open_access_recovery": true,
+///     "contact_email": "user@example.com",
+///     "oa_min_full_text_chars": 1000
+///   }
+/// }
+/// ```
+///
+/// `open_access_recovery` defaults to `false` (opt-in). `contact_email` is
+/// required by Unpaywall's terms of service when OA recovery is enabled.
+/// `oa_min_full_text_chars` defaults to the value used by the open-access
+/// recovery layer (`ragent_research::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ResearchConfig {
+    /// Enable open-access recovery via Unpaywall and Europe PMC for short
+    /// scholarly sources (FR-011).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub open_access_recovery: bool,
+    /// Contact email required by Unpaywall's terms of service (FR-012).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact_email: Option<String>,
+    /// Minimum full-text length (in characters) that triggers OA recovery.
+    ///
+    /// When a scholarly source's captured body is shorter than this, the
+    /// gatherer queries OA services for a legal full-text copy.
+    #[serde(default = "default_oa_min_full_text_chars")]
+    pub oa_min_full_text_chars: usize,
+}
+
+const fn default_oa_min_full_text_chars() -> usize {
+    1000
+}
+
+impl ResearchConfig {
+    /// Returns `true` when the research config contains only default values and
+    /// can be omitted from the serialized `ragent.json`.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        !self.open_access_recovery
+            && self.contact_email.is_none()
+            && self.oa_min_full_text_chars == default_oa_min_full_text_chars()
+    }
+}
+
+impl Default for ResearchConfig {
+    fn default() -> Self {
+        Self {
+            open_access_recovery: false,
+            contact_email: None,
+            oa_min_full_text_chars: default_oa_min_full_text_chars(),
+        }
     }
 }

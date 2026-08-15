@@ -532,6 +532,7 @@ mod tests {
                 page_type: None,
                 media_type: "page".into(),
                 language: None,
+                oa_recovery: None,
             },
             Source::Web {
                 url: "https://undated.example".into(),
@@ -548,6 +549,7 @@ mod tests {
                 page_type: None,
                 media_type: "page".into(),
                 language: None,
+                oa_recovery: None,
             },
         ];
         let idx = ResearchIo::render_references_index(&sources, Utc::now());

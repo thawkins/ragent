@@ -82,6 +82,13 @@ pub struct ResearchItem {
     /// which model produced its synthesis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Whether open-access recovery was enabled for this research run.
+    ///
+    /// When `true`, the frontmatter discloses that the report may contain
+    /// sources whose full text was recovered from a legal OA copy rather than
+    /// read directly from the original paywalled URL (FR-015).
+    #[serde(default)]
+    pub open_access_recovery: bool,
 }
 
 impl ResearchItem {
@@ -104,6 +111,7 @@ impl ResearchItem {
             queries: Vec::new(),
             output_format: None,
             model: None,
+            open_access_recovery: false,
         }
     }
 
@@ -226,6 +234,9 @@ impl ResearchItem {
         }
         if let Some(fmt) = &self.output_format {
             out.push_str(&format!("requested_format: {fmt}\n"));
+        }
+        if self.open_access_recovery {
+            out.push_str("open_access_recovery: true\n");
         }
         out.push_str("---\n\n");
         out
@@ -356,10 +367,13 @@ impl ResearchItem {
                 .with_timezone(&Utc),
             None => created_at,
         };
-        // `sources` is count-only; the IO layer loads the real list.
         let _ = fields.remove("sources");
         let output_format = fields.remove("requested_format");
         let model = fields.remove("model").map(|v| unquote_yaml_scalar(&v));
+        let open_access_recovery = fields
+            .remove("open_access_recovery")
+            .map(|v| v.trim().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
         Ok(Self {
             name,
@@ -372,9 +386,11 @@ impl ResearchItem {
             queries,
             output_format,
             model,
+            open_access_recovery,
         })
     }
 }
+
 /// Errors that can occur while parsing a `ResearchItem` from a frontmatter block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResearchItemError {
@@ -888,6 +904,50 @@ mod tests {
         let json = serde_json::to_string(&item).unwrap();
         let back: ResearchItem = serde_json::from_str(&json).unwrap();
         assert_eq!(item, back);
+    }
+
+    #[test]
+    fn render_frontmatter_includes_open_access_recovery_when_true() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.open_access_recovery = true;
+        let fm = item.render_frontmatter();
+        assert!(
+            fm.contains("open_access_recovery: true"),
+            "frontmatter should disclose OA recovery when enabled; got:\n{fm}"
+        );
+    }
+
+    #[test]
+    fn render_frontmatter_omits_open_access_recovery_when_false() {
+        let item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        let fm = item.render_frontmatter();
+        assert!(
+            !fm.contains("open_access_recovery"),
+            "frontmatter should omit OA recovery line when disabled; got:\n{fm}"
+        );
+    }
+
+    #[test]
+    fn from_frontmatter_parses_open_access_recovery_true() {
+        let block = "---\nname: rust-async\ntitle: Rust Async\ntopic: topic\nopen_access_recovery: true\n---\n";
+        let item = ResearchItem::from_frontmatter(block).expect("must parse");
+        assert!(item.open_access_recovery);
+    }
+
+    #[test]
+    fn from_frontmatter_defaults_open_access_recovery_false() {
+        let block = "---\nname: rust-async\ntitle: Rust Async\ntopic: topic\n---\n";
+        let item = ResearchItem::from_frontmatter(block).expect("must parse");
+        assert!(!item.open_access_recovery);
+    }
+
+    #[test]
+    fn serde_round_trip_preserves_open_access_recovery() {
+        let mut item = ResearchItem::new(sample_name(), "Rust Async", "topic");
+        item.open_access_recovery = true;
+        let json = serde_json::to_string(&item).unwrap();
+        let back: ResearchItem = serde_json::from_str(&json).unwrap();
+        assert!(back.open_access_recovery);
     }
 
     #[test]

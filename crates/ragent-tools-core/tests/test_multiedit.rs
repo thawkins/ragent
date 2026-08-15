@@ -164,51 +164,29 @@ async fn test_json_order_independence() {
 
 // ── Strict exact-match batch edits (editrenewal FR-004 / FR-009) ──────────────
 
-/// With the strict matcher, a batch edit whose `old_string` does not match
-/// the file byte-for-byte (here: the file has trailing spaces and CRLF that
-/// the needle omits) must be rejected, and no files may be modified.
+/// P2.4: with the fallback cascade, a batch edit whose `old_string` differs
+/// only in trailing spaces from the file content is now rescued by the
+/// whitespace-flexible lane (previously rejected by strict exact matching).
 #[tokio::test]
-async fn test_batch_exact_rejects_crlf_mismatch() {
+async fn test_batch_cascade_accepts_trailing_space_mismatch() {
     let tmp = TempDir::new().unwrap();
-    let path = write_file(
-        tmp.path(),
-        "a.rs",
-        "fn a() {  
-    bar  
-}
-",
-    );
+    let path = write_file(tmp.path(), "a.rs", "fn a() {  \n    bar  \n}\n");
 
     let input = json!({
         "edits": [
-            { "file_path": "a.rs", "old_string": "fn a() {
-    bar
-}
-", "new_string": "fn a() {
-    baz
-}
-" }
+            { "file_path": "a.rs", "old_string": "fn a() {\n    bar\n}\n", "new_string": "fn a() {\n    baz\n}\n" }
         ]
     });
 
-    let err = MultiEditTool
+    let out = MultiEditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("batch exact-byte matching should reject CRLF/trailing-whitespace mismatch");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("not found"),
-        "error should mention not found: {msg}"
-    );
-
-    let file_content = std::fs::read_to_string(&path).unwrap();
+        .expect("flexible fallback lane should rescue a unique whitespace-only mismatch");
+    assert_eq!(out.content, "Applied 1 edit across 1 file");
     assert_eq!(
-        file_content,
-        "fn a() {  
-    bar  
-}
-",
-        "file must be unmodified"
+        std::fs::read_to_string(&path).unwrap(),
+        "fn a() {\n    baz\n}\n",
+        "new_string is inserted verbatim"
     );
 }
 
@@ -241,12 +219,12 @@ async fn test_batch_dry_run_previews_without_writing() {
 }
 
 #[tokio::test]
-async fn test_batch_indentation_mismatch_still_rejected() {
+async fn test_batch_indentation_mismatch_rescued_by_cascade() {
     let tmp = TempDir::new().unwrap();
     // File uses 4-space indentation; needle omits indentation for the inner line.
-    // Strict exact-byte matching rejects the mismatch.
+    // P2.4: the fallback cascade resolves the unique whitespace-different match
+    // instead of rejecting it (strict exact-only matching is superseded).
     let path = write_file(tmp.path(), "a.rs", "fn a() {\n    bar\n}\n");
-    let original = std::fs::read_to_string(&path).unwrap();
 
     let input = json!({
         "edits": [
@@ -254,21 +232,16 @@ async fn test_batch_indentation_mismatch_still_rejected() {
         ]
     });
 
-    let err = MultiEditTool
+    MultiEditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("batch normalization must not adjust indentation");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("Edit 0"),
-        "error should name the edit index: {msg}"
-    );
-    assert!(
-        msg.contains("not found"),
-        "error should say the string was not found: {msg}"
-    );
+        .expect("flexible fallback lane should rescue a missed-indentation mismatch");
 
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "fn a() {\nbaz\n}\n",
+        "new_string is inserted verbatim"
+    );
 }
 
 /// A batch edit whose `old_string` matches the file exactly (including

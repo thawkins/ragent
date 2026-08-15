@@ -11,7 +11,7 @@ use crate::research_name::ResearchNameError;
 pub enum ResearchCliCommand {
     /// `ragent research help` — show the help table.
     Help,
-    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-papers]` — run a gathering session.
+    /// `ragent research create <name> [topic] [--from-url <URL>] [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep] [--tier light|full|dissertation] [--format report|executive-summary|comparison-table|source-bibliography|imrad] [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-papers]` — run a gathering session.
     Create {
         /// Validated research name (or raw string if validation hasn't run).
         name: String,
@@ -35,6 +35,8 @@ pub enum ResearchCliCommand {
         iterations: Option<u32>,
         /// Optional FR-011 `--depth shallow|standard|deep`.
         depth: Option<String>,
+        /// Optional FR-001 `--tier light|full|dissertation`.
+        tier: Option<String>,
         /// Optional FR-012 `--format <artifact>`.
         format: Option<String>,
         /// Optional FR-019 `--sources-dir <path>`.
@@ -202,6 +204,7 @@ impl ResearchCliCommand {
                         search_max_retries: None,
                         search_retry_base_delay_ms: None,
                         search_circuit_breaker_threshold: None,
+                        tier: None,
                     }
                 }
             }
@@ -211,6 +214,7 @@ impl ResearchCliCommand {
     fn parse_create(rest: &[&str]) -> Self {
         // Parse: ragent research create <name> <topic> [--from-url <URL>]
         //        [--from-file <PATH>] [--iterations N] [--depth shallow|standard|deep]
+        //        [--tier light|full|dissertation]
         //        [--format <artifact>] [--sources-dir <path>] [--template <name>]
         //        [--fetch-concurrently N] [--local-concurrently N] [--fetch-timeout-secs N] [--use-local]
         //        [--use-specs] [--use-low-relevance]
@@ -221,6 +225,7 @@ impl ResearchCliCommand {
         let mut from_file: Option<String> = None;
         let mut iterations: Option<u32> = None;
         let mut depth: Option<String> = None;
+        let mut tier: Option<String> = None;
         let mut format: Option<String> = None;
         let mut sources_dir: Option<String> = None;
         let mut template: Option<String> = None;
@@ -266,6 +271,14 @@ impl ResearchCliCommand {
                 "--depth" => {
                     if let Some(v) = rest.get(i + 1) {
                         depth = Some((*v).to_string());
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                "--tier" => {
+                    if let Some(v) = rest.get(i + 1) {
+                        tier = Some((*v).to_string());
                         i += 2;
                     } else {
                         i += 1;
@@ -396,6 +409,7 @@ impl ResearchCliCommand {
             from_file,
             iterations,
             depth,
+            tier,
             format,
             sources_dir,
             template,
@@ -478,7 +492,7 @@ impl ResearchCliCommand {
                  ragent research <SUBCOMMAND> [ARGS]\n\
                \n\
                SUBCOMMANDS:\n\
-                                   create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep]\n\
+                                   create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--tier light|full|dissertation]\n\
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
                                          [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-papers]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
@@ -488,6 +502,7 @@ impl ResearchCliCommand {
                                                                  multiple pages.\n\
                                          --iterations          Override the default maximum number of iterations.\n\
                                          --depth               Choose a preset: shallow, standard, or deep (default: standard).\n\
+                                         --tier                Choose a research tier: light, full, or dissertation (default: full).\n\
                                          --format              Select the output artifact format. Values: report, executive-summary, comparison-table, source-bibliography, imrad (default: report).\n\
                                          --fetch-concurrently  Override the maximum number of candidate pages fetched\n\
                                                                in parallel during the web-gathering phase (default 10).\n\
@@ -534,17 +549,28 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             search_engine,
             body_preview,
             language,
-        } => (
-            "web",
-            serde_json::json!({
-                "url": url,
-                "title": title,
-                "search_tool": search_tool,
-                "search_engine": search_engine,
-                "body_preview": body_preview,
-                "language": language,
-            }),
-        ),
+            oa_recovery,
+        } => {
+            let mut payload = serde_json::Map::new();
+            payload.insert("url".into(), serde_json::json!(url));
+            payload.insert("title".into(), serde_json::json!(title));
+            payload.insert("search_tool".into(), serde_json::json!(search_tool));
+            payload.insert("search_engine".into(), serde_json::json!(search_engine));
+            payload.insert("body_preview".into(), serde_json::json!(body_preview));
+            payload.insert("language".into(), serde_json::json!(language));
+            if let Some(r) = oa_recovery.as_ref() {
+                payload.insert(
+                    "oa_recovery".into(),
+                    serde_json::json!({
+                        "url": r.url,
+                        "source": r.source.to_string(),
+                        "version": r.version,
+                        "license": r.license,
+                    }),
+                );
+            }
+            ("web", serde_json::Value::Object(payload))
+        }
         SessionEvent::FromUrlBodyPreview { url, body_preview } => (
             "from_url_body_preview",
             serde_json::json!({ "url": url, "body_preview": body_preview }),
@@ -606,11 +632,140 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             "follow_up_queries",
             serde_json::json!({ "queries": queries }),
         ),
+        SessionEvent::ContradictionGraph {
+            edges,
+            sources_scanned,
+        } => (
+            "contradiction_graph",
+            serde_json::json!({
+                "sources_scanned": sources_scanned,
+                "edges": edges,
+            }),
+        ),
+        SessionEvent::LociAnalysis {
+            loci,
+            sources_scanned,
+        } => (
+            "loci_analysis",
+            serde_json::json!({
+                "sources_scanned": sources_scanned,
+                "loci": loci,
+            }),
+        ),
+        SessionEvent::DepthInvestigation { investigations } => (
+            "depth_investigation",
+            serde_json::json!({
+                "investigations": investigations,
+            }),
+        ),
+        SessionEvent::CrossLocusReconcile { reconcile } => (
+            "cross_locus_reconcile",
+            serde_json::json!({
+                "sources_scanned": reconcile.sources_scanned,
+                "pairs": reconcile.pairs,
+            }),
+        ),
+        SessionEvent::SourceTensions { tensions } => (
+            "source_tensions",
+            serde_json::json!({
+                "sources_scanned": tensions.sources_scanned,
+                "tensions": tensions.tensions,
+            }),
+        ),
+        SessionEvent::EvidenceDigest { digest } => (
+            "evidence_digest",
+            serde_json::json!({
+                "sources_scanned": digest.sources_scanned,
+                "claims": digest.claims,
+            }),
+        ),
+        SessionEvent::TripleDraft { draft } => (
+            "triple_draft",
+            serde_json::json!({
+                "candidates": draft.candidates,
+            }),
+        ),
         SessionEvent::SynthesizeResult { outcome, detail } => (
             "synthesize",
             serde_json::json!({
                 "outcome": outcome.as_str(),
                 "detail": detail,
+            }),
+        ),
+        SessionEvent::SynthesisAudit { audit } => (
+            "synthesis_audit",
+            serde_json::json!({
+                "overall_score": audit.overall_score,
+                "recommendation": audit.recommendation,
+                "critic_reports": audit.critic_reports,
+                "sources_used": audit.sources_used,
+            }),
+        ),
+        SessionEvent::CorpusCritic { report } => (
+            "corpus_critic",
+            serde_json::json!({
+                "score": report.score,
+                "passed": report.passed,
+                "coverage_score": report.coverage_score,
+                "evidence_score": report.evidence_score,
+                "balance_score": report.balance_score,
+                "tension_score": report.tension_score,
+                "issues": report.issues,
+                "gaps": report.gaps,
+            }),
+        ),
+        SessionEvent::GapFetch { result } => (
+            "gap_fetch",
+            serde_json::json!({
+                "attempted": result.attempted,
+                "new_sources": result.new_sources,
+                "failed_queries": result.failed_queries,
+                "queries": result.queries,
+                "note": result.note,
+            }),
+        ),
+        SessionEvent::SurgicalPatch { result } => (
+            "surgical_patch",
+            serde_json::json!({
+                "score_before": result.score_before,
+                "score_after": result.score_after,
+                "patches": result.patches,
+                "note": result.note,
+                "patched_finding_count": result.patched_finding_count,
+                "patched_implication_count": result.patched_implication_count,
+                "patched_open_question_count": result.patched_open_question_count,
+            }),
+        ),
+        SessionEvent::CiteCheck { result } => (
+            "cite_check",
+            serde_json::json!({
+                "passed": result.passed,
+                "checked": result.checked,
+                "gate_open": result.gate_open,
+                "issues": result.issues,
+                "failed_claims": result.failed_claims,
+            }),
+        ),
+        SessionEvent::Polish { result } => (
+            "polish",
+            serde_json::json!({
+                "control_chars_removed": result.control_chars_removed,
+                "whitespace_normalized": result.whitespace_normalized,
+                "empty_paragraphs_removed": result.empty_paragraphs_removed,
+                "change_count": result.changes.len(),
+                "note": result.note,
+            }),
+        ),
+        SessionEvent::ReadabilityAudit { result } => (
+            "readability_audit",
+            serde_json::json!({
+                "score": result.score,
+                "passed": result.passed,
+                "avg_finding_length": result.avg_finding_length,
+                "missing_label_count": result.missing_label_count,
+                "long_paragraph_count": result.long_paragraph_count,
+                "issues": result.issues,
+                "recommendations": result.recommendations,
             }),
         ),
         SessionEvent::Done {
@@ -627,10 +782,35 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "excluded_count": excluded_count,
             }),
         ),
+        SessionEvent::RunStep {
+            step,
+            status,
+            detail,
+        } => (
+            "run_step",
+            serde_json::json!({
+                "step": step,
+                "status": status,
+                "detail": detail,
+            }),
+        ),
+        SessionEvent::TierDone {
+            completed,
+            skipped,
+            failed,
+        } => (
+            "tier_done",
+            serde_json::json!({
+                "completed": completed,
+                "skipped": skipped,
+                "failed": failed,
+            }),
+        ),
         SessionEvent::ConfigSnapshot {
             output_format,
             depth,
             iterations,
+            tier,
             from_urls,
             from_file,
         } => (
@@ -639,6 +819,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "output_format": output_format,
                 "depth": depth,
                 "iterations": iterations,
+                "tier": tier,
                 "from_urls": from_urls,
                 "from_file": from_file,
             }),
@@ -663,7 +844,7 @@ pub fn render_show_output(
     status: &str,
     created: &str,
     modified: &str,
-    sources: &[(String, String, String, String)],
+    sources: &[(String, String, String, String, Option<String>)],
 ) -> String {
     let mut out = String::new();
     out.push_str(&format!("Research item: {name}\n"));
@@ -673,10 +854,13 @@ pub fn render_show_output(
     out.push_str(&format!("Created (UTC): {created}\n"));
     out.push_str(&format!("Modified (UTC):{modified}\n"));
     out.push_str(&format!("\nReferences ({}):\n", sources.len()));
-    for (i, (kind, path, title, captured)) in sources.iter().enumerate() {
+    for (i, (kind, path, title, captured, oa_note)) in sources.iter().enumerate() {
         out.push_str(&format!(
             "  #{i:>2}  [{kind:<11}] {path:<32}  {title}  ({captured})\n",
         ));
+        if let Some(note) = oa_note {
+            out.push_str(&format!("        [OA recovery] {note}\n",));
+        }
     }
     out
 }
@@ -1034,12 +1218,12 @@ mod tests {
             ResearchCliCommand::Create {
                 name,
                 topic,
-                no_scholarly,
+                no_papers,
                 ..
             } => {
                 assert_eq!(name, "foo");
                 assert_eq!(topic, "a topic");
-                assert!(no_scholarly);
+                assert!(no_papers);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1049,8 +1233,8 @@ mod tests {
     fn parse_create_no_scholarly_defaults_false() {
         let cmd = ResearchCliCommand::parse("create foo a topic");
         match cmd {
-            ResearchCliCommand::Create { no_scholarly, .. } => {
-                assert!(!no_scholarly);
+            ResearchCliCommand::Create { no_papers, .. } => {
+                assert!(!no_papers);
             }
             other => panic!("unexpected variant: {other:?}"),
         }
@@ -1157,6 +1341,54 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_create_tier_defaults_to_none() {
+        let cmd = ResearchCliCommand::parse("create foo a topic");
+        match cmd {
+            ResearchCliCommand::Create { tier, .. } => {
+                assert!(tier.is_none());
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_with_tier() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --tier light");
+        match cmd {
+            ResearchCliCommand::Create {
+                name, topic, tier, ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert_eq!(tier.as_deref(), Some("light"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_tier_does_not_swallow_topic_words() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --tier dissertation");
+        match cmd {
+            ResearchCliCommand::Create { topic, tier, .. } => {
+                assert_eq!(topic, "a topic");
+                assert_eq!(tier.as_deref(), Some("dissertation"));
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn help_message_lists_tier_option() {
+        let h = ResearchCliCommand::build_help_message();
+        assert!(h.contains("--tier"), "help missing `--tier`: {h}");
+        assert!(
+            h.contains("light|full|dissertation"),
+            "help missing tier values: {h}"
+        );
     }
 
     #[test]
@@ -1413,6 +1645,269 @@ mod tests {
     }
 
     #[test]
+    fn render_session_event_json_for_web_captured_includes_oa_recovery() {
+        use crate::open_access::{RecoveredOpenAccess, RecoverySource};
+        let event = crate::session::SessionEvent::WebCaptured {
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Example paper".into(),
+            search_tool: "mf_search".into(),
+            search_engine: "openalex".into(),
+            body_preview: String::new(),
+            language: "ENGLISH".into(),
+            oa_recovery: Some(Box::new(RecoveredOpenAccess {
+                url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/".into(),
+                source: RecoverySource::EuropePmc,
+                license: Some("CC-BY-4.0".into()),
+                version: Some("publishedVersion".into()),
+            })),
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"web\""));
+        assert!(line.contains("\"oa_recovery\""));
+        assert!(line.contains("pmc.ncbi.nlm.nih.gov/articles/PMC123456/"));
+        assert!(line.contains("europepmc"));
+        assert!(line.contains("publishedVersion"));
+    }
+
+    #[test]
+    fn render_session_event_json_for_web_captured_omits_oa_recovery_when_none() {
+        let event = crate::session::SessionEvent::WebCaptured {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            body_preview: String::new(),
+            language: "UNKNOWN".into(),
+            oa_recovery: None,
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("\"web\""));
+        assert!(!line.contains("\"oa_recovery\""));
+    }
+
+    #[test]
+    fn render_session_event_json_for_contradiction_graph() {
+        use crate::contradiction::{ContradictionClaim, ContradictionEdge};
+        use crate::source::Source;
+        use std::path::PathBuf;
+        let src = Source::Web {
+            url: "https://a.example".into(),
+            title: "A".into(),
+            captured_at: chrono::Utc::now(),
+            published_at: None,
+            body_path: PathBuf::new(),
+            body: "improves performance".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: None,
+        };
+        let edge = ContradictionEdge {
+            claim_a: ContradictionClaim::from_source("claims better performance", 1, &src),
+            claim_b: ContradictionClaim::from_source("claims worse performance", 2, &src),
+            dimension: "performance".into(),
+            note: "opposing performance claims".into(),
+            strength: 50,
+        };
+        let event = crate::session::SessionEvent::ContradictionGraph {
+            sources_scanned: 2,
+            edges: vec![edge],
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("contradiction_graph"));
+        assert!(line.contains("\"sources_scanned\":2"));
+        assert!(line.contains("performance"));
+    }
+
+    #[test]
+    fn render_session_event_json_for_evidence_digest_and_triple_draft() {
+        use crate::digest::{DigestClaim, DraftCandidate, EvidenceDigest, TripleDraft};
+        let digest = EvidenceDigest {
+            claims: vec![DigestClaim {
+                text: "Evidence on Performance".into(),
+                source_indices: vec![1, 2],
+                support_count: 2,
+                contested: true,
+                note: "contested performance evidence".into(),
+            }],
+            sources_scanned: 2,
+        };
+        let event = crate::session::SessionEvent::EvidenceDigest {
+            digest: digest.clone(),
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("evidence_digest"));
+        assert!(line.contains(r#""sources_scanned":2"#));
+        assert!(line.contains("Performance"));
+
+        let draft = TripleDraft {
+            candidates: vec![DraftCandidate {
+                label: "A".into(),
+                body: "Consensus draft body.".into(),
+                source_indices: vec![1],
+                note: "consensus-leaning draft".into(),
+            }],
+        };
+        let event = crate::session::SessionEvent::TripleDraft { draft };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("triple_draft"));
+        assert!(line.contains(r#""candidates""#));
+        assert!(line.contains("Consensus draft body."));
+    }
+
+    #[test]
+    fn render_session_event_json_for_corpus_critic_and_gap_fetch() {
+        let report = crate::corpus_critic::CorpusCriticReport {
+            score: 65,
+            coverage_score: 70,
+            evidence_score: 60,
+            balance_score: 80,
+            tension_score: 50,
+            issues: vec!["shallow evidence on Cost".into()],
+            gaps: vec!["Add cost evidence".into()],
+            recommendations: Vec::new(),
+            contested_ratio: 0,
+            shallow_dimensions: vec!["Cost".into()],
+            isolated_sources: Vec::new(),
+            passed: true,
+        };
+        let event = crate::session::SessionEvent::CorpusCritic { report };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("corpus_critic"));
+        assert!(line.contains(r#""score":65"#));
+        assert!(line.contains(r#""passed":true"#));
+
+        let result = crate::corpus_critic::GapFetchResult {
+            queries: vec!["AI coding agents cost evidence".into()],
+            new_sources: 0,
+            failed_queries: 0,
+            attempted: true,
+            note: "no web gatherer configured; gap-fill fetch skipped".into(),
+        };
+        let event = crate::session::SessionEvent::GapFetch { result };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("gap_fetch"));
+        assert!(line.contains(r#""attempted":true"#));
+        assert!(line.contains("AI coding agents cost evidence"));
+    }
+
+    #[test]
+    fn render_session_event_json_for_surgical_patch() {
+        let result = crate::patcher::PatchResult {
+            patches: vec![crate::patcher::SurgicalPatch {
+                operation: "append_finding".to_string(),
+                target: "Cost".to_string(),
+                reason: "Coverage gap".to_string(),
+                applied: true,
+            }],
+            patched_analysis: crate::analysis::AnalysisResult::default(),
+            score_before: 55,
+            score_after: 70,
+            note: "Applied 1 patch".to_string(),
+            patched_finding_count: 1,
+            patched_implication_count: 0,
+            patched_open_question_count: 1,
+        };
+        let event = crate::session::SessionEvent::SurgicalPatch { result };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("surgical_patch"));
+        assert!(line.contains(r#""score_before":55"#));
+        assert!(line.contains(r#""score_after":70"#));
+        assert!(line.contains(r#""operation":"append_finding""#));
+    }
+
+    #[test]
+    fn render_session_event_json_for_cite_check() {
+        let result = crate::cite_checker::CitationCheckResult {
+            passed: true,
+            checked: 3,
+            failed_claims: Vec::new(),
+            issues: Vec::new(),
+            gate_open: true,
+        };
+        let event = crate::session::SessionEvent::CiteCheck {
+            result: result.clone(),
+        };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("cite_check"));
+        assert!(line.contains(r#""passed":true"#));
+        assert!(line.contains(r#""checked":3"#));
+        assert!(line.contains(r#""gate_open":true"#));
+
+        let failed = crate::cite_checker::CitationCheckResult {
+            passed: false,
+            checked: 1,
+            failed_claims: vec!["CITATION_VERIFICATION_FAILED: [#2] missing".into()],
+            issues: vec!["[#2] unknown".into()],
+            gate_open: false,
+        };
+        let event = crate::session::SessionEvent::CiteCheck { result: failed };
+        let line = render_session_event_json(&event);
+        assert!(line.contains(r#""passed":false"#));
+        assert!(line.contains("CITATION_VERIFICATION_FAILED"));
+    }
+
+    #[test]
+    fn render_session_event_json_for_polish_and_readability_audit() {
+        let polish = crate::readability::PolishResult {
+            changes: vec![crate::readability::PolishChange {
+                field: "summary".to_string(),
+                description: "normalized whitespace".to_string(),
+            }],
+            control_chars_removed: 1,
+            whitespace_normalized: 2,
+            empty_paragraphs_removed: 3,
+            note: "Polished".to_string(),
+        };
+        let event = crate::session::SessionEvent::Polish { result: polish };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("polish"));
+        assert!(line.contains(r#""control_chars_removed":1"#));
+        assert!(line.contains(r#""empty_paragraphs_removed":3"#));
+
+        let audit = crate::readability::ReadabilityAudit {
+            score: 85,
+            passed: true,
+            issues: vec!["issue".to_string()],
+            recommendations: vec!["rec".to_string()],
+            avg_finding_length: 400,
+            missing_label_count: 0,
+            long_paragraph_count: 0,
+        };
+        let event = crate::session::SessionEvent::ReadabilityAudit { result: audit };
+        let line = render_session_event_json(&event);
+        assert!(line.contains("readability_audit"));
+        assert!(line.contains(r#""score":85"#));
+        assert!(line.contains(r#""passed":true"#));
+    }
+
+    #[test]
+    fn render_show_output_includes_oa_recovery_note() {
+        let out = render_show_output(
+            "oa-test",
+            "OA Recovery Test",
+            "topic",
+            "complete",
+            "2024-01-15T10:30:00Z",
+            "2024-01-15T10:31:00Z",
+            &[(
+                "web".into(),
+                "https://doi.org/10.1234/example".into(),
+                "Example paper".into(),
+                "2024-01-15T10:31:00Z".into(),
+                Some("recovered from europepmc (https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/); version=publishedVersion, license=CC-BY-4.0".into()),
+            )],
+        );
+        assert!(out.contains("[OA recovery]"));
+        assert!(out.contains("europepmc"));
+        assert!(out.contains("publishedVersion"));
+    }
+
+    #[test]
     fn render_show_output_includes_metadata() {
         let out = render_show_output(
             "rust-async",
@@ -1426,6 +1921,7 @@ mod tests {
                 "https://example.com".into(),
                 "Example".into(),
                 "2024-01-15T10:31:00Z".into(),
+                None,
             )],
         );
         assert!(out.contains("rust-async"));

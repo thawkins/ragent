@@ -12,8 +12,9 @@ use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root};
 
 mod replace {
     pub(crate) use ragent_tools_core::replace::{
-        FindDiag, FindError, find_exact_replacement_range, find_flexible_replacement_range,
-        format_match_failure,
+        CascadeFail, CascadeMatch, FindDiag, FindError, MatchLane, disambiguation_hint,
+        find_flexible_replacement_range, find_replacement_cascade, format_match_failure,
+        length_note, not_found_hint,
     };
 }
 
@@ -25,7 +26,9 @@ mod path_util {
     pub(crate) use ragent_tools_core::path_util::resolve_path;
 }
 mod edit_log {
-    pub(crate) use ragent_tools_core::edit_log::log_edit_operation;
+    pub(crate) use ragent_tools_core::edit_log::{
+        EntryExtras, log_edit_operation, log_edit_operation_ex,
+    };
 }
 
 #[path = "../src/edit.rs"]

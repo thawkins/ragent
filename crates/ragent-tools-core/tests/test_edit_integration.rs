@@ -74,10 +74,20 @@ async fn test_edit_exact_match_baseline() {
     .await;
 }
 
-// ── Exact-byte matching: reject mismatches in line endings/whitespace ────────
+// ── Exact-byte matching: cascade behaviour ────────────────────────────────────
+//
+// P2.4/P2.5: when exact matching fails, the fallback cascade retries with
+// whitespace-flexible and indent-normalised matching. Tests below verify both
+// the rescue behaviour (unique matches now succeed where strict-exact would
+// have failed) and the rejection behaviour (ambiguous / absent needles are
+// still errors).
 
 #[tokio::test]
-async fn test_edit_exact_rejects_crlf_mismatch() {
+async fn test_edit_cascade_accepts_crlf_mismatch_via_flexible_lane() {
+    // The old exact-only matcher rejected LF needles against CRLF files. The
+    // flexible fallback lane now resolves the unique match and rewrites only
+    // the matched span, converting those lines to LF (the caller's
+    // `new_string` is inserted verbatim by design).
     let tmp = TempDir::new().unwrap();
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\r\n    bar\r\n}\r\n");
     let input = json!({
@@ -85,69 +95,70 @@ async fn test_edit_exact_rejects_crlf_mismatch() {
         "old_string": "fn foo() {\n    bar\n}\n",
         "new_string": "fn foo() {\n    baz\n}\n",
     });
-    let err = EditTool
+    let out = EditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("exact-byte matcher must reject LF vs CRLF mismatch");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("not found"),
-        "error should say not found: {msg}"
+        .expect("flexible fallback lane should resolve a unique CRLF mismatch");
+    assert_eq!(
+        out.metadata.as_ref().unwrap()["match_lane"],
+        "flexible",
+        "success should record the flexible lane"
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\r\n    bar\r\n}\r\n",
-        "file must be unmodified"
+        "fn foo() {\n    baz\n}\n",
+        "matched span (including its trailing CRLF) is replaced by verbatim new_string"
     );
 }
 
 #[tokio::test]
-async fn test_edit_exact_rejects_trailing_space_mismatch() {
+async fn test_edit_cascade_accepts_trailing_space_mismatch() {
+    // Trailing-whitespace mismatch was previously rejected by strict exact
+    // matching; the flexible fallback lane now rescues a unique match.
     let tmp = TempDir::new().unwrap();
-    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
+    let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar  \n}\n");
     let input = json!({
         "file_path": "a.rs",
-        "old_string": "    bar  \n",
-        "new_string": "    baz\n",
+        "old_string": "fn foo() {\n    bar\n}\n",
+        "new_string": "fn foo() {\n    baz\n}\n",
     });
-    let err = EditTool
+    let out = EditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("exact-byte matcher must reject trailing-whitespace mismatch");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("not found"),
-        "error should say not found: {msg}"
-    );
+        .expect("flexible fallback lane should resolve a unique trailing-whitespace mismatch");
+    assert_eq!(out.metadata.as_ref().unwrap()["match_lane"], "flexible");
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\n    bar\n}\n",
-        "file must be unmodified"
+        "fn foo() {\n    baz\n}\n",
     );
 }
 
 #[tokio::test]
-async fn test_edit_exact_rejects_indentation_mismatch() {
+async fn test_edit_cascade_accepts_tab_vs_space_indentation() {
+    // A needle whose inner line omits the file's indentation is rescued by
+    // the fallback cascade (whitespace runs in the needle match the file's
+    // deeper indentation), and the caller's `new_string` is inserted
+    // verbatim.
     let tmp = TempDir::new().unwrap();
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
     let input = json!({
         "file_path": "a.rs",
-        "old_string": "\tbar\n",
-        "new_string": "\tbaz\n",
+        "old_string": "fn foo() {\nbar\n}\n",
+        "new_string": "fn foo() {\nbaz\n}\n",
     });
-    let err = EditTool
+    let out = EditTool
         .execute(input, &ctx(tmp.path()))
         .await
-        .expect_err("exact-byte matcher must reject indentation mismatch");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("not found"),
-        "error should say not found: {msg}"
+        .expect("cascade should resolve a missed-indentation mismatch");
+    assert_eq!(
+        out.metadata.as_ref().unwrap()["match_lane"],
+        "flexible",
+        "success should record the lane that matched"
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
-        "fn foo() {\n    bar\n}\n",
-        "file must be unmodified"
+        "fn foo() {\nbaz\n}\n",
+        "new_string is inserted verbatim"
     );
 }
 
@@ -754,26 +765,27 @@ async fn test_edit_collapse_whitespace_decodes_escapes() {
 }
 
 #[tokio::test]
-async fn test_edit_collapse_whitespace_default_still_strict() {
+async fn test_edit_collapse_whitespace_default_runs_flexible_fallback() {
+    // P2.4: even without `collapse_whitespace`, the fallback cascade now
+    // retries with whitespace-flexible matching. A unique (but
+    // whitespace-different) match succeeds and records the `flexible` lane.
     let tmp = TempDir::new().unwrap();
-    write_file(tmp.path(), "a.rs", "alpha   beta\n");
+    let path = write_file(tmp.path(), "a.rs", "alpha   beta\n");
     let input = json!({
         "file_path": "a.rs",
         "old_string": "alpha beta",
         "new_string": "X",
     });
-    let err = EditTool.execute(input, &ctx(tmp.path())).await.expect_err(
-        "without collapse_whitespace the strict matcher must reject whitespace mismatch",
-    );
-    assert!(
-        err.to_string().contains("byte-for-byte"),
-        "error must demand exact matching: {err}"
-    );
-    // File unchanged.
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("flexible fallback lane should resolve a unique whitespace-only mismatch");
     assert_eq!(
-        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
-        "alpha   beta\n"
+        out.metadata.as_ref().unwrap()["match_lane"],
+        "flexible",
+        "metadata should record the flexible lane"
     );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "X\n");
 }
 
 #[tokio::test]
@@ -794,4 +806,176 @@ async fn test_edit_collapse_whitespace_preserves_uniqueness_check() {
         err.to_string().contains("match exactly once"),
         "error must demand unique match: {err}"
     );
+}
+
+// ── P2.6 line-similarity hint + P2.7 multi-match disambiguation + match_lane ─
+
+#[tokio::test]
+async fn test_edit_not_found_line_similarity_hint_shows_closest_block() {
+    // P2.6: when ≥ 75 % of needle lines exist but no unique match was found,
+    // the error should name the closest block and show its current contents.
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        tmp.path(),
+        "a.rs",
+        "fn alpha() { 1 }\nfn beta() { 2 }\nfn gamma() { 3 }\nfn delta() { 4 }\n",
+    );
+    let input = json!({
+        "file_path": "a.rs",
+        // 3 of 4 lines exist verbatim; "fn beta() { 2 }" is replaced by a
+        // drifted needle line, so no exact match, but 75 % line presence.
+        "old_string": "fn alpha() { 1 }\nfn beta() { 99 }\nfn gamma() { 3 }\nfn delta() { 4 }\n",
+        "new_string": "x",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("partial match must still error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("not found"),
+        "should still say not found: {msg}"
+    );
+    assert!(
+        msg.contains("almost matches"),
+        "should name the near-miss window: {msg}"
+    );
+    assert!(
+        msg.contains("fn gamma() { 3 }"),
+        "should show actual file content to guide the next attempt: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_multi_match_error_lists_offsets_and_lines() {
+    // P2.7: multiple-match errors should now carry byte offsets and line
+    // numbers so the model can extend the needle precisely.
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "dup\nmid\ndup\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "dup",
+        "new_string": "DUP",
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("ambiguous needle must error");
+    let msg = format!("{err}");
+    assert!(msg.contains("2 times"), "should report count: {msg}");
+    assert!(
+        msg.contains("line 1") && msg.contains("line 3"),
+        "should name the lines of both matches: {msg}"
+    );
+    assert!(
+        msg.contains("Extend old_string"),
+        "should tell the model to extend the needle: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
+    // P4.12: the edit-log should record which matcher lane produced the
+    // outcome so future analyses can quantify fallback frequency.
+    let _guard = LOG_TEST_MUTEX.lock().unwrap();
+    let tmp = TempDir::new().unwrap();
+    set_edit_log_enabled(true);
+
+    write_file(tmp.path(), "a.rs", "alpha   beta\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "alpha beta",
+        "new_string": "X",
+    });
+    EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("flexible fallback should succeed");
+
+    let log_dir = tmp.path().join("log");
+    let files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(!files.is_empty());
+    let content = std::fs::read_to_string(files[0].path()).unwrap();
+    let entry: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+    assert_eq!(entry["tool"], "edit");
+    assert_eq!(entry["match_lane"], "flexible");
+    assert_eq!(entry["outcome"], "success");
+
+    set_edit_log_enabled(false);
+    clear_edit_logs(tmp.path());
+}
+
+#[tokio::test]
+async fn test_edit_metadata_records_buffer_stale_note() {
+    // P1.2: the success metadata should warn the model that the on-disk file
+    // now differs from any copy in its context.
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "let x = 1;\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "1",
+        "new_string": "2",
+    });
+    let out = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect("edit should succeed");
+    let meta = out.metadata.expect("metadata present");
+    assert_eq!(meta["match_lane"], "exact");
+    assert!(
+        meta["buffer_note"]
+            .as_str()
+            .unwrap()
+            .contains("differs from any copy"),
+        "buffer_note should warn about stale context: {meta}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_stale_retry_succeeds_after_timestamp_refresh() {
+    // P1.3: after a stale rejection, retrying the same edit should succeed
+    // because the read timestamp was refreshed during the first rejection.
+    let tmp = TempDir::new().unwrap();
+    let path = write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
+    let c = ctx(tmp.path());
+
+    // Arm the stale check with a read timestamp in the past.
+    {
+        let mut map = c.read_timestamps.write().unwrap();
+        map.insert(
+            path.clone(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+                - 5_000,
+        );
+    }
+    let future = SystemTime::now() + std::time::Duration::from_secs(10);
+    let _ = filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(future));
+
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "fn foo() { 1 }",
+        "new_string": "fn foo() { 2 }",
+    });
+    EditTool
+        .execute(input.clone(), &c)
+        .await
+        .expect_err("first attempt must be rejected as stale");
+
+    // Retry: the read timestamp was refreshed, so the same edit now succeeds
+    // without the caller manually re-reading the file.
+    EditTool
+        .execute(input, &c)
+        .await
+        .expect("retry after stale rejection should succeed");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "fn foo() { 2 }\n");
 }

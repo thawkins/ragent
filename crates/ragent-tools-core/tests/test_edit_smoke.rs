@@ -3,9 +3,10 @@
 //! Drives `ragent-tools-core` directly (the same code path that `ragent run` uses):
 //!
 //!  1. successful exact edit applies `new_string` verbatim,
-//!  2. whitespace-mismatched `old_string` is rejected with an actionable error
-//!     mentioning exact/byte-for-byte matching plus the re-read hint,
-//!  3. stale-file rejection (FR-003) still fires after an external touch.
+//!  2. whitespace-mismatched `old_string` is rescued by the fallback cascade
+//!     (metadata records which lane matched),
+//!  3. stale-file rejection (FR-003) still fires after an external touch,
+//!     and the P1.3 retry-once behaviour refreshes the read timestamp.
 
 #![allow(clippy::expect_used)]
 
@@ -90,9 +91,12 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         "edit applies new_string verbatim"
     );
 
-    // (b) Whitespace-mismatched old_string — trailing-space needle vs clean line.
+    // (b) Whitespace-mismatched old_string — the P2.4 fallback cascade now
+    // rescues a unique whitespace-only difference by consuming the trailing
+    // newline into the flexible match. The edit succeeds and the caller's
+    // `new_string` is inserted verbatim.
     record_read(&c, &path);
-    let err = EditTool
+    let out = EditTool
         .execute(
             json!({
                 "file_path": "smoke.txt",
@@ -102,20 +106,16 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
             &c,
         )
         .await
-        .expect_err("trailing-space mismatch must be rejected");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("exact"),
-        "error must state exact matching is required: {msg}"
-    );
-    assert!(
-        msg.contains("re-read") || msg.contains("Re-read"),
-        "error must carry the re-read hint: {msg}"
+        .expect("flexible fallback lane should resolve a trailing-space mismatch");
+    assert_eq!(
+        out.metadata.as_ref().unwrap()["match_lane"],
+        "flexible",
+        "fallback lane should be recorded"
     );
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "alpha\nBETA_REPLACED\ngamma\n",
-        "rejected edit leaves the file unmodified"
+        "alpha\nnopegamma\n",
+        "new_string is inserted verbatim, consuming the trailing newline"
     );
 
     // (c) Stale-file rejection (FR-003) still fires after an external touch.
@@ -139,7 +139,7 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
         .execute(
             json!({
                 "file_path": "smoke.txt",
-                "old_string": "gamma",
+                "old_string": "nopegamma",
                 "new_string": "GAMMA",
             }),
             &c,
@@ -150,5 +150,23 @@ async fn t14_smoke_exact_mismatch_and_stale_behaviour() {
     assert!(
         msg.contains("modified after") || msg.contains("stale"),
         "error should report stale file: {msg}"
+    );
+    // P1.3: after a stale rejection the read timestamp was refreshed, so the
+    // exact same retry now succeeds without a manual re-read.
+    EditTool
+        .execute(
+            json!({
+                "file_path": "smoke.txt",
+                "old_string": "nopegamma",
+                "new_string": "GAMMA",
+            }),
+            &c,
+        )
+        .await
+        .expect("retry after stale rejection should succeed (timestamp refreshed)");
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "alpha\nGAMMA\n",
+        "retry applies the replacement"
     );
 }

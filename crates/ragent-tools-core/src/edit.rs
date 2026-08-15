@@ -21,18 +21,35 @@
 //! - **Create**: `old_string` empty and the file does not exist → write
 //!   `new_string` to a new file. Rejected if the file already exists.
 //!
-//! # Matching (editrenewal FR-004 amended)
+//! # Matching (editplan P2 — fallback cascade)
 //!
-//! `old_string` must match exactly once in the target file, byte-for-byte. The
-//! strict exact matcher rejects zero or multiple matches. `new_string` is
-//! inserted verbatim — never re-indented, never line-ending-normalised.
+//! When `collapse_whitespace` is false (the default) the matcher runs the
+//! progressive fallback cascade in [`super::replace::find_replacement_cascade`]:
 //!
-//! # Stale-file detection (FR-003)
+//! 1. **Exact** — `old_string` must match exactly once, byte-for-byte.
+//! 2. **Flexible** — when exact matching fails with not-found, every run of
+//!    whitespace in the needle is matched against any non-empty run of
+//!    whitespace in the file. A unique match wins.
+//! 3. **Indent-normalised** — when both lanes above fail, per-line comparison
+//!    with leading whitespace stripped; the replacement re-applies the file's
+//!    own indentation.
+//!
+//! When `collapse_whitespace` is true, only the flexible lane runs (this is
+//! the opt-in mode). `new_string` is inserted verbatim — never re-indented
+//! or line-ending-normalised, except by the explicit indent-reapplication
+//! rule of the indent-normalised fallback lane.
+//!
+//! The winning lane is recorded in the edit-log `match_lane` field (P4.12)
+//! so future analyses can quantify which lane rescues each edit.
+//!
+//! # Stale-file detection (FR-003, amended by P1.3)
 //!
 //! When the session has recorded a read timestamp for `file_path` (via the
 //! `read` tool), the edit tool compares the file's current mtime against that
 //! recorded timestamp and rejects the edit if the file was modified after it
-//! was read. When no timestamp has been recorded, the edit proceeds (no
+//! was read. On rejection the tool refreshes the recorded read timestamp
+//! once (P1.3 retry-once) so the model's next attempt starts from the live
+//! content. When no timestamp has been recorded, the edit proceeds (no
 //! baseline is available).
 //!
 //! # Result snippet (FR-008)
@@ -52,10 +69,11 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::time::SystemTime;
 
-use super::edit_log::log_edit_operation;
+use super::edit_log::{EntryExtras, log_edit_operation, log_edit_operation_ex};
 use super::path_util::resolve_path;
 use super::replace::{
-    FindError, find_exact_replacement_range, find_flexible_replacement_range, format_match_failure,
+    CascadeFail, CascadeMatch, FindError, MatchLane, disambiguation_hint,
+    find_flexible_replacement_range, find_replacement_cascade, format_match_failure, length_note,
 };
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -86,15 +104,20 @@ impl Tool for EditTool {
     fn description(&self) -> &'static str {
         "Replace exactly one occurrence of `old_string` with `new_string` in a \
          single file. Required parameters: `file_path` (string), `old_string` \
-         (string), and `new_string` (string). By default the old_string must \
+         (string), and `new_string` (string). By default `old_string` must \
          match exactly once, byte-for-byte (indentation, whitespace, and line \
-         endings must match precisely). Optional `collapse_whitespace` \
+         endings must match precisely). If exact matching fails, a fallback \
+         cascade retries with whitespace-flexible and indent-normalised \
+         matching before erroring. Optional `collapse_whitespace` \
          (boolean, default false) relaxes matching: backslash escapes \
          (\\t, \\n, \\r, \\\\) in old_string are decoded and every run of \
          whitespace matches a non-empty run of whitespace in the file, so \
          collapsed indentation or alignment whitespace does not cause spurious \
          failures. Include 3–5 lines of context around \
-         the change point so the match is unique. Use an empty `old_string` on \
+         the change point so the match is unique; keep `old_string` under 20 \
+         lines where possible. If your previous edit on this file succeeded, \
+         treat your in-context copy as stale and re-read before composing the \
+         next `old_string`. Use an empty `old_string` on \
          a non-existent file to create it; use an empty `new_string` to delete \
          the matched text. Optional: `dry_run` (boolean) previews the change \
          without writing. Legacy aliases `path`/`old_str`/`new_str` are accepted \
@@ -241,60 +264,134 @@ impl Tool for EditTool {
 
         // ── Stale-file detection (FR-003) ─────────────────────────────────────
         if let Err(e) = check_stale_file(&path, ctx) {
-            log_edit_operation(
+            // P1.3: refresh the session's read timestamp once so the model's
+            // next attempt starts from the live content instead of being
+            // rejected again on the same file.
+            record_edit_timestamp(&path, ctx);
+            log_edit_operation_ex(
                 &ctx.working_dir,
-                "edit",
                 &path,
-                old_string,
-                new_string,
-                &format!("stale-file rejected: {e}"),
-                dry_run,
+                EntryExtras {
+                    tool: "edit",
+                    old_str: old_string,
+                    new_str: new_string,
+                    outcome: &format!("stale-file rejected: {e}"),
+                    dry_run,
+                    match_lane: None,
+                    note: Some("stale retry-once: read timestamp refreshed"),
+                },
             );
-            return Err(e);
+            bail!(
+                "{}. The session's read timestamp has been refreshed — \
+                 re-issue the edit against the live content (the file on \
+                 disk is the new baseline).",
+                e
+            );
         }
 
-        // ── Replacement (FR-004, FR-005; opt-in flexible mode) ───────────────
-        let (start, end, new_str) = if collapse_whitespace {
+        // ── Replacement (editplan P2: exact → flexible → indent-normalised) ──
+        let (lane, start, end, new_str) = if collapse_whitespace {
+            // Collapse-whitespace opt-in: run only the flexible lane.
             match find_flexible_replacement_range(&content, old_string, new_string) {
-                Ok(range) => range,
-                Err(e) => {
-                    let diag = match e {
-                        FindError::NotFound => super::replace::FindDiag::not_found(),
-                        FindError::MultipleMatches(n) => super::replace::FindDiag::multiple(n),
-                    };
-                    let err = format!(
-                        "{} (collapse_whitespace mode: escapes decoded, whitespace runs collapsed)",
-                        format_match_failure(&diag, &path)
-                    );
-                    log_edit_operation(
+                Ok((s, e, ns)) => (MatchLane::Flexible, s, e, ns),
+                Err(FindError::NotFound) => {
+                    // P2.6: try the line-similarity hint before giving up.
+                    let err =
+                        super::replace::not_found_hint(&content, old_string, &path, None, true);
+                    log_edit_operation_ex(
                         &ctx.working_dir,
-                        "edit",
                         &path,
-                        old_string,
-                        new_string,
-                        &err,
-                        dry_run,
+                        EntryExtras {
+                            tool: "edit",
+                            old_str: old_string,
+                            new_str: new_string,
+                            outcome: &err,
+                            dry_run,
+                            match_lane: Some("not_found"),
+                            note: length_note(old_string),
+                        },
+                    );
+                    bail!(err);
+                }
+                Err(FindError::MultipleMatches(n)) => {
+                    let starts: Vec<usize> = content
+                        .match_indices(old_string)
+                        .take(3)
+                        .map(|(i, _)| i)
+                        .collect();
+                    let err = format!(
+                        "{} (collapse_whitespace mode: escapes decoded, whitespace runs collapsed)\n{}",
+                        format_match_failure(&super::replace::FindDiag::multiple(n), &path),
+                        disambiguation_hint(&content, &starts)
+                    );
+                    log_edit_operation_ex(
+                        &ctx.working_dir,
+                        &path,
+                        EntryExtras {
+                            tool: "edit",
+                            old_str: old_string,
+                            new_str: new_string,
+                            outcome: &err,
+                            dry_run,
+                            match_lane: Some("multiple"),
+                            note: length_note(old_string),
+                        },
                     );
                     bail!(err);
                 }
             }
         } else {
-            match find_exact_replacement_range(&content, old_string, new_string) {
-                Ok(range) => range,
-                Err(_) => {
-                    let diag = match content.matches(old_string).count() {
-                        0 => super::replace::FindDiag::not_found(),
-                        n => super::replace::FindDiag::multiple(n),
-                    };
-                    let err = format_match_failure(&diag, &path);
-                    log_edit_operation(
+            match find_replacement_cascade(&content, old_string, new_string) {
+                CascadeMatch::Found {
+                    lane,
+                    start,
+                    end,
+                    new_str,
+                } => (lane, start, end, new_str),
+                CascadeMatch::Failed(CascadeFail::NotFound) => {
+                    // P2.6: line-similarity hint so the next attempt lands closer.
+                    let err =
+                        super::replace::not_found_hint(&content, old_string, &path, None, false);
+                    log_edit_operation_ex(
                         &ctx.working_dir,
-                        "edit",
                         &path,
-                        old_string,
-                        new_string,
-                        &err,
-                        dry_run,
+                        EntryExtras {
+                            tool: "edit",
+                            old_str: old_string,
+                            new_str: new_string,
+                            outcome: &err,
+                            dry_run,
+                            match_lane: Some("not_found"),
+                            note: length_note(old_string),
+                        },
+                    );
+                    bail!(err);
+                }
+                CascadeMatch::Failed(CascadeFail::MultipleMatches {
+                    lane: m_lane,
+                    count,
+                    starts,
+                }) => {
+                    // P2.7: show each candidate's location so the model can
+                    // extend old_string on the next attempt.
+                    let hint = disambiguation_hint(&content, &starts);
+                    let err = format!(
+                        "{}\n{}",
+                        format_match_failure(&super::replace::FindDiag::multiple(count), &path),
+                        hint
+                    );
+                    log_edit_operation_ex(
+                        &ctx.working_dir,
+                        &path,
+                        EntryExtras {
+                            tool: "edit",
+                            old_str: old_string,
+                            new_str: new_string,
+                            outcome: &err,
+                            dry_run,
+                            match_lane: Some(m_lane.as_str()),
+                            note: length_note(old_string),
+                        },
                     );
                     bail!(err);
                 }
@@ -305,20 +402,25 @@ impl Tool for EditTool {
             let old_lines = old_string.lines().count();
             let new_lines = new_str.lines().count();
             let path_str = path.display().to_string();
-            log_edit_operation(
+            log_edit_operation_ex(
                 &ctx.working_dir,
-                "edit",
                 &path,
-                old_string,
-                new_string,
-                "success (dry-run preview)",
-                dry_run,
+                EntryExtras {
+                    tool: "edit",
+                    old_str: old_string,
+                    new_str: new_string,
+                    outcome: "success (dry-run preview)",
+                    dry_run,
+                    match_lane: Some(lane.as_str()),
+                    note: None,
+                },
             );
             return Ok(ToolOutput {
                 content: snippet.clone(),
                 metadata: Some(json!({
                     "path": path_str,
                     "dry_run": true,
+                    "match_lane": lane.as_str(),
                     "old_lines": old_lines,
                     "new_lines": new_lines,
                     "lines": old_lines.max(new_lines),
@@ -350,6 +452,10 @@ impl Tool for EditTool {
         // trip the stale-file check on the file we just wrote.
         record_edit_timestamp(&path, ctx);
 
+        // P1.2: the session's buffer for this file is now out of date; update
+        // the read timestamp so the next edit sees the post-write baseline.
+        refresh_read_timestamp(&path, ctx);
+
         // ── Build the result snippet (FR-008) ─────────────────────────────────
         let snippet = build_snippet(&new_content, start, start + new_str.len());
 
@@ -365,6 +471,8 @@ impl Tool for EditTool {
             "lines": lines_changed,
             "dry_run": false,
             "collapse_whitespace": collapse_whitespace,
+            "match_lane": lane.as_str(),
+            "buffer_note": "The on-disk file now differs from any copy in your context. Re-read before composing the next edit.",
             "snippet": snippet,
         });
 
@@ -374,14 +482,18 @@ impl Tool for EditTool {
                  Use file_path/old_string/new_string instead."
             );
         }
-        log_edit_operation(
+        log_edit_operation_ex(
             &ctx.working_dir,
-            "edit",
             &path,
-            old_string,
-            new_string,
-            "success",
-            dry_run,
+            EntryExtras {
+                tool: "edit",
+                old_str: old_string,
+                new_str: new_string,
+                outcome: "success",
+                dry_run,
+                match_lane: Some(lane.as_str()),
+                note: None,
+            },
         );
 
         Ok(ToolOutput {
@@ -547,6 +659,18 @@ fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Update the session's recorded read timestamp for `path` to the on-disk
+/// mtime after a successful edit (P1.2: read-after-write guard). The post-edit
+/// state becomes the new baseline, so a subsequent edit on the same file is
+/// judged against the live content rather than the stale pre-edit buffer.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
+#[allow(dead_code)]
+fn refresh_read_timestamp(path: &Path, ctx: &ToolContext) {
+    record_edit_timestamp(path, ctx);
 }
 
 /// Record (or refresh) the edit timestamp for `path` so a follow-up edit in

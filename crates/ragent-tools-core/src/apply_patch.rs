@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 
+use super::edit_log::{EntryExtras, log_edit_operation_ex};
 use super::path_util::resolve_path;
 use super::replace::find_exact_replacement_range;
 use super::{Tool, ToolContext, ToolOutput};
@@ -79,8 +80,35 @@ impl Tool for ApplyPatchTool {
             ctx.working_dir.clone()
         };
 
-        let ops = parse_codex_patch(patch_str)?;
+        let ops = parse_codex_patch(patch_str).inspect_err(|e| {
+            log_edit_operation_ex(
+                &ctx.working_dir,
+                Path::new(""),
+                EntryExtras {
+                    tool: "apply_patch",
+                    old_str: "",
+                    new_str: patch_str,
+                    outcome: &format!("parse error: {e}"),
+                    dry_run,
+                    match_lane: None,
+                    note: None,
+                },
+            );
+        })?;
         if ops.is_empty() {
+            log_edit_operation_ex(
+                &ctx.working_dir,
+                Path::new(""),
+                EntryExtras {
+                    tool: "apply_patch",
+                    old_str: "",
+                    new_str: patch_str,
+                    outcome: "parse error: no valid patch operations found",
+                    dry_run,
+                    match_lane: None,
+                    note: None,
+                },
+            );
             bail!(
                 "No valid patch operations found. Ensure the patch is wrapped in \
                  `*** Begin Patch` / `*** End Patch` and includes an operation header."
@@ -91,7 +119,22 @@ impl Tool for ApplyPatchTool {
         let mut ops = ops
             .into_iter()
             .map(|op| op.resolve_paths(&base))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()
+            .inspect_err(|e| {
+                log_edit_operation_ex(
+                    &ctx.working_dir,
+                    Path::new(""),
+                    EntryExtras {
+                        tool: "apply_patch",
+                        old_str: "",
+                        new_str: patch_str,
+                        outcome: &format!("path validation error: {e}"),
+                        dry_run,
+                        match_lane: None,
+                        note: None,
+                    },
+                );
+            })?;
 
         // Deduplicate: if an earlier op is a pure rename of a file that a later op
         // references by its old name, adjust the later op to use the new name. This
@@ -109,56 +152,105 @@ impl Tool for ApplyPatchTool {
         let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
         let mut results: Vec<OpResult> = Vec::with_capacity(ops.len());
         for op in &ops {
-            match &op.kind {
-                OpKind::Add { content } => {
-                    if op.path.exists() && !dry_run {
-                        bail!("Add operation targets existing file: {}", op.path.display());
+            let op_result: Result<()> = async {
+                match &op.kind {
+                    OpKind::Add { content } => {
+                        if op.path.exists() && !dry_run {
+                            bail!("Add operation targets existing file: {}", op.path.display());
+                        }
+                        results.push(OpResult {
+                            path: op.path.clone(),
+                            kind: OpKindResult::Add {
+                                lines: content.lines().count(),
+                            },
+                        });
                     }
-                    results.push(OpResult {
-                        path: op.path.clone(),
-                        kind: OpKindResult::Add {
-                            lines: content.lines().count(),
-                        },
-                    });
-                }
-                OpKind::Delete => {
-                    if !op.path.exists() {
-                        bail!(
-                            "Delete operation targets missing file: {}",
-                            op.path.display()
-                        );
+                    OpKind::Delete => {
+                        if !op.path.exists() {
+                            bail!(
+                                "Delete operation targets missing file: {}",
+                                op.path.display()
+                            );
+                        }
+                        let content =
+                            tokio::fs::read_to_string(&op.path).await.with_context(|| {
+                                format!("Failed to read file: {}", op.path.display())
+                            })?;
+                        file_contents.insert(op.path.clone(), content);
+                        results.push(OpResult {
+                            path: op.path.clone(),
+                            kind: OpKindResult::Delete {
+                                lines: file_contents[&op.path].lines().count(),
+                            },
+                        });
                     }
-                    let content = tokio::fs::read_to_string(&op.path)
-                        .await
-                        .with_context(|| format!("Failed to read file: {}", op.path.display()))?;
-                    file_contents.insert(op.path.clone(), content);
-                    results.push(OpResult {
-                        path: op.path.clone(),
-                        kind: OpKindResult::Delete {
-                            lines: file_contents[&op.path].lines().count(),
-                        },
-                    });
+                    OpKind::Update { hunks } => {
+                        let content = if op.path.exists() {
+                            tokio::fs::read_to_string(&op.path).await.with_context(|| {
+                                format!("Failed to read file: {}", op.path.display())
+                            })?
+                        } else {
+                            String::new()
+                        };
+                        let new_content = apply_update_hunks(&content, hunks, &op.path)?;
+                        let old_lines = content.lines().count();
+                        let new_lines = new_content.lines().count();
+                        file_contents.insert(op.path.clone(), new_content);
+                        results.push(OpResult {
+                            path: op.path.clone(),
+                            kind: OpKindResult::Update {
+                                hunks: hunks.len(),
+                                old_lines,
+                                new_lines,
+                            },
+                        });
+                    }
                 }
-                OpKind::Update { hunks } => {
-                    let content = if op.path.exists() {
-                        tokio::fs::read_to_string(&op.path).await.with_context(|| {
-                            format!("Failed to read file: {}", op.path.display())
-                        })?
-                    } else {
-                        String::new()
-                    };
-                    let new_content = apply_update_hunks(&content, hunks, &op.path)?;
-                    let old_lines = content.lines().count();
-                    let new_lines = new_content.lines().count();
-                    file_contents.insert(op.path.clone(), new_content);
-                    results.push(OpResult {
-                        path: op.path.clone(),
-                        kind: OpKindResult::Update {
-                            hunks: hunks.len(),
-                            old_lines,
-                            new_lines,
+                Ok(())
+            }
+            .await;
+
+            match op_result {
+                Ok(()) => {
+                    let (old_str, new_str) = op_log_strings(op);
+                    log_edit_operation_ex(
+                        &ctx.working_dir,
+                        &op.path,
+                        EntryExtras {
+                            tool: "apply_patch",
+                            old_str: &old_str,
+                            new_str: &new_str,
+                            outcome: if dry_run {
+                                "success (dry-run preview)"
+                            } else {
+                                "success"
+                            },
+                            dry_run,
+                            match_lane: Some(match op.kind {
+                                OpKind::Add { .. } => "exact",
+                                OpKind::Delete => "exact",
+                                OpKind::Update { .. } => "exact",
+                            }),
+                            note: None,
                         },
-                    });
+                    );
+                }
+                Err(e) => {
+                    let (old_str, new_str) = op_log_strings(op);
+                    log_edit_operation_ex(
+                        &ctx.working_dir,
+                        &op.path,
+                        EntryExtras {
+                            tool: "apply_patch",
+                            old_str: &old_str,
+                            new_str: &new_str,
+                            outcome: &format!("{e}"),
+                            dry_run,
+                            match_lane: Some("not_found"),
+                            note: None,
+                        },
+                    );
+                    return Err(e);
                 }
             }
         }
@@ -495,6 +587,31 @@ fn hunk_replacement(hunk: &Hunk) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Build the `(old_str, new_str)` pair recorded in the edit log for one op.
+///
+/// - **Add** → `( "", file content )`
+/// - **Delete** → `( file content, "" )`
+/// - **Update** → `( concatenated hunk context, concatenated hunk replacement )`
+fn op_log_strings(op: &PatchOp) -> (String, String) {
+    match &op.kind {
+        OpKind::Add { content } => (String::new(), content.clone()),
+        OpKind::Delete => (String::new(), String::new()),
+        OpKind::Update { hunks } => {
+            let old = hunks
+                .iter()
+                .map(hunk_context)
+                .collect::<Vec<_>>()
+                .join("\n@@\n");
+            let new = hunks
+                .iter()
+                .map(hunk_replacement)
+                .collect::<Vec<_>>()
+                .join("\n@@\n");
+            (old, new)
+        }
+    }
 }
 
 fn build_output(results: Vec<OpResult>, dry_run: bool) -> ToolOutput {

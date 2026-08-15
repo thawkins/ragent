@@ -127,7 +127,10 @@ pub fn router(state: AppState) -> Router {
             auth_middleware,
         ));
 
-    // Serve static web UI files from the embedded static directory
+    // Serve static web UI files from the embedded static directory.
+    // Axum ≥ 0.8 rejects `nest_service("/")` ("Nesting at the root is no
+    // longer supported"), so the static tree is attached as the fallback for
+    // any path that matched no API route above.
     let static_files =
         ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/static"))
             .append_index_html_on_directories(true);
@@ -135,7 +138,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .merge(protected)
-        .nest_service("/", static_files)
+        .fallback_service(static_files)
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

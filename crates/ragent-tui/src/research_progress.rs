@@ -287,6 +287,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 search_engine,
                 body_preview,
                 language,
+                oa_recovery: _,
             } => {
                 let provenance = match (search_tool.is_empty(), search_engine.is_empty()) {
                     (true, true) => String::new(),
@@ -389,14 +390,52 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 *youtube_count,
                 *excluded_count,
             ),
+            SessionEvent::RunStep {
+                step,
+                status,
+                detail,
+            } => (
+                SessionPhase::Setup,
+                status.as_str(),
+                format!(
+                    "pipeline step: {step}{}",
+                    detail
+                        .as_ref()
+                        .map(|d| format!(" ({d})"))
+                        .unwrap_or_default()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::TierDone {
+                completed,
+                skipped,
+                failed,
+            } => (
+                SessionPhase::Finalize,
+                "tier done",
+                format!(
+                    "pipeline complete: {completed} completed, {skipped} skipped, {failed} failed"
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
             SessionEvent::ConfigSnapshot {
                 output_format,
                 depth,
                 iterations,
+                tier,
                 from_urls,
                 from_file,
             } => {
                 let mut parts = vec![format!("output format: {output_format}")];
+                if let Some(t) = tier {
+                    parts.push(format!("tier: {t}"));
+                }
                 if let Some(d) = depth {
                     parts.push(format!("depth: {d}"));
                 }
@@ -424,6 +463,108 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     0,
                 )
             }
+            SessionEvent::SynthesisAudit { audit } => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "synthesis audit: {}/100 — {}",
+                    audit.overall_score, audit.recommendation
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::CorpusCritic { report } => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "corpus critic: {}/100 ({}) — {} issue(s), {} gap(s)",
+                    report.score,
+                    if report.passed { "pass" } else { "review" },
+                    report.issues.len(),
+                    report.gaps.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::GapFetch { result } => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "gap-fill fetch: {} new source(s) from {} query(s) {}",
+                    result.new_sources,
+                    result.queries.len(),
+                    if result.attempted { "" } else { "(skipped)" }
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::SurgicalPatch { result } => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "surgical patch: {} → {} ({} patch(es), {} applied)",
+                    result.score_before,
+                    result.score_after,
+                    result.patches.len(),
+                    result.patches.iter().filter(|p| p.applied).count()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::CiteCheck { result } => (
+                SessionPhase::Synthesize,
+                if result.passed { "done" } else { "error" },
+                format!(
+                    "cite check: {} citation(s) checked — {} (gate {})",
+                    result.checked,
+                    if result.passed {
+                        "pass"
+                    } else {
+                        "CITATION_VERIFICATION_FAILED"
+                    },
+                    if result.gate_open { "open" } else { "closed" }
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Polish { result } => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "polish: {} control char(s), {} whitespace run(s), {} empty paragraph(s) changed",
+                    result.control_chars_removed,
+                    result.whitespace_normalized,
+                    result.empty_paragraphs_removed
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::ReadabilityAudit { result } => (
+                SessionPhase::Synthesize,
+                if result.passed { "done" } else { "error" },
+                format!(
+                    "readability audit: {}/100 — {} issue(s), {} recommendation(s)",
+                    result.score,
+                    result.issues.len(),
+                    result.recommendations.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
             _ => (
                 SessionPhase::Setup,
                 "event",
@@ -680,6 +821,52 @@ mod tests {
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert!(decoded.detail.contains("no LLM engine configured"));
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip_polish_and_readability_audit() {
+        let encoded = encode_progress_event(
+            "foo",
+            "bar",
+            &SessionEvent::Polish {
+                result: ragent_research::PolishResult {
+                    changes: vec![ragent_research::PolishChange {
+                        field: "summary".into(),
+                        description: "normalized whitespace".into(),
+                    }],
+                    control_chars_removed: 1,
+                    whitespace_normalized: 2,
+                    empty_paragraphs_removed: 3,
+                    note: "Polished".into(),
+                },
+            },
+        );
+        let decoded = decode_progress_event(&encoded).expect("decode");
+        assert_eq!(decoded.phase, SessionPhase::Synthesize);
+        assert_eq!(decoded.status, StepStatus::Done);
+        assert!(decoded.detail.contains("polish"));
+        assert!(decoded.detail.contains("1 control char"));
+
+        let encoded = encode_progress_event(
+            "foo",
+            "bar",
+            &SessionEvent::ReadabilityAudit {
+                result: ragent_research::ReadabilityAudit {
+                    score: 85,
+                    passed: true,
+                    issues: vec!["issue".into()],
+                    recommendations: vec!["rec".into()],
+                    avg_finding_length: 400,
+                    missing_label_count: 0,
+                    long_paragraph_count: 0,
+                },
+            },
+        );
+        let decoded = decode_progress_event(&encoded).expect("decode");
+        assert_eq!(decoded.phase, SessionPhase::Synthesize);
+        assert_eq!(decoded.status, StepStatus::Done);
+        assert!(decoded.detail.contains("readability audit"));
+        assert!(decoded.detail.contains("85/100"));
     }
 
     #[test]

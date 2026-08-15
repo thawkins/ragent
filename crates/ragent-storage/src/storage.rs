@@ -3954,17 +3954,17 @@ fn cron_event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronEventRow
     // it doesn't exist yet by defaulting to `false`.
     let stateful_i: i64 = row.get(11).unwrap_or(0);
     Ok(CronEventRow {
-        id: row.get(0)?,
-        agent_type: row.get(1)?,
-        prompt: row.get(2)?,
-        schedule_form: row.get(3)?,
-        start_at: row.get(4)?,
-        duration_secs: row.get(5)?,
-        schedule_raw: row.get(6)?,
+        id: row.get("id")?,
+        agent_type: row.get("agent_type")?,
+        prompt: row.get("prompt")?,
+        schedule_form: row.get("schedule_form")?,
+        start_at: row.get("start_at")?,
+        duration_secs: row.get("duration_secs")?,
+        schedule_raw: row.get("schedule_raw")?,
         enabled: enabled_i != 0,
-        next_due: row.get(8)?,
-        created_at: row.get(9)?,
-        last_fired: row.get(10)?,
+        next_due: row.get("next_due")?,
+        created_at: row.get("created_at")?,
+        last_fired: row.get("last_fired")?,
         stateful: stateful_i != 0,
     })
 }

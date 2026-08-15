@@ -245,3 +245,115 @@ async fn test_apply_patch_rejects_crlf_context_mismatch() {
         "file must be unmodified after the failed patch"
     );
 }
+
+// ── Edit-log instrumentation for apply_patch ────────────────────────────────
+
+use ragent_tools_core::edit_log::{clear_edit_logs, is_edit_log_enabled, set_edit_log_enabled};
+
+static APPLY_PATCH_LOG_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn read_log_lines(log_dir: &std::path::Path) -> Vec<serde_json::Value> {
+    let files: Vec<_> = std::fs::read_dir(log_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let s = e.file_name().to_string_lossy().to_string();
+            s.starts_with("edits-") && s.ends_with(".jsonl")
+        })
+        .collect();
+    assert!(
+        !files.is_empty(),
+        "log directory should contain an edits jsonl file"
+    );
+    let path = files.first().unwrap().path();
+    let content = std::fs::read_to_string(&path).unwrap();
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_apply_patch_log_success_writes_jsonl() {
+    let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let log_dir = root.join("log");
+    set_edit_log_enabled(true);
+    assert!(is_edit_log_enabled());
+
+    std::fs::write(
+        root.join("app.rs"),
+        "fn main() {\n    println!(\"hi\");\n}\n",
+    )
+    .unwrap();
+
+    let tool = ApplyPatchTool;
+    tool.execute(
+        json!({
+            "patch": "*** Begin Patch\n*** Update File: app.rs\n@@\n fn main() {\n-    println!(\"hi\");\n+    println!(\"hello\");\n }\n*** End Patch"
+        }),
+        &test_ctx(root.to_path_buf()),
+    )
+    .await
+    .expect("execute");
+
+    let entries = read_log_lines(&log_dir);
+    assert!(!entries.is_empty());
+    let entry = &entries[0];
+    assert_eq!(entry["tool"], "apply_patch");
+    assert!(
+        entry["file_path"].as_str().unwrap().ends_with("app.rs"),
+        "file_path should end with app.rs: {}",
+        entry["file_path"]
+    );
+    assert_eq!(entry["outcome"], "success");
+    assert_eq!(entry["dry_run"], false);
+
+    set_edit_log_enabled(false);
+    clear_edit_logs(root);
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn test_apply_patch_log_failure_writes_jsonl() {
+    let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let log_dir = root.join("log");
+    set_edit_log_enabled(true);
+
+    std::fs::write(root.join("x.rs"), "fn x() {}\n").unwrap();
+
+    let tool = ApplyPatchTool;
+    let err = tool
+        .execute(
+            json!({
+                "patch": "*** Begin Patch\n*** Update File: x.rs\n@@\n fn y() {}\n-fn y() {}\n+fn z() {}\n*** End Patch"
+            }),
+            &test_ctx(root.to_path_buf()),
+        )
+        .await
+        .expect_err("update against missing context should fail");
+
+    let entries = read_log_lines(&log_dir);
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry["tool"], "apply_patch");
+    assert!(
+        entry["outcome"].as_str().unwrap().contains("Hunk"),
+        "outcome should mention hunk failure: {}",
+        entry["outcome"]
+    );
+    assert!(
+        entry["outcome"].as_str().unwrap().contains("x.rs"),
+        "outcome should mention target file: {}",
+        entry["outcome"]
+    );
+    let _ = err;
+
+    set_edit_log_enabled(false);
+    clear_edit_logs(root);
+}

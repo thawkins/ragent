@@ -170,6 +170,7 @@ impl GatherObserver for StateGatherForwarder {
                 search_engine,
                 body_preview,
                 language,
+                oa_recovery,
             } => {
                 self.observer.on_event(SessionEvent::WebCaptured {
                     url,
@@ -178,6 +179,7 @@ impl GatherObserver for StateGatherForwarder {
                     search_engine,
                     body_preview,
                     language,
+                    oa_recovery,
                 });
             }
             _ => {}
@@ -392,6 +394,7 @@ impl IterativeEngine {
                                 search_engine,
                                 body,
                                 language,
+                                oa_recovery,
                                 ..
                             } = &src
                             {
@@ -414,6 +417,7 @@ impl IterativeEngine {
                                     search_engine: search_engine.clone(),
                                     body_preview,
                                     language: lang,
+                                    oa_recovery: oa_recovery.clone(),
                                 });
                             }
                             state.add_source(src);

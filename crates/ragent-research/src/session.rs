@@ -12,16 +12,26 @@
 use crate::analysis::{
     AnalysisEngine, AnalysisOutcome, AnalysisResult, LlmAnalysisEngine, build_source_bodies,
 };
+use crate::cite_checker::{CitationCheckResult, check_citations};
+use crate::contradiction::{ContradictionGraph, build_contradiction_graph};
+use crate::corpus_critic::{GapFetchResult, build_corpus_critic, derive_gap_queries};
+use crate::digest::{build_evidence_digest, build_triple_draft};
 use crate::document::{ResearchDocument, mark_in_progress};
 use crate::engine::{Critic, EngineConfig, IterativeEngine, SimpleCritic};
 use crate::io::ResearchIo;
 use crate::item::ResearchItem;
 use crate::local_gatherer::{LocalGatherConfig, LocalGatherer, LocalTool};
+use crate::locus::{analyze_loci, investigate_depth};
 use crate::manager::{ResearchError, ResearchManager, Result};
+use crate::patcher::{PatchResult, build_surgical_patches};
 use crate::planner::{HeuristicPlanner, Planner};
+use crate::readability::{PolishResult, ReadabilityAudit, audit_readability, polish_analysis};
+use crate::reconcile::{build_cross_locus_reconcile, build_source_tensions};
 use crate::research_name::ResearchName;
-use crate::run_config::{Depth, OutputFormat};
+use crate::run_config::{Depth, OutputFormat, Tier};
+use crate::run_manifest::RunStep;
 use crate::source::Source;
+use crate::tier_router::{TierRouter, TierRouterObserver, TierRouterToSessionObserver};
 use crate::web_gatherer::{
     DEFAULT_FETCH_CONCURRENCY, DEFAULT_MAX_WEB_RESULTS, GatherEvent, GatherObserver, WebGatherer,
 };
@@ -67,6 +77,7 @@ impl GatherObserver for GatherEventForwarder {
                 search_engine,
                 body_preview,
                 language,
+                oa_recovery,
             } => {
                 // Forward inline so the UI shows each successfully retrieved
                 // URL as it arrives, rather than only at the end of the
@@ -78,6 +89,7 @@ impl GatherObserver for GatherEventForwarder {
                     search_engine,
                     body_preview,
                     language,
+                    oa_recovery,
                 });
             }
             // H-002/H-003: retry and circuit-breaker events are forwarded as
@@ -102,6 +114,45 @@ impl GatherObserver for GatherEventForwarder {
                     error: format!(
                         "search circuit-breaker open after {consecutive_failures} consecutive failures"
                     ),
+                });
+            }
+            GatherEvent::WidthSweepSummary {
+                queries,
+                engines,
+                considered,
+                captured,
+                excluded,
+            } => {
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: crate::run_manifest::RunStep::WidthSweep
+                        .as_str()
+                        .to_string(),
+                    status: crate::run_manifest::StepStatus::InProgress
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!(
+                        "queries={}, engines=[{}], considered={}, captured={}, excluded={}",
+                        queries.len(),
+                        engines.join(", "),
+                        considered,
+                        captured,
+                        excluded
+                    )),
+                });
+            }
+            GatherEvent::VaultSufficient {
+                count,
+                required,
+                tier,
+            } => {
+                self.observer.on_event(SessionEvent::RunStep {
+                    step: "vault_sufficient".to_string(),
+                    status: crate::run_manifest::StepStatus::Completed
+                        .as_str()
+                        .to_string(),
+                    detail: Some(format!(
+                        "vault has {count} sources (required {required} for {tier} tier); skipping new fetches"
+                    )),
                 });
             }
         }
@@ -228,6 +279,16 @@ pub struct SessionConfig {
     /// [`crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD`] (3).
     /// `0` disables the circuit-breaker entirely.
     pub search_circuit_breaker_threshold: u32,
+    /// `--tier` research tier (FR-001). Defaults to [`Tier::Full`].
+    pub tier: Tier,
+    /// Enable open-access recovery via Unpaywall and Europe PMC for short
+    /// scholarly sources (FR-010). Defaults to `false`; T-018 will wire
+    /// this from `ragent.json` and CLI flags.
+    pub open_access_recovery: bool,
+    /// Contact email required by Unpaywall's terms of service (FR-012).
+    pub contact_email: Option<String>,
+    /// Minimum full-text length (in characters) that triggers OA recovery.
+    pub oa_min_full_text_chars: usize,
 }
 
 impl SessionConfig {
@@ -283,6 +344,10 @@ impl Default for SessionConfig {
             search_retry_base_delay_ms: crate::web_gatherer::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
             search_circuit_breaker_threshold:
                 crate::web_gatherer::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
+            tier: Tier::Full,
+            open_access_recovery: false,
+            contact_email: None,
+            oa_min_full_text_chars: crate::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS,
         }
     }
 }
@@ -361,6 +426,10 @@ pub enum SessionEvent {
         /// `"ENGLISH"`, `"FRENCH"`), or `"UNKNOWN"` when language
         /// detection was unavailable.
         language: String,
+        /// Open-access recovery metadata when the full text was recovered
+        /// from a legal OA copy instead of fetched from the original URL
+        /// (FR-015).
+        oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
     },
     /// The `--from-url` primary page was fetched. Carries a short preview of
     /// the extracted article body so the UI can show what topic was derived
@@ -466,6 +535,104 @@ pub enum SessionEvent {
         /// Queries to run in the next retrieval pass.
         queries: Vec<String>,
     },
+    /// The contradiction-graph step produced a ranked set of opposing source
+    /// claims (FR-005, T-007). Emitted only for tiers that include the step.
+    ContradictionGraph {
+        /// Detected contradiction edges, sorted from strongest to weakest.
+        edges: Vec<crate::contradiction::ContradictionEdge>,
+        /// Number of sources scanned to build the graph.
+        sources_scanned: usize,
+    },
+    /// The loci-analysis step identified key recurring dimensions across the
+    /// gathered corpus (FR-005, T-008). Emitted only for tiers that include the
+    /// step.
+    LociAnalysis {
+        /// Detected loci, sorted from most to least supported.
+        loci: crate::locus::LocusSet,
+        /// Number of sources scanned.
+        sources_scanned: usize,
+    },
+    /// The depth-investigation step classified each detected locus by evidence
+    /// coverage (FR-005, T-008). Emitted only for tiers that include the step.
+    DepthInvestigation {
+        /// Depth results, one per detected locus.
+        investigations: Vec<crate::locus::DepthInvestigation>,
+    },
+    /// The cross-locus reconcile step identified dimensions that share common
+    /// sources (FR-005, T-009). Emitted only for tiers that include the step.
+    CrossLocusReconcile {
+        /// Reconciled pairs of loci with shared supporting sources.
+        reconcile: crate::reconcile::CrossLocusReconcile,
+    },
+    /// The source-tensions step surfaced contradictions, shallow evidence, and
+    /// isolated sources (FR-005, T-009). Emitted only for tiers that include the
+    /// step.
+    SourceTensions {
+        /// Detected source tensions.
+        tensions: crate::reconcile::SourceTensions,
+    },
+    /// The evidence-digest step summarised claim support and conflict levels
+    /// (FR-005, T-011). Emitted only for tiers that include the step.
+    EvidenceDigest {
+        /// Structured digest claims.
+        digest: crate::digest::EvidenceDigest,
+    },
+    /// The corpus-critic step audited the gathered corpus for coverage,
+    /// evidence depth, balance, and unresolved tensions (FR-005, T-010).
+    /// Emitted only for tiers that include the step.
+    CorpusCritic {
+        /// Structured corpus-critic report.
+        report: crate::corpus_critic::CorpusCriticReport,
+    },
+    /// The gap-fill fetch step issued targeted follow-up queries to close
+    /// evidence gaps identified by the corpus critic (FR-005, T-010).
+    GapFetch {
+        /// Result of the gap-fill pass.
+        result: crate::corpus_critic::GapFetchResult,
+    },
+    /// The triple-draft step produced three deterministic candidate summaries
+    /// (FR-005, T-011). Emitted only for tiers that include the step.
+    TripleDraft {
+        /// Three candidate drafts.
+        draft: crate::digest::TripleDraft,
+    },
+    /// The synthesis audit step ran the 4-critic subagents against the final
+    /// narrative and produced a structured quality report (FR-005, T-012).
+    /// Emitted only for tiers that include the step.
+    SynthesisAudit {
+        /// Structured audit report.
+        audit: crate::synthesis::SynthesisAudit,
+    },
+    /// The surgical patcher step applied deterministic revisions to the draft
+    /// based on the synthesis audit and corpus-critic gaps (FR-005, T-013).
+    /// Emitted only for tiers that include the step.
+    SurgicalPatch {
+        /// Result of the patcher, including the list of applied patches and
+        /// the estimated score improvement.
+        result: PatchResult,
+    },
+    /// The cite-check step verified every `[#N]` citation in the draft against
+    /// the gathered sources (FR-005, T-014). Emitted only for tiers that
+    /// include the step.
+    CiteCheck {
+        /// Result of the citation verification pass, including the failure
+        /// gate state.
+        result: CitationCheckResult,
+    },
+    /// The polish step applied deterministic final edits to the narrative
+    /// before assembly (FR-005, T-015). Emitted only for tiers that include
+    /// the step.
+    Polish {
+        /// Result of the polish pass.
+        result: PolishResult,
+    },
+    /// The readability audit scored the polished draft on structure and
+    /// paragraph length (FR-005, T-015). Emitted only for tiers that include
+    /// the step.
+    ReadabilityAudit {
+        /// Result of the readability audit pass.
+        result: ReadabilityAudit,
+    },
     /// The session has finished and a fully-populated document was written.
     Done {
         /// Total number of sources captured.
@@ -477,6 +644,26 @@ pub enum SessionEvent {
         /// Number of web sources fetched but excluded for low relevance.
         excluded_count: usize,
     },
+    /// A single pipeline step started, completed, skipped, or failed.
+    /// Emitted by the tier router so the UI can display the Hyperresearch
+    /// pipeline progress (T-005, FR-005).
+    RunStep {
+        /// Step identifier (snake_case), e.g. `"width_sweep"`.
+        step: String,
+        /// New status label.
+        status: String,
+        /// Optional human-readable detail.
+        detail: Option<String>,
+    },
+    /// Tier-router summary emitted when the pipeline reaches a terminal state.
+    TierDone {
+        /// Number of completed steps.
+        completed: usize,
+        /// Number of skipped steps.
+        skipped: usize,
+        /// Number of failed steps.
+        failed: usize,
+    },
     /// Resolved run options, emitted once at the start of a session so that
     /// every observer (CLI JSON, TUI progress log, HTTP response) can confirm
     /// the output format and other flags that are in effect (FR-012).
@@ -487,6 +674,8 @@ pub enum SessionEvent {
         depth: Option<String>,
         /// Iteration override selected via `--iterations`, if any.
         iterations: Option<u32>,
+        /// `--tier` research tier selected for this run.
+        tier: Option<String>,
         /// `--from-url` primary sources, if any.
         from_urls: Vec<String>,
         /// `--from-file` primary source path, if any.
@@ -709,6 +898,7 @@ impl ResearchSession {
             output_format: config.output_format.as_str().to_string(),
             depth: config.depth.map(|d| d.as_str().to_string()),
             iterations: config.iterations,
+            tier: Some(config.tier.as_str().to_string()),
             from_urls: config.from_urls.clone(),
             from_file: config.from_file.as_ref().map(|p| p.display().to_string()),
         });
@@ -784,6 +974,7 @@ impl ResearchSession {
                         search_engine: String::new(),
                         body_preview: String::new(),
                         language: src_language,
+                        oa_recovery: None,
                     });
                     // Topic derivation only runs on the first URL (idx == 0)
                     // when no explicit topic was provided. Subsequent URLs are
@@ -1004,6 +1195,11 @@ impl ResearchSession {
         };
         mark_in_progress(&mut item);
         self.manager.start_gathering(name_str).await?;
+
+        // ── Initialize tier router (T-005) ───────────────────────────────
+        let run_tag = crate::tier_router::default_run_tag(name_str);
+        let mut router = TierRouter::new(&run_tag, name_str, &topic, config.tier);
+        let router_observer = TierRouterToSessionObserver::new(observer.clone());
         let template_body = load_template(self.manager.root(), config.template.as_deref()).await;
 
         // If we didn't have an explicit topic and no from-url/from-file was
@@ -1019,6 +1215,15 @@ impl ResearchSession {
         let mut pdf_count = 0usize;
         let mut youtube_count = 0usize;
         let gather_start = Instant::now();
+
+        // Decompose is the first step for every tier except dissertation.
+        if let Some(step) = router.next_step()
+            && step == RunStep::Decompose
+        {
+            router.start_step(RunStep::Decompose, &router_observer);
+            router.finish_step(RunStep::Decompose, &router_observer);
+        }
+
         if use_iterative && engine_cfg.max_iterations > 1 {
             observer.on_event(SessionEvent::Phase {
                 phase: SessionPhase::Web,
@@ -1077,7 +1282,13 @@ impl ResearchSession {
                         .with_search_retry_base_delay_ms(config.search_retry_base_delay_ms)
                         .with_search_circuit_breaker_threshold(
                             config.search_circuit_breaker_threshold,
-                        );
+                        )
+                        .with_open_access_recovery(
+                            config.open_access_recovery,
+                            config.contact_email.clone(),
+                        )
+                        .with_oa_min_full_text_chars(config.oa_min_full_text_chars)
+                        .with_sufficient_sources(config.tier.sufficient_sources());
                     let forwarder = GatherEventForwarder {
                         observer: observer.clone(),
                     };
@@ -1119,13 +1330,7 @@ impl ResearchSession {
                         }
                     }
                 } else {
-                    Ok(crate::web_gatherer::GatherResult {
-                        queries: Vec::new(),
-                        sources: Vec::new(),
-                        pdf_count: 0,
-                        youtube_count: 0,
-                        excluded_count: 0,
-                    })
+                    Ok(crate::web_gatherer::GatherResult::empty())
                 }
             };
 
@@ -1226,6 +1431,226 @@ impl ResearchSession {
         );
 
         // ── Synthesize ─────────────────────────────────────────────────────
+        // Advance the tier router to mark WidthSweep/DepthInvestigation-style
+        // steps as completed. Full tier: we keep adversarial steps as
+        // skipped-stubs until T-006..T-015 implement them.
+        if let Some(step) = router.next_step()
+            && step == RunStep::WidthSweep
+        {
+            router.start_step(RunStep::WidthSweep, &router_observer);
+            router.finish_step(RunStep::WidthSweep, &router_observer);
+        }
+        // ── Contradiction Graph (T-007) ────────────────────────────────────
+        // Run the deterministic contradiction-graph step for tiers that
+        // include it, emit the result as a session event, and keep the graph
+        // for the assembled document.
+        let contradiction_graph: Option<ContradictionGraph> = if let Some(step) = router.next_step()
+            && step == RunStep::ContradictionGraph
+        {
+            router.start_step(RunStep::ContradictionGraph, &router_observer);
+            let graph = build_contradiction_graph(&sources);
+            observer.on_event(SessionEvent::ContradictionGraph {
+                sources_scanned: sources.len(),
+                edges: graph.edges.clone(),
+            });
+            router.finish_step(RunStep::ContradictionGraph, &router_observer);
+            Some(graph)
+        } else {
+            None
+        };
+
+        // ── Loci Analysis (T-008) ──────────────────────────────────────────
+        let loci = if let Some(step) = router.next_step()
+            && step == RunStep::LociAnalysis
+        {
+            router.start_step(RunStep::LociAnalysis, &router_observer);
+            let loci = analyze_loci(&sources);
+            observer.on_event(SessionEvent::LociAnalysis {
+                sources_scanned: sources.len(),
+                loci: loci.clone(),
+            });
+            router.finish_step(RunStep::LociAnalysis, &router_observer);
+            loci
+        } else {
+            crate::locus::LocusSet::empty()
+        };
+
+        // ── Depth Investigation (T-008) ────────────────────────────────────
+        let depth_investigation = if let Some(step) = router.next_step()
+            && step == RunStep::DepthInvestigation
+        {
+            router.start_step(RunStep::DepthInvestigation, &router_observer);
+            let investigations = investigate_depth(&loci);
+            observer.on_event(SessionEvent::DepthInvestigation {
+                investigations: investigations.clone(),
+            });
+            router.finish_step(RunStep::DepthInvestigation, &router_observer);
+            investigations
+        } else {
+            Vec::new()
+        };
+
+        // ── Cross-Locus Reconcile (T-009) ─────────────────────────────────
+        let cross_locus_reconcile = if let Some(step) = router.next_step()
+            && step == RunStep::CrossLocusReconcile
+        {
+            router.start_step(RunStep::CrossLocusReconcile, &router_observer);
+            let reconcile =
+                build_cross_locus_reconcile(&loci, contradiction_graph.as_ref(), sources.len());
+            observer.on_event(SessionEvent::CrossLocusReconcile {
+                reconcile: reconcile.clone(),
+            });
+            router.finish_step(RunStep::CrossLocusReconcile, &router_observer);
+            reconcile
+        } else {
+            crate::reconcile::CrossLocusReconcile::empty()
+        };
+
+        // ── Source Tensions (T-009) ─────────────────────────────────────────
+        let source_tensions = if let Some(step) = router.next_step()
+            && step == RunStep::SourceTensions
+        {
+            router.start_step(RunStep::SourceTensions, &router_observer);
+            let tensions = build_source_tensions(&loci, contradiction_graph.as_ref(), &sources);
+            observer.on_event(SessionEvent::SourceTensions {
+                tensions: tensions.clone(),
+            });
+            router.finish_step(RunStep::SourceTensions, &router_observer);
+            tensions
+        } else {
+            crate::reconcile::SourceTensions::empty()
+        };
+
+        // ── Evidence Digest (T-011) ────────────────────────────────────────
+        let evidence_digest = if let Some(step) = router.next_step()
+            && step == RunStep::EvidenceDigest
+        {
+            router.start_step(RunStep::EvidenceDigest, &router_observer);
+            let digest = build_evidence_digest(
+                &sources,
+                &loci,
+                &depth_investigation,
+                contradiction_graph.as_ref(),
+            );
+            observer.on_event(SessionEvent::EvidenceDigest {
+                digest: digest.clone(),
+            });
+            router.finish_step(RunStep::EvidenceDigest, &router_observer);
+            digest
+        } else {
+            crate::digest::EvidenceDigest::empty()
+        };
+
+        // Corpus Critic (T-010)
+        let corpus_critic = if let Some(step) = router.next_step()
+            && step == RunStep::CorpusCritic
+        {
+            router.start_step(RunStep::CorpusCritic, &router_observer);
+            let report = build_corpus_critic(
+                &sources,
+                &loci,
+                &evidence_digest,
+                &source_tensions,
+                contradiction_graph.as_ref(),
+                None,
+                &topic,
+            );
+            observer.on_event(SessionEvent::CorpusCritic {
+                report: report.clone(),
+            });
+            router.finish_step(RunStep::CorpusCritic, &router_observer);
+            report
+        } else {
+            crate::corpus_critic::CorpusCriticReport::empty()
+        };
+
+        // Gap-Fill Fetch (T-010)
+        let mut gap_fetch = GapFetchResult::empty();
+        if let Some(step) = router.next_step()
+            && step == RunStep::GapFetch
+        {
+            router.start_step(RunStep::GapFetch, &router_observer);
+            let gap_queries = derive_gap_queries(&corpus_critic, &loci, &topic);
+            if !gap_queries.is_empty() {
+                if let Some(web) = &self.web {
+                    let budget = config.max_web_results.clamp(3, 10);
+                    let forwarder = GatherEventForwarder {
+                        observer: observer.clone(),
+                    };
+                    let combined_query = gap_queries.join(" | ");
+                    match web
+                        .gather_with_observer(&combined_query, budget, Some(&forwarder))
+                        .await
+                    {
+                        Ok(result) => {
+                            gap_fetch.new_sources = result.sources.len();
+                            gap_fetch.queries = gap_queries.clone();
+                            gap_fetch.attempted = true;
+                            sources.extend(result.sources);
+                        }
+                        Err(e) => {
+                            gap_fetch.failed_queries = gap_queries.len();
+                            gap_fetch.note = format!("gap-fill fetch failed: {e}");
+                        }
+                    }
+                } else {
+                    gap_fetch.note =
+                        "no web gatherer configured; gap-fill fetch skipped".to_string();
+                }
+            }
+            observer.on_event(SessionEvent::GapFetch {
+                result: gap_fetch.clone(),
+            });
+            router.finish_step(RunStep::GapFetch, &router_observer);
+        }
+
+        // Triple Draft (T-011)
+        let triple_draft = if let Some(step) = router.next_step()
+            && step == RunStep::TripleDraft
+        {
+            router.start_step(RunStep::TripleDraft, &router_observer);
+            let draft = build_triple_draft(&evidence_digest, &topic);
+            observer.on_event(SessionEvent::TripleDraft {
+                draft: draft.clone(),
+            });
+            router.finish_step(RunStep::TripleDraft, &router_observer);
+            draft
+        } else {
+            crate::digest::TripleDraft::empty()
+        };
+
+        // Mark remaining full-only steps skipped for `light`; for `full` they
+        // are also skipped-stubs until later tasks implement them. This
+        // satisfies FR-008 and FR-005's step-list contract.
+        let remaining_stub_steps: Vec<RunStep> = router
+            .manifest()
+            .steps
+            .iter()
+            .filter(|s| {
+                s.status == crate::run_manifest::StepStatus::Pending
+                    && s.step == RunStep::ChapterPartition
+            })
+            .map(|s| s.step)
+            .collect();
+        for step in remaining_stub_steps {
+            let detail = if config.tier == Tier::Light {
+                Some("not required for light tier".to_string())
+            } else {
+                Some("step not yet implemented; skipped".to_string())
+            };
+            router.skip_step(step, detail, &router_observer);
+        }
+        // ── Synthesize (T-012) ────────────────────────────────────────────
+        // The synthesize step runs the LLM (or deterministic fallback) and,
+        // immediately after, runs the deterministic 4-critic audit. Both are
+        // reported through the tier router so the pipeline manifest is accurate.
+
+        if let Some(step) = router.next_step()
+            && step == RunStep::Synthesize
+        {
+            router.start_step(RunStep::Synthesize, &router_observer);
+        }
+
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Synthesize,
         });
@@ -1251,16 +1676,16 @@ impl ResearchSession {
         // Decide which fallback path we'll take *before* calling the engine
         // so we can attribute the resulting summary correctly in the UI.
         let has_llm_engine = !self.analysis_is_noop();
-        let (analysis, synth_outcome, synth_detail) =
+        let (mut analysis, synth_outcome, synth_detail) =
             match self.synthesize(&name, &topic, &synthesis_sources).await {
-                Ok((result, outcome)) => {
+                Ok((result, engine_outcome)) => {
                     // Map the engine's AnalysisOutcome to the user-facing
                     // SynthesizeOutcome. When no LLM engine is wired in
                     // (NoopAnalysisEngine), the default analyze_with_outcome
                     // returns AnalysisOutcome::Llm, but we override to NoLlm
                     // so the UI is transparent about the provenance.
                     let synth = if has_llm_engine {
-                        match outcome {
+                        match engine_outcome {
                             AnalysisOutcome::Llm => SynthesizeOutcome::Llm,
                             AnalysisOutcome::FallbackEmpty => SynthesizeOutcome::FallbackEmpty,
                             AnalysisOutcome::FallbackError => SynthesizeOutcome::FallbackError,
@@ -1285,11 +1710,130 @@ impl ResearchSession {
                     )
                 }
             };
+
         observer.on_event(SessionEvent::SynthesizeResult {
             outcome: synth_outcome,
-            detail: synth_detail,
+            detail: synth_detail.clone(),
         });
-        // ── Assemble ──────────────────────────────────────────────────────
+
+        // Run the deterministic 4-critic audit against the final narrative and
+        // emit the structured report for the UI and the assembled document.
+        let synthesis_audit = crate::synthesis::build_synthesis_audit(
+            &sources,
+            &evidence_digest,
+            &triple_draft,
+            &topic,
+            &loci,
+            contradiction_graph.as_ref(),
+            Some(&analysis),
+        );
+        observer.on_event(SessionEvent::SynthesisAudit {
+            audit: synthesis_audit.clone(),
+        });
+
+        if let Some(step) = router.next_step()
+            && step == RunStep::Synthesize
+        {
+            router.finish_step(RunStep::Synthesize, &router_observer);
+        }
+
+        // ── Critics (T-012) ────────────────────────────────────────────────
+        // Emit one CriticResult event per critic report so the UI can see the
+        // 4-critic audit subagents individually.
+        if let Some(step) = router.next_step()
+            && step == RunStep::Critics
+        {
+            router.start_step(RunStep::Critics, &router_observer);
+            for report in &synthesis_audit.critic_reports {
+                observer.on_event(SessionEvent::CriticResult {
+                    score: Some(report.score),
+                    gaps: report.gaps.clone(),
+                });
+            }
+            router.finish_step(RunStep::Critics, &router_observer);
+        }
+
+        // ── Surgical Patcher (T-013) ─────────────────────────────────────
+        // Apply deterministic revisions to the draft based on the 4-critic
+        // audit and corpus-critic gaps. The patched analysis replaces the
+        // original synthesis output for downstream document assembly.
+        let mut patch_result = PatchResult::empty();
+        if let Some(step) = router.next_step()
+            && step == RunStep::Patcher
+        {
+            router.start_step(RunStep::Patcher, &router_observer);
+            patch_result =
+                build_surgical_patches(&synthesis_audit, &corpus_critic, &topic, &analysis);
+            observer.on_event(SessionEvent::SurgicalPatch {
+                result: patch_result.clone(),
+            });
+            analysis = patch_result.patched_analysis.clone();
+            router.finish_step(RunStep::Patcher, &router_observer);
+        }
+
+        // ── Cite Check (T-014) ───────────────────────────────────────────
+        // Verify that every `[#N]` citation in the patched draft is backed by a
+        // source in the gathered corpus. If the failure gate closes, abort
+        // before writing the report so unsupported citations are not shipped.
+        let mut cite_check = CitationCheckResult::empty();
+        if let Some(step) = router.next_step()
+            && step == RunStep::CiteCheck
+        {
+            router.start_step(RunStep::CiteCheck, &router_observer);
+            cite_check = check_citations(
+                &analysis.summary,
+                &analysis.findings,
+                &analysis.top_implications,
+                &analysis.open_questions,
+                &sources,
+            );
+            observer.on_event(SessionEvent::CiteCheck {
+                result: cite_check.clone(),
+            });
+            if !cite_check.gate_open {
+                tracing::error!(
+                    failed = cite_check.failed_claims.len(),
+                    "research: cite-check gate closed; aborting before report shipment"
+                );
+                return Err(ResearchError::CiteCheckFailed {
+                    claims: cite_check.failed_claims,
+                });
+            }
+            router.finish_step(RunStep::CiteCheck, &router_observer);
+        }
+
+        // ── Polish (T-015) ───────────────────────────────────────────────
+        // Apply deterministic final edits to the narrative before assembly:
+        // strip control characters, normalize whitespace, and remove empty
+        // paragraphs. This runs for every tier that includes the step.
+        let mut polish_result = PolishResult::empty();
+        if let Some(step) = router.next_step()
+            && step == RunStep::Polish
+        {
+            router.start_step(RunStep::Polish, &router_observer);
+            polish_result = polish_analysis(&mut analysis);
+            observer.on_event(SessionEvent::Polish {
+                result: polish_result.clone(),
+            });
+            router.finish_step(RunStep::Polish, &router_observer);
+        }
+
+        // ── Readability Audit (T-015) ──────────────────────────────────
+        // Run a final deterministic readability audit on the polished draft
+        // and surface the score in the assembled document.
+        let mut readability_audit = ReadabilityAudit::empty();
+        if let Some(step) = router.next_step()
+            && step == RunStep::ReadabilityAudit
+        {
+            router.start_step(RunStep::ReadabilityAudit, &router_observer);
+            readability_audit = audit_readability(&analysis);
+            observer.on_event(SessionEvent::ReadabilityAudit {
+                result: readability_audit.clone(),
+            });
+            router.finish_step(RunStep::ReadabilityAudit, &router_observer);
+        }
+
+        // ── Assemble ─────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Assemble,
         });
@@ -1303,6 +1847,7 @@ impl ResearchSession {
         if config.output_format != OutputFormat::Report {
             item_with_sources.output_format = Some(config.output_format.as_str().to_string());
         }
+        item_with_sources.open_access_recovery = config.open_access_recovery;
         for s in &sources {
             item_with_sources.add_source(s.clone());
         }
@@ -1362,6 +1907,68 @@ impl ResearchSession {
             } else {
                 analysis.top_implications
             },
+            contradiction_graph,
+            loci: if loci.is_empty() { None } else { Some(loci) },
+            depth_investigation: if depth_investigation.is_empty() {
+                None
+            } else {
+                Some(depth_investigation)
+            },
+            evidence_digest: if evidence_digest.is_empty() {
+                None
+            } else {
+                Some(evidence_digest)
+            },
+            triple_draft: if triple_draft.is_empty() {
+                None
+            } else {
+                Some(triple_draft)
+            },
+            cross_locus_reconcile: if cross_locus_reconcile.is_empty() {
+                None
+            } else {
+                Some(cross_locus_reconcile)
+            },
+            source_tensions: if source_tensions.is_empty() {
+                None
+            } else {
+                Some(source_tensions)
+            },
+            synthesis_audit: if synthesis_audit.is_empty() {
+                None
+            } else {
+                Some(synthesis_audit)
+            },
+            corpus_critic: if corpus_critic.is_empty() {
+                None
+            } else {
+                Some(corpus_critic)
+            },
+            gap_fetch: if gap_fetch.is_empty() {
+                None
+            } else {
+                Some(gap_fetch)
+            },
+            surgical_patch: if patch_result.is_empty() {
+                None
+            } else {
+                Some(patch_result)
+            },
+            cite_check: if cite_check.is_empty() {
+                None
+            } else {
+                Some(cite_check)
+            },
+            polish: if polish_result.is_empty() {
+                None
+            } else {
+                Some(polish_result)
+            },
+            readability_audit: if readability_audit.is_empty() {
+                None
+            } else {
+                Some(readability_audit)
+            },
             template_body,
             decomposed_queries: web_queries.clone(),
             output_format: config.output_format,
@@ -1380,10 +1987,15 @@ impl ResearchSession {
             };
         doc.item.set_title(&final_title);
         let assembled = self.manager.write_document(&doc).await?;
-        // ── Finalize ──────────────────────────────────────────────────────
+        // ── Finalize ─────────────────────────────────────────────────────
         observer.on_event(SessionEvent::Phase {
             phase: SessionPhase::Finalize,
         });
+        // Finalize phase: any remaining pipeline steps are already completed
+        // (Polish/ReadabilityAudit ran before assembly); this just closes the
+        // manifest so resumability records the correct terminal state.
+        let (completed, skipped, failed) = router.counts();
+        router_observer.on_done(completed, skipped, failed);
         self.manager.complete_gathering(name_str).await?;
 
         let total_sources = sources.len();
@@ -3345,6 +3957,7 @@ mod tests {
             page_type: None,
             media_type: "page".to_string(),
             language: None,
+            oa_recovery: None,
         };
         let sources = vec![
             make_web("Low — weak query match"),
@@ -3375,6 +3988,7 @@ mod tests {
             page_type: None,
             media_type: "page".to_string(),
             language: None,
+            oa_recovery: None,
         };
         // Sources in order: A(high), B(low), C(high), D(low)
         let sources = vec![
@@ -3412,6 +4026,7 @@ mod tests {
             page_type: None,
             media_type: "page".to_string(),
             language: None,
+            oa_recovery: None,
         };
         let sources = vec![make_web("High"), make_web("Medium")];
         let selected = select_top_relevance_sources(&sources, 10);
@@ -3436,6 +4051,7 @@ mod tests {
             page_type: None,
             media_type: "page".to_string(),
             language: None,
+            oa_recovery: None,
         };
         let sources = vec![
             make_web("High — title matches query"),

@@ -38,7 +38,12 @@ use futures::StreamExt;
 
 use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
 use crate::gather_log::GatherLog;
+use crate::open_access::{
+    DEFAULT_OA_MIN_FULL_TEXT_CHARS, OpenAccessClient, RecoveredOpenAccess, ReqwestOpenAccessClient,
+    recover_open_access,
+};
 use crate::source::Source;
+use crate::source_vault::SourceVault;
 use std::time::Duration;
 
 mod classify;
@@ -57,12 +62,10 @@ use title::clean_web_source_title;
 /// while staying within typical LLM output budgets for a JSON array.
 pub(crate) const MAX_DECOMPOSED_QUERIES: usize = 10;
 
-/// Default maximum number of web sources to capture per research item. The
-/// earlier 15-source cap was too restrictive for broad topics; a larger
-/// default lets the decomposer's parallel queries surface a much wider
+/// Default maximum number of web sources to capture per research item
+/// (FR-011). The earlier 15-source cap was too restrictive for broad topics; a
+/// larger default lets the decomposer's parallel queries surface a much wider
 /// set of candidate URLs before the synthesis phase.
-/// Default cap on the number of web sources captured when the caller does not
-/// supply an explicit `max_web_results` (FR-011).
 pub const DEFAULT_MAX_WEB_RESULTS: usize = 500;
 
 /// Default per-fetch wall-clock timeout. Pages that take longer than this are
@@ -143,8 +146,8 @@ pub const MIN_ENCYCLOPEDIA_CONTENT_CHARS: usize = 80;
 /// preferred so the richer page body is captured instead of the concise
 /// abstract.
 fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
-    hit.search_engine.split(',').all(|e| e.trim() == "openalex")
-        && hit.search_engine.contains("openalex")
+    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
+    !engines.is_empty() && engines.iter().all(|e| *e == "openalex")
 }
 
 /// Returns `true` for encyclopedia search-engine hits that carry a page
@@ -166,10 +169,8 @@ fn is_scholarly_hit(hit: &WebSearchHit) -> bool {
 /// path is preferred so the richer page body is captured instead of the
 /// concise summary.
 fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
-    hit.search_engine
-        .split(',')
-        .all(|e| e.trim() == "wikipedia")
-        && hit.search_engine.contains("wikipedia")
+    let engines: Vec<&str> = hit.search_engine.split(',').map(str::trim).collect();
+    !engines.is_empty() && engines.iter().all(|e| *e == "wikipedia")
 }
 
 /// Cap a captured web body at the same byte budget used by the supporting
@@ -177,13 +178,6 @@ fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
 /// disk. Keeps runaway pages from blowing up the synthesis prompt.
 fn fence_captured_body(body: &str) -> String {
     fence_source_body(body)
-}
-
-/// Cap a captured web body to at most `max_bytes`. Kept for downstream
-/// callers that want an explicit cap helper (Milestone B-002).
-#[allow(dead_code)]
-fn truncate_captured_body(body: &str, max_bytes: usize) -> String {
-    truncate_body_to_bytes(body, max_bytes)
 }
 
 /// Result of a decomposed web-gathering pass.
@@ -201,6 +195,12 @@ pub struct GatherResult {
     /// Number of candidate web sources that were fetched but excluded because
     /// their relevance score was too low.
     pub excluded_count: usize,
+    /// Number of unique candidate URLs that passed the title/snippet pre-filter
+    /// and were considered for fetching during the width sweep.
+    pub considered_count: usize,
+    /// Backend search engines that contributed at least one hit, sorted and
+    /// deduplicated (e.g. `["brave", "duckduckgo", "openalex"]`).
+    pub engines: Vec<String>,
 }
 
 impl GatherResult {
@@ -213,6 +213,8 @@ impl GatherResult {
             pdf_count: 0,
             youtube_count: 0,
             excluded_count: 0,
+            considered_count: 0,
+            engines: Vec::new(),
         }
     }
 }
@@ -344,6 +346,10 @@ pub enum GatherEvent {
         /// `"ENGLISH"`, `"FRENCH"`), or `"UNKNOWN"` when language
         /// detection was unavailable.
         language: String,
+        /// Open-access recovery metadata when the full text was recovered
+        /// from a legal OA copy instead of fetched from the original URL
+        /// (FR-015).
+        oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
     },
     /// The underlying search tool returned an error.
     SearchFailed {
@@ -378,6 +384,34 @@ pub enum GatherEvent {
     SearchCircuitOpen {
         /// Number of consecutive failures that triggered the breaker.
         consecutive_failures: u32,
+    },
+    /// Width-sweep summary emitted after all parallel sub-query searches and
+    /// candidate fetches have resolved. Carries aggregate statistics so the
+    /// tier router and the UI can display which `mf_search` backends
+    /// contributed to the run (T-006, FR-005).
+    WidthSweepSummary {
+        /// Sub-queries that were issued in parallel.
+        queries: Vec<String>,
+        /// Unique backend search engines that returned at least one hit.
+        engines: Vec<String>,
+        /// Number of unique candidate URLs considered after deduplication and
+        /// pre-filtering.
+        considered: usize,
+        /// Number of sources ultimately captured.
+        captured: usize,
+        /// Number of candidates excluded by relevance or content-length
+        /// filters.
+        excluded: usize,
+    },
+    /// The vault already contained enough sources to satisfy the query for the
+    /// current tier, so no new web searches were issued (FR-016, T-021).
+    VaultSufficient {
+        /// Number of matching sources found in the vault.
+        count: usize,
+        /// Minimum required to satisfy the tier.
+        required: usize,
+        /// Tier that was requested for this run.
+        tier: String,
     },
 }
 
@@ -430,6 +464,27 @@ pub struct WebGatherer {
     /// every search hit as `considered`/`captured`/`rejected` with a reason.
     /// `None` disables logging. Set via [`with_gather_log`].
     gather_log: Option<Arc<Mutex<GatherLog>>>,
+    /// Optional persistent source vault (Milestone T-004). When configured,
+    /// [`gather_with_observer`] searches the vault before issuing any web search
+    /// and returns matching stored sources directly, satisfying FR-009.
+    vault: Option<Arc<SourceVault>>,
+    /// Minimum number of vaulted sources that satisfies the query for the
+    /// current tier. When the vault lookup returns at least this many sources,
+    /// the gatherer skips new web searches entirely (FR-016, T-021). `None`
+    /// disables the sufficient-source check and falls back to the FR-009
+    /// behavior of using any vault match.
+    sufficient_sources: Option<usize>,
+    /// When `true`, the gatherer attempts to recover a legal open-access
+    /// full-text copy via Unpaywall and Europe PMC for scholarly sources
+    /// whose body is shorter than [`Self::oa_min_full_text_chars`] (FR-010).
+    open_access_recovery: bool,
+    /// Contact email required by Unpaywall's API terms.
+    contact_email: Option<String>,
+    /// Minimum body length (in characters) that triggers OA recovery for
+    /// scholarly sources. Defaults to [`DEFAULT_OA_MIN_FULL_TEXT_CHARS`].
+    oa_min_full_text_chars: usize,
+    /// HTTP client used for Unpaywall/Europe PMC queries.
+    oa_client: Option<Arc<dyn OpenAccessClient>>,
 }
 
 impl std::fmt::Debug for WebGatherer {
@@ -445,6 +500,10 @@ impl std::fmt::Debug for WebGatherer {
                 &self.search_circuit_breaker_threshold,
             )
             .field("has_gather_log", &self.gather_log.is_some())
+            .field("has_vault", &self.vault.is_some())
+            .field("open_access_recovery", &self.open_access_recovery)
+            .field("oa_min_full_text_chars", &self.oa_min_full_text_chars)
+            .field("has_contact_email", &self.contact_email.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -467,7 +526,65 @@ impl WebGatherer {
             search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
             search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
             gather_log: None,
+            vault: None,
+            sufficient_sources: None,
+            open_access_recovery: false,
+            contact_email: None,
+            oa_min_full_text_chars: DEFAULT_OA_MIN_FULL_TEXT_CHARS,
+            oa_client: Some(Arc::new(ReqwestOpenAccessClient::new(None))),
         }
+    }
+
+    /// Attach a persistent source vault (Milestone T-004). When a vault is
+    /// configured, [`gather_with_observer`] searches it before issuing any web
+    /// search calls; if the vault contains sources matching the topic, those
+    /// sources are returned directly and the web search phase is skipped.
+    /// This satisfies FR-009 and avoids re-fetching sources that have already
+    /// been captured for this run.
+    #[must_use]
+    pub fn with_vault(mut self, vault: Arc<SourceVault>) -> Self {
+        self.vault = Some(vault);
+        self
+    }
+
+    /// Set the minimum number of vaulted sources that satisfies the query for
+    /// the current tier (FR-016, T-021). When the vault lookup returns at least
+    /// this many matching sources, no new web searches are issued.
+    ///
+    /// A value of `0` disables the sufficient-source check and restores the
+    /// FR-009 behavior of using any vault match.
+    #[must_use]
+    pub fn with_sufficient_sources(mut self, n: usize) -> Self {
+        self.sufficient_sources = if n == 0 { None } else { Some(n) };
+        self
+    }
+
+    /// Enable or disable open-access recovery (FR-010) and set the contact
+    /// email required by Unpaywall.
+    #[must_use]
+    pub fn with_open_access_recovery(
+        mut self,
+        enabled: bool,
+        contact_email: Option<String>,
+    ) -> Self {
+        self.open_access_recovery = enabled;
+        self.contact_email = contact_email.clone();
+        self.oa_client = Some(Arc::new(ReqwestOpenAccessClient::new(contact_email)));
+        self
+    }
+
+    /// Override the minimum full-text length that triggers OA recovery.
+    #[must_use]
+    pub fn with_oa_min_full_text_chars(mut self, n: usize) -> Self {
+        self.oa_min_full_text_chars = n.max(1);
+        self
+    }
+
+    /// Replace the OA HTTP client. Used by tests to inject a fake client.
+    #[must_use]
+    pub fn with_oa_client(mut self, client: Arc<dyn OpenAccessClient>) -> Self {
+        self.oa_client = Some(client);
+        self
     }
 
     /// Attach a JSONL gather log that records every search hit considered
@@ -655,6 +772,7 @@ impl WebGatherer {
             page_type: page.page_type.clone(),
             media_type,
             language: page.language.clone(),
+            oa_recovery: None,
         };
         Ok((source, page))
     }
@@ -691,6 +809,126 @@ impl WebGatherer {
         } else {
             None
         }
+    }
+
+    /// Search the configured [`SourceVault`] for sources matching `topic` and
+    /// convert any matches into `Source::Web` entries.
+    ///
+    /// Returns `Ok(Some(GatherResult))` when the vault contains at least one
+    /// matching source, signalling that the caller should skip the web search
+    /// phase entirely. Returns `Ok(None)` when the vault is empty or configured
+    /// but has no matches for this topic. Errors are returned so the caller can
+    /// decide whether to fall back to web search.
+    async fn gather_from_vault(
+        &self,
+        vault: Arc<SourceVault>,
+        topic: &str,
+        max_results: usize,
+        observer: Option<&dyn GatherObserver>,
+    ) -> anyhow::Result<Option<GatherResult>> {
+        let topic = topic.to_string();
+        let limit = max_results;
+        let hits = {
+            let vault = Arc::clone(&vault);
+            let topic = topic.clone();
+            tokio::task::spawn_blocking(move || vault.search(&topic, limit))
+                .await
+                .map_err(|e| anyhow::anyhow!("vault search task panicked: {e}"))??
+        };
+
+        if hits.is_empty() {
+            return Ok(None);
+        }
+
+        let mut pdf_count = 0usize;
+        let mut youtube_count = 0usize;
+        let mut sources = Vec::with_capacity(hits.len());
+        for (index, hit) in hits.into_iter().enumerate() {
+            let body = match vault.read_content(&hit.source_id) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(source_id = %hit.source_id, error = %e, "research: failed to read vaulted source content; skipping");
+                    continue;
+                }
+            };
+            let relevance = format!("Vaulted — reused from {}", hit.run_tag);
+            let body_preview: String = body
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("```"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .chars()
+                .take(MIN_EXTRACTABLE_CONTENT_CHARS)
+                .collect();
+            let kind = classify_web_source(&hit.url, None);
+            match kind {
+                WebSourceKind::Pdf => pdf_count += 1,
+                WebSourceKind::YouTube => youtube_count += 1,
+                WebSourceKind::Page => {}
+            }
+            let source = Source::Web {
+                url: hit.url.clone(),
+                title: hit.title,
+                captured_at: hit.fetch_timestamp,
+                published_at: None,
+                body_path: web_body_path(index),
+                body,
+                relevance,
+                search_tool: hit.search_tool,
+                search_engine: hit.search_engine,
+                content_type: None,
+                page_type: None,
+                media_type: kind.as_str().to_string(),
+                language: None,
+                oa_recovery: None,
+            };
+            if let Some(obs) = observer {
+                obs.on_event(GatherEvent::SourceCaptured {
+                    url: hit.url.clone(),
+                    title: source.title().to_string(),
+                    search_tool: source.search_tool().to_string(),
+                    search_engine: source.search_engine().to_string(),
+                    body_preview,
+                    language: "UNKNOWN".to_string(),
+                    oa_recovery: None,
+                });
+            }
+            self.log_url_outcome(
+                &hit.url,
+                &topic,
+                source.title(),
+                source.search_tool(),
+                source.search_engine(),
+                "captured",
+                "",
+                Some(&serde_json::json!({"origin": "vault"})),
+            );
+            sources.push(source);
+        }
+
+        if sources.is_empty() {
+            return Ok(None);
+        }
+
+        let engines: Vec<String> = sources
+            .iter()
+            .flat_map(|s| s.search_engine().split(','))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let considered_count = sources.len();
+        Ok(Some(GatherResult {
+            queries: Vec::new(),
+            sources,
+            pdf_count,
+            youtube_count,
+            excluded_count: 0,
+            considered_count,
+            engines,
+        }))
     }
 
     /// Gather web sources with an optional observer for diagnostic events.
@@ -735,6 +973,59 @@ impl WebGatherer {
                 }))
         {
             tracing::warn!(error = %e, "research: failed to write gather-start to web URL log");
+        }
+
+        // If a source vault is configured, try to satisfy the request from
+        // already-captured sources before issuing any new web search (FR-009).
+        // The vault is searched by the raw topic; matching sources are
+        // converted back into `Source::Web` entries and returned directly.
+        // Errors are logged and treated as "no matches" so a vault problem
+        // never fails a gather pass.
+        if let Some(vault) = &self.vault {
+            match self
+                .gather_from_vault(vault.clone(), topic, max_results, observer)
+                .await
+            {
+                Ok(Some(result)) => {
+                    // FR-016 (T-021): if the vault already contains enough
+                    // sources for the requested tier, skip new web searches.
+                    let required = self.sufficient_sources.unwrap_or(1);
+                    if result.sources.len() >= required {
+                        tracing::info!(
+                            topic,
+                            sources = result.sources.len(),
+                            required,
+                            "research: vault has sufficient sources; skipping web search"
+                        );
+                        if let Some(obs) = observer {
+                            obs.on_event(GatherEvent::VaultSufficient {
+                                count: result.sources.len(),
+                                required,
+                                tier: self
+                                    .sufficient_sources
+                                    .map(|_| "configured".to_string())
+                                    .unwrap_or_else(|| "default".to_string()),
+                            });
+                        }
+                        return Ok(result);
+                    }
+                    tracing::info!(
+                        topic,
+                        sources = result.sources.len(),
+                        required,
+                        "research: vault sources are below tier threshold; continuing to web search"
+                    );
+                }
+                Ok(None) => {
+                    tracing::info!(
+                        topic,
+                        "research: vault lookup returned no matches; continuing to web search"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "research: vault lookup failed; continuing to web search");
+                }
+            }
         }
 
         // Determine the set of sub-queries.  If no decomposer is configured
@@ -906,8 +1197,12 @@ impl WebGatherer {
                         if !seen_urls.insert(url_key) {
                             continue;
                         }
+                        // Classify once so the two branches below can reuse the
+                        // result instead of re-splitting the engine CSV twice.
+                        let is_scholarly = is_scholarly_hit(&hit);
+                        let is_encyclopedia = is_encyclopedia_hit(&hit);
                         // Filter out scholarly hits when --no-papers is set.
-                        if self.disable_scholarly && is_scholarly_hit(&hit) {
+                        if self.disable_scholarly && is_scholarly {
                             excluded_count += 1;
                             let reason = "scholarly engine excluded by --no-papers";
                             tracing::info!(
@@ -945,7 +1240,7 @@ impl WebGatherer {
                         // and would wrongly reject scholarly titles that do not
                         // lexically overlap the (often rephrased) sub-query, so
                         // these hits bypass it entirely.
-                        if is_scholarly_hit(&hit) {
+                        if is_scholarly {
                             hit.matched_query =
                                 format!("{query} [Scholarly — engine-ranked abstract]");
                             hits_by_url.push((query.clone(), hit));
@@ -958,7 +1253,7 @@ impl WebGatherer {
                         // and would wrongly reject encyclopedia titles (proper
                         // names, technical terms) that do not lexically overlap
                         // the sub-query, so these hits bypass it entirely.
-                        if is_encyclopedia_hit(&hit) {
+                        if is_encyclopedia {
                             hit.matched_query =
                                 format!("{query} [Encyclopedia — engine-ranked summary]");
                             hits_by_url.push((query.clone(), hit));
@@ -1068,12 +1363,23 @@ impl WebGatherer {
             {
                 tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
             }
+            if let Some(obs) = observer {
+                obs.on_event(GatherEvent::WidthSweepSummary {
+                    queries: queries.clone(),
+                    engines: Vec::new(),
+                    considered: considered_count,
+                    captured: 0,
+                    excluded: excluded_count,
+                });
+            }
             return Ok(GatherResult {
                 queries,
                 sources: Vec::new(),
                 pdf_count: 0,
                 youtube_count: 0,
                 excluded_count,
+                considered_count,
+                engines: Vec::new(),
             });
         }
 
@@ -1088,6 +1394,17 @@ impl WebGatherer {
         let fetch_timeout = self.fetch_timeout;
         // Renumber retained hits densely so the supporting-file names have no
         // gaps, while preserving the original search-ranking order.
+        // Collect the set of contributing engines before consuming hits_by_url.
+        let mut engines: Vec<String> = hits_by_url
+            .iter()
+            .flat_map(|(_, hit)| hit.search_engine.split(','))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        engines.sort();
         let candidates: Vec<(usize, String, WebSearchHit)> = hits_by_url
             .into_iter()
             .take(max_results)
@@ -1154,7 +1471,7 @@ impl WebGatherer {
                 Ok(Ok(page)) => {
                     let scholarly = page.page_type.as_deref() == Some("scholarly");
                     let encyclopedia = page.page_type.as_deref() == Some("encyclopedia");
-                    let title = clean_web_source_title(&page.title, &hit.title);
+                    let mut title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
                     // Scholarly and encyclopedia sources are already ranked by
@@ -1202,6 +1519,77 @@ impl WebGatherer {
                     // contributing usable evidence. Scholarly sources use a
                     // lower threshold — their body is the concise reconstructed
                     // abstract, not a full page.
+                    let mut page = page;
+                    let mut oa_recovery: Option<Box<RecoveredOpenAccess>> = None;
+                    if self.open_access_recovery {
+                        let is_short = page.body.chars().count() < self.oa_min_full_text_chars;
+                        let is_scholarly_url = scholarly
+                            || page.page_type.as_deref() == Some("scholarly")
+                            || crate::open_access::extract_doi(&page.url).is_some();
+                        if is_short
+                            && is_scholarly_url
+                            && let Some(client) = self.oa_client.clone()
+                        {
+                            let email = self.contact_email.as_deref();
+                            match recover_open_access(&page.url, email, client.as_ref()).await {
+                                Ok(Some(recovered)) => {
+                                    let recovered_url = recovered.url.clone();
+                                    let recovered_source = recovered.source.to_string();
+                                    tracing::info!(
+                                        url = %page.url,
+                                        recovered_url = %recovered_url,
+                                        source = %recovered_source,
+                                        "research: recovering open-access full text"
+                                    );
+                                    let recovered_result = tokio::time::timeout(
+                                        fetch_timeout,
+                                        fetch_tool.fetch_with_limit(
+                                            &recovered_url,
+                                            MAX_SOURCE_BODY_BYTES,
+                                        ),
+                                    )
+                                    .await;
+                                    match recovered_result {
+                                        Ok(Ok(recovered_page)) => {
+                                            page.body = recovered_page.body;
+                                            page.title = recovered_page.title;
+                                            page.content_type = recovered_page.content_type.clone();
+                                            page.page_type = recovered_page.page_type.clone();
+                                            page.language = recovered_page.language.clone();
+                                            // Recompute the source title from the recovered page
+                                            // so the References Index reflects the OA copy.
+                                            title = clean_web_source_title(&page.title, &hit.title);
+                                            oa_recovery = Some(Box::new(recovered));
+                                        }
+                                        Ok(Err(e)) => {
+                                            tracing::warn!(
+                                                url = %page.url,
+                                                recovered_url = %recovered_url,
+                                                error = %e,
+                                                "research: failed to fetch recovered OA copy; keeping original"
+                                            );
+                                        }
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                url = %page.url,
+                                                recovered_url = %recovered_url,
+                                                "research: recovered OA fetch timed out; keeping original"
+                                            );
+                                        }
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(e) => {
+                                    tracing::warn!(
+                                        url = %page.url,
+                                        error = %e,
+                                        "research: OA recovery lookup failed"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
                     let content_chars = page.body.chars().count();
                     let min_chars = if scholarly || encyclopedia {
                         if scholarly {
@@ -1281,6 +1669,7 @@ impl WebGatherer {
                                 .as_deref()
                                 .map(str::to_uppercase)
                                 .unwrap_or_else(|| "UNKNOWN".to_string()),
+                            oa_recovery: oa_recovery.clone(),
                         });
                     }
                     log_captured(
@@ -1315,6 +1704,7 @@ impl WebGatherer {
                             .as_str()
                             .to_string(),
                             language: page.language.clone(),
+                            oa_recovery,
                         }),
                     ));
                 }
@@ -1412,12 +1802,23 @@ impl WebGatherer {
         {
             tracing::warn!(error = %e, "research: failed to write gather summary to web URL log");
         }
+        if let Some(obs) = observer {
+            obs.on_event(GatherEvent::WidthSweepSummary {
+                queries: queries.clone(),
+                engines: engines.clone(),
+                considered: considered_count,
+                captured: sources.len(),
+                excluded: excluded_count,
+            });
+        }
         Ok(GatherResult {
             queries,
             sources,
             pdf_count,
             youtube_count,
             excluded_count,
+            considered_count,
+            engines,
         })
     }
 }
@@ -1468,6 +1869,7 @@ fn web_body_path(index: usize) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source_vault::{NewVaultSource, SourceVault};
     use std::sync::Mutex;
 
     /// Generate a body string of at least [`MIN_EXTRACTABLE_CONTENT_CHARS`]
@@ -2454,7 +2856,7 @@ mod tests {
         assert!(result.sources.is_empty());
         assert_eq!(result.queries, vec!["topic".to_string()]);
         let events = obs.0.lock().unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(
             matches!(&events[0], GatherEvent::QueriesDecomposed { queries } if queries == &["topic".to_string()])
         );
@@ -2484,7 +2886,7 @@ mod tests {
         assert!(result.sources.is_empty());
         assert_eq!(result.queries, vec!["rust async".to_string()]);
         let events = obs.0.lock().unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(
             matches!(&events[0], GatherEvent::QueriesDecomposed { queries } if queries == &["rust async".to_string()])
         );
@@ -3542,5 +3944,703 @@ mod tests {
             "expected FetchFailed with 'too short' message, got {:?}",
             *events
         );
+    }
+
+    #[tokio::test]
+    async fn gather_uses_vault_sources_when_available() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-001").unwrap();
+
+        vault
+            .store(&NewVaultSource {
+                url: "https://vaulted.example/page".into(),
+                title: "Vaulted Rust Async Page".into(),
+                fetch_timestamp: Some(Utc::now()),
+                search_tool: "mf_search".into(),
+                search_engine: "duckduckgo".into(),
+                media_type: "page".into(),
+                content_type: None,
+                body_text: body256("vaulted rust async runtime content"),
+            })
+            .unwrap();
+
+        // Search tool that would fail if called — proves vault short-circuits
+        // the web-search phase.
+        struct PanicSearch;
+        #[async_trait]
+        impl WebSearchTool for PanicSearch {
+            async fn search(
+                &self,
+                _query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                panic!("search should not be called when vault has matches")
+            }
+        }
+        struct PanicFetch;
+        #[async_trait]
+        impl WebFetchTool for PanicFetch {
+            async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
+                panic!("fetch should not be called when vault has matches")
+            }
+        }
+
+        let g = WebGatherer::new(Arc::new(PanicSearch), Arc::new(PanicFetch))
+            .with_vault(Arc::new(vault));
+        let result = g
+            .gather_with_observer("rust async runtime", 5, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.sources.len(),
+            1,
+            "vaulted source should be returned directly"
+        );
+        if let Source::Web { url, body, .. } = &result.sources[0] {
+            assert_eq!(url, "https://vaulted.example/page");
+            assert!(
+                body.contains("vaulted rust async runtime content"),
+                "vault body should be present"
+            );
+        } else {
+            panic!("expected Source::Web")
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_falls_back_to_search_when_vault_has_no_matches() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-empty").unwrap();
+
+        let hits = vec![WebSearchHit {
+            url: "https://web.example".into(),
+            title: "Web page".into(),
+            snippet: "rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://web.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://web.example".into(),
+                title: "Web page".into(),
+                body: body256("fresh web content"),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (search, fetch) = (
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            Arc::new(FakeFetch {
+                pages,
+                fail_urls: Vec::new(),
+                calls: Mutex::new(Vec::new()),
+            }),
+        );
+        let g = WebGatherer::new(search.clone(), fetch.clone()).with_vault(Arc::new(vault));
+        let result = g.gather("rust async runtime", 5).await.unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "should fall back to web search when vault has no matches"
+        );
+        assert_eq!(
+            search.calls.lock().unwrap().len(),
+            1,
+            "search should be called once"
+        );
+        assert_eq!(
+            fetch.calls.lock().unwrap().len(),
+            1,
+            "fetch should be called once"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_skips_search_when_vault_has_sufficient_sources() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-sufficient").unwrap();
+
+        for i in 0..3 {
+            vault
+                .store(&NewVaultSource {
+                    url: format!("https://vaulted.example/page-{i}"),
+                    title: format!("Vaulted Rust Async Page {i}"),
+                    fetch_timestamp: Some(Utc::now()),
+                    search_tool: "mf_search".into(),
+                    search_engine: "duckduckgo".into(),
+                    media_type: "page".into(),
+                    content_type: None,
+                    body_text: body256(&format!("vaulted rust async runtime content {i}")),
+                })
+                .unwrap();
+        }
+
+        struct PanicSearch;
+        #[async_trait]
+        impl WebSearchTool for PanicSearch {
+            async fn search(
+                &self,
+                _query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                panic!("search should not be called when vault has sufficient sources")
+            }
+        }
+        struct PanicFetch;
+        #[async_trait]
+        impl WebFetchTool for PanicFetch {
+            async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
+                panic!("fetch should not be called when vault has sufficient sources")
+            }
+        }
+
+        let g = WebGatherer::new(Arc::new(PanicSearch), Arc::new(PanicFetch))
+            .with_vault(Arc::new(vault))
+            .with_sufficient_sources(3);
+        let result = g
+            .gather_with_observer("rust async runtime", 5, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            result.sources.len(),
+            3,
+            "all vaulted sources should be returned without new fetches"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_falls_back_to_search_when_vault_is_below_threshold() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-below").unwrap();
+
+        vault
+            .store(&NewVaultSource {
+                url: "https://vaulted.example/page".into(),
+                title: "Vaulted Rust Async Page".into(),
+                fetch_timestamp: Some(Utc::now()),
+                search_tool: "mf_search".into(),
+                search_engine: "duckduckgo".into(),
+                media_type: "page".into(),
+                content_type: None,
+                body_text: body256("vaulted rust async runtime content"),
+            })
+            .unwrap();
+
+        let hits = vec![WebSearchHit {
+            url: "https://web.example".into(),
+            title: "Web page".into(),
+            snippet: "rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://web.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://web.example".into(),
+                title: "Web page".into(),
+                body: body256("fresh web content"),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (search, fetch) = (
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            Arc::new(FakeFetch {
+                pages,
+                fail_urls: Vec::new(),
+                calls: Mutex::new(Vec::new()),
+            }),
+        );
+        let g = WebGatherer::new(search.clone(), fetch.clone())
+            .with_vault(Arc::new(vault))
+            .with_sufficient_sources(3);
+        let result = g.gather("rust async runtime", 5).await.unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "should fall back to web search when vault is below threshold"
+        );
+        assert_eq!(
+            search.calls.lock().unwrap().len(),
+            1,
+            "search should be called once"
+        );
+        assert_eq!(
+            fetch.calls.lock().unwrap().len(),
+            1,
+            "fetch should be called once"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_emits_vault_sufficient_event() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        let vault = SourceVault::open_with_root(&vault_root, "run-2026-event").unwrap();
+
+        for i in 0..3 {
+            vault
+                .store(&NewVaultSource {
+                    url: format!("https://vaulted.example/page-{i}"),
+                    title: format!("Vaulted Rust Async Page {i}"),
+                    fetch_timestamp: Some(Utc::now()),
+                    search_tool: "mf_search".into(),
+                    search_engine: "duckduckgo".into(),
+                    media_type: "page".into(),
+                    content_type: None,
+                    body_text: body256(&format!("vaulted rust async runtime content {i}")),
+                })
+                .unwrap();
+        }
+
+        struct PanicSearch;
+        #[async_trait]
+        impl WebSearchTool for PanicSearch {
+            async fn search(
+                &self,
+                _query: &str,
+                _max_results: usize,
+            ) -> anyhow::Result<Vec<WebSearchHit>> {
+                panic!("search should not be called when vault is sufficient")
+            }
+        }
+        struct PanicFetch;
+        #[async_trait]
+        impl WebFetchTool for PanicFetch {
+            async fn fetch(&self, _url: &str) -> anyhow::Result<WebFetchedPage> {
+                panic!("fetch should not be called when vault is sufficient")
+            }
+        }
+
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let g = WebGatherer::new(Arc::new(PanicSearch), Arc::new(PanicFetch))
+            .with_vault(Arc::new(vault))
+            .with_sufficient_sources(3);
+        g.gather_with_observer("rust async runtime", 5, Some(&obs))
+            .await
+            .unwrap();
+
+        let events = obs.0.lock().unwrap();
+        let sufficient = events
+            .iter()
+            .find(|e| matches!(e, GatherEvent::VaultSufficient { required: 3, .. }));
+        assert!(
+            sufficient.is_some(),
+            "expected VaultSufficient event, got {events:?}"
+        );
+    }
+
+    /// Fake OA client that mimics Unpaywall/Europe PMC responses for a
+    /// configurable recovered URL.
+    struct FakeOaClient {
+        recovered_url: String,
+    }
+
+    #[async_trait]
+    impl OpenAccessClient for FakeOaClient {
+        async fn fetch_text(&self, _url: &str) -> crate::open_access::Result<String> {
+            Ok(String::new())
+        }
+
+        async fn fetch_json(&self, url: &str) -> crate::open_access::Result<serde_json::Value> {
+            if url.contains("unpaywall.org") {
+                Ok(serde_json::json!({
+                    "is_oa": true,
+                    "oa_status": "gold",
+                    "best_oa_location": {
+                        "url_for_pdf": self.recovered_url,
+                        "url": self.recovered_url,
+                        "license": "cc-by"
+                    }
+                }))
+            } else {
+                Ok(serde_json::json!({ "resultList": { "result": [] } }))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn gather_recovers_open_access_copy_for_short_scholarly_source() {
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Paywalled Paper".into(),
+            snippet: "short abstract".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "duckduckgo".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://doi.org/10.1234/example".into(),
+            WebFetchedPage {
+                url: "https://doi.org/10.1234/example".into(),
+                title: "Paywalled Paper".into(),
+                body: "short abstract".into(),
+                published_at: None,
+                content_type: None,
+                page_type: Some("scholarly".into()),
+                language: None,
+            },
+        );
+        pages.insert(
+            "https://oa.example.com/full.pdf".into(),
+            WebFetchedPage {
+                url: "https://oa.example.com/full.pdf".into(),
+                title: "Recovered Full Text".into(),
+                body: body256("open access full text content here"),
+                published_at: None,
+                content_type: Some("application/pdf".into()),
+                page_type: None,
+                language: Some("English".into()),
+            },
+        );
+        let fetch = Arc::new(FakeFetch {
+            pages,
+            fail_urls: Vec::new(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let oa_client = Arc::new(FakeOaClient {
+            recovered_url: "https://oa.example.com/full.pdf".into(),
+        });
+        let gatherer = WebGatherer::new(
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            fetch,
+        )
+        .with_keep_low_relevance(true)
+        .with_open_access_recovery(true, Some("oa@example.com".into()))
+        .with_oa_min_full_text_chars(500)
+        .with_oa_client(oa_client);
+        let sources = gatherer.gather("some scholarly topic", 5).await.unwrap();
+        assert_eq!(
+            sources.len(),
+            1,
+            "short scholarly source should be recovered"
+        );
+        let src = &sources[0];
+        assert_eq!(src.title(), "Recovered Full Text");
+        assert_eq!(src.path_or_url(), "https://doi.org/10.1234/example");
+        let recovery = src
+            .oa_recovery()
+            .expect("OA recovery metadata should be present");
+        assert_eq!(recovery.url, "https://oa.example.com/full.pdf");
+        assert_eq!(recovery.source.to_string(), "unpaywall");
+    }
+
+    #[tokio::test]
+    async fn gather_does_not_recover_when_body_is_long_enough() {
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Open Paper".into(),
+            snippet: "already full text".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "duckduckgo".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://doi.org/10.1234/example".into(),
+            WebFetchedPage {
+                url: "https://doi.org/10.1234/example".into(),
+                title: "Open Paper".into(),
+                body: body256("already long full text"),
+                published_at: None,
+                content_type: None,
+                page_type: Some("scholarly".into()),
+                language: None,
+            },
+        );
+        let fetch = Arc::new(FakeFetch {
+            pages,
+            fail_urls: Vec::new(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let oa_client = Arc::new(FakeOaClient {
+            recovered_url: "https://oa.example.com/full.pdf".into(),
+        });
+        let gatherer = WebGatherer::new(
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            fetch,
+        )
+        .with_keep_low_relevance(true)
+        .with_open_access_recovery(true, Some("oa@example.com".into()))
+        .with_oa_min_full_text_chars(200)
+        .with_oa_client(oa_client);
+        let sources = gatherer.gather("some scholarly topic", 5).await.unwrap();
+        assert_eq!(sources.len(), 1);
+        assert!(
+            sources[0].oa_recovery().is_none(),
+            "long source should not be recovered"
+        );
+    }
+
+    #[tokio::test]
+    async fn gather_does_not_recover_when_disabled() {
+        let hits = vec![WebSearchHit {
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Paywalled Paper".into(),
+            snippet: "short".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "openalex".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://doi.org/10.1234/example".into(),
+            WebFetchedPage {
+                url: "https://doi.org/10.1234/example".into(),
+                title: "Paywalled Paper".into(),
+                body: "short".into(),
+                published_at: None,
+                content_type: None,
+                page_type: Some("scholarly".into()),
+                language: None,
+            },
+        );
+        let fetch = Arc::new(FakeFetch {
+            pages,
+            fail_urls: Vec::new(),
+            calls: Mutex::new(Vec::new()),
+        });
+        let oa_client = Arc::new(FakeOaClient {
+            recovered_url: "https://oa.example.com/full.pdf".into(),
+        });
+        let gatherer = WebGatherer::new(
+            Arc::new(FakeSearch {
+                hits,
+                calls: Mutex::new(Vec::new()),
+            }),
+            fetch,
+        )
+        .with_open_access_recovery(false, None)
+        .with_oa_client(oa_client);
+        let sources = gatherer.gather("some scholarly topic", 5).await.unwrap();
+        assert!(
+            sources.is_empty() || sources[0].oa_recovery().is_none(),
+            "recovery disabled"
+        );
+    }
+
+    /// T-006: the width sweep records which mf_search parallel backends
+    /// contributed hits, and the aggregate `GatherResult` carries the
+    /// deduplicated engine list plus considered/captured/excluded counts.
+    #[tokio::test]
+    async fn width_sweep_tracks_parallel_engines_and_considered_count() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://ddg.example".into(),
+                title: "DuckDuckGo result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "duckduckgo".into(),
+            },
+            WebSearchHit {
+                url: "https://brave.example".into(),
+                title: "Brave result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "brave".into(),
+            },
+            WebSearchHit {
+                url: "https://wikipedia.example".into(),
+                title: "Wikipedia summary".into(),
+                snippet: "Rust is a multi-paradigm, general-purpose programming language emphasizing performance and safety, especially safe concurrency.".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "wikipedia".into(),
+            },
+            WebSearchHit {
+                url: "https://openalex.example/paper".into(),
+                title: "OpenAlex paper".into(),
+                snippet: "We evaluate asynchronous runtimes in Rust across a range of benchmark workloads and report detailed performance comparisons. (Year: 2024 | Cited: 5 | OA: yes)".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "openalex".into(),
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        for url in ["https://ddg.example", "https://brave.example"] {
+            pages.insert(
+                url.into(),
+                WebFetchedPage {
+                    published_at: None,
+                    url: url.into(),
+                    title: format!("title {url}"),
+                    body: body256("body"),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                },
+            );
+        }
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let result = g
+            .gather_with_observer("Rust async runtime", 10, None)
+            .await
+            .unwrap();
+        // DuckDuckGo and Brave pages are fetched; Wikipedia and OpenAlex are
+        // captured as snippet-only sources.
+        assert_eq!(
+            result.sources.len(),
+            4,
+            "all four backend hits should be captured"
+        );
+        assert_eq!(
+            result.engines,
+            vec!["brave", "duckduckgo", "openalex", "wikipedia"],
+            "engines should be sorted and deduplicated"
+        );
+        assert_eq!(
+            result.considered_count, 4,
+            "all four unique URLs were considered"
+        );
+        assert_eq!(result.excluded_count, 0, "no sources were excluded");
+    }
+
+    /// T-006: when the same URL is returned by multiple parallel backends,
+    /// the engine list on the source should reflect every contributing
+    /// engine and the result engines should still be deduplicated.
+    #[tokio::test]
+    async fn width_sweep_merges_engines_for_shared_url() {
+        let hits = vec![WebSearchHit {
+            url: "https://shared.example".into(),
+            title: "Shared result".into(),
+            snippet: "topic Rust async runtime".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "duckduckgo, brave".into(),
+        }];
+        let mut pages = std::collections::HashMap::new();
+        pages.insert(
+            "https://shared.example".into(),
+            WebFetchedPage {
+                published_at: None,
+                url: "https://shared.example".into(),
+                title: "Shared result".into(),
+                body: body256("shared body"),
+                content_type: None,
+                page_type: None,
+                language: None,
+            },
+        );
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+        let result = g
+            .gather_with_observer("Rust async runtime", 5, None)
+            .await
+            .unwrap();
+        assert_eq!(result.sources.len(), 1);
+        assert_eq!(result.engines, vec!["brave", "duckduckgo"]);
+    }
+
+    /// T-006: the width-sweep summary event is emitted after parallel
+    /// searches resolve, carrying the contributing engine list and counts.
+    #[tokio::test]
+    async fn width_sweep_emits_summary_event() {
+        let hits = vec![
+            WebSearchHit {
+                url: "https://ddg.example".into(),
+                title: "DuckDuckGo result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "duckduckgo".into(),
+            },
+            WebSearchHit {
+                url: "https://brave.example".into(),
+                title: "Brave result".into(),
+                snippet: "topic Rust async runtime".into(),
+                matched_query: String::new(),
+                search_tool: "mf_search".into(),
+                search_engine: "brave".into(),
+            },
+        ];
+        let mut pages = std::collections::HashMap::new();
+        for url in ["https://ddg.example", "https://brave.example"] {
+            pages.insert(
+                url.into(),
+                WebFetchedPage {
+                    published_at: None,
+                    url: url.into(),
+                    title: format!("title {url}"),
+                    body: body256("body"),
+                    content_type: None,
+                    page_type: None,
+                    language: None,
+                },
+            );
+        }
+        let (g, _, _) = gatherer_with(hits, pages, Vec::new());
+
+        #[derive(Default)]
+        struct CollectEvents(Mutex<Vec<GatherEvent>>);
+        impl GatherObserver for CollectEvents {
+            fn on_event(&self, event: GatherEvent) {
+                self.0.lock().unwrap().push(event);
+            }
+        }
+        let obs = CollectEvents::default();
+        let result = g
+            .gather_with_observer("Rust async runtime", 5, Some(&obs))
+            .await
+            .unwrap();
+
+        let events = obs.0.lock().unwrap();
+        let summary = events.iter().find(|e| {
+            matches!(
+                e,
+                GatherEvent::WidthSweepSummary { engines, .. } if engines.contains(&"duckduckgo".to_string())
+            )
+        });
+        assert!(
+            summary.is_some(),
+            "expected WidthSweepSummary event, got {events:?}"
+        );
+        if let Some(GatherEvent::WidthSweepSummary {
+            queries,
+            engines,
+            considered,
+            captured,
+            excluded,
+        }) = summary
+        {
+            assert_eq!(queries, &["Rust async runtime".to_string()]);
+            assert_eq!(engines, &["brave", "duckduckgo"]);
+            assert_eq!(*considered, 2);
+            assert_eq!(*captured, result.sources.len());
+            assert_eq!(*excluded, 0);
+        }
     }
 }

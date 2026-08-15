@@ -30,13 +30,19 @@
 //! In both layouts all sections are always present (even if empty) so a
 //! downstream tool that reads `RESEARCH.md` can rely on a stable structure.
 
+use crate::contradiction::ContradictionGraph;
+use crate::digest::{EvidenceDigest, TripleDraft};
 use crate::io::ResearchIo;
 use crate::item::{ResearchItem, strip_control_chars};
+use crate::locus::{DepthInvestigation, LocusSet};
+use crate::reconcile::{CrossLocusReconcile, SourceTensions};
 use crate::research_name::ResearchName;
 use crate::source::{LocalSourceKind, Source};
 use crate::status::ResearchStatus;
+use crate::synthesis::SynthesisAudit;
 use chrono::Utc;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 /// Maximum number of bytes allowed in a single untrusted source excerpt.
 /// Sources larger than this are truncated to avoid blowing up RESEARCH.md
@@ -80,6 +86,60 @@ pub struct ResearchDocument {
     pub cross_references: Vec<CrossReference>,
     /// Open questions — one bullet per question.
     pub open_questions: Vec<String>,
+    /// Optional contradiction graph produced by the full / dissertation
+    /// pipeline (FR-005, T-007). When `None` the report layout omits the
+    /// contradiction section entirely; an empty graph is rendered with a
+    /// placeholder so the section is still present for full-tier runs.
+    pub contradiction_graph: Option<ContradictionGraph>,
+    /// Optional loci set produced by the full / dissertation pipeline
+    /// (FR-005, T-008). When `None` the report layout omits the loci section.
+    pub loci: Option<LocusSet>,
+    /// Optional depth investigation produced by the full / dissertation
+    /// pipeline (FR-005, T-008). When `None` the report layout omits the depth
+    /// section.
+    pub depth_investigation: Option<Vec<DepthInvestigation>>,
+    /// Optional evidence digest produced by the full / dissertation pipeline
+    /// (FR-005, T-011). When `None` the report layout omits the evidence digest
+    /// section.
+    pub evidence_digest: Option<EvidenceDigest>,
+    /// Optional triple draft produced by the full / dissertation pipeline
+    /// (FR-005, T-011). When `None` the report layout omits the triple draft
+    /// section.
+    pub triple_draft: Option<TripleDraft>,
+    /// Optional cross-locus reconciliation produced by the full / dissertation
+    /// pipeline (FR-005, T-009). When `None` the report layout omits the reconcile
+    /// section.
+    pub cross_locus_reconcile: Option<CrossLocusReconcile>,
+    /// Optional source-tensions list produced by the full / dissertation
+    /// pipeline (FR-005, T-009). When `None` the report layout omits the source
+    /// tensions section.
+    pub source_tensions: Option<SourceTensions>,
+    /// Optional synthesis audit produced by the full / dissertation pipeline
+    /// (FR-005, T-012). When `None` the report layout omits the synthesis audit
+    /// section.
+    pub synthesis_audit: Option<SynthesisAudit>,
+    /// Optional corpus-critic report produced by the full / dissertation
+    /// pipeline (FR-005, T-010). When `None` the report layout omits the corpus
+    /// critic section.
+    pub corpus_critic: Option<crate::corpus_critic::CorpusCriticReport>,
+    /// Optional gap-fill fetch result produced by the full / dissertation
+    /// pipeline (FR-005, T-010). When `None` the report layout omits the gap-fill
+    /// section.
+    pub gap_fetch: Option<crate::corpus_critic::GapFetchResult>,
+    /// Optional surgical patch result produced by the full / dissertation
+    /// pipeline (FR-005, T-013). When `None` the report layout omits the
+    /// surgical patch section.
+    pub surgical_patch: Option<crate::patcher::PatchResult>,
+    /// Optional cite-check result produced by the full / dissertation pipeline
+    /// (FR-005, T-014). When `None` the report layout omits the citation
+    /// check section.
+    pub cite_check: Option<crate::cite_checker::CitationCheckResult>,
+    /// Optional polish result produced by the final polish step (FR-005, T-015).
+    /// When `None` the report layout omits the polish section.
+    pub polish: Option<crate::readability::PolishResult>,
+    /// Optional readability audit produced by the final audit step (FR-005, T-015).
+    /// When `None` the report layout omits the readability audit section.
+    pub readability_audit: Option<crate::readability::ReadabilityAudit>,
     /// Optional template body loaded from `research/_templates/<name>.md`
     /// (FR-020). When supplied, the template is used as the skeleton and
     /// `{{title}}`, `{{topic}}`, `{{date}}` placeholders are substituted
@@ -93,7 +153,7 @@ pub struct ResearchDocument {
 }
 
 /// One in-project cross-reference row (FR-009).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CrossReference {
     /// Project-relative path (e.g. `"src/lib.rs"`).
     pub path: String,
@@ -252,6 +312,373 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
 /// This preserves the original section order: Topic, Search Queries, Executive
 /// Summary, Top 5 Implications, Findings, Findings Relationship Diagram,
 /// In-Project Cross-References, Open Questions, References Index.
+/// Render the synthesis audit as a concise markdown section.
+fn render_synthesis_audit(audit: &SynthesisAudit) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "**Overall score:** {}/100\n\n",
+        audit.overall_score
+    ));
+    out.push_str(&format!(
+        "**Recommendation:** {}\n\n",
+        escape_pipe(&audit.recommendation)
+    ));
+    if !audit.summary.is_empty() {
+        out.push_str(&format!(
+            "{}\n\n",
+            strip_control_chars(&audit.summary).trim()
+        ));
+    }
+    if audit.critic_reports.is_empty() {
+        out.push_str("_(no critic reports available)_\n\n");
+        return out;
+    }
+    out.push_str("| Critic | Score | Status | Issue / Gap Summary |\n");
+    out.push_str("|--------|-------|--------|---------------------|\n");
+    for report in &audit.critic_reports {
+        let status = if report.passed { "pass" } else { "review" };
+        let summary = if report.issues.is_empty() {
+            "none".to_string()
+        } else {
+            escape_pipe(&report.issues[0])
+        };
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            escape_pipe(&report.name),
+            report.score,
+            status,
+            summary
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Render the evidence-digest section as a markdown table.
+fn render_evidence_digest(digest: &EvidenceDigest) -> String {
+    let mut out = String::new();
+    if digest.claims.is_empty() {
+        out.push_str("_(no evidence digest available)_\n\n");
+        return out;
+    }
+    out.push_str("| Claim | Support | Contested | Note |\n");
+    out.push_str("|-------|---------|-----------|------|\n");
+    for claim in &digest.claims {
+        let sources = claim
+            .source_indices
+            .iter()
+            .map(|i| format!("#{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let contested = if claim.contested { "yes" } else { "no" };
+        out.push_str(&format!(
+            "| {} | {} ({}) | {} | {} |\n",
+            escape_pipe(&claim.text),
+            escape_pipe(&sources),
+            claim.support_count,
+            contested,
+            escape_pipe(&claim.note)
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Render the triple-draft section as three labelled paragraphs.
+fn render_triple_draft(draft: &TripleDraft) -> String {
+    let mut out = String::new();
+    if draft.candidates.is_empty() {
+        out.push_str("_(no triple draft available)_\n\n");
+        return out;
+    }
+    for candidate in &draft.candidates {
+        out.push_str(&format!(
+            "### Draft {} — {}\n\n{}\n\n*Sources: {}*\n\n",
+            candidate.label,
+            escape_pipe(&candidate.note),
+            strip_control_chars(&candidate.body).trim(),
+            candidate
+                .source_indices
+                .iter()
+                .map(|i| format!("#{i}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    out
+}
+
+/// Render the cross-locus reconcile section as a markdown table.
+fn render_cross_locus_reconcile(reconcile: &CrossLocusReconcile) -> String {
+    let mut out = String::new();
+    if reconcile.pairs.is_empty() {
+        out.push_str("_(no cross-locus reconciliation available)_\n\n");
+        return out;
+    }
+    out.push_str("| Locus A | Locus B | Shared Sources | Conflicts | Note |\n");
+    out.push_str("|---------|---------|----------------|-----------|------|\n");
+    for pair in &reconcile.pairs {
+        let shared = pair
+            .shared_source_indices
+            .iter()
+            .map(|i| format!("#{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} |\n",
+            escape_pipe(&pair.locus_a),
+            escape_pipe(&pair.locus_b),
+            escape_pipe(&shared),
+            pair.conflicting_edges,
+            escape_pipe(&pair.note)
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Render the source-tensions section as a markdown table.
+fn render_source_tensions(tensions: &SourceTensions) -> String {
+    let mut out = String::new();
+    if tensions.tensions.is_empty() {
+        out.push_str("_(no source tensions detected)_\n\n");
+        return out;
+    }
+    out.push_str("| Kind | Label | Sources | Note |\n");
+    out.push_str("|------|-------|---------|------|\n");
+    for t in &tensions.tensions {
+        let sources = t
+            .source_indices
+            .iter()
+            .map(|i| format!("#{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            escape_pipe(t.kind.as_str()),
+            escape_pipe(&t.label),
+            escape_pipe(&sources),
+            escape_pipe(&t.note)
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Render the corpus-critic section as a markdown summary.
+fn render_corpus_critic(report: &crate::corpus_critic::CorpusCriticReport) -> String {
+    let mut out = String::new();
+    let status = if report.passed { "pass" } else { "review" };
+    out.push_str(&format!(
+        "**Overall score:** {}/100 ({})\n\n",
+        report.score, status
+    ));
+    out.push_str(&format!(
+        "**Subscores:** coverage {} | evidence {} | balance {} | tension {}\n\n",
+        report.coverage_score, report.evidence_score, report.balance_score, report.tension_score
+    ));
+    if !report.issues.is_empty() {
+        out.push_str("**Issues:**\n");
+        for issue in &report.issues {
+            out.push_str(&format!("- {}\n", escape_pipe(issue)));
+        }
+        out.push('\n');
+    }
+    if !report.gaps.is_empty() {
+        out.push_str("**Evidence gaps:**\n");
+        for gap in &report.gaps {
+            out.push_str(&format!("- {}\n", escape_pipe(gap)));
+        }
+        out.push('\n');
+    }
+    if !report.recommendations.is_empty() {
+        out.push_str("**Recommendations:**\n");
+        for rec in &report.recommendations {
+            out.push_str(&format!("- {}\n", escape_pipe(rec)));
+        }
+        out.push('\n');
+    }
+    if !report.shallow_dimensions.is_empty() {
+        out.push_str(&format!(
+            "**Shallow dimensions:** {}\n\n",
+            escape_pipe(&report.shallow_dimensions.join(", "))
+        ));
+    }
+    if !report.isolated_sources.is_empty() {
+        let indices: Vec<String> = report
+            .isolated_sources
+            .iter()
+            .map(|i| format!("#{i}"))
+            .collect();
+        out.push_str(&format!(
+            "**Isolated sources:** {}\n\n",
+            escape_pipe(&indices.join(", "))
+        ));
+    }
+    out
+}
+
+/// Render the gap-fill fetch section as a markdown summary.
+fn render_gap_fetch(result: &crate::corpus_critic::GapFetchResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "**Attempted:** {}\n\n",
+        if result.attempted { "yes" } else { "no" }
+    ));
+    out.push_str(&format!(
+        "**New sources captured:** {}\n\n",
+        result.new_sources
+    ));
+    if !result.queries.is_empty() {
+        out.push_str("**Gap-fill queries:**\n");
+        for q in &result.queries {
+            out.push_str(&format!("- {}\n", escape_pipe(q)));
+        }
+        out.push('\n');
+    }
+    if !result.note.is_empty() {
+        out.push_str(&format!("**Note:** {}\n\n", escape_pipe(&result.note)));
+    }
+    out
+}
+
+fn render_citation_check(result: &crate::cite_checker::CitationCheckResult) -> String {
+    let mut out = String::new();
+    let failed = if result.passed {
+        0
+    } else {
+        result.failed_claims.len()
+    };
+    let passed = result.checked.saturating_sub(failed);
+    out.push_str(&format!(
+        "**Summary:** {} citation(s) checked, {} passed, {} failed; gate {}.\n\n",
+        result.checked,
+        passed,
+        failed,
+        if result.gate_open { "open" } else { "closed" }
+    ));
+    out.push_str(&format!(
+        "**Result:** {} ({} citation(s) checked)\n\n",
+        if result.passed {
+            "pass"
+        } else {
+            "CITATION_VERIFICATION_FAILED"
+        },
+        result.checked
+    ));
+    if !result.issues.is_empty() {
+        out.push_str("**Issues:**\n");
+        for issue in &result.issues {
+            out.push_str(&format!("- {}\n", escape_pipe(issue)));
+        }
+        out.push('\n');
+    }
+    if !result.failed_claims.is_empty() {
+        out.push_str("**Failed claims:**\n");
+        for claim in &result.failed_claims {
+            out.push_str(&format!("- {}\n", escape_pipe(claim)));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "**Gate:** {}\n\n",
+        if result.gate_open {
+            "open — report may ship"
+        } else {
+            "closed — human approval required"
+        }
+    ));
+    out
+}
+
+/// Render the polish section as a markdown summary.
+fn render_polish(result: &crate::readability::PolishResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "**Changes:** {} control character(s) removed, {} whitespace run(s) normalized, {} empty paragraph(s) removed.\n\n",
+        result.control_chars_removed,
+        result.whitespace_normalized,
+        result.empty_paragraphs_removed
+    ));
+    out.push_str(&format!("**Note:** {}\n\n", escape_pipe(&result.note)));
+    if result.changes.is_empty() {
+        out.push_str("_(no polish changes applied)_\n\n");
+        return out;
+    }
+    out.push_str("**Applied changes:**\n");
+    for change in &result.changes {
+        out.push_str(&format!(
+            "- **{}:** {}\n",
+            escape_pipe(&change.field),
+            escape_pipe(&change.description)
+        ));
+    }
+    out.push('\n');
+    out
+}
+
+/// Render the readability audit section as a markdown summary.
+fn render_readability_audit(audit: &crate::readability::ReadabilityAudit) -> String {
+    let mut out = String::new();
+    let status = if audit.passed { "pass" } else { "review" };
+    out.push_str(&format!("**Score:** {}/100 ({})\n\n", audit.score, status));
+    out.push_str(&format!(
+        "**Metrics:** average finding length {} characters, {} missing label(s), {} long paragraph(s)\n\n",
+        audit.avg_finding_length,
+        audit.missing_label_count,
+        audit.long_paragraph_count
+    ));
+    if !audit.issues.is_empty() {
+        out.push_str("**Issues:**\n");
+        for issue in &audit.issues {
+            out.push_str(&format!("- {}\n", escape_pipe(issue)));
+        }
+        out.push('\n');
+    }
+    if !audit.recommendations.is_empty() {
+        out.push_str("**Recommendations:**\n");
+        for rec in &audit.recommendations {
+            out.push_str(&format!("- {}\n", escape_pipe(rec)));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Render the surgical-patch section as a markdown summary.
+fn render_surgical_patch(result: &crate::patcher::PatchResult) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "**Score estimate:** {} → {}\n\n",
+        result.score_before, result.score_after
+    ));
+    out.push_str(&format!("**Note:** {}\n\n", escape_pipe(&result.note)));
+    if result.patches.is_empty() {
+        out.push_str("_(no surgical patches applied)_\n\n");
+        return out;
+    }
+    out.push_str("**Patches:**\n");
+    out.push_str("| Operation | Target | Reason | Applied |\n");
+    out.push_str("|-----------|--------|--------|----------|\n");
+    for patch in &result.patches {
+        out.push_str(&format!(
+            "| {} | {} | {} | {} |\n",
+            escape_pipe(&patch.operation),
+            escape_pipe(&patch.target),
+            escape_pipe(&patch.reason),
+            if patch.applied { "yes" } else { "no" }
+        ));
+    }
+    out.push('\n');
+    out.push_str(&format!(
+        "**Patched draft:** {} finding(s), {} implication(s), {} open question(s).\n\n",
+        result.patched_finding_count,
+        result.patched_implication_count,
+        result.patched_open_question_count
+    ));
+    out
+}
+
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
@@ -330,6 +757,169 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     }
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
     body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
+
+    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
+    if let Some(graph) = &doc.contradiction_graph {
+        body.push_str("## Contradiction Graph\n\n");
+        if graph.is_empty() {
+            body.push_str("_(no contradictions detected among the gathered sources)_\n\n");
+        } else {
+            body.push_str("| Pair | Dimension | Strength | Source A | Source B | Note |\n");
+            body.push_str("|------|-----------|----------|----------|----------|------|\n");
+            for edge in &graph.edges {
+                let a = format!(
+                    "#{} {}",
+                    edge.claim_a.source_index, edge.claim_a.source_path
+                );
+                let b = format!(
+                    "#{} {}",
+                    edge.claim_b.source_index, edge.claim_b.source_path
+                );
+                body.push_str(&format!(
+                    "| {} vs {} | {} | {} | {} | {} | {} |\n",
+                    edge.claim_a.source_index,
+                    edge.claim_b.source_index,
+                    edge.dimension,
+                    edge.strength,
+                    escape_pipe(&a),
+                    escape_pipe(&b),
+                    escape_pipe(&edge.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
+    if let Some(loci) = &doc.loci {
+        body.push_str("## Loci Analysis\n\n");
+        if loci.is_empty() {
+            body.push_str(
+                "_(no recurring research dimensions detected among the gathered sources)_\n\n",
+            );
+        } else {
+            body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
+            body.push_str("|-------|---------|----------|-------------------------|\n");
+            for locus in &loci.loci {
+                let indices: Vec<String> = locus
+                    .source_indices
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect();
+                let snippets = if locus.snippets.is_empty() {
+                    "—".to_string()
+                } else {
+                    locus
+                        .snippets
+                        .join("; ")
+                        .chars()
+                        .take(120)
+                        .collect::<String>()
+                };
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&locus.label),
+                    escape_pipe(&indices.join(", ")),
+                    locus.mentions,
+                    escape_pipe(&snippets)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
+    if let Some(investigations) = &doc.depth_investigation {
+        body.push_str("## Depth Investigation\n\n");
+        if investigations.is_empty() {
+            body.push_str("_(no depth investigation available)_\n\n");
+        } else {
+            body.push_str("| Locus | Depth | Sources | Note |\n");
+            body.push_str("|-------|-------|---------|------|\n");
+            for inv in investigations {
+                let sources = inv
+                    .representative_sources
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&inv.label),
+                    inv.depth.as_str(),
+                    escape_pipe(&sources),
+                    escape_pipe(&inv.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Evidence Digest (FR-005, T-011) ───────────────────────────────────
+    if let Some(digest) = &doc.evidence_digest {
+        body.push_str("## Evidence Digest\n\n");
+        body.push_str(&render_evidence_digest(digest));
+    }
+
+    // ── Triple Draft (FR-005, T-011) ────────────────────────────────────
+    if let Some(draft) = &doc.triple_draft {
+        body.push_str("## Triple Draft\n\n");
+        body.push_str(&render_triple_draft(draft));
+    }
+
+    // ── Cross-Locus Reconcile (FR-005, T-009) ────────────────────────��
+    if let Some(reconcile) = &doc.cross_locus_reconcile {
+        body.push_str("## Cross-Locus Reconcile\n\n");
+        body.push_str(&render_cross_locus_reconcile(reconcile));
+    }
+
+    // ── Source Tensions (FR-005, T-009) ─────────────────────────────────
+    if let Some(tensions) = &doc.source_tensions {
+        body.push_str("## Source Tensions\n\n");
+        body.push_str(&render_source_tensions(tensions));
+    }
+
+    // ── Synthesis Audit (FR-005, T-012) ─────────────────────────────────
+    if let Some(audit) = &doc.synthesis_audit {
+        body.push_str("## Synthesis Audit\n\n");
+        body.push_str(&render_synthesis_audit(audit));
+    }
+
+    // ── Corpus Critic (FR-005, T-010) ─────────────────────────��──────────
+    if let Some(report) = &doc.corpus_critic {
+        body.push_str("## Corpus Critic\n\n");
+        body.push_str(&render_corpus_critic(report));
+    }
+
+    // ── Gap-Fill Fetch (FR-005, T-010) ───────────────────────────────────
+    if let Some(result) = &doc.gap_fetch {
+        body.push_str("## Gap-Fill Fetch\n\n");
+        body.push_str(&render_gap_fetch(result));
+    }
+
+    // ── Surgical Patch (FR-005, T-013) ─────────────────────────────────
+    if let Some(result) = &doc.surgical_patch {
+        body.push_str("## Surgical Patch\n\n");
+        body.push_str(&render_surgical_patch(result));
+    }
+
+    // ── Citation Check (FR-005, T-014) ──────────────────────────���───────
+    if let Some(result) = &doc.cite_check {
+        body.push_str("## Citation Check\n\n");
+        body.push_str(&render_citation_check(result));
+    }
+
+    // ── Polish (FR-005, T-015) ───────────────────────────────────────────
+    if let Some(result) = &doc.polish {
+        body.push_str("## Polish\n\n");
+        body.push_str(&render_polish(result));
+    }
+
+    // ── Readability Audit (FR-005, T-015) ─────────────────────────────
+    if let Some(audit) = &doc.readability_audit {
+        body.push_str("## Readability Audit\n\n");
+        body.push_str(&render_readability_audit(audit));
+    }
 
     // ── In-Project Cross-References ─────────────────────────────────────
     body.push_str("## In-Project Cross-References\n\n");
@@ -463,6 +1053,169 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     // ── Discussion (FR-009) ────────────────────────────────────────────────
     body.push_str("## Discussion\n\n");
 
+    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
+    if let Some(graph) = &doc.contradiction_graph {
+        body.push_str("### Contradiction Graph\n\n");
+        if graph.is_empty() {
+            body.push_str("_(no contradictions detected among the gathered sources)_\n\n");
+        } else {
+            body.push_str("| Pair | Dimension | Strength | Source A | Source B | Note |\n");
+            body.push_str("|------|-----------|----------|----------|----------|------|\n");
+            for edge in &graph.edges {
+                let a = format!(
+                    "#{} {}",
+                    edge.claim_a.source_index, edge.claim_a.source_path
+                );
+                let b = format!(
+                    "#{} {}",
+                    edge.claim_b.source_index, edge.claim_b.source_path
+                );
+                body.push_str(&format!(
+                    "| {} vs {} | {} | {} | {} | {} | {} |\n",
+                    edge.claim_a.source_index,
+                    edge.claim_b.source_index,
+                    edge.dimension,
+                    edge.strength,
+                    escape_pipe(&a),
+                    escape_pipe(&b),
+                    escape_pipe(&edge.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
+    if let Some(loci) = &doc.loci {
+        body.push_str("### Loci Analysis\n\n");
+        if loci.is_empty() {
+            body.push_str(
+                "_(no recurring research dimensions detected among the gathered sources)_\n\n",
+            );
+        } else {
+            body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
+            body.push_str("|-------|---------|----------|-------------------------|\n");
+            for locus in &loci.loci {
+                let indices: Vec<String> = locus
+                    .source_indices
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect();
+                let snippets = if locus.snippets.is_empty() {
+                    "—".to_string()
+                } else {
+                    locus
+                        .snippets
+                        .join("; ")
+                        .chars()
+                        .take(120)
+                        .collect::<String>()
+                };
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&locus.label),
+                    escape_pipe(&indices.join(", ")),
+                    locus.mentions,
+                    escape_pipe(&snippets)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
+    if let Some(investigations) = &doc.depth_investigation {
+        body.push_str("### Depth Investigation\n\n");
+        if investigations.is_empty() {
+            body.push_str("_(no depth investigation available)_\n\n");
+        } else {
+            body.push_str("| Locus | Depth | Sources | Note |\n");
+            body.push_str("|-------|-------|---------|------|\n");
+            for inv in investigations {
+                let sources = inv
+                    .representative_sources
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&inv.label),
+                    inv.depth.as_str(),
+                    escape_pipe(&sources),
+                    escape_pipe(&inv.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Evidence Digest (FR-005, T-011) ────��──────────────────────────────
+    if let Some(digest) = &doc.evidence_digest {
+        body.push_str("### Evidence Digest\n\n");
+        body.push_str(&render_evidence_digest(digest));
+    }
+
+    // ── Triple Draft (FR-005, T-011) ────────────────────────────────────
+    if let Some(draft) = &doc.triple_draft {
+        body.push_str("### Triple Draft\n\n");
+        body.push_str(&render_triple_draft(draft));
+    }
+
+    // ── Cross-Locus Reconcile (FR-005, T-009) ──────────────────────────
+    if let Some(reconcile) = &doc.cross_locus_reconcile {
+        body.push_str("### Cross-Locus Reconcile\n\n");
+        body.push_str(&render_cross_locus_reconcile(reconcile));
+    }
+
+    // ── Source Tensions (FR-005, T-009) ─────────────────────────────────
+    if let Some(tensions) = &doc.source_tensions {
+        body.push_str("### Source Tensions\n\n");
+        body.push_str(&render_source_tensions(tensions));
+    }
+
+    // Synthesis Audit (FR-005, T-012)
+    if let Some(audit) = &doc.synthesis_audit {
+        body.push_str("### Synthesis Audit\n\n");
+        body.push_str(&render_synthesis_audit(audit));
+    }
+
+    // Corpus Critic (FR-005, T-010)
+    if let Some(report) = &doc.corpus_critic {
+        body.push_str("### Corpus Critic\n\n");
+        body.push_str(&render_corpus_critic(report));
+    }
+
+    // Gap-Fill Fetch (FR-005, T-010)
+    if let Some(result) = &doc.gap_fetch {
+        body.push_str("### Gap-Fill Fetch\n\n");
+        body.push_str(&render_gap_fetch(result));
+    }
+
+    // Surgical Patch (FR-005, T-013)
+    if let Some(result) = &doc.surgical_patch {
+        body.push_str("### Surgical Patch\n\n");
+        body.push_str(&render_surgical_patch(result));
+    }
+
+    // Citation Check (FR-005, T-014)
+    if let Some(result) = &doc.cite_check {
+        body.push_str("### Citation Check\n\n");
+        body.push_str(&render_citation_check(result));
+    }
+
+    // Polish (FR-005, T-015)
+    if let Some(result) = &doc.polish {
+        body.push_str("### Polish\n\n");
+        body.push_str(&render_polish(result));
+    }
+
+    // Readability Audit (FR-005, T-015)
+    if let Some(audit) = &doc.readability_audit {
+        body.push_str("### Readability Audit\n\n");
+        body.push_str(&render_readability_audit(audit));
+    }
+
     body.push_str("### In-Project Cross-References\n\n");
     if doc.cross_references.is_empty() {
         body.push_str(
@@ -526,6 +1279,20 @@ pub fn render_skeleton(
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        contradiction_graph: None,
+        loci: None,
+        depth_investigation: None,
+        evidence_digest: None,
+        triple_draft: None,
+        cross_locus_reconcile: None,
+        source_tensions: None,
+        synthesis_audit: None,
+        corpus_critic: None,
+        gap_fetch: None,
+        surgical_patch: None,
+        cite_check: None,
+        polish: None,
+        readability_audit: None,
         template_body: None,
         decomposed_queries: Vec::new(),
         output_format,
@@ -876,30 +1643,46 @@ pub fn render_supporting_file(source: &Source) -> Option<String> {
             published_at,
             body,
             relevance,
+            oa_recovery,
             ..
-        } => Some(format!(
-            "# Web source\n\n\
-             - URL: {url}\n\
-             - Title: {title}\n\
-             - Published (UTC): {published}\n\
-             - Captured (UTC): {captured}\n\
-             - Relevance: {relevance}\n\n\
-             ```text\n{body}\n```\n",
-            url = url,
-            title = title,
-            published = published_at.map_or_else(|| "—".to_string(), |dt| dt.to_rfc3339()),
-            captured = captured_at.to_rfc3339(),
-            relevance = if relevance.is_empty() {
-                "—"
-            } else {
-                relevance.as_str()
-            },
-            body = if body.is_empty() {
-                "(no body captured for this source)"
-            } else {
-                body.as_str()
-            },
-        )),
+        } => {
+            let recovery_note = match oa_recovery {
+                Some(r) => {
+                    let version = r.version.as_deref().unwrap_or("unspecified");
+                    let license = r.license.as_deref().unwrap_or("unspecified");
+                    format!(
+                        "- Open-access recovery: full text fetched from {source} ({url}); version={version}, license={license}",
+                        source = r.source,
+                        url = r.url
+                    )
+                }
+                None => String::new(),
+            };
+            Some(format!(
+                "# Web source\n\n\
+                 - URL: {url}\n\
+                 - Title: {title}\n\
+                 - Published (UTC): {published}\n\
+                 - Captured (UTC): {captured}\n\
+                 - Relevance: {relevance}\n\
+                 {recovery_note}\n\n\
+                 ```text\n{body}\n```\n",
+                url = url,
+                title = title,
+                published = published_at.map_or_else(|| "—".to_string(), |dt| dt.to_rfc3339()),
+                captured = captured_at.to_rfc3339(),
+                relevance = if relevance.is_empty() {
+                    "—"
+                } else {
+                    relevance.as_str()
+                },
+                body = if body.is_empty() {
+                    "(no body captured for this source)"
+                } else {
+                    body.as_str()
+                },
+            ))
+        }
         Source::Local {
             path,
             kind,
@@ -1317,10 +2100,227 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            contradiction_graph: None,
+            loci: None,
+            depth_investigation: None,
+            evidence_digest: None,
+            triple_draft: None,
+            cross_locus_reconcile: None,
+            source_tensions: None,
+            synthesis_audit: None,
+            corpus_critic: None,
+            gap_fetch: None,
+            surgical_patch: None,
+            cite_check: None,
+            polish: None,
+            readability_audit: None,
             template_body: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
         }
+    }
+
+    #[test]
+    fn assemble_document_renders_contradiction_graph_section() {
+        use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
+        let sources = vec![
+            Source::Web {
+                url: "https://a.example".into(),
+                title: "A".into(),
+                captured_at: chrono::Utc::now(),
+                published_at: None,
+                body_path: PathBuf::new(),
+                body: "The intervention improves performance.".into(),
+                relevance: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+                oa_recovery: None,
+            },
+            Source::Web {
+                url: "https://b.example".into(),
+                title: "B".into(),
+                captured_at: chrono::Utc::now(),
+                published_at: None,
+                body_path: PathBuf::new(),
+                body: "The intervention degrades performance.".into(),
+                relevance: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+                oa_recovery: None,
+            },
+        ];
+        let mut graph = ContradictionGraph::empty();
+        graph.add_edge(ContradictionEdge {
+            claim_a: ContradictionClaim::from_source("claims better performance", 1, &sources[0]),
+            claim_b: ContradictionClaim::from_source("claims worse performance", 2, &sources[1]),
+            dimension: "performance".into(),
+            note: "opposing performance claims".into(),
+            strength: 50,
+        });
+        let mut doc = sample_doc(sample_item());
+        doc.contradiction_graph = Some(graph);
+        let assembled = assemble_document(&doc);
+        assert!(assembled.body.contains("## Contradiction Graph"));
+        assert!(assembled.body.contains("performance"));
+        assert!(assembled.body.contains("opposing performance claims"));
+        assert!(assembled.body.contains("#1"));
+        assert!(assembled.body.contains("#2"));
+    }
+
+    #[test]
+    fn assemble_document_contradiction_graph_placeholder_when_empty() {
+        let mut doc = sample_doc(sample_item());
+        doc.contradiction_graph = Some(crate::contradiction::ContradictionGraph::empty());
+        let assembled = assemble_document(&doc);
+        assert!(assembled.body.contains("## Contradiction Graph"));
+        assert!(
+            assembled
+                .body
+                .contains("no contradictions detected among the gathered sources")
+        );
+    }
+
+    #[test]
+    fn assemble_document_omits_contradiction_section_when_none() {
+        let doc = sample_doc(sample_item());
+        let assembled = assemble_document(&doc);
+        assert!(!assembled.body.contains("## Contradiction Graph"));
+    }
+
+    #[test]
+    fn assemble_document_renders_corpus_critic_and_gap_fetch_sections() {
+        let mut doc = sample_doc(sample_item());
+        doc.corpus_critic = Some(crate::corpus_critic::CorpusCriticReport {
+            score: 72,
+            coverage_score: 80,
+            evidence_score: 70,
+            balance_score: 85,
+            tension_score: 55,
+            issues: vec!["shallow evidence on Cost".into()],
+            gaps: vec!["Add cost evidence".into()],
+            recommendations: vec!["Broaden the width sweep".into()],
+            contested_ratio: 10,
+            shallow_dimensions: vec!["Cost".into()],
+            isolated_sources: vec![3],
+            passed: true,
+        });
+        doc.gap_fetch = Some(crate::corpus_critic::GapFetchResult {
+            queries: vec!["topic cost evidence".into()],
+            new_sources: 2,
+            failed_queries: 0,
+            attempted: true,
+            note: String::new(),
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Corpus Critic"),
+            "report layout should render corpus critic section"
+        );
+        assert!(
+            assembled.body.contains("## Gap-Fill Fetch"),
+            "report layout should render gap-fill section"
+        );
+        assert!(assembled.body.contains("72/100"));
+        assert!(assembled.body.contains("Broaden the width sweep"));
+        assert!(assembled.body.contains("**New sources captured:** 2"));
+        assert!(assembled.body.contains("topic cost evidence"));
+    }
+
+    #[test]
+    fn assemble_document_renders_surgical_patch_section() {
+        let mut doc = sample_doc(sample_item());
+        doc.surgical_patch = Some(crate::patcher::PatchResult {
+            patches: vec![
+                crate::patcher::SurgicalPatch {
+                    operation: "append_finding".to_string(),
+                    target: "Cost".to_string(),
+                    reason: "Dimension 'Cost' not addressed".to_string(),
+                    applied: true,
+                },
+                crate::patcher::SurgicalPatch {
+                    operation: "noop".to_string(),
+                    target: "logic".to_string(),
+                    reason: "logic critic passed".to_string(),
+                    applied: false,
+                },
+            ],
+            patched_analysis: crate::analysis::AnalysisResult::default(),
+            score_before: 55,
+            score_after: 70,
+            note: "Applied 1 surgical patch".to_string(),
+            patched_finding_count: 1,
+            patched_implication_count: 0,
+            patched_open_question_count: 1,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Surgical Patch"),
+            "report layout should render surgical patch section"
+        );
+        assert!(assembled.body.contains("55 → 70"));
+        assert!(assembled.body.contains("Applied 1 surgical patch"));
+        assert!(assembled.body.contains("append_finding"));
+        assert!(assembled.body.contains("Cost"));
+    }
+
+    #[test]
+    fn assemble_document_omits_surgical_patch_section_when_none() {
+        let doc = sample_doc(sample_item());
+        let assembled = assemble_document(&doc);
+        assert!(!assembled.body.contains("## Surgical Patch"));
+    }
+
+    #[test]
+    fn assemble_document_frontmatter_discloses_open_access_recovery() {
+        let mut item = sample_item();
+        item.open_access_recovery = true;
+        let doc = sample_doc(item);
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.frontmatter.contains("open_access_recovery: true"),
+            "frontmatter should disclose OA recovery; got:\n{}",
+            assembled.frontmatter
+        );
+    }
+
+    #[test]
+    fn assemble_document_supporting_file_discloses_recovery_version_and_license() {
+        use crate::open_access::{RecoveredOpenAccess, RecoverySource};
+        let mut item = sample_item();
+        item.add_source(Source::Web {
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Example paper".into(),
+            captured_at: chrono::Utc::now(),
+            published_at: None,
+            body_path: std::path::PathBuf::from("sources/web-01.md"),
+            body: "full text".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: Some(Box::new(RecoveredOpenAccess {
+                url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/".into(),
+                source: RecoverySource::EuropePmc,
+                license: Some("CC-BY-4.0".into()),
+                version: Some("publishedVersion".into()),
+            })),
+        });
+        let rendered = render_supporting_file(&item.sources[0]).expect("web source renders");
+        assert!(rendered.contains("Open-access recovery"));
+        assert!(rendered.contains("europepmc"));
+        assert!(rendered.contains("publishedVersion"));
+        assert!(rendered.contains("CC-BY-4.0"));
     }
 
     #[test]
@@ -1495,6 +2495,7 @@ mod tests {
             page_type: None,
             media_type: media_type.into(),
             language: None,
+            oa_recovery: None,
         }
     }
 
@@ -1693,6 +2694,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
@@ -1716,6 +2718,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("no body captured"));
@@ -1774,6 +2777,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         let out = render_bibliography(&[source]);
         assert!(out.contains("Example"));
@@ -1818,6 +2822,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1861,6 +2866,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1876,6 +2882,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
@@ -1913,6 +2920,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         item.add_source(Source::Web {
             published_at: Some(
@@ -1932,6 +2940,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -1947,6 +2956,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -1987,6 +2997,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -2032,6 +3043,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.
@@ -2182,6 +3194,154 @@ mod tests {
         assert_eq!(
             out,
             "J. P. Morgan founded the firm.\n\nLater he expanded it."
+        );
+    }
+
+    #[test]
+    fn assemble_document_renders_citation_check_section() {
+        use crate::cite_checker::CitationCheckResult;
+        let mut doc = sample_doc(sample_item());
+        doc.cite_check = Some(CitationCheckResult {
+            passed: true,
+            checked: 2,
+            failed_claims: Vec::new(),
+            issues: Vec::new(),
+            gate_open: true,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Citation Check"),
+            "report layout must contain Citation Check section"
+        );
+        assert!(
+            assembled
+                .body
+                .contains("**Summary:** 2 citation(s) checked, 2 passed, 0 failed; gate open.")
+        );
+        assert!(assembled.body.contains("pass (2 citation(s) checked)"));
+        assert!(assembled.body.contains("open — report may ship"));
+    }
+
+    #[test]
+    fn assemble_document_renders_source_tensions_section() {
+        use crate::reconcile::{SourceTensions, TensionKind, TensionRecord};
+        let mut doc = sample_doc(sample_item());
+        doc.source_tensions = Some(SourceTensions {
+            tensions: vec![TensionRecord {
+                kind: TensionKind::Contradiction,
+                label: "performance".into(),
+                source_indices: vec![1, 2],
+                note: "opposing performance claims".into(),
+            }],
+            sources_scanned: 2,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Source Tensions"),
+            "report layout must contain Source Tensions section"
+        );
+        assert!(assembled.body.contains("contradiction"));
+        assert!(assembled.body.contains("performance"));
+        assert!(assembled.body.contains("#1, #2"));
+        assert!(assembled.body.contains("opposing performance claims"));
+    }
+
+    #[test]
+    fn assemble_document_imrad_renders_source_tensions_subsection() {
+        use crate::reconcile::{SourceTensions, TensionKind, TensionRecord};
+        let mut doc = sample_doc(sample_item());
+        doc.output_format = crate::run_config::OutputFormat::Imrad;
+        doc.source_tensions = Some(SourceTensions {
+            tensions: vec![TensionRecord {
+                kind: TensionKind::ShallowEvidence,
+                label: "cost".into(),
+                source_indices: vec![3],
+                note: "thin coverage".into(),
+            }],
+            sources_scanned: 5,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("### Source Tensions"),
+            "IMRaD layout must render Source Tensions as a subsection"
+        );
+        assert!(assembled.body.contains("shallow evidence"));
+        assert!(assembled.body.contains("cost"));
+    }
+
+    #[test]
+    fn assemble_document_renders_polish_and_readability_audit_sections() {
+        use crate::readability::{PolishChange, PolishResult, ReadabilityAudit};
+        let mut doc = sample_doc(sample_item());
+        doc.polish = Some(PolishResult {
+            changes: vec![PolishChange {
+                field: "summary".into(),
+                description: "normalized whitespace".into(),
+            }],
+            control_chars_removed: 1,
+            whitespace_normalized: 2,
+            empty_paragraphs_removed: 3,
+            note: "Polished draft".into(),
+        });
+        doc.readability_audit = Some(ReadabilityAudit {
+            score: 85,
+            passed: true,
+            issues: vec!["issue".into()],
+            recommendations: vec!["rec".into()],
+            avg_finding_length: 400,
+            missing_label_count: 0,
+            long_paragraph_count: 0,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Polish"),
+            "report layout must contain Polish section"
+        );
+        assert!(assembled.body.contains("1 control character(s) removed"));
+        assert!(
+            assembled.body.contains("## Readability Audit"),
+            "report layout must contain Readability Audit section"
+        );
+        assert!(assembled.body.contains("85/100"));
+        assert!(
+            assembled
+                .body
+                .contains("average finding length 400 characters")
+        );
+    }
+
+    #[test]
+    fn assemble_document_renders_failed_citation_check_with_marker() {
+        use crate::cite_checker::CitationCheckResult;
+        let mut doc = sample_doc(sample_item());
+        doc.cite_check = Some(CitationCheckResult {
+            passed: false,
+            checked: 1,
+            failed_claims: vec!["CITATION_VERIFICATION_FAILED: [#1] missing body".into()],
+            issues: vec!["[#1] has no captured body".into()],
+            gate_open: false,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(assembled.body.contains("CITATION_VERIFICATION_FAILED"));
+        assert!(assembled.body.contains("closed — human approval required"));
+    }
+
+    #[test]
+    fn assemble_document_imrad_renders_citation_check_subsection() {
+        use crate::cite_checker::CitationCheckResult;
+        let mut doc = sample_doc(sample_item());
+        doc.output_format = crate::run_config::OutputFormat::Imrad;
+        doc.cite_check = Some(CitationCheckResult {
+            passed: true,
+            checked: 1,
+            failed_claims: Vec::new(),
+            issues: Vec::new(),
+            gate_open: true,
+        });
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("### Citation Check"),
+            "IMRaD layout must render Citation Check as a subsection"
         );
     }
 

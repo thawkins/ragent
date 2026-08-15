@@ -18,7 +18,7 @@ use crate::app::state::{App, LogLevel};
 impl App {
     pub(crate) fn handle_research_command(&mut self, args: &str) {
         use ragent_research::cli::ResearchCliCommand;
-        use ragent_research::{Depth, OutputFormat, ResearchManager, SessionConfig};
+        use ragent_research::{Depth, OutputFormat, ResearchManager, SessionConfig, Tier};
         use std::sync::Arc;
 
         let cmd = ResearchCliCommand::parse(args);
@@ -55,6 +55,7 @@ impl App {
                 from_file,
                 iterations,
                 depth,
+                tier,
                 format,
                 sources_dir,
                 template,
@@ -118,7 +119,11 @@ impl App {
                     fetch_concurrency: fetch_concurrency
                         .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
                     depth: depth.as_deref().and_then(Depth::parse),
+                    tier: tier.as_deref().and_then(Tier::parse).unwrap_or(Tier::Full),
                     iterations,
+                    max_web_results: ragent_research::DEFAULT_MAX_WEB_RESULTS,
+                    max_local_sources: 10,
+                    max_synthesis_sources: None,
                     output_format: format
                         .as_deref()
                         .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
@@ -136,7 +141,17 @@ impl App {
                         .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
                     search_circuit_breaker_threshold: search_circuit_breaker_threshold
                         .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
-                    ..SessionConfig::default()
+                    open_access_recovery: config_arc
+                        .as_ref()
+                        .map(|c| c.research.open_access_recovery)
+                        .unwrap_or(false),
+                    contact_email: config_arc
+                        .as_ref()
+                        .and_then(|c| c.research.contact_email.clone()),
+                    oa_min_full_text_chars: config_arc
+                        .as_ref()
+                        .map(|c| c.research.oa_min_full_text_chars)
+                        .unwrap_or(ragent_research::DEFAULT_OA_MIN_FULL_TEXT_CHARS),
                 };
                 let session = crate::research_adapter::build_research_session(
                     &self.session_processor.tool_registry,
@@ -324,18 +339,19 @@ impl App {
                 tokio::spawn(async move {
                     match mgr.show(&name).await {
                         Ok(item) => {
-                            let sources: Vec<(String, String, String, String)> = item
-                                .sources
-                                .iter()
-                                .map(|s| {
-                                    (
-                                        s.type_str().to_string(),
-                                        s.path_or_url().to_string(),
-                                        s.title().to_string(),
-                                        s.captured_at().to_rfc3339(),
-                                    )
-                                })
-                                .collect();
+                            let sources: Vec<(String, String, String, String, Option<String>)> =
+                                item.sources
+                                    .iter()
+                                    .map(|s| {
+                                        (
+                                            s.type_str().to_string(),
+                                            s.path_or_url().to_string(),
+                                            s.title().to_string(),
+                                            s.captured_at().to_rfc3339(),
+                                            s.oa_recovery_note(),
+                                        )
+                                    })
+                                    .collect();
                             event_bus.publish(Event::TextDelta {
                                 session_id,
                                 text: format!(

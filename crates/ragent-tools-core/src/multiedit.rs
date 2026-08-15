@@ -4,13 +4,13 @@
 //! operations across one or more files atomically. All edits are validated
 //! before any files are written — if any match fails, no files are modified.
 //!
-//! # Matching (editrenewal FR-004 / FR-009, amended)
+//! # Matching (editrenewal FR-004 / FR-009, amended by editplan P2)
 //!
-//! Each edit is resolved with **strict exact-byte matching**
-//! ([`find_exact_replacement_range`]). `old_string` must match exactly once,
-//! byte-for-byte; there is no CRLF, trailing-whitespace, or indentation
-//! tolerance. If the match fails, the edit is rejected and no files are
-//! modified.
+//! Each edit is resolved with the fallback cascade in
+//! [`find_replacement_cascade`]: exact → whitespace-flexible →
+//! indent-normalised. The first lane producing exactly one match wins. If
+//! every lane fails, the error carries a line-similarity hint (P2.6) or
+//! multi-match disambiguation (P2.7) so the model's next attempt lands closer.
 //!
 //! # Dry-run mode
 //!
@@ -39,13 +39,44 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use super::edit_log::log_edit_operation;
+use super::edit_log::{EntryExtras, log_edit_operation, log_edit_operation_ex};
 use super::path_util::resolve_path;
 use super::replace::{
-    FindDiag, FindError, find_exact_replacement_range, find_flexible_replacement_range,
-    format_match_failure,
+    CascadeFail, CascadeMatch, FindDiag, FindError, MatchLane, disambiguation_hint,
+    find_flexible_replacement_range, find_replacement_cascade, format_match_failure, length_note,
 };
 use super::{Tool, ToolContext, ToolOutput};
+
+/// An edit match failed with `outcome`; log the failure (with the match lane
+/// and a length note) and return it as the tool error.
+///
+/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
+/// re-imports this source via `#[path]`.
+#[allow(dead_code)]
+fn fail_match(
+    ctx: &ToolContext,
+    path: &Path,
+    old_str: &str,
+    new_str: &str,
+    outcome: String,
+    lane: &'static str,
+    dry_run: bool,
+) -> anyhow::Error {
+    log_edit_operation_ex(
+        &ctx.working_dir,
+        path,
+        EntryExtras {
+            tool: "multi_edit",
+            old_str,
+            new_str,
+            outcome: &outcome,
+            dry_run,
+            match_lane: Some(lane),
+            note: length_note(old_str),
+        },
+    );
+    anyhow::anyhow!(outcome)
+}
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
 ///
@@ -86,6 +117,8 @@ struct EditOp {
 struct ResolvedEdit {
     /// Index of this edit in the original JSON `edits` array (for diagnostics).
     input_index: usize,
+    /// Which cascade lane matched this edit (for the success log).
+    lane: MatchLane,
     /// Inclusive start byte offset against the original file content.
     start: usize,
     /// Exclusive end byte offset against the original file content.
@@ -113,7 +146,12 @@ impl Tool for MultiEditTool {
          must provide `file_path` (string), `old_string` (string), and \
          `new_string` (string). By default every edit must match exactly once in \
          its file, byte-for-byte; if any single edit fails validation, no files \
-         are modified. Each edit also accepts `collapse_whitespace` (boolean, \
+         are modified. When exact matching fails, a fallback cascade retries \
+         with whitespace-flexible and indent-normalised matching before \
+         erroring. If your previous edit on this file succeeded, treat your \
+         in-context copy as stale and re-read before composing the next \
+         `old_string`. Keep each `old_string` under 20 lines where possible. \
+         Each edit also accepts `collapse_whitespace` (boolean, \
          default false) to relax matching for that edit: backslash escapes \
          (\\t, \\n, \\r, \\\\) in old_string are decoded and every whitespace \
          run matches a non-empty whitespace run in the file. Edits to the same \
@@ -252,23 +290,32 @@ impl Tool for MultiEditTool {
         // Phase 1b: Stale-file detection (editrenewal FR-003 / FR-009).
         // For every target file that the session has recorded a read
         // timestamp for, reject the batch if the file was modified after it
-        // was read. Files with no recorded timestamp proceed (no baseline).
+        // was read. P1.3: refresh the read timestamp once so the model's next
+        // attempt starts from the live content.
         for path in &unique_paths {
             if let Err(e) = check_stale_file(path, ctx) {
+                record_edit_timestamp(path, ctx);
                 for op in &ops {
                     if &op.path == path {
-                        log_edit_operation(
+                        log_edit_operation_ex(
                             &ctx.working_dir,
-                            "multi_edit",
                             &op.path,
-                            &op.old_str,
-                            &op.new_str,
-                            &format!("stale-file rejected: {e}"),
-                            dry_run,
+                            EntryExtras {
+                                tool: "multi_edit",
+                                old_str: &op.old_str,
+                                new_str: &op.new_str,
+                                outcome: &format!("stale-file rejected: {e}"),
+                                dry_run,
+                                match_lane: None,
+                                note: Some("stale retry-once: read timestamp refreshed"),
+                            },
                         );
                     }
                 }
-                bail!("{e}");
+                bail!(
+                    "{e}. The session's read timestamp has been refreshed — \
+                     re-issue the batch against the live content."
+                );
             }
         }
         // Phase 2: Resolve every edit against the original file content and
@@ -279,48 +326,96 @@ impl Tool for MultiEditTool {
                 .get(&op.path)
                 .expect("file content must exist for every op path");
 
-            let (start, end, effective_new) = if op.collapse_ws {
-                find_flexible_replacement_range(original, &op.old_str, &op.new_str).map_err(
-                    |e| {
-                        let diag = match e {
-                            FindError::NotFound => FindDiag::not_found(),
-                            FindError::MultipleMatches(n) => FindDiag::multiple(n),
+            let (lane, start, end, effective_new) = if op.collapse_ws {
+                match find_flexible_replacement_range(original, &op.old_str, &op.new_str) {
+                    Ok((s, e, ns)) => (MatchLane::Flexible, s, e, ns),
+                    Err(e) => {
+                        let err_prefix = match e {
+                            FindError::NotFound => super::replace::not_found_hint(
+                                original,
+                                &op.old_str,
+                                &op.path,
+                                Some(i),
+                                false,
+                            ),
+                            FindError::MultipleMatches(n) => {
+                                let starts: Vec<usize> = original
+                                    .match_indices(&op.old_str)
+                                    .take(3)
+                                    .map(|(x, _)| x)
+                                    .collect();
+                                format!(
+                                    "Edit {}: {}\n{}",
+                                    i,
+                                    format_match_failure(&FindDiag::multiple(n), &op.path),
+                                    disambiguation_hint(original, &starts)
+                                )
+                            }
                         };
-                        let err = format!(
-                            "Edit {}: {} (collapse_whitespace mode)",
-                            i,
-                            format_match_failure(&diag, &op.path)
-                        );
-                        log_edit_operation(
-                            &ctx.working_dir,
-                            "multi_edit",
+                        let err = format!("{err_prefix} (collapse_whitespace mode)");
+                        let lane_str = match e {
+                            FindError::NotFound => "not_found",
+                            FindError::MultipleMatches(_) => "multiple",
+                        };
+                        return Err(fail_match(
+                            ctx,
                             &op.path,
                             &op.old_str,
                             &op.new_str,
-                            &err,
+                            err,
+                            lane_str,
                             dry_run,
-                        );
-                        anyhow::anyhow!(err)
-                    },
-                )?
+                        ));
+                    }
+                }
             } else {
-                find_exact_replacement_range(original, &op.old_str, &op.new_str).map_err(|e| {
-                    let diag = match e {
-                        FindError::NotFound => FindDiag::not_found(),
-                        FindError::MultipleMatches(n) => FindDiag::multiple(n),
-                    };
-                    let err = format!("Edit {}: {}", i, format_match_failure(&diag, &op.path));
-                    log_edit_operation(
-                        &ctx.working_dir,
-                        "multi_edit",
-                        &op.path,
-                        &op.old_str,
-                        &op.new_str,
-                        &err,
-                        dry_run,
-                    );
-                    anyhow::anyhow!(err)
-                })?
+                match find_replacement_cascade(original, &op.old_str, &op.new_str) {
+                    CascadeMatch::Found {
+                        lane,
+                        start,
+                        end,
+                        new_str,
+                    } => (lane, start, end, new_str),
+                    CascadeMatch::Failed(CascadeFail::NotFound) => {
+                        let err = super::replace::not_found_hint(
+                            original,
+                            &op.old_str,
+                            &op.path,
+                            Some(i),
+                            false,
+                        );
+                        return Err(fail_match(
+                            ctx,
+                            &op.path,
+                            &op.old_str,
+                            &op.new_str,
+                            err,
+                            "not_found",
+                            dry_run,
+                        ));
+                    }
+                    CascadeMatch::Failed(CascadeFail::MultipleMatches {
+                        lane: m_lane,
+                        count,
+                        starts,
+                    }) => {
+                        let err = format!(
+                            "Edit {}: {}\n{}",
+                            i,
+                            format_match_failure(&FindDiag::multiple(count), &op.path),
+                            disambiguation_hint(original, &starts)
+                        );
+                        return Err(fail_match(
+                            ctx,
+                            &op.path,
+                            &op.old_str,
+                            &op.new_str,
+                            err,
+                            m_lane.as_str(),
+                            dry_run,
+                        ));
+                    }
+                }
             };
 
             let old_lines = original[start..end].lines().count().max(1);
@@ -331,6 +426,7 @@ impl Tool for MultiEditTool {
                 .or_default()
                 .push(ResolvedEdit {
                     input_index: i,
+                    lane,
                     start,
                     end,
                     effective_new,
@@ -461,14 +557,18 @@ impl Tool for MultiEditTool {
         // Log a success entry for every resolved edit operation.
         for (path, edits) in &resolved_by_file {
             for edit in edits {
-                log_edit_operation(
+                log_edit_operation_ex(
                     &ctx.working_dir,
-                    "multi_edit",
                     path,
-                    &ops[edit.input_index].old_str,
-                    &ops[edit.input_index].new_str,
-                    "success",
-                    dry_run,
+                    EntryExtras {
+                        tool: "multi_edit",
+                        old_str: &ops[edit.input_index].old_str,
+                        new_str: &ops[edit.input_index].new_str,
+                        outcome: "success",
+                        dry_run,
+                        match_lane: Some(edit.lane.as_str()),
+                        note: None,
+                    },
                 );
             }
         }

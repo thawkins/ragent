@@ -23,8 +23,8 @@ pub use config::{
     AgentConfig, AgentPerfConfig, AutoExtractConfig, BrowserConfig, Capabilities, ChannelsConfig,
     Config, Cost, CrossProjectConfig, DiscordChannelConfig, GitLabIntegrationConfig, GmailConfig,
     McpServerConfig, McpTransport, MemoryConfig, ModelConfig, PieGapConfig, PriceEntry,
-    ProviderConfig, SddConfig, StreamConfig, TelegramChannelConfig, ToolVisibilityConfig,
-    tool_family_names,
+    ProviderConfig, ResearchConfig, SddConfig, StreamConfig, TelegramChannelConfig,
+    ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{
     Permission, PermissionAction, PermissionChecker, PermissionDecision, PermissionRequest,

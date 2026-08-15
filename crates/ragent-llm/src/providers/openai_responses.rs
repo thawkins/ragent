@@ -397,7 +397,7 @@ impl ResponsesApiClient {
                 // Check for 409 Conflict - retryable error
                 if status == reqwest::StatusCode::CONFLICT {
                     yield StreamEvent::Error {
-                        message: format!("HTTP 409 Conflict: Concurrent modification detected. Please retry the request."),
+                        message: "HTTP 409 Conflict: Concurrent modification detected. Please retry the request.".to_string(),
                     };
                 } else {
                     yield StreamEvent::Error {
@@ -472,13 +472,14 @@ impl ResponsesApiClient {
                                 yield StreamEvent::ReasoningEnd;
                             }
                             "response.function_call_arguments.delta" => {
-                                if let Some(call_id) = event.get("call_id").and_then(|v| v.as_str()) {
-                                    if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: call_id.to_string(),
-                                            args_json: delta.to_string(),
-                                        };
-                                    }
+                                if let (Some(call_id), Some(delta)) = (
+                                    event.get("call_id").and_then(|v| v.as_str()),
+                                    event.get("delta").and_then(|v| v.as_str()),
+                                ) {
+                                    yield StreamEvent::ToolCallDelta {
+                                        id: call_id.to_string(),
+                                        args_json: delta.to_string(),
+                                    };
                                 }
                             }
                             "response.function_call_arguments.done" => {

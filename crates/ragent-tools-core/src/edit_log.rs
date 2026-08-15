@@ -1,8 +1,8 @@
-//! Edit-operation instrumentation for `edit` and `multi_edit`.
+//! Edit-operation instrumentation for `edit`, `multi_edit`, and `apply_patch`.
 //!
-//! When enabled, every `edit` and `multi_edit` invocation writes a single JSON
-//! line to a log file in `<working_dir>/log/edits-<timestamp>.jsonl`. Each line
-//! records the timestamp, the target file path, the search/replacement text,
+//! When enabled, every `edit`, `multi_edit`, and `apply_patch` invocation
+//! writes a single JSON line to a log file in `<working_dir>/log/edits-<timestamp>.jsonl`.
+//! Each line records the timestamp, the target file path, the search/replacement text,
 //! and the outcome.
 //!
 //! Logging is controlled by a process-wide atomic flag that is toggled via the
@@ -47,12 +47,16 @@ fn log_file_path(log_dir: &Path) -> PathBuf {
 /// but are never propagated to the caller, so an edit cannot fail because of a
 /// logging problem.
 ///
+/// This is the plain form kept for existing callers; new call sites should
+/// prefer [`log_edit_operation_ex`] so the `match_lane` and `note` fields are
+/// populated for later analysis.
+///
 /// # Arguments
 ///
 /// * `working_dir` — project working directory; the `log/` subdirectory is
 ///   created here if needed.
-/// * `tool` — name of the tool that performed the edit (`"edit"` or
-///   `"multi_edit"`).
+/// * `tool` — name of the tool that performed the edit (`"edit"`,
+///   `"multi_edit"`, or `"apply_patch"`).
 /// * `file_path` — absolute or project-relative path of the edited file.
 /// * `old_str` — search string that was replaced.
 /// * `new_str` — replacement string that was inserted.
@@ -67,6 +71,44 @@ pub fn log_edit_operation(
     outcome: &str,
     dry_run: bool,
 ) {
+    log_edit_operation_ex(
+        working_dir,
+        file_path,
+        EntryExtras {
+            tool,
+            old_str,
+            new_str,
+            outcome,
+            dry_run,
+            match_lane: None,
+            note: None,
+        },
+    );
+}
+
+/// Extra fields attached to an edit-log entry by [`log_edit_operation_ex`].
+#[derive(Default)]
+pub struct EntryExtras<'a> {
+    /// Name of the tool (`"edit"`, `"multi_edit"`, `"apply_patch"`).
+    pub tool: &'a str,
+    /// Search string that was replaced.
+    pub old_str: &'a str,
+    /// Replacement string that was inserted.
+    pub new_str: &'a str,
+    /// `"success"` or an error message.
+    pub outcome: &'a str,
+    /// Whether the edit was a dry-run preview.
+    pub dry_run: bool,
+    /// Which matcher lane produced the outcome (editplan P4.12).
+    pub match_lane: Option<&'a str>,
+    /// Free-form diagnostic tag (e.g. `"no prior read"`, `"long old_str"`;
+    /// editplan P3.8 / P3.10).
+    pub note: Option<&'a str>,
+}
+
+/// Write a single JSON log entry with the extended `match_lane` / `note`
+/// fields. Identical semantics to [`log_edit_operation`] otherwise.
+pub fn log_edit_operation_ex(working_dir: &Path, file_path: &Path, extras: EntryExtras<'_>) {
     if !is_edit_log_enabled() {
         return;
     }
@@ -83,15 +125,21 @@ pub fn log_edit_operation(
     // Pick an existing log file from the current session, or start a new one.
     let path = pick_log_file(&log_dir);
 
-    let entry = json!({
+    let mut entry = json!({
         "timestamp": chrono::Utc::now().to_rfc3339(),
-        "tool": tool,
+        "tool": extras.tool,
         "file_path": file_path.display().to_string(),
-        "old_str": old_str,
-        "new_str": new_str,
-        "outcome": outcome,
-        "dry_run": dry_run,
+        "old_str": extras.old_str,
+        "new_str": extras.new_str,
+        "outcome": extras.outcome,
+        "dry_run": extras.dry_run,
     });
+    if let Some(lane) = extras.match_lane {
+        entry["match_lane"] = json!(lane);
+    }
+    if let Some(note) = extras.note {
+        entry["note"] = json!(note);
+    }
 
     if let Err(e) = append_json_line(&path, &entry) {
         tracing::warn!("edit_log: failed to append to {}: {e}", path.display());

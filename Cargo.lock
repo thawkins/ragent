@@ -5483,7 +5483,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "clap",
@@ -5509,7 +5509,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5584,7 +5584,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5611,7 +5611,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5701,10 +5701,11 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "async-trait",
+ "blake3",
  "chrono",
  "criterion",
  "futures",
@@ -5716,6 +5717,8 @@ dependencies = [
  "ragent-tools-extended",
  "ragent-types",
  "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
  "similar",
@@ -5729,7 +5732,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5790,7 +5793,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5927,7 +5930,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.29"
+version = "1.0.30"
 dependencies = [
  "anyhow",
  "arboard",

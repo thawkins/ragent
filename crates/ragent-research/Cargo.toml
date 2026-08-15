@@ -23,7 +23,10 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+blake3 = { workspace = true }
+rusqlite = { workspace = true }
 ragent-tools-extended = { path = "../ragent-tools-extended" }
+reqwest = { workspace = true }
 tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }
 similar = { workspace = true }
 regex = { workspace = true }

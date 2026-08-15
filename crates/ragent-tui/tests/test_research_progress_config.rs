@@ -13,6 +13,7 @@ fn encode_config_snapshot_shows_format_and_depth() {
         output_format: OutputFormat::Imrad.as_str().to_string(),
         depth: Some(Depth::Standard.as_str().to_string()),
         iterations: Some(2),
+        tier: None,
         from_urls: Vec::new(),
         from_file: None,
     };
@@ -31,6 +32,7 @@ fn encode_config_snapshot_sanitizes_from_urls() {
         output_format: OutputFormat::ComparisonTable.as_str().to_string(),
         depth: None,
         iterations: None,
+        tier: None,
         from_urls: vec!["https://example.com\x1b[31m".to_string()],
         from_file: None,
     };

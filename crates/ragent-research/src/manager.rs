@@ -93,6 +93,13 @@ pub enum ResearchError {
     /// The iterative research engine failed during a multi-iteration pass.
     #[error("iterative research engine failed: {0}")]
     EngineRunFailed(String),
+    /// The cite-check gate closed because a cited source was missing or its
+    /// captured body did not support the claim (FR-006, FR-014).
+    #[error("cite-check failed: {claims:?}")]
+    CiteCheckFailed {
+        /// Failed claims, each prefixed with `CITATION_VERIFICATION_FAILED`.
+        claims: Vec<String>,
+    },
 }
 
 /// Result alias for [`ResearchManager`].
@@ -900,6 +907,20 @@ pub fn render_document_for(
         top_implications: Vec::new(),
         cross_references: Vec::new(),
         open_questions: Vec::new(),
+        contradiction_graph: None,
+        loci: None,
+        depth_investigation: None,
+        evidence_digest: None,
+        triple_draft: None,
+        cross_locus_reconcile: None,
+        source_tensions: None,
+        synthesis_audit: None,
+        corpus_critic: None,
+        gap_fetch: None,
+        surgical_patch: None,
+        cite_check: None,
+        polish: None,
+        readability_audit: None,
         template_body: None,
         decomposed_queries: queries.to_vec(),
         output_format: crate::run_config::OutputFormat::Report,
@@ -1205,6 +1226,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let doc = ResearchDocument {
             item,
@@ -1213,7 +1235,21 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            contradiction_graph: None,
+            loci: None,
+            depth_investigation: None,
+            evidence_digest: None,
+            triple_draft: None,
+            cross_locus_reconcile: None,
+            source_tensions: None,
+            synthesis_audit: None,
             template_body: None,
+            corpus_critic: None,
+            gap_fetch: None,
+            surgical_patch: None,
+            cite_check: None,
+            polish: None,
+            readability_audit: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
         };
@@ -1426,6 +1462,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -1471,6 +1508,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         let doc = ResearchDocument {
             item,
@@ -1479,7 +1517,21 @@ mod tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            contradiction_graph: None,
+            loci: None,
+            depth_investigation: None,
+            evidence_digest: None,
+            triple_draft: None,
+            cross_locus_reconcile: None,
+            source_tensions: None,
+            synthesis_audit: None,
             template_body: None,
+            corpus_critic: None,
+            gap_fetch: None,
+            surgical_patch: None,
+            cite_check: None,
+            polish: None,
+            readability_audit: None,
             decomposed_queries: Vec::new(),
             output_format: crate::run_config::OutputFormat::Report,
         };
@@ -1521,6 +1573,7 @@ mod frontmatter_tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         });
         item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
         let doc = ResearchDocument {
@@ -1530,7 +1583,21 @@ mod frontmatter_tests {
             top_implications: Vec::new(),
             cross_references: Vec::new(),
             open_questions: Vec::new(),
+            contradiction_graph: None,
+            loci: None,
+            depth_investigation: None,
+            evidence_digest: None,
+            triple_draft: None,
+            cross_locus_reconcile: None,
+            source_tensions: None,
+            synthesis_audit: None,
             template_body: None,
+            corpus_critic: None,
+            gap_fetch: None,
+            surgical_patch: None,
+            cite_check: None,
+            polish: None,
+            readability_audit: None,
             decomposed_queries: vec!["Rust async".into(), "Tokio runtime".into()],
             output_format: crate::run_config::OutputFormat::Report,
         };

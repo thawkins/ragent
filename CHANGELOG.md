@@ -1,6 +1,69 @@
 # Changelog
 
+## Version: 1.0.30
+
+### Changed — Edit and edit-log improvements (ragent-tools-core)
+
+- Hardened `edit`, `multiedit`, `apply_patch`, and `replace` matching with
+  improved fallback cascades, whitespace-flexible matching, and
+  indent-normalised retry logic to reduce spurious match failures.
+- Enhanced `edit_log` tracking for better auditability of applied edits.
+- Expanded test coverage in `test_edit`, `test_edit_integration`,
+  `test_edit_smoke`, `test_multiedit`, `test_multiedit_helpers`, and
+  `test_apply_patch` to cover the new matching behaviour.
+
+### Changed — Research system (ragent-research)
+
+- Added new hyperresearch modules: `chapter`, `cite_checker`,
+  `contradiction`, `corpus_critic`, `digest`, `locus`, `open_access`,
+  `patcher`, `readability`, `reconcile`, `run_manifest`, `source_vault`,
+  `synthesis`, and `tier_router`.
+- Extended `cli`, `document`, `session`, `web_gatherer`, `source`,
+  `manager`, `run_config`, and `item` with tier-based research pipeline
+  support.
+- Added `test_hyperresearch_manual` and `source_vault` tests.
+
+### Changed — Configuration (ragent-config)
+
+- Added `research.open_access_recovery` and `research.contact_email`
+  config fields.
+- Added `test_research_config` test.
+
+### Changed — Other
+
+- Updated `openai_responses` provider handling.
+- Updated `ragent-server` routes and `ragent-storage` storage helpers.
+- Updated TUI research progress rendering and tests.
+- Removed obsolete docs: `CODE_QUALITY_IMPLEMENTED.md`,
+  `edit-matching-improvements.md`, `O365_TOOL.md`, and
+  `research-options-wiring-plan.md`.
+- Added `docs/howtos/research.md`.
+- Bumped workspace version to 1.0.30.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.29
+
+### Added — Hyperresearch integration
+
+- `/research --tier light|full|dissertation` selects research depth; default is `full` (T-001, FR-001).
+- `RunManifest` with `RunStep`/`StepStatus` tracks every run step and supports resuming an interrupted run via `/research resume <run_tag>` (T-002, FR-007).
+- Persistent source vault under `.ragent/research_vault/<run_tag>/` with SQLite index and raw content files; vault sources are reused before any new web search (T-003, T-004, FR-002, FR-003, FR-009).
+- Tier router implements the full 16-step pipeline for `full`, a trimmed pipeline for `light`, and dissertation chaptering for `dissertation` (T-005, FR-005, FR-008, FR-013).
+- Width sweep aggregates results from all configured `mf_search` backends in parallel (T-006).
+- Deterministic contradiction graph and cross-locus reconcile/source tensions are rendered in `RESEARCH.md` (T-007, T-009).
+- Deterministic loci analysis and depth investigation surface recurring dimensions and shallow evidence (T-008).
+- Deterministic corpus critic, gap-fill fetch, and surgical patcher refine the draft before citation checking (T-010, T-013).
+- Deterministic evidence digest and triple draft feed synthesis and a 4-critic audit (T-011, T-012).
+- Citation checker verifies every `[#N]` marker and closes the failure gate with `CITATION_VERIFICATION_FAILED` markers when a source is unsupported (T-014, FR-006, FR-014).
+- Deterministic polish and readability audit run before final assembly (T-015).
+- Open-access recovery via Unpaywall and Europe PMC, with source license/version disclosure in `RESEARCH.md` frontmatter and supporting-file notes (T-017, T-019, FR-010, FR-015).
+- `research.open_access_recovery` and `research.contact_email` config fields (T-018, FR-011, FR-012).
+- Sufficient-source check skips web search when the vault already holds enough sources for the requested tier (T-021, FR-016).
+
+### Tests — Hyperresearch integration
+
+- Added `crates/ragent-research/tests/test_hyperresearch_manual.rs` with manual verification test cases covering tier step selection, resume-from-manifest, rendered contradiction/tensions/cite-check sections, sufficient-source skip, and OA-recovery disclosure.
 
 ### Changed
 

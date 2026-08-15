@@ -119,6 +119,12 @@ pub enum Source {
         /// predates this field.
         #[serde(default)]
         language: Option<String>,
+        /// Open-access recovery metadata. Populated when the source body was
+        /// recovered from a legal OA copy via Unpaywall or Europe PMC
+        /// (FR-010). `None` when the source was captured directly from the
+        /// original URL or predates this field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
     },
     /// A local file excerpted from the project or an extra sources dir.
     Local {
@@ -266,6 +272,19 @@ impl Source {
         }
     }
 
+    /// Name of the search tool that discovered this source.
+    ///
+    /// Only [`Source::Web`] carries a `search_tool` value (e.g. `"mf_search"`,
+    /// `"websearch"`). Local, spec, and other sources do not have a search tool
+    /// and return an empty string.
+    #[must_use]
+    pub fn search_tool(&self) -> &str {
+        match self {
+            Self::Web { search_tool, .. } => search_tool,
+            _ => "",
+        }
+    }
+
     /// Optional relevance note for local, spec, and web sources.
     #[must_use]
     pub fn relevance(&self) -> Option<&str> {
@@ -309,6 +328,34 @@ impl Source {
     #[must_use]
     pub fn has_body(&self) -> bool {
         self.body().is_some_and(|b| !b.is_empty())
+    }
+
+    /// Open-access recovery metadata, when the source body was recovered from a
+    /// legal OA copy instead of being fetched directly from the original URL.
+    #[must_use]
+    pub fn oa_recovery(&self) -> Option<&crate::open_access::RecoveredOpenAccess> {
+        match self {
+            Self::Web { oa_recovery, .. } => oa_recovery.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Human-readable disclosure of an open-access recovery for this source.
+    ///
+    /// Returns `None` when the source was captured directly from the original
+    /// URL or is not a web source. When a legal OA copy was recovered, the
+    /// note includes the recovery service, the recovered URL, and the version
+    /// and license when reported (FR-015).
+    #[must_use]
+    pub fn oa_recovery_note(&self) -> Option<String> {
+        let r = self.oa_recovery()?;
+        let version = r.version.as_deref().unwrap_or("unspecified");
+        let license = r.license.as_deref().unwrap_or("unspecified");
+        Some(format!(
+            "recovered from {source} ({url}); version={version}, license={license}",
+            source = r.source,
+            url = r.url
+        ))
     }
 
     /// Numeric relevance rank used by the `max_synthesis_sources` cap
@@ -365,6 +412,73 @@ mod tests {
             .with_timezone(&Utc)
     }
 
+    fn web_with_oa_recovery() -> Source {
+        Source::Web {
+            published_at: None,
+            url: "https://doi.org/10.1234/example".into(),
+            title: "Example paper".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "full text".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: Some(Box::new(crate::open_access::RecoveredOpenAccess {
+                url: "https://pmc.ncbi.nlm.nih.gov/articles/PMC123456/".into(),
+                source: crate::open_access::RecoverySource::EuropePmc,
+                license: Some("CC-BY-4.0".into()),
+                version: Some("publishedVersion".into()),
+            })),
+        }
+    }
+
+    #[test]
+    fn oa_recovery_note_includes_source_url_version_and_license() {
+        let source = web_with_oa_recovery();
+        let note = source.oa_recovery_note().expect("should have note");
+        assert!(
+            note.contains("europepmc"),
+            "note should name service: {note}"
+        );
+        assert!(
+            note.contains("pmc.ncbi.nlm.nih.gov/articles/PMC123456/"),
+            "note should include recovered URL: {note}"
+        );
+        assert!(
+            note.contains("publishedVersion"),
+            "note should include version: {note}"
+        );
+        assert!(
+            note.contains("CC-BY-4.0"),
+            "note should include license: {note}"
+        );
+    }
+
+    #[test]
+    fn oa_recovery_note_is_none_without_recovery() {
+        let web = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: None,
+        };
+        assert!(web.oa_recovery_note().is_none());
+    }
+
     #[test]
     fn type_str_for_each_variant() {
         let web = Source::Web {
@@ -381,6 +495,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(web.type_str(), "web");
 
@@ -436,6 +551,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -477,6 +593,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -497,6 +614,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -595,6 +713,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -613,6 +732,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -647,6 +767,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -670,6 +791,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance(), Some(""));
     }
@@ -692,6 +814,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance_rank(), 8);
     }
@@ -712,6 +835,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance_rank(), 7);
     }
@@ -732,6 +856,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance_rank(), 5);
     }
@@ -752,6 +877,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance_rank(), 3);
     }
@@ -772,6 +898,7 @@ mod tests {
             page_type: None,
             media_type: "page".into(),
             language: None,
+            oa_recovery: None,
         };
         assert_eq!(s.relevance_rank(), 1);
     }
