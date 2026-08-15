@@ -1,6 +1,48 @@
 # Changelog
 
+## Version: 1.0.31
+
+### Fixed — CI clippy and dead-code lint failures
+
+- Fixed `clippy::needless_raw_string_hashes` warnings in
+  `crates/ragent-agent/src/goal/mod.rs`, `crates/ragent-agent/src/template/mod.rs`,
+  and `crates/ragent-tui/src/app/slash.rs` by removing unnecessary `#` delimiters
+  from raw string literals that don't contain double quotes.
+- Fixed `clippy::vec_init_then_push` warning in
+  `crates/ragent-agent/src/template/mod.rs` by converting `Vec::new()` + `push`
+  pattern to a `vec![]` macro.
+- Fixed `clippy::useless_borrows_in_formatting` warning in `src/main.rs` by
+  removing a redundant `&` borrow on a format argument.
+- Added explanatory `// reason:` comments to all 8 undocumented
+  `#[allow(dead_code)]` attributes in
+  `crates/ragent-agent/src/session/archive.rs` `CronEventExport` struct,
+  resolving the dead-code reason check CI job failure.
+
+### Changed
+
+- Bumped workspace version to 1.0.31.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.30
+
+### Added — Panic hook with full log capture (ragent binary)
+
+- Installed a custom `std::panic` hook at the very start of `main` that
+  captures every panic and writes a full report to `log/panic-*.log` in
+  the project working directory.
+- Each panic log includes: UTC timestamp, PID, executable path, working
+  directory, panic location (file:line:column), panic message, full
+  command-line arguments, `RUST_BACKTRACE` / `RUST_LIB_BACKTRACE`
+  environment values, and a complete backtrace captured via
+  `std::backtrace::Backtrace::force_capture` (always captured regardless
+  of `RUST_BACKTRACE` setting).
+- The hook chains to the default Rust panic hook after writing the file,
+  preserving stderr output for terminal users.
+- Added `src/panic_hook.rs` module with `install()`, `log_dir()`,
+  `panic_log_path()`, and `write_panic_log()` functions, plus unit tests
+  for path format and log directory resolution.
+- Added `chrono` to the root `Cargo.toml` `[dependencies]`.
 
 ### Changed — Edit and edit-log improvements (ragent-tools-core)
 

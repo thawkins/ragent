@@ -9713,7 +9713,7 @@ fn handle_goal_command(app: &mut App, args: &str) {
     use ragent_agent::goal::GoalCondition;
 
     if args.is_empty() {
-        let output = r#"## Goal-Based Autonomous Stop
+        let output = r"## Goal-Based Autonomous Stop
 
 Usage:
   `/goal set <description>` — Set a goal condition for autonomous execution
@@ -9725,7 +9725,7 @@ Example:
   `/goal set Stop when all tests pass and the build succeeds`
 
 When a goal is set, the agent will evaluate it after each turn during
-autonomous execution and halt when the goal is satisfied."#;
+autonomous execution and halt when the goal is satisfied.";
         app.append_assistant_text(output);
         app.status = "goal: help".to_string();
         return;
@@ -9767,22 +9767,22 @@ autonomous execution and halt when the goal is satisfied."#;
         "show" => {
             // TODO: Load goal from session storage
             // For now, show placeholder
-            let output = r#"## Current Goal
+            let output = r"## Current Goal
 
 No goal is currently set.
 
-Use `/goal set <description>` to set a goal for autonomous execution."#;
+Use `/goal set <description>` to set a goal for autonomous execution.";
             app.append_assistant_text(output);
             app.status = "goal: none".to_string();
         }
         "test" => {
             // TODO: Load goal and evaluate
             // For now, show placeholder
-            let output = r#"## Goal Test
+            let output = r"## Goal Test
 
 No goal is currently set to test.
 
-Use `/goal set <description>` to set a goal first."#;
+Use `/goal set <description>` to set a goal first.";
             app.append_assistant_text(output);
             app.status = "goal: test (none)".to_string();
         }

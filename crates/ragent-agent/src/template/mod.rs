@@ -206,13 +206,12 @@ pub fn discover_templates(working_dir: &Path) -> HashMap<String, TemplateInfo> {
 fn load_bundled_templates() -> Result<Vec<TemplateInfo>, std::io::Error> {
     // Bundled templates are in the crate's templates/ directory
     // For now, we'll use a few built-in templates defined inline
-    let mut templates = Vec::new();
-
-    // Code review template
-    templates.push(TemplateInfo {
-        name: "code-review".to_string(),
-        description: Some("Review code for quality, security, and best practices".to_string()),
-        body: r#"Review the following code for quality, security, and best practices:
+    let templates = vec![
+        // Code review template
+        TemplateInfo {
+            name: "code-review".to_string(),
+            description: Some("Review code for quality, security, and best practices".to_string()),
+            body: r"Review the following code for quality, security, and best practices:
 
 **Code to Review:**
 ```
@@ -227,19 +226,18 @@ fn load_bundled_templates() -> Result<Vec<TemplateInfo>, std::io::Error> {
 5. Test coverage
 6. Documentation
 
-Provide specific, actionable feedback for each issue found."#
-            .to_string(),
-        source_path: PathBuf::new(),
-        template_dir: PathBuf::new(),
-        scope: TemplateScope::Bundled,
-        placeholders: vec!["arguments".to_string()],
-    });
-
-    // Bug fix template
-    templates.push(TemplateInfo {
-        name: "bug-fix".to_string(),
-        description: Some("Analyze and fix a reported bug".to_string()),
-        body: r#"Analyze and fix the following bug:
+Provide specific, actionable feedback for each issue found."
+                .to_string(),
+            source_path: PathBuf::new(),
+            template_dir: PathBuf::new(),
+            scope: TemplateScope::Bundled,
+            placeholders: vec!["arguments".to_string()],
+        },
+        // Bug fix template
+        TemplateInfo {
+            name: "bug-fix".to_string(),
+            description: Some("Analyze and fix a reported bug".to_string()),
+            body: r"Analyze and fix the following bug:
 
 **Bug Description:**
 {{arguments}}
@@ -257,19 +255,18 @@ Provide specific, actionable feedback for each issue found."#
 [Describe the fix]
 
 **Testing:**
-[How to verify the fix works]"#
-            .to_string(),
-        source_path: PathBuf::new(),
-        template_dir: PathBuf::new(),
-        scope: TemplateScope::Bundled,
-        placeholders: vec!["arguments".to_string()],
-    });
-
-    // Feature request template
-    templates.push(TemplateInfo {
-        name: "feature".to_string(),
-        description: Some("Implement a new feature".to_string()),
-        body: r#"Implement the following feature:
+[How to verify the fix works]"
+                .to_string(),
+            source_path: PathBuf::new(),
+            template_dir: PathBuf::new(),
+            scope: TemplateScope::Bundled,
+            placeholders: vec!["arguments".to_string()],
+        },
+        // Feature request template
+        TemplateInfo {
+            name: "feature".to_string(),
+            description: Some("Implement a new feature".to_string()),
+            body: r"Implement the following feature:
 
 **Feature Description:**
 {{arguments}}
@@ -286,19 +283,18 @@ As a [user type], I want [goal] so that [benefit].
 [Technical details, constraints, or considerations]
 
 **Testing Strategy:**
-[How to test the feature]"#
-            .to_string(),
-        source_path: PathBuf::new(),
-        template_dir: PathBuf::new(),
-        scope: TemplateScope::Bundled,
-        placeholders: vec!["arguments".to_string()],
-    });
-
-    // Test plan template
-    templates.push(TemplateInfo {
-        name: "test-plan".to_string(),
-        description: Some("Generate a comprehensive test plan".to_string()),
-        body: r#"Generate a comprehensive test plan for:
+[How to test the feature]"
+                .to_string(),
+            source_path: PathBuf::new(),
+            template_dir: PathBuf::new(),
+            scope: TemplateScope::Bundled,
+            placeholders: vec!["arguments".to_string()],
+        },
+        // Test plan template
+        TemplateInfo {
+            name: "test-plan".to_string(),
+            description: Some("Generate a comprehensive test plan".to_string()),
+            body: r"Generate a comprehensive test plan for:
 
 **Feature/Component:**
 {{arguments}}
@@ -323,19 +319,18 @@ As a [user type], I want [goal] so that [benefit].
 [List any special environment needs]
 
 **Risk Assessment:**
-[Identify potential testing risks and mitigations]"#
-            .to_string(),
-        source_path: PathBuf::new(),
-        template_dir: PathBuf::new(),
-        scope: TemplateScope::Bundled,
-        placeholders: vec!["arguments".to_string()],
-    });
-
-    // Documentation template
-    templates.push(TemplateInfo {
-        name: "docs".to_string(),
-        description: Some("Write documentation for a feature or API".to_string()),
-        body: r#"Write comprehensive documentation for:
+[Identify potential testing risks and mitigations]"
+                .to_string(),
+            source_path: PathBuf::new(),
+            template_dir: PathBuf::new(),
+            scope: TemplateScope::Bundled,
+            placeholders: vec!["arguments".to_string()],
+        },
+        // Documentation template
+        TemplateInfo {
+            name: "docs".to_string(),
+            description: Some("Write documentation for a feature or API".to_string()),
+            body: r"Write comprehensive documentation for:
 
 **Topic:**
 {{arguments}}
@@ -365,13 +360,14 @@ As a [user type], I want [goal] so that [benefit].
 - Use clear, concise language
 - Include code examples where relevant
 - Link to related documentation
-- Keep sections focused and scannable"#
-            .to_string(),
-        source_path: PathBuf::new(),
-        template_dir: PathBuf::new(),
-        scope: TemplateScope::Bundled,
-        placeholders: vec!["arguments".to_string()],
-    });
+- Keep sections focused and scannable"
+                .to_string(),
+            source_path: PathBuf::new(),
+            template_dir: PathBuf::new(),
+            scope: TemplateScope::Bundled,
+            placeholders: vec!["arguments".to_string()],
+        },
+    ];
 
     Ok(templates)
 }

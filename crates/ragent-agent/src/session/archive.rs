@@ -600,24 +600,32 @@ fn verify_archive_checksums(extract_dir: &Path, manifest: &ArchiveManifest) -> R
 /// Cron job export structure for import.
 #[derive(Debug, Clone, Deserialize)]
 struct CronEventExport {
+    // reason: id is deserialised for import validation but not consumed by the archive step.
     #[allow(dead_code)]
     id: String,
     agent_type: String,
     prompt: String,
+    // reason: schedule_form is parsed to preserve round-trip fidelity but unused here.
     #[allow(dead_code)]
     schedule_form: String,
+    // reason: start_at is read from export payloads but not needed for re-import.
     #[allow(dead_code)]
     start_at: Option<String>,
     duration_secs: Option<i64>,
     schedule_raw: String,
+    // reason: enabled is captured for completeness but not applied during import.
     #[allow(dead_code)]
     enabled: bool,
+    // reason: next_due is informational from the export and not used on import.
     #[allow(dead_code)]
     next_due: String,
+    // reason: created_at is preserved for audit traceability but not consumed.
     #[allow(dead_code)]
     created_at: String,
+    // reason: last_fired is historical metadata that is not re-imported.
     #[allow(dead_code)]
     last_fired: Option<String>,
+    // reason: stateful flag is read to preserve semantics but not used in archive.
     #[allow(dead_code)]
     stateful: bool,
 }

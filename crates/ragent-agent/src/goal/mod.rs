@@ -151,22 +151,22 @@ impl GoalEvaluator {
         goal: &GoalCondition,
         context: &str,
     ) -> anyhow::Result<GoalEvaluation> {
-        let system_prompt = r#"You are a goal evaluator for an AI coding agent. Your task is to determine whether a user-defined goal has been satisfied based on the conversation history and tool results.
+        let system_prompt = r"You are a goal evaluator for an AI coding agent. Your task is to determine whether a user-defined goal has been satisfied based on the conversation history and tool results.
 
 Evaluate the goal objectively and conservatively. Only mark the goal as satisfied if there is clear evidence that the condition has been met. If there is any doubt, err on the side of continuing execution.
 
 Respond in the following format:
 SATISFIED: <YES or NO>
 CONFIDENCE: <0.0 to 1.0>
-REASONING: <Your explanation>"#;
+REASONING: <Your explanation>";
 
         let user_prompt = format!(
-            r#"GOAL: {}
+            r"GOAL: {}
 
 CONTEXT:
 {}
 
-Evaluate whether the goal has been satisfied. Be conservative - only mark as satisfied if there is clear evidence."#,
+Evaluate whether the goal has been satisfied. Be conservative - only mark as satisfied if there is clear evidence.",
             goal.description, context
         );
 

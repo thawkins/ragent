@@ -368,16 +368,13 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.28-beta** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+**v1.0.31** — The core architecture, tool system (~150 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
-- **Spec-Driven Development (SDD) back-fill** — New `/spec specify` (SPEC.md only), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md), and `/spec feedback` (FEEDBACK.md) subcommands; clarification marker detection; quality checklists in templates; `CONSTITUTION.md` support; ambiguity/consistency validation; opt-in via `sdd` config flags
-- **Exa Search API backend** — Added Exa Search API-backed engine to `mf_search` with `exa_api_key` configuration; `engine` parameter accepts `"exa"` to restrict searches to Exa only
-- **OpenAlex and Wikipedia backends** — OpenAlex (scholarly works) and Wikipedia (encyclopedia summaries) keyless search backends added to `mf_search`, running in parallel with DuckDuckGo and Brave; per-engine `relevance_score` and `fetch_relevance` consensus weighting adjusted for balanced ranking
-- **Research document format** — Updated `Search Engine Summary` section in RESEARCH.md outputs to show per-engine result counts and relevance scores
+- **CI fixes** — Resolved clippy `needless_raw_string_hashes`, `vec_init_then_push`, and `useless_borrows_in_formatting` warnings; documented all `#[allow(dead_code)]` suppressions in `CronEventExport`
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

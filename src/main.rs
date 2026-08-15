@@ -28,6 +28,7 @@ use ragent_agent::{
 use ragent_config::{edit_log, yolo::sync_from_config};
 
 mod cli;
+mod panic_hook;
 
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
@@ -223,6 +224,9 @@ fn print_banner() {
 /// Returns an error on configuration, storage, network, or I/O failures.
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Install the panic hook first so panics during startup are also captured.
+    panic_hook::install();
+
     let mut startup = StartupTimings::new();
 
     let t0 = Instant::now();
@@ -819,7 +823,7 @@ async fn main() -> Result<()> {
                         writeln!(
                             std::io::stdout(),
                             "Exported session {} to {}",
-                            &id,
+                            id,
                             archive_path.display()
                         )?;
                     }

@@ -222,15 +222,24 @@ pub fn investigate_depth(loci: &LocusSet) -> Vec<DepthInvestigation> {
 ///
 /// Returns up to ~100 characters centred on the keyword, or an empty string
 /// if the keyword cannot be found.
+///
+/// The search is case-insensitive, but the match position is resolved directly
+/// against `body` (rather than against a separate lowercased copy) so that the
+/// byte offset is always a valid char boundary in `body`. This avoids panics
+/// when `to_lowercase()` changes the byte length of earlier characters (which
+/// would shift offsets and land inside a multi-byte UTF-8 sequence).
 fn extract_snippet(body: &str, keyword: &str) -> String {
-    let lower_body = body.to_lowercase();
-    let lower_kw = keyword.to_lowercase();
-    let Some(pos) = lower_body.find(&lower_kw) else {
+    let kw_lower = keyword.to_lowercase();
+    let Some(pos) = body
+        .char_indices()
+        .map(|(i, _)| i)
+        .find(|&i| body[i..].to_lowercase().starts_with(&kw_lower))
+    else {
         return String::new();
     };
 
-    let start = pos.saturating_sub(40);
-    let end = (pos + keyword.len() + 40).min(body.len());
+    let start = body.floor_char_boundary(pos.saturating_sub(40));
+    let end = body.ceil_char_boundary((pos + keyword.len() + 40).min(body.len()));
     let snippet = &body[start..end];
     snippet.replace('\n', " ").trim().to_string()
 }
@@ -379,5 +388,17 @@ mod tests {
         let set = analyze_loci(&sources);
         let perf = set.loci.iter().find(|l| l.keyword == "performance");
         assert_eq!(perf.map(|l| l.mentions), Some(1));
+    }
+
+    #[test]
+    fn snippet_does_not_panic_on_multibyte_boundary() {
+        // Reproduces the panic: an em-dash ('—', 3 bytes) sits inside the slice
+        // window when the start offset is computed from a lowercased copy whose
+        // earlier bytes differ in length. The snippet must extract without
+        // panicking on a non-char-boundary byte index.
+        let prefix = "İ".repeat(512); // 'İ' lowercases to a longer sequence, shifting offsets
+        let body = format!("{prefix}lead in — performance is the key metric here and more.");
+        let snippet = extract_snippet(&body, "performance");
+        assert!(snippet.to_lowercase().contains("performance"));
     }
 }

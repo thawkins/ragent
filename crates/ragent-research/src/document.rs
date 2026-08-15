@@ -542,6 +542,209 @@ fn render_gap_fetch(result: &crate::corpus_critic::GapFetchResult) -> String {
     out
 }
 
+/// Render a concise "Data Quality & Consistency" summary that synthesizes the
+/// five QA artifacts — corpus critic, contradiction graph, source tensions,
+/// cross-locus reconcile, and synthesis audit — into a single overview block.
+///
+/// Returns an empty string when none of the five artifacts are present, so the
+/// caller can omit the section heading entirely. When at least one artifact is
+/// available the body is returned (without a heading); the caller is
+/// responsible for emitting the appropriate `##` or `###` heading.
+fn render_data_quality_summary(doc: &ResearchDocument) -> String {
+    let has_corpus = doc.corpus_critic.is_some();
+    let has_contradictions = doc.contradiction_graph.is_some();
+    let has_tensions = doc.source_tensions.is_some();
+    let has_reconcile = doc.cross_locus_reconcile.is_some();
+    let has_audit = doc.synthesis_audit.is_some();
+    if !(has_corpus || has_contradictions || has_tensions || has_reconcile || has_audit) {
+        return String::new();
+    }
+
+    let mut out = String::new();
+
+    // ── Verdict line ──────────────────────────────────────────────────────
+    // Prefer the synthesis-audit recommendation; fall back to the corpus-critic
+    // pass/fail status; finally emit a neutral line when only the graph or
+    // tensions are present.
+    let verdict = if let Some(audit) = &doc.synthesis_audit {
+        if !audit.recommendation.is_empty() {
+            escape_pipe(&audit.recommendation)
+        } else {
+            format!("Synthesis audit scored {}/100.", audit.overall_score)
+        }
+    } else if let Some(report) = &doc.corpus_critic {
+        let status = if report.passed { "pass" } else { "review" };
+        format!("Corpus critic scored {}/100 ({}).", report.score, status)
+    } else {
+        "Quality data available — see metrics below.".to_string()
+    };
+    out.push_str(&format!("**Overall verdict:** {}\n\n", verdict));
+
+    // ── Metrics table ─────────────────────────────────────────────────────
+    // Only rows with data are emitted, so a sparse QA run produces a compact
+    // table rather than a row of placeholders.
+    let mut rows: Vec<(String, String, String)> = Vec::new();
+
+    if let Some(report) = &doc.corpus_critic {
+        let status = if report.passed { "pass" } else { "review" };
+        rows.push((
+            "Corpus critic".into(),
+            format!("{}/100 ({})", report.score, status),
+            format!(
+                "coverage {} · evidence {} · balance {} · tension {}",
+                report.coverage_score,
+                report.evidence_score,
+                report.balance_score,
+                report.tension_score
+            ),
+        ));
+    }
+
+    if let Some(graph) = &doc.contradiction_graph {
+        let count = graph.edges.len();
+        let strongest = graph.edges.first().map(|e| e.strength).unwrap_or(0);
+        rows.push((
+            "Contradictions".into(),
+            format!("{count} edge(s)"),
+            if strongest > 0 {
+                format!("strongest = {strongest}/100")
+            } else {
+                "no edges".into()
+            },
+        ));
+    }
+
+    if let Some(tensions) = &doc.source_tensions {
+        let total = tensions.tensions.len();
+        let contradictions = tensions
+            .tensions
+            .iter()
+            .filter(|t| t.kind == crate::reconcile::TensionKind::Contradiction)
+            .count();
+        let shallow = tensions
+            .tensions
+            .iter()
+            .filter(|t| t.kind == crate::reconcile::TensionKind::ShallowEvidence)
+            .count();
+        let isolated = tensions
+            .tensions
+            .iter()
+            .filter(|t| t.kind == crate::reconcile::TensionKind::IsolatedSource)
+            .count();
+        rows.push((
+            "Source tensions".into(),
+            format!("{total} tension(s)"),
+            format!(
+                "{} contradiction · {} shallow · {} isolated",
+                contradictions, shallow, isolated
+            ),
+        ));
+    }
+
+    if let Some(reconcile) = &doc.cross_locus_reconcile {
+        let pairs = reconcile.pairs.len();
+        let conflicts: usize = reconcile.pairs.iter().map(|p| p.conflicting_edges).sum();
+        rows.push((
+            "Cross-locus reconcile".into(),
+            format!("{pairs} pair(s)"),
+            format!("{conflicts} conflicting edge(s)"),
+        ));
+    }
+
+    if let Some(audit) = &doc.synthesis_audit {
+        let status = if audit.overall_score >= 80 {
+            "proceed"
+        } else if audit.overall_score >= 50 {
+            "caution"
+        } else {
+            "revise"
+        };
+        rows.push((
+            "Synthesis audit".into(),
+            format!("{}/100 ({})", audit.overall_score, status),
+            format!("{} source(s) cited", audit.sources_used),
+        ));
+    }
+
+    if !rows.is_empty() {
+        out.push_str("| Metric | Value | Detail |\n");
+        out.push_str("|--------|-------|--------|\n");
+        for (metric, value, detail) in &rows {
+            out.push_str(&format!(
+                "| {} | {} | {} |\n",
+                escape_pipe(metric),
+                escape_pipe(value),
+                escape_pipe(detail)
+            ));
+        }
+        out.push('\n');
+    }
+
+    // ── Key concerns ──────────────────────────────────────────────────────
+    // Collect the most salient issue from each artifact so the reader can scan
+    // the headline problems without opening each detailed section.
+    let mut concerns: Vec<String> = Vec::new();
+    if let Some(report) = &doc.corpus_critic {
+        for issue in report.issues.iter().take(2) {
+            concerns.push(format!("Corpus: {}", escape_pipe(issue)));
+        }
+    }
+    if let Some(graph) = &doc.contradiction_graph {
+        for edge in graph.edges.iter().take(2) {
+            concerns.push(format!(
+                "Contradiction: {} vs {} — {}",
+                edge.claim_a.source_index,
+                edge.claim_b.source_index,
+                escape_pipe(&edge.note)
+            ));
+        }
+    }
+    if let Some(tensions) = &doc.source_tensions {
+        for t in tensions.tensions.iter().take(2) {
+            let sources = t
+                .source_indices
+                .iter()
+                .map(|i| format!("#{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            concerns.push(format!(
+                "Tension ({}): {} [{}] — {}",
+                t.kind.as_str(),
+                escape_pipe(&t.label),
+                sources,
+                escape_pipe(&t.note)
+            ));
+        }
+    }
+    if let Some(reconcile) = &doc.cross_locus_reconcile {
+        for pair in reconcile.pairs.iter().take(2) {
+            if pair.conflicting_edges > 0 {
+                concerns.push(format!(
+                    "Reconcile: {} ↔ {} — {} conflicting edge(s)",
+                    escape_pipe(&pair.locus_a),
+                    escape_pipe(&pair.locus_b),
+                    pair.conflicting_edges
+                ));
+            }
+        }
+    }
+    if let Some(audit) = &doc.synthesis_audit
+        && !audit.summary.is_empty()
+    {
+        concerns.push(format!("Audit: {}", escape_pipe(audit.summary.trim())));
+    }
+
+    if !concerns.is_empty() {
+        out.push_str("**Key concerns:**\n");
+        for concern in &concerns {
+            out.push_str(&format!("- {concern}\n"));
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
 fn render_citation_check(result: &crate::cite_checker::CitationCheckResult) -> String {
     let mut out = String::new();
     let failed = if result.passed {
@@ -735,6 +938,17 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
             body.push_str(&format!("{n}. {cleaned}\n"));
         }
         body.push('\n');
+    }
+
+    // ── Data Quality & Consistency ──────────────────────────────────────
+    // Synthesized overview of the QA artifacts, placed between the Top 5
+    // Implications and Findings so the reader sees the quality summary before
+    // diving into the detailed sections. Omitted entirely when no QA data
+    // is present (standard gathering run without full-tier QA).
+    let dq_summary = render_data_quality_summary(doc);
+    if !dq_summary.is_empty() {
+        body.push_str("## Data Quality & Consistency\n\n");
+        body.push_str(&dq_summary);
     }
 
     // -- Findings ---------------------------------------------------------
@@ -1052,6 +1266,16 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
 
     // ── Discussion (FR-009) ────────────────────────────────────────────────
     body.push_str("## Discussion\n\n");
+
+    // ── Data Quality & Consistency ──────────────────────────────────────
+    // Synthesized QA overview at the start of Discussion, before the detailed
+    // contradiction/reconcile/audit subsections. Omitted entirely when no QA
+    // data is present.
+    let dq_summary = render_data_quality_summary(doc);
+    if !dq_summary.is_empty() {
+        body.push_str("### Data Quality & Consistency\n\n");
+        body.push_str(&dq_summary);
+    }
 
     // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
     if let Some(graph) = &doc.contradiction_graph {
@@ -3378,6 +3602,291 @@ mod tests {
         assert!(
             finding.contains("Sentence three.\n\n**Cross-reference / Dependencies:**"),
             "cross-reference label should remain separated by a blank line: {finding}"
+        );
+    }
+
+    // ── Data Quality & Consistency summary ────────────────────────────────
+
+    /// Build a `ResearchDocument` with all five QA artifacts populated so the
+    /// Data Quality & Consistency summary has something to synthesize.
+    fn doc_with_all_qa_artifacts() -> ResearchDocument {
+        use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
+        use crate::corpus_critic::{CorpusCriticReport, GapFetchResult};
+        use crate::reconcile::{
+            CrossLocusReconcile, ReconcilePair, SourceTensions, TensionKind, TensionRecord,
+        };
+        use crate::synthesis::{CriticReport, SynthesisAudit};
+        use std::path::PathBuf;
+
+        let sources = vec![
+            Source::Web {
+                url: "https://a.example".into(),
+                title: "A".into(),
+                captured_at: chrono::Utc::now(),
+                published_at: None,
+                body_path: PathBuf::new(),
+                body: "The intervention improves performance.".into(),
+                relevance: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+                oa_recovery: None,
+            },
+            Source::Web {
+                url: "https://b.example".into(),
+                title: "B".into(),
+                captured_at: chrono::Utc::now(),
+                published_at: None,
+                body_path: PathBuf::new(),
+                body: "The intervention degrades performance.".into(),
+                relevance: String::new(),
+                search_tool: String::new(),
+                search_engine: String::new(),
+                content_type: None,
+                page_type: None,
+                media_type: "page".into(),
+                language: None,
+                oa_recovery: None,
+            },
+        ];
+
+        let mut graph = ContradictionGraph::empty();
+        graph.add_edge(ContradictionEdge {
+            claim_a: ContradictionClaim::from_source("claims better", 1, &sources[0]),
+            claim_b: ContradictionClaim::from_source("claims worse", 2, &sources[1]),
+            dimension: "performance".into(),
+            note: "opposing performance claims".into(),
+            strength: 72,
+        });
+
+        let tensions = SourceTensions {
+            tensions: vec![
+                TensionRecord {
+                    kind: TensionKind::Contradiction,
+                    label: "performance".into(),
+                    source_indices: vec![1, 2],
+                    note: "opposing claims".into(),
+                },
+                TensionRecord {
+                    kind: TensionKind::ShallowEvidence,
+                    label: "cost".into(),
+                    source_indices: vec![3],
+                    note: "only one source".into(),
+                },
+            ],
+            sources_scanned: 2,
+        };
+
+        let reconcile = CrossLocusReconcile {
+            pairs: vec![ReconcilePair {
+                locus_a: "performance".into(),
+                locus_b: "cost".into(),
+                shared_source_indices: vec![1],
+                shared_sources: 1,
+                conflicting_edges: 1,
+                note: "shared source disagrees".into(),
+            }],
+            sources_scanned: 2,
+        };
+
+        let audit = SynthesisAudit {
+            summary: "Audit complete.".into(),
+            findings: Vec::new(),
+            top_implications: Vec::new(),
+            cross_references: Vec::new(),
+            open_questions: Vec::new(),
+            critic_reports: vec![CriticReport {
+                name: "coverage".into(),
+                score: 60,
+                issues: vec!["thin coverage".into()],
+                gaps: Vec::new(),
+                passed: false,
+            }],
+            overall_score: 65,
+            recommendation: "Proceed with caution — issues: thin coverage.".into(),
+            sources_used: 2,
+        };
+
+        let corpus_critic = CorpusCriticReport {
+            score: 72,
+            coverage_score: 80,
+            evidence_score: 70,
+            balance_score: 85,
+            tension_score: 55,
+            issues: vec!["shallow evidence on Cost".into()],
+            gaps: vec!["Add cost evidence".into()],
+            recommendations: vec!["Broaden the width sweep".into()],
+            contested_ratio: 10,
+            shallow_dimensions: vec!["Cost".into()],
+            isolated_sources: vec![3],
+            passed: true,
+        };
+
+        let gap_fetch = GapFetchResult {
+            queries: vec!["topic cost evidence".into()],
+            new_sources: 2,
+            failed_queries: 0,
+            attempted: true,
+            note: String::new(),
+        };
+
+        let mut doc = sample_doc(sample_item());
+        doc.item.sources = sources;
+        doc.contradiction_graph = Some(graph);
+        doc.source_tensions = Some(tensions);
+        doc.cross_locus_reconcile = Some(reconcile);
+        doc.synthesis_audit = Some(audit);
+        doc.corpus_critic = Some(corpus_critic);
+        doc.gap_fetch = Some(gap_fetch);
+        doc
+    }
+
+    #[test]
+    fn render_data_quality_summary_returns_empty_when_no_qa_data() {
+        let doc = sample_doc(sample_item());
+        let rendered = render_data_quality_summary(&doc);
+        assert!(
+            rendered.is_empty(),
+            "expected empty string when no QA artifacts present, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn render_data_quality_summary_synthesizes_all_artifacts() {
+        let doc = doc_with_all_qa_artifacts();
+        let rendered = render_data_quality_summary(&doc);
+        // Verdict line uses the synthesis-audit recommendation.
+        assert!(
+            rendered.contains("**Overall verdict:** Proceed with caution"),
+            "verdict should come from synthesis audit: {rendered}"
+        );
+        // Metrics table includes rows from every populated artifact.
+        assert!(rendered.contains("| Metric | Value | Detail |"));
+        assert!(
+            rendered.contains("Corpus critic"),
+            "corpus critic row should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("Contradictions"),
+            "contradictions row should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("Source tensions"),
+            "source tensions row should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("Cross-locus reconcile"),
+            "cross-locus reconcile row should be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("Synthesis audit"),
+            "synthesis audit row should be present: {rendered}"
+        );
+        // Key concerns surface the top issue from each artifact.
+        assert!(
+            rendered.contains("**Key concerns:**"),
+            "key concerns section must be present: {rendered}"
+        );
+        assert!(
+            rendered.contains("Corpus: shallow evidence on Cost"),
+            "corpus critic issue should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("Contradiction: 1 vs 2"),
+            "contradiction edge should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("Tension (contradiction): performance"),
+            "source tension should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("Reconcile: performance ↔ cost — 1 conflicting edge(s)"),
+            "reconcile conflict should appear: {rendered}"
+        );
+        assert!(
+            rendered.contains("Audit: Audit complete."),
+            "audit summary should appear: {rendered}"
+        );
+    }
+
+    #[test]
+    fn assemble_document_report_renders_data_quality_summary_after_implications() {
+        let doc = doc_with_all_qa_artifacts();
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("## Data Quality & Consistency"),
+            "report layout must contain Data Quality & Consistency section"
+        );
+        // The section must appear after Top 5 Implications and before Findings.
+        let implications_pos = assembled.body.find("## Top 5 Implications").unwrap();
+        let dq_pos = assembled
+            .body
+            .find("## Data Quality & Consistency")
+            .expect("DQ section should be present");
+        let findings_pos = assembled.body.find("## Findings").unwrap();
+        assert!(
+            implications_pos < dq_pos,
+            "DQ summary should come after Top 5 Implications"
+        );
+        assert!(
+            dq_pos < findings_pos,
+            "DQ summary should come before Findings"
+        );
+    }
+
+    #[test]
+    fn assemble_document_report_omits_data_quality_summary_when_no_qa() {
+        let doc = sample_doc(sample_item());
+        let assembled = assemble_document(&doc);
+        assert!(
+            !assembled.body.contains("## Data Quality & Consistency"),
+            "skeleton should not contain DQ section: {}",
+            assembled.body
+        );
+    }
+
+    #[test]
+    fn assemble_document_imrad_renders_data_quality_summary_in_discussion() {
+        let mut doc = doc_with_all_qa_artifacts();
+        doc.output_format = crate::run_config::OutputFormat::Imrad;
+        let assembled = assemble_document(&doc);
+        assert!(
+            assembled.body.contains("### Data Quality & Consistency"),
+            "IMRaD layout must render DQ summary as a subsection"
+        );
+        // It must appear inside Discussion, before the Contradiction Graph
+        // subsection.
+        let discussion_pos = assembled.body.find("## Discussion").unwrap();
+        let dq_pos = assembled
+            .body
+            .find("### Data Quality & Consistency")
+            .unwrap();
+        let contradiction_pos = assembled
+            .body
+            .find("### Contradiction Graph")
+            .unwrap_or(usize::MAX);
+        assert!(
+            discussion_pos < dq_pos,
+            "DQ summary should come after Discussion heading"
+        );
+        assert!(
+            dq_pos < contradiction_pos,
+            "DQ summary should come before Contradiction Graph subsection"
+        );
+    }
+
+    #[test]
+    fn assemble_document_imrad_omits_data_quality_summary_when_no_qa() {
+        let mut doc = sample_doc(sample_item());
+        doc.output_format = crate::run_config::OutputFormat::Imrad;
+        let assembled = assemble_document(&doc);
+        assert!(
+            !assembled.body.contains("### Data Quality & Consistency"),
+            "IMRaD skeleton should not contain DQ section: {}",
+            assembled.body
         );
     }
 }
