@@ -121,8 +121,8 @@ pub enum InputAction {
     ToggleLog,
     /// Toggle the profiler panel visibility and profiler state (Alt+P).
     ToggleProfile,
-    /// Toggle the TODO panel visibility (Alt+T).
-    ToggleTodo,
+    /// Toggle the Tasks panel visibility (Alt+T).
+    ToggleTasksPanel,
     /// Toggle the Memory side panel visibility (Alt+M).
     ToggleMemory,
     /// Toggle the Telemetry side panel visibility (Alt+O).
@@ -710,7 +710,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // Alt+T toggles the TODO panel (placed before generic char-insert
         // handling so the `t` is never inserted into the input buffer — NFR-002).
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::ALT) => {
-            Some(InputAction::ToggleTodo)
+            Some(InputAction::ToggleTasksPanel)
         }
         // Alt+M toggles the Memory side panel (placed before generic char-insert
         // handling so the `m` is never inserted into the input buffer — NFR-002,

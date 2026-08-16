@@ -534,7 +534,7 @@ async fn main() -> Result<()> {
         tool_registry: tool_registry.clone(),
         permission_checker,
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
             std::collections::HashMap::new(),
@@ -571,14 +571,14 @@ async fn main() -> Result<()> {
         ));
         let _ = session_processor.extraction_engine.set(extraction_engine);
     }
-    // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
-    let task_manager = Arc::new(ragent_agent::task::TaskManager::new(
+    // Create AgentManager and wire it into the processor (breaks circular dep via OnceLock)
+    let agent_manager = Arc::new(ragent_agent::task::AgentManager::new(
         event_bus.clone(),
         session_processor.clone(),
         max_background_agents,
     ));
-    let _ = session_processor.task_manager.set(task_manager);
-    tracing::debug!(max_background_agents, "Task manager initialized");
+    let _ = session_processor.agent_manager.set(agent_manager);
+    tracing::debug!(max_background_agents, "Agent manager initialized");
 
     // Wire the background task service into the processor (M3).
     let bg_service = Arc::new(ragent_agent::background::BackgroundTaskService::new(
@@ -587,7 +587,7 @@ async fn main() -> Result<()> {
     ));
     let _ = session_processor.bg_service.set(bg_service);
     tracing::debug!("Background task service initialized");
-    startup.record("Task mgr & bg service", t0.elapsed());
+    startup.record("Agent mgr & bg service", t0.elapsed());
 
     // Connect MCP servers from config in the background so the TUI (or
     // headless run) appears immediately.  Each MCP connection spawns a child

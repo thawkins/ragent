@@ -76,7 +76,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
         working_dir: workdir.clone(),
         event_bus: event_bus.clone(),
         storage: None,
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: Some(Arc::new(ragent_agent::tool::TeamContext {
             team_name: "perf-005-team".to_string(),

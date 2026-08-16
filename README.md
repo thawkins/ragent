@@ -41,10 +41,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
       and repository management
     - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
-    - **Sub-agents** — new_task, cancel_task, list_tasks, wait_tasks, task_complete
+    - **Sub-agents** — new_agent, cancel_agent, list_agents, wait_agents, agent_complete
     - **Planning** — plan_enter, plan_exit
     - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
-    - **Interactive** — question, think, todo_read, todo_write
+    - **Task Management** — task_create, task_update, task_get, task_list
+    - **Interactive** — question, think
     - **Utility** — calculator, get_env
     - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex

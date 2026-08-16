@@ -42,7 +42,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         tool_registry,
         permission_checker,
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
@@ -2433,7 +2433,7 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
             .tool_registry
             .definitions()
             .iter()
-            .any(|d| d.name == "new_task")
+            .any(|d| d.name == "new_agent")
     );
 
     app.execute_slash_command("/tools agents on");
@@ -2445,7 +2445,7 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
             .tool_registry
             .definitions()
             .iter()
-            .any(|d| d.name == "new_task")
+            .any(|d| d.name == "new_agent")
     );
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("`agents` visibility is now **on**"));
@@ -4043,4 +4043,234 @@ fn test_inbox_list_shows_status() {
         text.contains("claimed"),
         "list should show updated status: {text}"
     );
+}
+
+// ── /task (todo2tasks T-016, FR-019) ─────────────────────────────────
+
+#[test]
+fn test_slash_task_toggles_panel() {
+    let mut app = make_app();
+    assert!(
+        !app.show_tasks_panel,
+        "tasks panel should be hidden initially"
+    );
+
+    app.execute_slash_command("/task");
+    assert!(
+        app.show_tasks_panel,
+        "tasks panel should be visible after /task"
+    );
+    assert_eq!(app.status, "tasks panel visible");
+
+    app.execute_slash_command("/task");
+    assert!(
+        !app.show_tasks_panel,
+        "tasks panel should be hidden after second /task"
+    );
+    assert_eq!(app.status, "tasks panel hidden");
+}
+
+#[test]
+fn test_slash_task_mutually_excludes_log() {
+    let mut app = make_app();
+    app.show_log = true;
+    app.show_tasks_panel = false;
+
+    app.execute_slash_command("/task");
+    assert!(app.show_tasks_panel, "tasks panel should be visible");
+    assert!(
+        !app.show_log,
+        "log panel should be hidden when tasks is shown"
+    );
+}
+
+#[test]
+fn test_slash_task_list_shows_items() {
+    let mut app = make_app();
+    let session_id = "task-list-session".to_string();
+    app.session_id = Some(session_id.clone());
+    app.storage
+        .create_session(&session_id, ".")
+        .expect("create session");
+    app.storage
+        .create_task(
+            "t1",
+            &session_id,
+            "first task",
+            "",
+            "pending",
+            None,
+            None,
+            "{}",
+            &[],
+        )
+        .expect("create task");
+    app.storage
+        .create_task(
+            "t2",
+            &session_id,
+            "second task",
+            "",
+            "in_progress",
+            None,
+            None,
+            "{}",
+            &[],
+        )
+        .expect("create task");
+
+    app.execute_slash_command("/task list");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /task list"),
+        "should show /task list header: {text}"
+    );
+    assert!(
+        text.contains("first task"),
+        "should list first task: {text}"
+    );
+    assert!(
+        text.contains("second task"),
+        "should list second task: {text}"
+    );
+    assert_eq!(app.status, "2 task(s)");
+}
+
+#[test]
+fn test_slash_task_list_empty() {
+    let mut app = make_app();
+    let session_id = "task-empty-session".to_string();
+    app.session_id = Some(session_id.clone());
+    app.storage
+        .create_session(&session_id, ".")
+        .expect("create session");
+
+    app.execute_slash_command("/task list");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("No tasks found"),
+        "empty list should say 'No tasks found': {text}"
+    );
+}
+
+#[test]
+fn test_slash_task_help() {
+    let mut app = make_app();
+    app.session_id = Some("help-session".to_string());
+
+    app.execute_slash_command("/task help");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /task help"),
+        "help should have header: {text}"
+    );
+    assert!(
+        text.contains("/task list"),
+        "help should mention /task list: {text}"
+    );
+    assert!(
+        text.contains("task_create"),
+        "help should mention task_create tool: {text}"
+    );
+    assert!(
+        text.contains("task_update"),
+        "help should mention task_update tool: {text}"
+    );
+    assert_eq!(app.status, "task help");
+}
+
+#[test]
+fn test_slash_task_add_delegates_hint() {
+    let mut app = make_app();
+    app.session_id = Some("add-hint-session".to_string());
+
+    app.execute_slash_command("/task add");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("task_create"),
+        "/task add should mention task_create tool: {text}"
+    );
+    assert_eq!(app.status, "Use agent tool: task_create");
+}
+
+#[test]
+fn test_slash_task_update_delegates_hint() {
+    let mut app = make_app();
+    app.session_id = Some("update-hint-session".to_string());
+
+    app.execute_slash_command("/task update");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("task_update"),
+        "/task update should mention task_update tool: {text}"
+    );
+    assert_eq!(app.status, "Use agent tool: task_update");
+}
+
+#[test]
+fn test_slash_task_get_delegates_hint() {
+    let mut app = make_app();
+    app.session_id = Some("get-hint-session".to_string());
+
+    app.execute_slash_command("/task get");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("task_get"),
+        "/task get should mention task_get tool: {text}"
+    );
+    assert_eq!(app.status, "Use agent tool: task_get");
+}
+
+#[test]
+fn test_slash_task_create_alias_for_add() {
+    let mut app = make_app();
+    app.session_id = Some("create-alias-session".to_string());
+
+    app.execute_slash_command("/task create");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("task_create"),
+        "/task create should mention task_create tool: {text}"
+    );
+}
+
+#[test]
+fn test_slash_task_unknown_subcommand_shows_help() {
+    let mut app = make_app();
+    app.session_id = Some("unknown-sub-session".to_string());
+
+    app.execute_slash_command("/task frobnicate");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("From: /task help"),
+        "unknown subcommand should fall through to help: {text}"
+    );
+}
+
+#[test]
+fn test_slash_task_toggles_panel_with_tasks_status() {
+    // FR-019: /task toggles the Tasks side panel.
+    let mut app = make_app();
+
+    app.execute_slash_command("/task");
+    assert!(
+        app.show_tasks_panel,
+        "tasks panel should be visible after /task"
+    );
+    assert_eq!(app.status, "tasks panel visible");
+
+    app.execute_slash_command("/task");
+    assert!(
+        !app.show_tasks_panel,
+        "tasks panel should be hidden after second /task"
+    );
+    assert_eq!(app.status, "tasks panel hidden");
 }

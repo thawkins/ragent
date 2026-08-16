@@ -51,8 +51,8 @@ async fn test_hardwired_task_suffix_tool_is_auto_approved() {
         &event_bus,
         "session-1",
         "tool:execute",
-        "tool:new_task",
-        "new_task",
+        "tool:new_agent",
+        "new_agent",
         false,
     )
     .await
@@ -82,7 +82,7 @@ async fn test_hardwired_ask_user_tool_is_auto_approved() {
 }
 
 #[tokio::test]
-async fn test_hardwired_todo_read_is_auto_approved() {
+async fn test_hardwired_wait_agents_is_auto_approved() {
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
     let event_bus = Arc::new(EventBus::new(16));
 
@@ -90,49 +90,9 @@ async fn test_hardwired_todo_read_is_auto_approved() {
         &checker,
         &event_bus,
         "session-1",
-        "todo_read",
-        "list all",
-        "todo_read",
-        false,
-    )
-    .await
-    .expect("permission check should succeed");
-
-    assert_eq!(action, PermissionAction::Allow);
-}
-
-#[tokio::test]
-async fn test_hardwired_todo_write_is_auto_approved() {
-    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
-    let event_bus = Arc::new(EventBus::new(16));
-
-    let action = check_permission_with_prompt(
-        &checker,
-        &event_bus,
-        "session-1",
-        "todo_write",
-        "add item",
-        "todo_write",
-        false,
-    )
-    .await
-    .expect("permission check should succeed");
-
-    assert_eq!(action, PermissionAction::Allow);
-}
-
-#[tokio::test]
-async fn test_hardwired_wait_tasks_is_auto_approved() {
-    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
-    let event_bus = Arc::new(EventBus::new(16));
-
-    let action = check_permission_with_prompt(
-        &checker,
-        &event_bus,
-        "session-1",
-        "wait_tasks",
+        "wait_agents",
         "waiting",
-        "wait_tasks",
+        "wait_agents",
         false,
     )
     .await
@@ -142,8 +102,8 @@ async fn test_hardwired_wait_tasks_is_auto_approved() {
 }
 
 #[tokio::test]
-async fn test_hardwired_task_complete_is_auto_approved() {
-    // The `task_complete` tool is a terminal signal that ends the
+async fn test_hardwired_agent_complete_is_auto_approved() {
+    // The `agent_complete` tool is a terminal signal that ends the
     // autonomous loop.  It must be auto-approved so the agent can
     // always finish a task without a permission prompt.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
@@ -153,9 +113,9 @@ async fn test_hardwired_task_complete_is_auto_approved() {
         &checker,
         &event_bus,
         "session-1",
-        "task_complete",
+        "agent_complete",
         "summary",
-        "task_complete",
+        "agent_complete",
         false,
     )
     .await
@@ -165,8 +125,8 @@ async fn test_hardwired_task_complete_is_auto_approved() {
 }
 
 #[tokio::test]
-async fn test_hardwired_list_tasks_is_auto_approved() {
-    // `list_tasks` is a read-only inspection tool.  It must be
+async fn test_hardwired_list_agents_is_auto_approved() {
+    // `list_agents` is a read-only inspection tool.  It must be
     // auto-approved so the agent can always check on background
     // sub-agent tasks without a permission prompt.
     let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
@@ -176,9 +136,97 @@ async fn test_hardwired_list_tasks_is_auto_approved() {
         &checker,
         &event_bus,
         "session-1",
-        "list_tasks",
+        "list_agents",
         "list",
-        "list_tasks",
+        "list_agents",
+        false,
+    )
+    .await
+    .expect("permission check should succeed");
+
+    assert_eq!(action, PermissionAction::Allow);
+}
+
+#[tokio::test]
+async fn test_hardwired_task_create_is_auto_approved() {
+    // todo2tasks T-011: `task_create` shares the "task" permission
+    // category and must be auto-approved.
+    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+    let event_bus = Arc::new(EventBus::new(16));
+
+    let action = check_permission_with_prompt(
+        &checker,
+        &event_bus,
+        "session-1",
+        "task",
+        "create task",
+        "task_create",
+        false,
+    )
+    .await
+    .expect("permission check should succeed");
+
+    assert_eq!(action, PermissionAction::Allow);
+}
+
+#[tokio::test]
+async fn test_hardwired_task_update_is_auto_approved() {
+    // todo2tasks T-011: `task_update` shares the "task" permission
+    // category and must be auto-approved.
+    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+    let event_bus = Arc::new(EventBus::new(16));
+
+    let action = check_permission_with_prompt(
+        &checker,
+        &event_bus,
+        "session-1",
+        "task",
+        "update task",
+        "task_update",
+        false,
+    )
+    .await
+    .expect("permission check should succeed");
+
+    assert_eq!(action, PermissionAction::Allow);
+}
+
+#[tokio::test]
+async fn test_hardwired_task_get_is_auto_approved() {
+    // todo2tasks T-011: `task_get` shares the "task" permission
+    // category and must be auto-approved.
+    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+    let event_bus = Arc::new(EventBus::new(16));
+
+    let action = check_permission_with_prompt(
+        &checker,
+        &event_bus,
+        "session-1",
+        "task",
+        "get task",
+        "task_get",
+        false,
+    )
+    .await
+    .expect("permission check should succeed");
+
+    assert_eq!(action, PermissionAction::Allow);
+}
+
+#[tokio::test]
+async fn test_hardwired_task_list_is_auto_approved() {
+    // todo2tasks T-011: `task_list` shares the "task" permission
+    // category and must be auto-approved.
+    let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
+    let event_bus = Arc::new(EventBus::new(16));
+
+    let action = check_permission_with_prompt(
+        &checker,
+        &event_bus,
+        "session-1",
+        "task",
+        "list tasks",
+        "task_list",
         false,
     )
     .await
@@ -340,7 +388,7 @@ fn test_detailed_tool_reference_includes_schemas_and_required_flags() {
     let section = build_detailed_tool_reference_section(&registry);
 
     assert!(section.starts_with("## Available Tools"));
-    assert!(section.contains("### `new_task`"));
+    assert!(section.contains("### `new_agent`"));
     assert!(section.contains("- `agent` (`string` (required)"));
     assert!(section.contains("- `task` (`string` (required)"));
     assert!(section.contains("- `background` (`boolean`)"));

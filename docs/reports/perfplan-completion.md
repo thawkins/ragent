@@ -88,7 +88,7 @@ milestone ends with `cargo check --workspace` + `cargo build --workspace
   acquisition), and the `&&` chain short-circuits when no spec is active
   or no file-write tool was called.
 - **P-11** (`processor.rs` + `task/mod.rs`): added
-  `has_pending_background: AtomicBool` to `TaskManager`, set by
+  `has_pending_background: AtomicBool` to `AgentManager`, set by
   `spawn_background` and cleared by `drain_completed` when nothing
   remains. The orchestrator skips the `drain_completed` call (and its
   lock+scan) when the flag is false.

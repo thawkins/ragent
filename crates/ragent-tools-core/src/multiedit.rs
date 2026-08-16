@@ -324,7 +324,7 @@ impl Tool for MultiEditTool {
         for (i, op) in ops.iter().enumerate() {
             let original = file_contents
                 .get(&op.path)
-                .expect("file content must exist for every op path");
+                .with_context(|| format!("Missing original content for {}", op.path.display()))?;
 
             let (lane, start, end, effective_new) = if op.collapse_ws {
                 match find_flexible_replacement_range(original, &op.old_str, &op.new_str) {
@@ -489,7 +489,7 @@ impl Tool for MultiEditTool {
 
             let content = file_contents
                 .get_mut(path)
-                .expect("file content must exist");
+                .with_context(|| format!("Missing live content for {}", path.display()))?;
 
             for edit in &mut *edits {
                 *content = format!(

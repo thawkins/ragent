@@ -226,7 +226,7 @@ ragent run --agent explore "How does the config system work?"
 ragent run --model ollama/llama3.2 "Write a hello world in Rust"
 
 # Skip the TUI and stream to stdout
-ragent run --no-tui "List all TODO items"
+ragent run --no-tui "List all tasks"
 
 # Auto-approve all tool calls (no permission prompts)
 ragent run --yes "Fix the failing test in src/lib.rs"
@@ -809,7 +809,7 @@ ragent run --agent build "Fix the failing tests"
 ## 8b. Background Agents (F13 & F14)
 
 Ragent supports spawning multiple sub-agents concurrently for parallel task execution.
-Use the `new_task` tool to spawn a background agent while the parent continues processing.
+Use the `new_agent` tool to spawn a background agent while the parent continues processing.
 
 ### Spawning Background Tasks
 
@@ -821,15 +821,16 @@ User: Analyze the codebase in parallel — run explore to find patterns,
       and build to check for compilation errors.
 
 Agent uses:
-  /new_task agent="explore" task="Find common patterns in src/ and list them"
-  /new_task agent="build" task="Run cargo check and list any errors" background=true
+  /new_agent agent="explore" task="Find common patterns in src/ and list them"
+  /new_agent agent="build" task="Run cargo check and list any errors" background=true
 ```
 
 **Via TUI Commands:**
 
 ```
-/tasks              # Show all running and completed tasks
-/tasks cancel abc1  # Cancel a task by ID prefix
+/agents     # Open the Agents panel to see running background tasks
+/cancel abc # Cancel a background task by ID prefix
+/task list  # List session tasks (the task-service equivalent of old todos)
 ```
 
 **Via REST API:**

@@ -82,8 +82,8 @@ pub(crate) struct LoopState {
     pub assistant_parts: Arc<Vec<MessagePart>>,
     /// Set when a tool returns `agent_switch` / `agent_restore` metadata.
     pub agent_switch_requested: bool,
-    /// Set when a tool returns `task_complete` metadata.
-    pub task_complete_requested: bool,
+    /// Set when a tool returns `agent_complete` metadata.
+    pub agent_complete_requested: bool,
     /// Content hash of `assistant_parts` from the last interim save.
     pub last_interim_hash: Option<u64>,
     /// Cumulative milliseconds spent waiting for the LLM.

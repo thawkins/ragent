@@ -24,7 +24,7 @@ fn test_ask_agent_defaults_thinking_off() {
 fn test_task_tool_family_guidance_is_injected_into_system_prompt() {
     // The system prompt must always end with the task tool family
     // guidance so the model understands the difference between
-    // `task_complete` (autonomous loop signal) and
+    // `agent_complete` (autonomous loop signal) and
     // `team_task_complete` (team workflow).  This guards against
     // regressions where someone removes the append at the end of
     // `build_system_prompt_with_storage`.
@@ -50,10 +50,10 @@ fn test_task_tool_family_guidance_is_injected_into_system_prompt() {
         &prompt[prompt.len().saturating_sub(2000)..]
     );
     assert!(
-        prompt.contains("task_complete") && prompt.contains("team_task_complete"),
-        "system prompt must reference both task_complete and team_task_complete"
+        prompt.contains("agent_complete") && prompt.contains("team_task_complete"),
+        "system prompt must reference both agent_complete and team_task_complete"
     );
-    // The guidance must call out that `task_complete` only takes
+    // The guidance must call out that `agent_complete` only takes
     // `summary` and `team_task_complete` takes `team_name` + `task_id`.
     assert!(
         prompt.contains("summary") && prompt.contains("team_name") && prompt.contains("task_id"),

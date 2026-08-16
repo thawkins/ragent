@@ -69,15 +69,14 @@ pub fn find_exact_replacement_range(
     needle: &str,
     new_str: &str,
 ) -> Result<(usize, usize, String), FindError> {
-    let count = content.matches(needle).count();
-    if count == 0 {
-        return Err(FindError::NotFound);
+    let mut matches = content.match_indices(needle);
+    let first = matches.next();
+    let second = matches.next();
+    match (first, second) {
+        (None, _) => Err(FindError::NotFound),
+        (Some(_), Some(_)) => Err(FindError::MultipleMatches(2 + matches.count())),
+        (Some((start, _)), None) => Ok((start, start + needle.len(), new_str.to_string())),
     }
-    if count > 1 {
-        return Err(FindError::MultipleMatches(count));
-    }
-    let start = content.find(needle).unwrap();
-    Ok((start, start + needle.len(), new_str.to_string()))
 }
 
 /// Decode common backslash escape sequences in a needle.
@@ -158,10 +157,19 @@ pub fn find_flexible_replacement_range(
 ) -> Result<(usize, usize, String), FindError> {
     let decoded = decode_escapes(needle);
 
-    // ── Lane 1: exact substring count ────────────────────────────────────
-    let exact_count = content.matches(decoded.as_str()).count();
+    // ── Lane 1: exact substring ─────────────────────────────────────────
+    let mut exact_iter = content.match_indices(decoded.as_str());
+    let first_exact = exact_iter.next();
+    let second_exact = exact_iter.next();
+    let exact_count = if first_exact.is_none() {
+        0
+    } else if second_exact.is_none() {
+        1
+    } else {
+        2 + exact_iter.count()
+    };
     if exact_count == 1 {
-        let start = content.find(decoded.as_str()).unwrap();
+        let (start, _) = first_exact.unwrap();
         return Ok((start, start + decoded.len(), new_str.to_string()));
     }
 

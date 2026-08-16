@@ -2,7 +2,7 @@
 //!
 //! Implements JCODEPLAN M8 T-070: long-lived initiatives that persist in
 //! SQLite (via `ragent-storage`) and survive compaction, session restarts,
-//! and machine reboots. Unlike session-scoped `todo_read`/`todo_write` items,
+//! and machine reboots. Unlike session-scoped `task_*` items,
 //! initiatives are scoped to the *project* (working directory) so any future
 //! session in the same directory can read and update them.
 //!

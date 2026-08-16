@@ -505,57 +505,61 @@ tool calls.
 The scrollbar gutter runs along the right edge of the panel and can be dragged
 or clicked to jump to a position in the report.
 
-The Profile panel is mutually exclusive with TODO and Memory panels: only one
-of Log/Profile/TODO/Memory occupies the side column at a time (Log and Profile
+The Profile panel is mutually exclusive with TASKS and Memory panels: only one
+of Log/Profile/TASKS/Memory occupies the side column at a time (Log and Profile
 can be shown together).
 
 ---
 
-## 11. TODO panel — `Alt+T`
+## 11. TASKS panel — `Alt+T`
 
-Press **`Alt+T`** to toggle the **TODO panel** on the right side of the screen.
+Press **`Alt+T`** to toggle the **TASKS panel** on the right side of the screen.
 
-The TODO panel lists TODO items for the current session, fetched from the
+The TASKS panel lists tasks for the current session, fetched from the
 SQLite-backed storage on every render. Each row shows:
 
 ```text
-[<STATUS>] <title>
+[<STATUS>] <subject> (owner) [blocked by #id, …]
 ```
 
 Status colors:
 
 | Status          | Color  |
 | --------------- | ------ |
-| `PENDING`     | Yellow |
-| `IN_PROGRESS` | Cyan   |
-| `DONE`        | Green  |
-| `BLOCKED`     | Red    |
+| `pending`     | Yellow |
+| `in_progress` | Cyan   |
+| `completed`   | Green  |
+| blocked (derived) | Red    |
 
-### Managing TODOs
+A task is **blocked** when its `blocked_by` list is non-empty and at least one
+blocker is not yet `completed`. Blocked-ness is derived at read time — there is
+no `blocked` status value (FR-005). When a task is `in_progress` and has an
+`active_form`, it is shown as an indented sub-line beneath the subject.
 
-Create, update, or remove TODOs with the `todo_write` tool or the `/todo` slash
-command:
+### Managing Tasks
+
+Create, update, or list tasks with the `task_create` / `task_update` /
+`task_list` tools or the `/task` slash command:
 
 ```text
-/todo add Implement token bucket rate limiter
-/todo status 3 DONE
-/todo remove 2
-/todo list
+/task add Implement token bucket rate limiter
+/task update task-abc123 --status completed
+/task list
 ```
 
 You can also use the tool directly in a prompt:
 
 ```text
-Create a TODO list for adding OAuth2 login support
+Create a task list for adding OAuth2 login support
 ```
 
-ragent will call `todo_write` to add the items, and the TODO panel updates
+ragent will call `task_create` to add the items, and the TASKS panel updates
 immediately.
 
-### Interacting with the TODO panel
+### Interacting with the TASKS panel
 
 - **`Scroll`** with the mouse wheel.
-- **`Drag`** the scrollbar thumb to move through a long TODO list.
+- **`Drag`** the scrollbar thumb to move through a long task list.
 - Press **`Alt+T`** again to hide the panel.
 
 The scrollbar gutter runs along the right edge of the panel.
@@ -620,7 +624,7 @@ The scrollbar gutter runs along the right edge of the panel.
 | --------- | --------- | ------------------------------------------------- |
 | `Alt+L` | Log       | Runtime events, tool calls, warnings, errors      |
 | `Alt+P` | Profile   | Live agent-loop profiler output                   |
-| `Alt+T` | TODO      | Session TODO items and status                     |
+| `Alt+T` | TASKS    | Session tasks and status                         |
 | `Alt+M` | Memory    | Project/user memory and structured-memory summary |
 | `Alt+O` | Telemetry | OpenTelemetry metrics and counters                |
 
@@ -643,7 +647,7 @@ shortcut again to close the panel.
 | `Ctrl+C`                      | Copy selection / arm quit                   |
 | `Alt+L`                       | Toggle Log panel                            |
 | `Alt+P`                       | Toggle Profile panel                        |
-| `Alt+T`                       | Toggle TODO panel                           |
+| `Alt+T`                       | Toggle TASKS panel                           |
 | `Alt+M`                       | Toggle Memory panel                         |
 | `Alt+O`                       | Toggle Telemetry panel                      |
 | `Alt+V`                       | Paste image from clipboard                  |

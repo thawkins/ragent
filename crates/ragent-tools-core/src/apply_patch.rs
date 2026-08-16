@@ -423,7 +423,7 @@ fn parse_codex_patch(text: &str) -> Result<Vec<PatchOp>> {
                 {
                     break;
                 }
-                let next = lines.next().unwrap();
+                let next = lines.next().context("Unexpected end of patch in Add file content")?;
                 content_lines.push(strip_prefix(next, '+')?);
             }
             ops.push(PatchOp {
@@ -451,7 +451,7 @@ fn parse_codex_patch(text: &str) -> Result<Vec<PatchOp>> {
                     break;
                 }
                 if peek_trim.to_lowercase().starts_with("*** move to:") {
-                    let next = lines.next().unwrap();
+                    let next = lines.next().context("Unexpected end of patch at move-to header")?;
                     let target = parse_header_value(next.trim(), "*** move to:")?;
                     move_to = Some(PathBuf::from(target));
                     continue;
@@ -518,14 +518,15 @@ fn parse_hunk<'a>(lines: &mut std::iter::Peekable<impl Iterator<Item = &'a str>>
             lines.next();
             break;
         }
-        let next = lines.next().unwrap();
+        let next = lines.next().context("Unexpected end of patch inside hunk")?;
         if next.is_empty() {
             // Treat empty lines as context without prefix if they appear in the
             // middle of a hunk (Codex occasionally omits the leading space).
             hunk_lines.push(HunkLine::Context(String::new()));
             continue;
         }
-        match next.chars().next().unwrap() {
+        let first_char = next.chars().next().context("Empty hunk line already handled")?;
+          match first_char {
             ' ' => hunk_lines.push(HunkLine::Context(next[1..].to_string())),
             '+' => hunk_lines.push(HunkLine::Add(next[1..].to_string())),
             '-' => hunk_lines.push(HunkLine::Remove(next[1..].to_string())),

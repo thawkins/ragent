@@ -13,7 +13,7 @@
 //! TUI/CLI idle loop) can await [`BackgroundTaskService::completion_notify`] to
 //! resume the session the moment a long-running task completes. Completed tasks
 //! are drained via [`BackgroundTaskService::drain_completed`] and injected into
-//! the agent conversation, mirroring the sub-agent `task_manager` pattern.
+//! the agent conversation, mirroring the sub-agent `agent_manager` pattern.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -160,6 +160,7 @@ impl BackgroundTaskService {
             command.to_string(),
             working_dir.clone(),
             Some(Arc::clone(&self.event_bus)),
+            session_id.to_string(),
         )
         .await?;
 

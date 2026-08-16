@@ -13,6 +13,36 @@ use ratatui::{
 
 use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 
+/// Sentinel prefix used to identify agent-notice chat bubbles.
+const AGENT_NOTICE_PREFIX: &str = "📋 Agent Notice";
+
+/// Returns true if the text is an agent-notice bubble.
+pub(crate) fn is_agent_notice(text: &str) -> bool {
+    text.trim_start().starts_with(AGENT_NOTICE_PREFIX)
+}
+
+/// Render an agent-notice bubble as bright-yellow lines, one item per line.
+pub(crate) fn render_agent_notice_lines(text: &str) -> Vec<Line<'static>> {
+    let style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let mut lines = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        if i == 0 {
+            lines.push(Line::from(vec![
+                Span::styled("● ", style),
+                Span::styled(line.to_string(), style),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", " ".repeat(2), line),
+                style,
+            )));
+        }
+    }
+    lines
+}
+
 use crate::theme;
 
 /// Helper to build a ternary for pluralization (e.g., "1 item" vs "2 items").
@@ -139,8 +169,8 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// - ❓ User Interaction: question, ask_user
 /// - 💭 Reasoning: think
 /// - 📝 Planning: plan_enter, plan_exit
-/// - 📋 Task Management: todo_read, todo_write
-/// - 🤖 Sub-agent: new_task, cancel_task, list_tasks, wait_tasks
+/// - 📋 Task Management: task_create, task_update, task_get, task_list
+/// - 🤖 Sub-agent: new_agent, cancel_agent, list_agents, wait_agents
 /// - 👥 Team Coordination: team_*
 /// - 🔎 LSP/Code Intelligence: lsp_*
 /// - 📄 Document: office_*, pdf_*
@@ -597,48 +627,52 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
 
         // ═══════════════════════════════════════════════════════════════════
         // 📋 TASK MANAGEMENT
-        // ═══════════════════════════════════════════════════════════════════
-        "todo_read" => {
+        // ═══════════════════════════════════════════════════════════��═══════
+        "task_create" => {
+            let subject = get_str(&["subject"]).unwrap_or_default();
+            format!("📋 +{}", trunc120(&subject))
+        }
+        "task_update" => {
+            let task_id = get_str(&["task_id"]).unwrap_or_default();
+            let status = get_str(&["status"]);
+            let subject = get_str(&["subject"]);
+            match (status, subject) {
+                (Some(s), _) => format!("📋 ✓{} → {}", task_id, s),
+                (None, Some(t)) => format!("📋 ~{} \"{}\"", task_id, trunc120(&t)),
+                (None, None) => format!("📋 ~{}", task_id),
+            }
+        }
+        "task_get" => {
+            let task_id = get_str(&["task_id"]).unwrap_or_default();
+            format!("📋 get {}", task_id)
+        }
+        "task_list" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("all");
             format!("📋 filter: {}", status)
         }
-        "todo_write" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            match action {
-                "add" => format!("📋 +{}", trunc120(&title)),
-                "update" if !title.is_empty() => format!("📋 ~{} \"{}\"", id, trunc120(&title)),
-                "update" => format!("📋 ~{}", id),
-                "complete" => format!("📋 ✓{}", id),
-                "remove" => format!("📋 -{}", id),
-                "clear" => "📋 clear all".to_string(),
-                _ => format!("📋 {}", action),
-            }
-        }
         // ═══════════════════════════════════════════════════════════════════
-        // 🤖 SUB-AGENT
+        // ���� SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
-        "new_task" => {
+        "new_agent" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
             format!("🤖 {} → {}", agent, trunc120(&task))
         }
-        "cancel_task" => {
+        "cancel_agent" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
             format!("🤖 cancel {}", &task_id[..8.min(task_id.len())])
         }
-        "list_tasks" => {
+        "list_agents" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("all");
             format!("🤖 filter: {}", status)
         }
-        "wait_tasks" => {
+        "wait_agents" => {
             let task_ids = input
                 .get("task_ids")
                 .and_then(|v| v.as_array())
@@ -1667,7 +1701,7 @@ pub fn tool_result_summary(
                 Some(thought.to_string())
             }
         }
-        "task_complete" => {
+        "agent_complete" => {
             let summary = out.get("summary").and_then(|v| v.as_str()).unwrap_or("");
             if summary.is_empty() {
                 Some("Task complete".to_string())
@@ -1692,37 +1726,59 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         // 📋 TASK MANAGEMENT
         // ═══════════════════════════════════════════════════════════════════
-        "todo_read" => {
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{}", pluralize(count, "item", "items")))
-        }
-        "todo_write" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-            let title = out.get("title").and_then(|v| v.as_str());
-            let old_status = out.get("old_status").and_then(|v| v.as_str());
-            let new_status = out.get("new_status").and_then(|v| v.as_str());
-            match (title, old_status, new_status) {
-                (Some(t), Some(old), Some(new)) => Some(format!(
-                    "{} \"{}\" ({} → {}) → {} remaining",
-                    action,
-                    truncate_str(t, 80),
-                    old,
-                    new,
-                    count
+        "task_create" => {
+            let subject = out.get("subject").and_then(|v| v.as_str());
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            match subject {
+                Some(s) => Some(format!(
+                    "created \"{}\" [{}]",
+                    truncate_str(s, 80),
+                    &id[..8.min(id.len())]
                 )),
-                (Some(t), _, _) => Some(format!(
-                    "{} \"{}\" → {} remaining",
-                    action,
-                    truncate_str(t, 100),
-                    count
-                )),
-                _ => Some(format!("{} → {} remaining", action, count)),
+                None => Some(format!("created [{}]", &id[..8.min(id.len())])),
             }
+        }
+        "task_update" => {
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = out.get("status").and_then(|v| v.as_str());
+            let subject = out.get("subject").and_then(|v| v.as_str());
+            let unblocked = out.get("unblocked").and_then(|v| v.as_array());
+            let short_id = &id[..8.min(id.len())];
+            let base = match (status, subject) {
+                (Some(s), Some(t)) => {
+                    format!("updated \"{}\" → {} [{}]", truncate_str(t, 80), s, short_id)
+                }
+                (Some(s), None) => format!("updated → {} [{}]", s, short_id),
+                (None, Some(t)) => format!("updated \"{}\" [{}]", truncate_str(t, 80), short_id),
+                (None, None) => format!("updated [{}]", short_id),
+            };
+            if let Some(ub) = unblocked
+                && !ub.is_empty()
+            {
+                let count = ub.len();
+                Some(format!("{} ({} unblocked)", base, count))
+            } else {
+                Some(base)
+            }
+        }
+        "task_get" => {
+            let id = out.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let subject = out.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+            Some(format!(
+                "{} [{}] {}",
+                status,
+                &id[..8.min(id.len())],
+                truncate_str(&subject, 80)
+            ))
+        }
+        "task_list" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{}", pluralize(count, "task", "tasks")))
         } // ═══════════════════════════════════════════════════════════════════
         // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
-        "new_task" => {
+        "new_agent" => {
             let agent = out.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let background = out
                 .get("background")
@@ -1746,7 +1802,7 @@ pub fn tool_result_summary(
                 ))
             }
         }
-        "cancel_task" => {
+        "cancel_agent" => {
             let cancelled = out
                 .get("cancelled")
                 .and_then(|v| v.as_bool())
@@ -1757,11 +1813,11 @@ pub fn tool_result_summary(
                 Some("already completed".to_string())
             }
         }
-        "list_tasks" => {
+        "list_agents" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!("{}", pluralize(count, "task", "tasks")))
         }
-        "wait_tasks" => {
+        "wait_agents" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let success = out
                 .get("success")
@@ -2529,6 +2585,11 @@ impl<'a> MessageWidget<'a> {
         for part in &self.message.parts {
             match part {
                 MessagePart::Text { text } => {
+                    // Agent notices are rendered in bright yellow, one item per line.
+                    if self.message.role == Role::Assistant && is_agent_notice(text) {
+                        lines.extend(render_agent_notice_lines(text));
+                        continue;
+                    }
                     // Detect the model "thinking out loud" with minimal text like "..." or "......"
                     // and render it as a distinct greyed-out thinking indicator.
                     let trimmed = text.trim();
@@ -2673,8 +2734,8 @@ impl<'a> MessageWidget<'a> {
                     }
                     lines.push(Line::from(spans));
                     if state.status == ToolCallStatus::Completed {
-                        if tool == "wait_tasks" {
-                            // Special handling for wait_tasks: show indented list of tasks
+                        if tool == "wait_agents" {
+                            // Special handling for wait_agents: show indented list of tasks
                             if let Some(tasks_array) = state
                                 .output
                                 .as_ref()
@@ -2756,7 +2817,7 @@ impl<'a> MessageWidget<'a> {
                                     )));
                                 }
                             }
-                        } else if tool == "task_complete" {
+                        } else if tool == "agent_complete" {
                             // Render the full task completion summary
                             if let Some(summary) = state
                                 .output

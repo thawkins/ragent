@@ -36,7 +36,7 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
         tool_registry,
         permission_checker,
         event_bus,
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),

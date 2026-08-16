@@ -1,4 +1,4 @@
-//! The `wait_tasks` tool — blocks until one or more background sub-agent tasks complete.
+//! The `wait_agents` tool — blocks until one or more background sub-agent tasks complete.
 //!
 //! Subscribes to [`Event::SubagentComplete`] on the session event bus so there is
 //! no polling.  Returns the full results of all awaited tasks once they finish,
@@ -21,12 +21,12 @@ use super::{Tool, ToolContext, ToolOutput};
 /// - `task_ids` (array of string, optional): IDs of tasks to wait for.
 ///   If omitted, waits for **all** currently running background tasks.
 /// - `timeout_secs` (number, optional): Maximum seconds to wait. Default: 300.
-pub struct WaitTasksTool;
+pub struct WaitAgentsTool;
 
 #[async_trait::async_trait]
-impl Tool for WaitTasksTool {
+impl Tool for WaitAgentsTool {
     fn name(&self) -> &'static str {
-        "wait_tasks"
+        "wait_agents"
     }
 
     /// # Errors
@@ -36,9 +36,9 @@ impl Tool for WaitTasksTool {
         "Wait for one or more background sub-agent tasks to complete. No required \
              parameters. Optional: 'task_ids' (array of strings) to wait for specific \
              tasks, or 'timeout_secs' (number, default 300). Returns full results for \
-             all awaited tasks. Use this instead of polling with list_tasks; omitting \
+             all awaited tasks. Use this instead of polling with list_agents; omitting \
              task_ids waits for ALL running background tasks. Common gotcha: this tool \
-             is for new_task sub-agents spawned with background: true, NOT for team \
+             is for new_agent sub-agents spawned with background: true, NOT for team \
              members — for teams, always use team_wait."
     }
 
@@ -68,13 +68,13 @@ impl Tool for WaitTasksTool {
 
     /// # Errors
     ///
-    /// Returns an error if the `TaskManager` is not initialized, if any requested task ID
+    /// Returns an error if the `AgentManager` is not initialized, if any requested task ID
     /// does not exist or is not a background task, or if the wait operation times out.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let task_manager = ctx
-            .task_manager
+        let agent_manager = ctx
+            .agent_manager
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("TaskManager not initialised in this context."))?;
+            .ok_or_else(|| anyhow::anyhow!("AgentManager not initialised in this context."))?;
 
         let timeout_secs = input
             .get("timeout_secs")
@@ -96,7 +96,7 @@ impl Tool for WaitTasksTool {
             })
             .unwrap_or_default();
 
-        let all_tasks = task_manager.list_tasks(&ctx.session_id).await;
+        let all_tasks = agent_manager.list_agents(&ctx.session_id).await;
 
         let mut waiting_for: HashSet<String> = if requested.is_empty() {
             all_tasks
@@ -138,7 +138,7 @@ impl Tool for WaitTasksTool {
         // avoiding spurious decrements).
         let mut still_waiting: Vec<String> = Vec::new();
         for task_id in &waiting_for {
-            if task_manager.increment_waiter(task_id).await {
+            if agent_manager.increment_waiter(task_id).await {
                 still_waiting.push(task_id.clone());
             }
             // If increment_waiter returned false, the task is already
@@ -189,7 +189,7 @@ impl Tool for WaitTasksTool {
         // — a spurious decrement could cause drain_completed to inject
         // results prematurely when another waiter is still waiting.
         for task_id in &still_waiting {
-            task_manager.decrement_waiter(task_id).await;
+            agent_manager.decrement_waiter(task_id).await;
         }
         // Format the output.
         let timed_out = !waiting_for.is_empty();

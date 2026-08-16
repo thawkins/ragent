@@ -40,7 +40,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         tool_registry,
         permission_checker,
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),

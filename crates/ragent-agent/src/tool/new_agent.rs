@@ -1,4 +1,4 @@
-//! The `new_task` tool — spawns a sub-agent to perform a focused task.
+//! The `new_agent` tool — spawns a sub-agent to perform a focused task.
 //!
 //! Supports both synchronous (blocking) and background (non-blocking) modes.
 //! Background tasks publish [`Event::SubagentComplete`] when finished.
@@ -26,12 +26,12 @@ use super::{Tool, ToolContext, ToolOutput};
 ///   one task in the same response so they can run concurrently. Default: `false`.
 /// - `model` (string, optional) — Model override in `provider/model` or
 ///   `provider:model` format. Inherits the parent session's model when omitted.
-pub struct NewTaskTool;
+pub struct NewAgentTool;
 
 #[async_trait::async_trait]
-impl Tool for NewTaskTool {
+impl Tool for NewAgentTool {
     fn name(&self) -> &'static str {
-        "new_task"
+        "new_agent"
     }
 
     /// # Errors
@@ -49,7 +49,7 @@ impl Tool for NewTaskTool {
          - `background` (bool, default false) — set to `true` to spawn in the background\n\
          - `model` (string) — provider/model override, e.g. 'anthropic/claude-sonnet-4-20250514'\n\
          \n\
-         Example: new_task(agent: \"explore\", task: \"Find all callers of X in src/\")"
+         Example: new_agent(agent: \"explore\", task: \"Find all callers of X in src/\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -85,13 +85,13 @@ impl Tool for NewTaskTool {
     /// # Errors
     ///
     /// Returns an error if required parameters `agent` or `task` are missing,
-    /// if the `TaskManager` has not been initialized, or if task spawning fails.
+    /// if the `AgentManager` has not been initialized, or if task spawning fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         if let Some(team) = ctx.team_context.as_ref() {
             let guidance = if team.is_lead {
                 format!(
                     "Session '{}' is the lead of active team '{}'. \
-                     Do not use `new_task` for team delegation. Use team tools (`team_spawn`, \
+                     Do not use `new_agent` for team delegation. Use team tools (`team_spawn`, \
                      `team_task_create`, `team_assign_task`, `team_message`) so teammate activity \
                      and output stay visible in the Teams UI.",
                     ctx.session_id, team.team_name
@@ -99,7 +99,7 @@ impl Tool for NewTaskTool {
             } else {
                 format!(
                     "Session '{}' is teammate '{}' in active team '{}'. \
-                     Do not use `new_task` from a teammate session. Use team workflow tools \
+                     Do not use `new_agent` from a teammate session. Use team workflow tools \
                      (`team_read_messages`, `team_task_claim`, `team_task_complete`, `team_idle`) \
                      and report progress via team messaging.",
                     ctx.session_id, team.agent_id, team.team_name
@@ -146,15 +146,15 @@ impl Tool for NewTaskTool {
                     .map(|m| format!("{}/{}", m.provider_id, m.model_id))
             });
 
-        let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
+        let agent_manager = ctx.agent_manager.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "Sub-agent spawning is not available in this context. \
-                     TaskManager has not been initialised."
+                     AgentManager has not been initialised."
             )
         })?;
 
         if background {
-            let entry = task_manager
+            let entry = agent_manager
                 .spawn_background(
                     &ctx.session_id,
                     agent,
@@ -182,7 +182,7 @@ impl Tool for NewTaskTool {
                 })),
             })
         } else {
-            let result = task_manager
+            let result = agent_manager
                 .spawn_sync(
                     &ctx.session_id,
                     agent,
@@ -220,7 +220,7 @@ mod tests {
             working_dir: PathBuf::from("/tmp"),
             event_bus: Arc::new(EventBus::new(16)),
             storage: None,
-            task_manager: None,
+            agent_manager: None,
             active_model: None,
             team_context: None,
             team_manager: None,
@@ -235,7 +235,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_new_task_without_team_context_tries_to_spawn() {
-        let tool = NewTaskTool;
+        let tool = NewAgentTool;
         let ctx = base_ctx();
         let err = tool
             .execute(
@@ -250,14 +250,14 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("TaskManager has not been initialised"),
+                .contains("AgentManager has not been initialised"),
             "unexpected error: {err:#}"
         );
     }
 
     #[tokio::test]
     async fn test_new_task_blocks_for_active_team_sessions() {
-        let tool = NewTaskTool;
+        let tool = NewAgentTool;
         let mut ctx = base_ctx();
         ctx.team_context = Some(Arc::new(TeamContext {
             team_name: "alpha".to_string(),

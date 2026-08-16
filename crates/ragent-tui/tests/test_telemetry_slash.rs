@@ -47,7 +47,7 @@ fn make_app() -> App {
         tool_registry,
         permission_checker,
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
@@ -205,7 +205,7 @@ fn test_telemetry_panel_slash_command_toggles_panel() {
     assert!(app.show_telemetry);
     assert!(!app.show_log);
     assert!(!app.show_profile);
-    assert!(!app.show_todo);
+    assert!(!app.show_tasks_panel);
     assert!(!app.show_memory);
     assert_eq!(app.status, "telemetry panel visible");
 

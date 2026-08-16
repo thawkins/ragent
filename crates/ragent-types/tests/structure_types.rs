@@ -96,7 +96,7 @@ const CANONICAL_HOMES: &[(&str, &str, &str)] = &[
     ("StreamEvent", "crates/ragent-types/src/llm.rs", "enum"),
     // Storage family (D1) — canonical in ragent-storage/src/storage.rs.
     // The agent crate's `storage/mod.rs` is now a re-export shim.
-    // NOTE: `ragent-tools-extended::storage` defines its own `TodoRow` /
+    // NOTE: `ragent-tools-extended::storage` defines its own `TaskRow` /
     // `MemoryRow` / `EmbeddingMatch` as part of the `StorageBackend` trait
     // surface (they are DTOs for the trait, not storage-row types).  Those
     // are intentional parallel definitions used by the extracted tools and

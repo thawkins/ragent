@@ -13,12 +13,12 @@ pub use mcp_tool::McpToolWrapper;
 
 /// Alias tools that map commonly hallucinated tool names to canonical implementations.
 pub mod aliases;
-/// Task cancellation tool.
-pub mod cancel_task;
+/// Sub-agent cancellation tool.
+pub mod cancel_agent;
 /// Structured memory store, recall, and forget tools.
 pub mod conversation_search;
-pub mod list_tasks;
-pub mod new_task;
+pub mod list_agents;
+pub mod new_agent;
 pub mod plan;
 pub mod structured_memory;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
@@ -49,7 +49,8 @@ pub mod team_task_complete;
 pub mod team_task_create;
 pub mod team_task_list;
 pub mod team_wait;
-pub mod wait_tasks;
+/// Sub-agent wait tool.
+pub mod wait_agents;
 
 /// Session search tools (M5).
 pub mod session_search;
@@ -240,7 +241,7 @@ impl Default for ToolOutput {
 ///     working_dir: PathBuf::from("/tmp"),
 ///     event_bus: Arc::new(EventBus::new(128)),
 ///     storage: None,
-///     task_manager: None,
+///     agent_manager: None,
 ///     active_model: None,
 ///     team_context: None,
 ///     team_manager: None,
@@ -264,8 +265,8 @@ pub struct ToolContext {
     pub event_bus: Arc<EventBus>,
     /// Optional storage handle for tools that need database access.
     pub storage: Option<Arc<crate::storage::Storage>>,
-    /// Optional task manager for spawning sub-agent tasks.
-    pub task_manager: Option<Arc<crate::task::TaskManager>>,
+    /// Optional agent manager for spawning sub-agent tasks.
+    pub agent_manager: Option<Arc<crate::task::AgentManager>>,
     /// The active model (provider + model ID) used by the parent session.
     /// Sub-agent tools use this to inherit the parent's provider when no
     /// explicit model override is specified in the tool call.
@@ -661,14 +662,14 @@ impl CoreStorageAdapter {
 }
 
 impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
-    fn get_todos(
+    fn list_tasks(
         &self,
         session_id: &str,
         status: Option<&str>,
-    ) -> anyhow::Result<Vec<ragent_tools_extended::storage::TodoRow>> {
-        self.inner.get_todos(session_id, status).map(|rows| {
+    ) -> anyhow::Result<Vec<ragent_tools_extended::storage::TaskRow>> {
+        self.inner.list_tasks(session_id, status).map(|rows| {
             rows.into_iter()
-                .map(|row| ragent_tools_extended::storage::TodoRow {
+                .map(|row| ragent_tools_extended::storage::TaskRow {
                     id: row.id,
                     session_id: row.session_id,
                     title: row.title,
@@ -676,12 +677,24 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
                     description: row.description,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
+                    // T-001: map new Task fields. metadata is stored as a
+                    // JSON string in the storage layer; parse it to Value
+                    // for the tool-facing type. Empty string → `{}`.
+                    active_form: row.active_form,
+                    owner: row.owner,
+                    metadata: if row.metadata.is_empty() {
+                        serde_json::Value::Object(serde_json::Map::new())
+                    } else {
+                        serde_json::from_str(&row.metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+                    },
+                    blocked_by: row.blocked_by,
                 })
                 .collect()
         })
     }
 
-    fn create_todo(
+    fn create_task_simple(
         &self,
         id: &str,
         session_id: &str,
@@ -690,10 +703,37 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
         description: &str,
     ) -> anyhow::Result<()> {
         self.inner
-            .create_todo(id, session_id, title, status, description)
+            .create_task_simple(id, session_id, title, status, description)
     }
 
-    fn update_todo(
+    #[allow(clippy::too_many_arguments)]
+    fn create_task(
+        &self,
+        id: &str,
+        session_id: &str,
+        subject: &str,
+        description: &str,
+        status: &str,
+        active_form: Option<&str>,
+        owner: Option<&str>,
+        metadata: &serde_json::Value,
+        blocked_by: &[String],
+    ) -> anyhow::Result<()> {
+        let metadata_str = serde_json::to_string(metadata)?;
+        self.inner.create_task(
+            id,
+            session_id,
+            subject,
+            description,
+            status,
+            active_form,
+            owner,
+            &metadata_str,
+            blocked_by,
+        )
+    }
+
+    fn update_task_simple(
         &self,
         id: &str,
         session_id: &str,
@@ -702,15 +742,44 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
         description: Option<&str>,
     ) -> anyhow::Result<bool> {
         self.inner
-            .update_todo(id, session_id, title, status, description)
+            .update_task_simple(id, session_id, title, status, description)
     }
 
-    fn delete_todo(&self, id: &str, session_id: &str) -> anyhow::Result<bool> {
-        self.inner.delete_todo(id, session_id)
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    fn update_task(
+        &self,
+        id: &str,
+        session_id: &str,
+        subject: Option<&str>,
+        status: Option<&str>,
+        description: Option<&str>,
+        active_form: Option<Option<&str>>,
+        owner: Option<Option<&str>>,
+        metadata: Option<&serde_json::Value>,
+        blocked_by: Option<&[String]>,
+    ) -> anyhow::Result<bool> {
+        let metadata_str = match metadata {
+            Some(v) => Some(serde_json::to_string(v)?),
+            None => None,
+        };
+        let params = crate::storage::TaskUpdateParams {
+            subject,
+            status,
+            description,
+            active_form,
+            owner,
+            metadata: metadata_str.as_deref(),
+            blocked_by,
+        };
+        self.inner.update_task(id, session_id, &params)
     }
 
-    fn clear_todos(&self, session_id: &str) -> anyhow::Result<usize> {
-        self.inner.clear_todos(session_id)
+    fn delete_task(&self, id: &str, session_id: &str) -> anyhow::Result<bool> {
+        self.inner.delete_task(id, session_id)
+    }
+
+    fn clear_tasks(&self, session_id: &str) -> anyhow::Result<usize> {
+        self.inner.clear_tasks(session_id)
     }
 
     fn get_memory(
@@ -1314,7 +1383,7 @@ impl Default for ToolRegistry {
 ///
 /// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`,
 /// `question`, `office_read`, `office_write`, `office_info`, `pdf_read`,
-/// `pdf_write`, `new_task`, `cancel_task`, `list_tasks`.
+/// `pdf_write`, `new_agent`, `cancel_agent`, `list_agents`.
 ///
 /// # Examples
 ///
@@ -1332,10 +1401,10 @@ pub fn create_default_registry() -> ToolRegistry {
     register_extracted_vcs_tools(&registry);
     registry.register(Arc::new(plan::PlanEnterTool));
     registry.register(Arc::new(plan::PlanExitTool));
-    registry.register(Arc::new(new_task::NewTaskTool));
-    registry.register(Arc::new(cancel_task::CancelTaskTool));
-    registry.register(Arc::new(list_tasks::ListTasksTool));
-    registry.register(Arc::new(wait_tasks::WaitTasksTool));
+    registry.register(Arc::new(new_agent::NewAgentTool));
+    registry.register(Arc::new(cancel_agent::CancelAgentTool));
+    registry.register(Arc::new(list_agents::ListAgentsTool));
+    registry.register(Arc::new(wait_agents::WaitAgentsTool));
     // Structured memory tools
     registry.register(Arc::new(structured_memory::MemoryStoreTool));
     registry.register(Arc::new(structured_memory::MemoryRecallTool));

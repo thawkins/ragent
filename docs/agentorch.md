@@ -55,7 +55,7 @@ Key fields:
 | `tool_registry` | `processor.rs:64` | registered tools |
 | `permission_checker` | `processor.rs:66` | allow/deny/ask policy gate |
 | `event_bus` | `processor.rs:68` | tokio broadcast of all lifecycle events |
-| `task_manager` | `processor.rs:71` | sub-agent spawning (`OnceLock`) |
+| `agent_manager` | `processor.rs:71` | sub-agent spawning (`OnceLock`) |
 | `team_manager` | `processor.rs:74` | team/teammate coordination (`OnceLock`) |
 | `mcp_client` | `processor.rs:86` | dynamic MCP tools (`OnceLock`) |
 | `code_index` | `processor.rs:89` | codebase search (`OnceLock`) |
@@ -257,7 +257,7 @@ When the LLM returned no tool calls:
 
 ### 4.12 Background task / shell injection
 
-- Sub-agent completions drained from `TaskManager` and injected as a user
+- Sub-agent completions drained from `AgentManager` and injected as a user
   `ContentPart::Text` — `processor.rs:1544`.
 - Background shell task completions drained from `bg_service` — `processor.rs:1587`.
 
@@ -486,9 +486,9 @@ orchestration substrate for parallel/team work.
 4. `ConflictResolver` applies a `ConflictPolicy` (with optional human fallback)
    when aggregating multiple agent responses.
 
-Note: the production team/sub-agent flow (`/swarm`, `team_spawn`, `new_task`)
+Note: the production team/sub-agent flow (`/swarm`, `team_spawn`, `new_agent`)
 lives in `team/` and `task/` and routes through `SessionProcessor`'s
-`task_manager` / `team_manager`, not through this orchestrator crate.
+`agent_manager` / `team_manager`, not through this orchestrator crate.
 
 ---
 

@@ -44,7 +44,7 @@ pub mod bg;
 pub mod open;
 
 // Interaction tools
-pub mod task_complete;
+pub mod agent_complete;
 pub mod think;
 
 // Utility tools
@@ -357,7 +357,7 @@ pub fn create_core_registry() -> ToolRegistry {
     registry.register(Arc::new(bash_reset::BashResetTool));
     registry.register(Arc::new(open::OpenTool));
     // Interaction tools
-    registry.register(Arc::new(task_complete::TaskCompleteTool));
+    registry.register(Arc::new(agent_complete::AgentCompleteTool));
     registry.register(Arc::new(think::ThinkTool));
 
     // Utility tools

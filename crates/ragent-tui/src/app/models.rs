@@ -2256,7 +2256,7 @@ impl App {
             // Entering profile mode: dismiss the other side panels so only one
             // occupies the side column (FR-012 mutual-exclusion policy).
             self.show_log = false;
-            self.show_todo = false;
+            self.show_tasks_panel = false;
             self.show_memory = false;
             self.show_telemetry = false;
         }

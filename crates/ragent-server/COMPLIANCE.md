@@ -117,7 +117,7 @@ Key findings (detailed)
     - rate limiter logic: correct counting, reset after 60s, concurrency.
     - create_session: invalid path, non-directory, success (use tempdir and tokio::fs::canonicalize when refactored).
     - prompt_opt_handler: validation errors when missing provider/model/method; successful optimization flow using a mock Completer that returns deterministic result.
-    - spawn_task and task endpoints: success and failure paths — these will likely be integration tests requiring mocking of Storage and TaskManager or using a lightweight in-memory Storage for tests.
+    - spawn_task and task endpoints: success and failure paths — these will likely be integration tests requiring mocking of Storage and AgentManager or using a lightweight in-memory Storage for tests.
   - Add integration tests that run the Router in-process (Router::with_state) and send HTTP requests using reqwest::Client or axum::test::TestClient (or hyper test) to exercise authentication and SSE endpoints.
 - Suggested test framework: tokio::test + assert_json_diff or similar utilities. For benchmarks use criterion.
 - Estimated effort: medium
@@ -304,7 +304,7 @@ Suggested tests (summary)
 - Integration tests:
   - start_router_in_process: authenticated vs unauthenticated requests
   - SSE stream: subscribe to /events and assert events are received for session activities
-  - spawn_task + task endpoints: end-to-end using an in-memory TaskManager if available
+  - spawn_task + task endpoints: end-to-end using an in-memory AgentManager if available
 - Benchmarks:
   - event serialization
   - rate limiting under concurrency

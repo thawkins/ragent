@@ -63,8 +63,8 @@ fn test_tool_family_names_teams() {
 fn test_tool_family_names_agents() {
     let names = tool_family_names("agents").unwrap();
     assert_eq!(names.len(), 5);
-    assert!(names.contains(&"new_task"));
-    assert!(names.contains(&"wait_tasks"));
+    assert!(names.contains(&"new_agent"));
+    assert!(names.contains(&"wait_agents"));
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_effective_hidden_tools_uses_default_github_gitlab_switches() {
     assert!(hidden.contains(&"github_list_issues".to_string()));
     assert!(hidden.contains(&"gitlab_list_issues".to_string()));
     assert!(hidden.contains(&"team_create".to_string()));
-    assert!(hidden.contains(&"new_task".to_string()));
+    assert!(hidden.contains(&"new_agent".to_string()));
     assert!(hidden.contains(&"plan_enter".to_string()));
 }
 

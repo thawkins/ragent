@@ -121,7 +121,7 @@ fn make_processor(event_bus: Arc<EventBus>) -> (SessionProcessor, std::path::Pat
         tool_registry: Arc::new(tool::create_default_registry()),
         permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![]))),
         event_bus,
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),

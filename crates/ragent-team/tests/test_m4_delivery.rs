@@ -36,7 +36,7 @@ fn make_ctx(
         working_dir: working_dir.to_path_buf(),
         event_bus,
         storage: None,
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: None,
         team_manager: None,

@@ -73,8 +73,8 @@ pub enum Permission {
     PlanEnter,
     /// Exit a planning phase.
     PlanExit,
-    /// Create or modify to-do items.
-    Todo,
+    /// Create or modify task items.
+    Task,
     /// Access directories outside the project root.
     ExternalDirectory,
     /// Detect and break infinite processing loops.
@@ -105,7 +105,7 @@ impl From<&str> for Permission {
             "question" => Self::Question,
             "plan_enter" | "plan" => Self::PlanEnter,
             "plan_exit" => Self::PlanExit,
-            "todo" => Self::Todo,
+            "task" => Self::Task,
             "external_directory" => Self::ExternalDirectory,
             "doom_loop" => Self::DoomLoop,
             _ => Self::Custom(s.to_string()),
@@ -128,7 +128,7 @@ impl fmt::Display for Permission {
             Self::Question => write!(f, "question"),
             Self::PlanEnter => write!(f, "plan_enter"),
             Self::PlanExit => write!(f, "plan_exit"),
-            Self::Todo => write!(f, "todo"),
+            Self::Task => write!(f, "task"),
             Self::ExternalDirectory => write!(f, "external_directory"),
             Self::DoomLoop => write!(f, "doom_loop"),
             Self::Custom(s) => write!(f, "{s}"),

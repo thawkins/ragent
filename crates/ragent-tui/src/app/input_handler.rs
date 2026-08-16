@@ -210,7 +210,7 @@ impl App {
             MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {
-                    if self.active_tasks.is_empty() {
+                    if self.active_tasks.is_empty() && self.bg_tasks.is_empty() {
                         return;
                     }
                     self.show_agents_window = !self.show_agents_window;
@@ -274,6 +274,9 @@ impl App {
                                                                                           } else {
                                                                                               self.suspend_agent_task(&task.id);
                                                                                           }
+                                                                                      } else if self.bg_tasks.iter().any(|t| t.id == *task_id) {
+                                                                                          let id = task_id.clone();
+                                                                                          self.cancel_bg_task(&id);
                                                                                       }
                                                                                       return;
                                                                                   }
@@ -283,6 +286,9 @@ impl App {
                                                                                       let task_id = &self.agent_row_kill_task_ids[i];
                                                                                       if let Some(task) = self.active_tasks.iter().find(|t| t.id == *task_id).cloned() {
                                                                                           self.kill_agent_task(&task.id);
+                                                                                      } else if self.bg_tasks.iter().any(|t| t.id == *task_id) {
+                                                                                          let id = task_id.clone();
+                                                                                          self.cancel_bg_task(&id);
                                                                                       }
                                                                                       return;
                                                                                   }
@@ -389,15 +395,15 @@ impl App {
                     self.scrollbar_drag = Some(ScrollbarDragPane::Profile);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Profile);
-                } else if self.show_todo
-                    && self.todo_area.height > 0
-                    && event.column == self.todo_area.right().saturating_sub(1)
-                    && self.todo_area.contains(pos.into())
-                    && self.todo_max_scroll > 0
+                } else if self.show_tasks_panel
+                    && self.tasks_area.height > 0
+                    && event.column == self.tasks_area.right().saturating_sub(1)
+                    && self.tasks_area.contains(pos.into())
+                    && self.tasks_max_scroll > 0
                 {
-                    self.scrollbar_drag = Some(ScrollbarDragPane::Todo);
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Tasks);
                     self.text_selection = None;
-                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Todo);
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Tasks);
                                   } else if self.show_memory
                                       && self.memory_area.height > 0
                                       && event.column == self.memory_area.right().saturating_sub(1)
@@ -603,7 +609,9 @@ impl App {
             SelectionPane::Profile => self
                 .profile_max_scroll
                 .saturating_sub(self.profile_scroll_offset),
-            SelectionPane::Todo => self.todo_max_scroll.saturating_sub(self.todo_scroll_offset),
+            SelectionPane::Tasks => self
+                .tasks_max_scroll
+                .saturating_sub(self.tasks_scroll_offset),
             SelectionPane::Memory => self
                 .memory_max_scroll
                 .saturating_sub(self.memory_scroll_offset),
@@ -619,7 +627,7 @@ impl App {
             SelectionPane::Messages => &self.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
             SelectionPane::Profile => &self.profile_content_lines,
-            SelectionPane::Todo => &self.todo_content_lines,
+            SelectionPane::Tasks => &self.tasks_content_lines,
             SelectionPane::Memory => &self.memory_content_lines,
             SelectionPane::Telemetry => &self.telemetry_content_lines,
             SelectionPane::Input => {
@@ -656,7 +664,7 @@ impl App {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
             SelectionPane::Profile => self.profile_area,
-            SelectionPane::Todo => self.todo_area,
+            SelectionPane::Tasks => self.tasks_area,
             SelectionPane::Memory => self.memory_area,
             SelectionPane::Telemetry => self.telemetry_area,
             _ => unreachable!(),
@@ -907,8 +915,8 @@ impl App {
                         self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
                     } else if self.show_profile {
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
-                    } else if self.show_todo {
-                        self.todo_scroll_offset = self.todo_scroll_offset.saturating_add(3);
+                    } else if self.show_tasks_panel {
+                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);
                     } else if self.show_memory {
                         // Memory panel shares the LogScrollUp / LogScrollDown
                         // key bindings with the other side panels (FR-009).
@@ -923,8 +931,8 @@ impl App {
                         self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                     } else if self.show_profile {
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
-                    } else if self.show_todo {
-                        self.todo_scroll_offset = self.todo_scroll_offset.saturating_sub(3);
+                    } else if self.show_tasks_panel {
+                        self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);
                     } else if self.show_memory {
                         self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
                     } else if self.show_telemetry {
@@ -938,7 +946,7 @@ impl App {
                         // Entering log mode: dismiss the other side panels so
                         // only one occupies the side column (FR-012).
                         self.show_profile = false;
-                        self.show_todo = false;
+                        self.show_tasks_panel = false;
                         self.show_memory = false;
                         self.show_telemetry = false;
                     } else {
@@ -1013,15 +1021,15 @@ impl App {
                     }
                     self.needs_redraw = true;
                 }
-                InputAction::ToggleTodo => {
+                InputAction::ToggleTasksPanel => {
                     // Toggle the TODO panel visibility (Alt+T). Implements
                     // FR-002 (toggle) and FR-003 (mutual exclusion of side
                     // panels — only one of log/profile/todo is visible at a
                     // time, matching the `/log` and `/profile` slash commands
                     // in app/slash.rs). On hide, any active Todo-pane text
                     // selection or context menu is cleared.
-                    self.show_todo = !self.show_todo;
-                    if self.show_todo {
+                    self.show_tasks_panel = !self.show_tasks_panel;
+                    if self.show_tasks_panel {
                         // Entering TODO mode: dismiss the other side panels so
                         // only one occupies the side column (FR-012/SPEC
                         // mutual-exclusion policy).
@@ -1034,22 +1042,22 @@ impl App {
                         if self
                             .text_selection
                             .as_ref()
-                            .is_some_and(|s| s.pane == SelectionPane::Todo)
+                            .is_some_and(|s| s.pane == SelectionPane::Tasks)
                         {
                             self.text_selection = None;
                         }
                         if self
                             .context_menu
                             .as_ref()
-                            .is_some_and(|m| m.pane == SelectionPane::Todo)
+                            .is_some_and(|m| m.pane == SelectionPane::Tasks)
                         {
                             self.context_menu = None;
                         }
                     }
-                    self.status = if self.show_todo {
-                        "todo panel visible".to_string()
+                    self.status = if self.show_tasks_panel {
+                        "tasks panel visible".to_string()
                     } else {
-                        "todo panel hidden".to_string()
+                        "tasks panel hidden".to_string()
                     };
                     self.needs_redraw = true;
                 }
@@ -1067,7 +1075,7 @@ impl App {
                         // so only one occupies the side column (FR-004).
                         self.show_log = false;
                         self.show_profile = false;
-                        self.show_todo = false;
+                        self.show_tasks_panel = false;
                         self.show_telemetry = false;
                     } else {
                         if self
@@ -1101,7 +1109,7 @@ impl App {
                     if self.show_telemetry {
                         self.show_log = false;
                         self.show_profile = false;
-                        self.show_todo = false;
+                        self.show_tasks_panel = false;
                         self.show_memory = false;
                     } else {
                         if self

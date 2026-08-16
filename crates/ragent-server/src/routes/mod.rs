@@ -35,7 +35,7 @@ use ragent_agent::{
     sanitize::redact_secrets,
     session::processor::SessionProcessor,
     storage::{SessionRow, Storage},
-    task::TaskManager,
+    task::AgentManager,
 };
 
 use crate::sse::event_to_sse;
@@ -109,10 +109,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/sessions/{id}/abort", post(abort_session))
         .route("/sessions/{id}/permission/{req_id}", post(reply_permission))
-        .route("/sessions/{id}/tasks", get(list_tasks).post(spawn_task))
+        .route("/sessions/{id}/tasks", get(list_agents).post(spawn_task))
         .route(
             "/sessions/{id}/tasks/{tid}",
-            get(get_task).delete(cancel_task),
+            get(get_task).delete(cancel_agent),
         )
         .route("/events", get(events_stream))
         .route("/opt", post(prompt_opt_handler))
@@ -651,10 +651,10 @@ async fn spawn_task(
 
     let working_dir = std::path::Path::new(&session.directory);
     let background = body.background.unwrap_or(false);
-    let task_manager = get_task_manager(&state)?;
+    let agent_manager = get_agent_manager(&state)?;
 
     let result = if background {
-        task_manager
+        agent_manager
             .spawn_background(
                 &session_id,
                 &body.agent,
@@ -664,7 +664,7 @@ async fn spawn_task(
             )
             .await
     } else {
-        task_manager
+        agent_manager
             .spawn_sync(
                 &session_id,
                 &body.agent,
@@ -688,16 +688,16 @@ async fn spawn_task(
     }
 }
 
-async fn list_tasks(
+async fn list_agents(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
 ) -> Result<(StatusCode, Json<Vec<TaskResponse>>), (StatusCode, Json<serde_json::Value>)> {
     // Verify session exists
     verify_session_exists(&state, &session_id).await?;
 
-    let task_manager = get_task_manager(&state)?;
+    let agent_manager = get_agent_manager(&state)?;
 
-    let entries = task_manager.list_tasks(&session_id).await;
+    let entries = agent_manager.list_agents(&session_id).await;
     let tasks: Vec<TaskResponse> = entries
         .into_iter()
         .map(|entry| task_entry_to_response(entry, false))
@@ -709,9 +709,9 @@ async fn get_task(
     State(state): State<AppState>,
     Path((session_id, task_id)): Path<(String, String)>,
 ) -> Result<(StatusCode, Json<TaskResponse>), (StatusCode, Json<serde_json::Value>)> {
-    let task_manager = get_task_manager(&state)?;
+    let agent_manager = get_agent_manager(&state)?;
 
-    match task_manager.get_task(&task_id).await {
+    match agent_manager.get_task(&task_id).await {
         Some(entry) => {
             if entry.parent_session_id != session_id {
                 return Err(error_response(
@@ -726,14 +726,14 @@ async fn get_task(
     }
 }
 
-async fn cancel_task(
+async fn cancel_agent(
     State(state): State<AppState>,
     Path((session_id, task_id)): Path<(String, String)>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
-    let task_manager = get_task_manager(&state)?;
+    let agent_manager = get_agent_manager(&state)?;
 
     // Verify task belongs to this session
-    match task_manager.get_task(&task_id).await {
+    match agent_manager.get_task(&task_id).await {
         Some(entry) => {
             if entry.parent_session_id != session_id {
                 return Err(error_response(
@@ -747,7 +747,7 @@ async fn cancel_task(
         }
     }
 
-    match task_manager.cancel_task(&task_id).await {
+    match agent_manager.cancel_agent(&task_id).await {
         Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
         Err(e) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -924,19 +924,19 @@ fn serialize_response<T: serde::Serialize>(
     }
 }
 
-/// Helper to retrieve the task manager from session processor or return error response.
-fn get_task_manager(
+/// Helper to retrieve the agent manager from session processor or return error response.
+fn get_agent_manager(
     state: &AppState,
-) -> Result<Arc<TaskManager>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Arc<AgentManager>, (StatusCode, Json<serde_json::Value>)> {
     state
         .session_processor
-        .task_manager
+        .agent_manager
         .get()
         .cloned()
         .ok_or_else(|| {
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "task manager not initialized",
+                "agent manager not initialized",
             )
         })
 }

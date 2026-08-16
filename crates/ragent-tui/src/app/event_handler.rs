@@ -18,12 +18,13 @@ use ragent_telemetry::counters as telemetry_counters;
 
 // State types from app/state.rs
 use crate::app::state::{
-    App, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState, OutputViewState,
-    OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest, ResearchViewState,
+    App, BgTaskView, LlmRequestStat, LogLevel, ModelDownloadState, ModelLoadingState,
+    OutputViewState, OutputViewTarget, PlanApprovalState, ProviderSetupStep, QuestionRequest,
+    ResearchViewState,
 };
 
 // Helpers
-use crate::app::helpers::{is_discovery_notice, short_session_id, summarise_error};
+use crate::app::helpers::{short_session_id, summarise_error};
 
 // Re-export status types from theme
 
@@ -484,7 +485,7 @@ impl App {
                 }
 
                 // Autopilot auto-continue: after agent completes a turn without calling
-                // task_complete, automatically send a continuation prompt so the agent
+                // agent_complete, automatically send a continuation prompt so the agent
                 // keeps working towards its goal.
                 // If TaskCompleted was consumed before us, autopilot_enabled will already
                 // be false and this block is unreachable — this is just a defensive fallback.
@@ -515,7 +516,7 @@ impl App {
                     } else {
                         // Schedule a continuation on the next render tick
                         self.autopilot_pending_continue = Some(
-                                "Continue working on the task. When fully done, call task_complete with a summary.".to_string()
+                                "Continue working on the task. When fully done, call agent_complete with a summary.".to_string()
                             );
                         self.status = "⚡ autopilot".to_string();
                     }
@@ -696,7 +697,7 @@ impl App {
                 ref session_id,
                 ref summary,
             } if self.is_current_session(session_id) => {
-                self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
+                self.push_log_no_agent(LogLevel::Info, "agent_complete signalled".to_string());
                 self.last_task_completed_at = Some(std::time::Instant::now());
                 // Exit autopilot mode on task completion
                 if self.autopilot_enabled {
@@ -808,15 +809,10 @@ impl App {
                     return;
                 }
                 self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
-                // The instruction-file-discovery summary is multi-line and is
-                // also rendered into the message window. Suppressing it in
-                // the status bar avoids a duplicated, truncated/overflowing
-                // copy on the right of status line 1.
-                if !is_discovery_notice(message) {
-                    self.status = summarise_error(message);
-                }
-                // Also display in the message window for visibility
-                self.append_assistant_text(&format!("📋 **Agent Notice**\n{}", message));
+                // Agent notices are displayed in the message window only.
+                // They are intentionally not mirrored to the status bar so
+                // multi-line summaries do not overflow or duplicate there.
+                self.append_assistant_text(&format!("📋 Agent Notice\n{}", message));
             }
             Event::AgentError {
                 ref session_id,
@@ -1195,6 +1191,62 @@ impl App {
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!("💀 {} task ({})", label, &task_id[..8.min(task_id.len())]),
+                );
+            }
+            Event::BackgroundTaskSpawned {
+                ref session_id,
+                ref task_id,
+                ref command,
+            } if self.is_current_session(session_id) => {
+                self.bg_tasks.push(BgTaskView {
+                    id: task_id.clone(),
+                    session_id: session_id.clone(),
+                    command: command.clone(),
+                    status: "running".to_string(),
+                    created_at: chrono::Utc::now(),
+                    completed_at: None,
+                });
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "⚙️  Background task started: {} ({})",
+                        &task_id[..8.min(task_id.len())],
+                        command
+                    ),
+                );
+            }
+            Event::BackgroundTaskUpdated {
+                ref session_id,
+                ref task_id,
+                ref status,
+                ..
+            } if self.is_current_session(session_id) => {
+                if let Some(task) = self.bg_tasks.iter_mut().find(|t| t.id == *task_id) {
+                    task.status = status.clone();
+                    if matches!(status.as_str(), "completed" | "failed" | "cancelled") {
+                        task.completed_at = Some(chrono::Utc::now());
+                    }
+                }
+            }
+            Event::BackgroundTaskCompleted {
+                ref session_id,
+                ref task_id,
+                ref status,
+                ..
+            } if self.is_current_session(session_id) => {
+                if let Some(task) = self.bg_tasks.iter_mut().find(|t| t.id == *task_id) {
+                    task.status = status.clone();
+                    task.completed_at = Some(chrono::Utc::now());
+                }
+                let icon = if status == "completed" { "✅" } else { "❌" };
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "{} Background task completed ({}): {}",
+                        icon,
+                        &task_id[..8.min(task_id.len())],
+                        status
+                    ),
                 );
             }
             Event::TeammateSpawned {
@@ -1696,9 +1748,21 @@ impl App {
         }
     }
 
+    pub(crate) fn cancel_bg_task(&mut self, task_id: &str) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let bg = self.session_processor.bg_service.get().cloned();
+            let id = task_id.to_string();
+            handle.spawn(async move {
+                if let Some(bg) = bg {
+                    let _ = bg.cancel(&id).await;
+                }
+            });
+        }
+    }
+
     pub(crate) fn suspend_agent_task(&mut self, task_id: &str) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.task_manager.get().cloned();
+            let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
@@ -1710,7 +1774,7 @@ impl App {
 
     pub(crate) fn resume_agent_task(&mut self, task_id: &str) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.task_manager.get().cloned();
+            let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
@@ -1722,7 +1786,7 @@ impl App {
 
     pub(crate) fn kill_agent_task(&mut self, task_id: &str) {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let tm = self.session_processor.task_manager.get().cloned();
+            let tm = self.session_processor.agent_manager.get().cloned();
             let id = task_id.to_string();
             handle.spawn(async move {
                 if let Some(tm) = tm {
@@ -2373,7 +2437,7 @@ impl App {
         // its turn but forgot to call `spec_task_update`), auto-mark the task
         // as `Completed` and continue to the next task. This is the common
         // case: agents implement the task, end their turn (often via
-        // `task_complete`), but don't update the spec task status.
+        // `agent_complete`), but don't update the spec task status.
         if task_status == ragent_specs::spec::TaskStatus::Blocked {
             self.spec_impl_state = None;
             self.append_assistant_text(&format!(

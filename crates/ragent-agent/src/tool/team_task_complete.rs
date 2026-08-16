@@ -23,7 +23,7 @@ impl Tool for TeamTaskCompleteTool {
              you claimed via team_task_claim, e.g. 'task-001'). The task must be currently \
              assigned to the caller; completing it unblocks any dependent tasks. \
              \\\n\\\n\
-             WARNING: DO NOT confuse with `task_complete` (a different tool used OUTSIDE teams to \
+             WARNING: DO NOT confuse with `agent_complete` (a different tool used OUTSIDE teams to \
              signal the end of the autonomous loop, which takes `summary` as its only parameter). \
              This tool takes `team_name` + `task_id` — NOT `summary`. \
              \\\n\\\n\
@@ -36,7 +36,7 @@ impl Tool for TeamTaskCompleteTool {
             "properties": {
                 "team_name": {
                     "type": "string",
-                    "description": "REQUIRED. Name of the team. If you are NOT inside a team session, this tool will fail — use `task_complete(summary: ...)` instead to end the autonomous loop."
+                    "description": "REQUIRED. Name of the team. If you are NOT inside a team session, this tool will fail — use `agent_complete(summary: ...)` instead to end the autonomous loop."
                 },
                 "task_id": {
                     "type": "string",

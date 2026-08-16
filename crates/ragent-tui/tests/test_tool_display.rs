@@ -531,10 +531,10 @@ fn test_network_operations_use_globe() {
 // =============================================================================
 
 #[test]
-fn test_result_summary_task_complete_with_summary() {
-    let output = Some(json!({"summary": "Fixed formatting bug in parser", "task_complete": true}));
+fn test_result_summary_agent_complete_with_summary() {
+    let output = Some(json!({"summary": "Fixed formatting bug in parser", "agent_complete": true}));
     let input = json!({"summary": "Fixed formatting bug in parser"});
-    let result = tool_result_summary("task_complete", &output, &input, "/project");
+    let result = tool_result_summary("agent_complete", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert!(
@@ -548,10 +548,10 @@ fn test_result_summary_task_complete_with_summary() {
 }
 
 #[test]
-fn test_result_summary_task_complete_empty_summary() {
-    let output = Some(json!({"task_complete": true}));
+fn test_result_summary_agent_complete_empty_summary() {
+    let output = Some(json!({"agent_complete": true}));
     let input = json!({});
-    let result = tool_result_summary("task_complete", &output, &input, "/project");
+    let result = tool_result_summary("agent_complete", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     assert_eq!(
@@ -719,4 +719,154 @@ fn test_result_summary_github_get_actions_failed() {
         result,
         Some("📋 2 runs inspected, 1 run failed".to_string())
     );
+}
+// =============================================================================
+// Task Management Tool Display Tests (todo2tasks T-014, FR-017)
+// =============================================================================
+
+#[test]
+fn test_input_summary_task_create() {
+    let input = json!({"subject": "Implement JWT auth", "description": "Add JWT tokens"});
+    let summary = tool_input_summary("task_create", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(
+        summary.contains("Implement JWT auth"),
+        "Should contain subject"
+    );
+    assert!(
+        summary.starts_with("📋 +"),
+        "Should use + prefix for create"
+    );
+}
+
+#[test]
+fn test_input_summary_task_update_status() {
+    let input = json!({"task_id": "task-abc123", "status": "completed"});
+    let summary = tool_input_summary("task_update", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("task-abc123"), "Should contain task_id");
+    assert!(summary.contains("completed"), "Should contain new status");
+}
+
+#[test]
+fn test_input_summary_task_update_subject() {
+    let input = json!({"task_id": "task-abc123", "subject": "New title"});
+    let summary = tool_input_summary("task_update", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("task-abc123"), "Should contain task_id");
+    assert!(summary.contains("New title"), "Should contain new subject");
+}
+
+#[test]
+fn test_input_summary_task_update_no_fields() {
+    let input = json!({"task_id": "task-abc123"});
+    let summary = tool_input_summary("task_update", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("task-abc123"), "Should contain task_id");
+}
+
+#[test]
+fn test_input_summary_task_get() {
+    let input = json!({"task_id": "task-abc123"});
+    let summary = tool_input_summary("task_get", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("task-abc123"), "Should contain task_id");
+    assert!(summary.contains("get"), "Should use 'get' label");
+}
+
+#[test]
+fn test_input_summary_task_list_default() {
+    let input = json!({});
+    let summary = tool_input_summary("task_list", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("all"), "Should default to 'all' filter");
+}
+
+#[test]
+fn test_input_summary_task_list_filtered() {
+    let input = json!({"status": "pending"});
+    let summary = tool_input_summary("task_list", &input, "/project");
+    assert!(summary.contains("📋"), "Should have clipboard emoji");
+    assert!(summary.contains("pending"), "Should contain status filter");
+}
+
+#[test]
+fn test_result_summary_task_create() {
+    let output = json!({
+        "id": "task-abc123def456",
+        "subject": "Implement JWT auth",
+        "status": "pending",
+    });
+    let result = tool_result_summary("task_create", &Some(output), &json!({}), "/project");
+    assert!(result.is_some());
+    let r = result.unwrap();
+    assert!(r.contains("created"), "Should say 'created'");
+    assert!(r.contains("Implement JWT auth"), "Should contain subject");
+    assert!(r.contains("task-abc"), "Should contain short id");
+}
+
+#[test]
+fn test_result_summary_task_update_status() {
+    let output = json!({
+        "id": "task-abc123def456",
+        "subject": "Implement JWT auth",
+        "status": "completed",
+        "unblocked": [],
+    });
+    let result = tool_result_summary("task_update", &Some(output), &json!({}), "/project");
+    assert!(result.is_some());
+    let r = result.unwrap();
+    assert!(r.contains("updated"), "Should say 'updated'");
+    assert!(r.contains("completed"), "Should contain new status");
+}
+
+#[test]
+fn test_result_summary_task_update_with_unblocked() {
+    let output = json!({
+        "id": "task-abc123def456",
+        "subject": "Implement JWT auth",
+        "status": "completed",
+        "unblocked": ["task-xyz", "task-def"],
+    });
+    let result = tool_result_summary("task_update", &Some(output), &json!({}), "/project");
+    assert!(result.is_some());
+    let r = result.unwrap();
+    assert!(r.contains("2 unblocked"), "Should mention unblocked count");
+}
+
+#[test]
+fn test_result_summary_task_get() {
+    let output = json!({
+        "id": "task-abc123def456",
+        "subject": "Implement JWT auth",
+        "status": "in_progress",
+    });
+    let result = tool_result_summary("task_get", &Some(output), &json!({}), "/project");
+    assert!(result.is_some());
+    let r = result.unwrap();
+    assert!(r.contains("in_progress"), "Should contain status");
+    assert!(r.contains("task-abc"), "Should contain short id");
+    assert!(r.contains("Implement JWT auth"), "Should contain subject");
+}
+
+#[test]
+fn test_result_summary_task_list() {
+    let output = json!({
+        "count": 3,
+        "status_filter": "all",
+        "tasks": [],
+    });
+    let result = tool_result_summary("task_list", &Some(output), &json!({}), "/project");
+    assert_eq!(result, Some("3 tasks".to_string()));
+}
+
+#[test]
+fn test_result_summary_task_list_empty() {
+    let output = json!({
+        "count": 0,
+        "status_filter": "all",
+        "tasks": [],
+    });
+    let result = tool_result_summary("task_list", &Some(output), &json!({}), "/project");
+    assert_eq!(result, Some("0 tasks".to_string()));
 }

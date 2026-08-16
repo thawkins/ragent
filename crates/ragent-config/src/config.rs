@@ -257,7 +257,7 @@ pub struct ToolVisibilityConfig {
     pub gitlab: bool,
     /// Team coordination tools (team_create, team_spawn, team_message, etc.).
     pub teams: bool,
-    /// Autonomous agent task tools (new_task, list_tasks, cancel_task, etc.).
+    /// Autonomous sub-agent tools (new_agent, list_agents, cancel_agent, etc.).
     pub agents: bool,
     /// Plan-mode tools (plan_enter, plan_exit).
     pub plan: bool,
@@ -589,11 +589,11 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "team_wait",
         ]),
         "agents" => Some(&[
-            "cancel_task",
-            "list_tasks",
-            "new_task",
-            "task_complete",
-            "wait_tasks",
+            "cancel_agent",
+            "list_agents",
+            "new_agent",
+            "agent_complete",
+            "wait_agents",
         ]),
         "plan" => Some(&["plan_enter", "plan_exit"]),
         "codeindex" => Some(&[

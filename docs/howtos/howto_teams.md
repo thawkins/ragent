@@ -145,7 +145,7 @@ When the LLM calls `team_create`, it should **always pass a `context` parameter*
 
 ### Wait for teammates to finish
 
-After creation, the lead should call `team_wait` to block until all teammates complete their initial work. Do **not** use `wait_tasks` for teammates — that only tracks `new_task` sub-agents.
+After creation, the lead should call `team_wait` to block until all teammates complete their initial work. Do **not** use `wait_agents` for teammates — that only tracks `new_agent` sub-agents.
 
 ### Inspect team state
 
@@ -233,7 +233,7 @@ After `team_create` spawns all teammates, call `team_wait` immediately:
 }
 ```
 
-This blocks until all teammates become idle. **Do NOT use `wait_tasks`** — that only tracks `new_task` sub-agents, not team members.
+This blocks until all teammates become idle. **Do NOT use `wait_agents`** — that only tracks `new_agent` sub-agents, not team members.
 
 ### 6.3 Spawn additional teammates (manual)
 

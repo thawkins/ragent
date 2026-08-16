@@ -1,6 +1,6 @@
 //! Sub-agent task management for F13 (sub-agent spawning) and F14 (background agents).
 //!
-//! The [`TaskManager`] tracks spawned sub-agent tasks, supports both synchronous
+//! The [`AgentManager`] tracks spawned sub-agent tasks, supports both synchronous
 //! (blocking) and background (non-blocking) execution, and publishes lifecycle
 //! events via the [`EventBus`](crate::event::EventBus).
 //!
@@ -9,10 +9,10 @@
 //! ```text
 //! Parent Session
 //!   │
-//!   ├─ new_task(agent: "explore", background: false)  ← blocks until done
+//!   ├─ new_agent(agent: "explore", background: false)  ← blocks until done
 //!   │   └─ TaskEntry { status: Completed, result: "..." }
 //!   │
-//!   └─ new_task(agent: "build", background: true)     ← returns immediately
+//!   └─ new_agent(agent: "build", background: true)     ← returns immediately
 //!       └─ TaskEntry { status: Running }
 //!           ↓ (later)
 //!       └─ SubagentComplete event published
@@ -135,7 +135,7 @@ pub struct TaskEntry {
     /// Whether this completion has been injected into the parent session.
     #[serde(default)]
     pub reported: bool,
-    /// Number of active waiters for this task (via wait_tasks tool).
+    /// Number of active waiters for this task (via wait_agents tool).
     /// When > 0, the task result should not be redundantly reported via drain_completed
     /// because a waiter is already handling it.
     #[serde(default)]
@@ -154,8 +154,8 @@ pub struct TaskResult {
 /// Manages sub-agent task lifecycle, tracking, and background execution.
 ///
 /// Thread-safe via interior mutability (`RwLock`). Designed to be shared
-/// as `Arc<TaskManager>` across the session processor and tool invocations.
-pub struct TaskManager {
+/// as `Arc<AgentManager>` across the session processor and tool invocations.
+pub struct AgentManager {
     /// Active and completed tasks indexed by task ID.
     tasks: Arc<RwLock<HashMap<String, TaskEntry>>>,
     /// Cancel flags for running tasks.
@@ -174,7 +174,7 @@ pub struct TaskManager {
     has_pending_background: AtomicBool,
 }
 
-impl TaskManager {
+impl AgentManager {
     /// Creates a new task manager.
     pub fn new(
         event_bus: Arc<EventBus>,
@@ -574,7 +574,7 @@ impl TaskManager {
     }
 
     /// Cancels a running task by setting its cancel flag.
-    pub async fn cancel_task(&self, task_id: &str) -> anyhow::Result<()> {
+    pub async fn cancel_agent(&self, task_id: &str) -> anyhow::Result<()> {
         let flags = self.cancel_flags.read().await;
         if let Some(flag) = flags.get(task_id) {
             flag.store(true, Ordering::Relaxed);
@@ -595,7 +595,7 @@ impl TaskManager {
     /// now return a clear error explaining that suspension is not
     /// implemented, and the `SubagentSuspended` / `SubagentResumed` events
     /// are no longer published. The TUI buttons that previously called
-    /// these methods should use `cancel_task` instead.
+    /// these methods should use `cancel_agent` instead.
     ///
     /// See `docs/team-unification-decision.md` for the rationale.
     pub async fn suspend_task(&self, task_id: &str) -> anyhow::Result<()> {
@@ -605,7 +605,7 @@ impl TaskManager {
         let _ = task_id;
         anyhow::bail!(
             "suspend_task is not implemented — the agent loop does not honour \
-             suspend flags. Use cancel_task to stop a running sub-agent instead."
+             suspend flags. Use cancel_agent to stop a running sub-agent instead."
         )
     }
 
@@ -614,7 +614,7 @@ impl TaskManager {
         let _ = task_id;
         anyhow::bail!(
             "resume_task is not implemented — the agent loop does not honour \
-             suspend flags. Use cancel_task and re-spawn instead."
+             suspend flags. Use cancel_agent and re-spawn instead."
         )
     }
 
@@ -691,7 +691,7 @@ impl TaskManager {
     }
 
     /// Returns all tasks for a given parent session.
-    pub async fn list_tasks(&self, parent_session_id: &str) -> Vec<TaskEntry> {
+    pub async fn list_agents(&self, parent_session_id: &str) -> Vec<TaskEntry> {
         self.tasks
             .read()
             .await
@@ -733,7 +733,7 @@ impl TaskManager {
     /// background task results into the conversation.
     ///
     /// Note: Tasks with waiter_count > 0 are skipped because they are being
-    /// actively waited on via wait_tasks tool and should not be redundantly
+    /// actively waited on via wait_agents tool and should not be redundantly
     /// injected into the conversation.
     pub async fn drain_completed(&self, parent_session_id: &str) -> Vec<TaskEntry> {
         // P-11: fast path — if no background tasks have ever been spawned,

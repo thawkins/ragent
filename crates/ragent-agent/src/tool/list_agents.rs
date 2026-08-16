@@ -1,4 +1,4 @@
-//! The `list_tasks` tool — lists sub-agent tasks for the current session.
+//! The `list_agents` tool — lists sub-agent tasks for the current session.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -12,12 +12,12 @@ use super::{Tool, ToolContext, ToolOutput};
 /// - `status` (string, optional): Filter by status (`"running"`, `"completed"`,
 ///   `"failed"`, `"cancelled"`). If omitted, returns all tasks.
 /// - `task_id` (string, optional): Get details for a specific task.
-pub struct ListTasksTool;
+pub struct ListAgentsTool;
 
 #[async_trait::async_trait]
-impl Tool for ListTasksTool {
+impl Tool for ListAgentsTool {
     fn name(&self) -> &'static str {
-        "list_tasks"
+        "list_agents"
     }
 
     /// Returns a human-readable description of what the tool does.
@@ -26,7 +26,7 @@ impl Tool for ListTasksTool {
              background tasks with their status, agent, and result summary. No required \
              parameters. Optional: 'status' (string enum running/completed/failed/cancelled) \
              to filter, or 'task_id' (string) to retrieve details for a single task. Common \
-             gotcha: this tool lists tasks created via new_task with background: true; it does \
+             gotcha: this tool lists tasks created via new_agent with background: true; it does \
              not list team tasks (use team_task_list for those)."
     }
     fn parameters_schema(&self) -> Value {
@@ -55,18 +55,18 @@ impl Tool for ListTasksTool {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - `TaskManager` is not available in the context
+    /// - `AgentManager` is not available in the context
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
+        let agent_manager = ctx.agent_manager.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "Sub-agent management is not available in this context. \
-                      TaskManager has not been initialised."
+                      AgentManager has not been initialised."
             )
         })?;
 
         // Single task detail mode
         if let Some(task_id) = input.get("task_id").and_then(|v| v.as_str()) {
-            return match task_manager.get_task(task_id).await {
+            return match agent_manager.get_task(task_id).await {
                 Some(entry) => {
                     let detail = format_task_detail(&entry);
                     Ok(ToolOutput {
@@ -87,7 +87,7 @@ impl Tool for ListTasksTool {
         // List mode
         let status_filter = input.get("status").and_then(|v| v.as_str());
 
-        let tasks = task_manager.list_tasks(&ctx.session_id).await;
+        let tasks = agent_manager.list_agents(&ctx.session_id).await;
 
         let filtered: Vec<_> = if let Some(filter) = status_filter {
             tasks

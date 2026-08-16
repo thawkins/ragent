@@ -554,14 +554,21 @@ has a JSON schema, a permission category, and an async `execute` method.
 | `calculator` | Evaluate mathematical expressions |
 | `open` | Open/reveal files, folders, or URLs in the desktop environment |
 
-#### Interactive Tools (4)
+#### Interactive Tools (2)
 
 | Tool | Purpose |
 |------|---------|
 | `ask_user` | Ask the user a question (text or multiple-choice) |
 | `think` | Record a reasoning note |
-| `todo_read` | List session TODOs |
-| `todo_write` | Add/update/remove session TODOs |
+
+#### Task Management Tools (4)
+
+| Tool | Purpose |
+|------|---------|
+| `task_create` | Create a session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies |
+| `task_update` | Update a task's status (pending, in_progress, completed), subject, owner, metadata, or dependencies; auto-evaluates blocked tasks on completion |
+| `task_get` | Retrieve the full record of a single task by ID |
+| `task_list` | List all session tasks, optionally filtered by status |
 
 #### Utility Tools (2)
 
@@ -581,7 +588,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
 | Teams | 19 team lifecycle/task/message tools | 19 |
-| Sub-agents | `new_task`, `cancel_task`, `list_tasks`, `wait_tasks`, `task_complete` | 5 |
+| Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` | 5 |
 | VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
 | Office / PDF | `office_read/write/info`, `libre_read/write/info`, `pdf_read/write` | 8 |
 | External messaging | `gmail`, `send_channel_message` | 2 |
@@ -589,7 +596,8 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Planning | `plan_enter`, `plan_exit` | 2 |
 | Background tasks | `bg` | 1 |
 | Initiatives / skills | `initiative`, `skill_manage` | 2 |
-| Interactive | `ask_user`, `think`, `todo_read`, `todo_write` | 4 |
+| Interactive | `ask_user`, `think` | 2 |
+| Task management | `task_create`, `task_update`, `task_get`, `task_list` | 4 |
 | Utility | `get_env`, `calculator` | 2 |
 
 #### Team Tools (19)
@@ -748,13 +756,13 @@ graph LR
 
 | Tool | Use |
 |------|-----|
-| `new_task` | Spawn a background sub-agent |
-| `cancel_task` | Cancel a running sub-agent |
-| `list_tasks` | Inspect active sub-agents |
-| `wait_tasks` | Block until sub-agents finish |
-| `task_complete` | **Terminal signal** that ends the autonomous loop |
+| `new_agent` | Spawn a background sub-agent |
+| `cancel_agent` | Cancel a running sub-agent |
+| `list_agents` | Inspect active sub-agents |
+| `wait_agents` | Block until sub-agents finish |
+| `agent_complete` | **Terminal signal** that ends the autonomous loop |
 
-`task_complete` takes **only** `summary`. `team_task_complete` takes `team_name` + `task_id`.
+`agent_complete` takes **only** `summary`. `team_task_complete` takes `team_name` + `task_id`.
 
 ---
 
@@ -765,7 +773,7 @@ graph LR
 ```mermaid
 graph TD
     ToolCall[Tool Call] --> Hardwired[Hardwired Rules]
-    Hardwired -->|codeindex / task_complete / list_tasks| Allow[Always Allow]
+    Hardwired -->|codeindex / agent_complete / list_agents| Allow[Always Allow]
     Hardwired -->|others| Rules[Configured Rules]
     Rules --> Match[Last Match Wins]
     Match -->|allow| Allow
@@ -1106,7 +1114,7 @@ The TUI is a ratatui full-screen interface with these panels:
 | `/compact` | Summarise and compact the conversation history (one-shot LLM summarisation; FR-009). `/compress` is a deprecated alias |
 | `/memory` | Memory management commands |
 | `/yolo` | Toggle YOLO mode |
-| `/todo` | Open the TODO side panel (also Alt+T) |
+| `/todo` `/task` `/tasks` | Open the TASKS side panel (also Alt+T); subcommands delegate to task tools |
 | `/team create <name>` | Create a team |
 | `/team open <name>` | Re-open existing team |
 | `/team close` | Close current team |
@@ -1915,14 +1923,14 @@ is useful for long-running, low-risk tasks.
 
 Autopilot ends when:
 
-- The agent calls `task_complete(summary)`.
+- The agent calls `agent_complete(summary)`.
 - A safety limit is reached.
 - The user sends `/autopilot off` or `Esc`.
 
-### 16.4.1 `new_task` parameter contract
+### 16.4.1 `new_agent` parameter contract
 
-`new_task` spawns a sub-agent with a bounded task. The sub-agent should finish
-with `task_complete`.
+`new_agent` spawns a sub-agent with a bounded task. The sub-agent should finish
+with `agent_complete`.
 
 ### 16.5 Status Display
 
@@ -2409,7 +2417,7 @@ examples.
 | v0.1.0-beta.24 | 2026-08-01 | Disabled `.deb` package builds in release workflow |
 | v0.1.0-beta.23 | 2026-08-01 | Added `.github/workflows/release.yml` triggered on `v*` tags; packages built with `cargo-deb`/`cargo-generate-rpm` and published via `softprops/action-gh-release@v2` |
 | v0.1.0-beta.22 | 2026-07-31 | `/provider` always allows editing API keys; `/model` jumps straight to model list; key/token fields unmasked; research `--use-low-relevance` |
-| v0.1.0-beta.21 | 2026-07-30 | Compaction bail paths publish `AgentNotice`; post-compaction continuation nudge; autopilot stops after `task_complete`; router downstream model/tier status bar; synthetic `Finish`; autopilot status indicator |
+| v0.1.0-beta.21 | 2026-07-30 | Compaction bail paths publish `AgentNotice`; post-compaction continuation nudge; autopilot stops after `agent_complete`; router downstream model/tier status bar; synthetic `Finish`; autopilot status indicator |
 | v0.1.0-beta.20 | 2026-07-29 | Research `--from-file` local-document seeding; control-character sanitisation; `html2text` panic catch-up |
 | v0.1.0-beta.19 | 2026-07-28 | Clean trailing newlines on startup messages |
 | v0.1.0-beta.18 | 2026-07-28 | Startup blocking fixed: MCP, code-index, provider health checks run in background; `/startup` timings; first keystroke after cost banner not swallowed; code-index WAL mode and direct `file_id` queries |
@@ -2527,7 +2535,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Foundry Local provider routing branches on `provider.foundry_local.in_process` (default `false`)
 - `provider.foundry_local.device` values validated to `auto`, `cpu`, `gpu`, or `npu`
 - HuggingFace provider discovery now tolerates missing token and falls back to the static catalog on empty discovery
-- `task_complete` and `list_tasks` are hardwired auto-approved
+- `agent_complete` and `list_agents` are hardwired auto-approved
 - Built-in agents no longer hardcode Anthropic Claude; they auto-resolve the first available model
 - Provider setup dialog scrolls and supports all 12 providers
 - TUI `/codeindex`, `/internal-llm` (before removal), and `/tools` toggles persist to project-local `.ragent/ragent.json`
@@ -2556,7 +2564,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Azure Resource integration tests — Provider listing, persistence round-trip, ModelInfo conversion, backend resolution
 - Azure Resource documentation — `docs/userdocs/azure-resource.md` with schema reference and troubleshooting
 - File format specification — `specs/AzureResource/FILEFORMAT.md` documenting the complete `azureresources.json` format
-- `task_complete` summary display — TUI widget output now shows task completion summaries
+- `agent_complete` summary display — TUI widget output now shows task completion summaries
 
 ### Added (v0.1.0-alpha.76 → v0.1.0-alpha.82)
 - Azure AI Foundry provider — New `azure_foundry` provider for Microsoft Azure AI Foundry models
@@ -2660,7 +2668,7 @@ callers and integrators know the intended surface.
 - **Research seeding & enrichment** — `--from-file` local-document seeding (PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, MD); `--from-url` URL seeding; `--use-low-relevance` flag; PDF and YouTube text extraction; excluded-source counts; `search_tool`/`search_engine` provenance; `mf_fetch` used as the preferred fetch path (beta.9–beta.22)
 - **Research resilience** — Control-character sanitisation in `RESEARCH.md`; `html2text` panic caught and degraded to raw text; source citations stripped of redundant `mf_fetch:` header (beta.12–beta.20)
 - **Context compaction reliability** — Bail paths publish `AgentNotice` instead of silently failing; post-compaction continuation nudge threaded across loop iterations; compaction prompt cap reduced to 60 k chars; pre-serialised head reused for token-cost calculation (beta.18, beta.21)
-- **Autopilot & router fixes** — Autopilot auto-continue suppressed after `task_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
+- **Autopilot & router fixes** — Autopilot auto-continue suppressed after `agent_complete`; TUI status bar shows downstream model/tier for `router`; synthetic `Finish { Stop }` injected when a provider stream ends without terminal signal; autopilot status indicator (beta.21)
 - **Startup responsiveness** — MCP server connections, code-index open/watcher/reindex, and provider health checks moved to background tasks; `/startup` slash command shows per-stage timing; first printable keystroke after the run-cost banner is no longer swallowed (beta.18–beta.19)
 - **Code-index performance** — SQLite `WAL` mode, `synchronous = NORMAL`, `temp_store = MEMORY`; direct `file_id` symbol queries; reindex chunk yield reduced to 1 ms; per-phase timing logs (beta.18)
 - **Tool expansion** — `apply_patch` Codex-style patch tool; `open` cross-platform reveal/URL tool; `browser` CDP automation tool; `conversation_search`/`session_search`; `bg` background shell task manager; `initiative` durable goals; `skill_manage` runtime skill control; `gmail` and `send_channel_message` external integrations; six `mf_*` MasterFetch tools (beta.12–beta.17)

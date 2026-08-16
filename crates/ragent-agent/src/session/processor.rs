@@ -86,9 +86,9 @@ pub struct SessionProcessor {
     pub permission_checker: Arc<parking_lot::RwLock<PermissionChecker>>,
     /// Bus for broadcasting session and processing events.
     pub event_bus: Arc<EventBus>,
-    /// Optional task manager for sub-agent spawning (F13/F14).
-    /// Uses `OnceLock` to break the circular dependency with `TaskManager`.
-    pub task_manager: std::sync::OnceLock<Arc<crate::task::TaskManager>>,
+    /// Optional agent manager for sub-agent spawning (F13/F14).
+    /// Uses `OnceLock` to break the circular dependency with `AgentManager`.
+    pub agent_manager: std::sync::OnceLock<Arc<crate::task::AgentManager>>,
     /// Optional team manager for spawning and coordinating teammate sessions.
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
     pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
@@ -675,7 +675,7 @@ impl SessionProcessor {
         };
         let mut assistant_parts: std::sync::Arc<Vec<MessagePart>> = std::sync::Arc::new(Vec::new());
         let mut agent_switch_requested = false;
-        let mut task_complete_requested = false;
+        let mut agent_complete_requested = false;
         // Set when a tool call stalls past `TOOL_WATCHDOG_TIMEOUT`; the run is
         // terminated after the tool phase.
         let mut watchdog_timed_out = false;
@@ -878,7 +878,7 @@ impl SessionProcessor {
                 chat_messages: std::mem::take(&mut chat_messages),
                 assistant_parts: std::sync::Arc::clone(&assistant_parts),
                 agent_switch_requested,
-                task_complete_requested,
+                agent_complete_requested,
                 last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
@@ -974,7 +974,7 @@ impl SessionProcessor {
                     working_dir: turn.working_dir.clone(),
                     event_bus: self.event_bus.clone(),
                     storage: Some(self.session_manager.storage().clone()),
-                    task_manager: self.task_manager.get().cloned(),
+                    agent_manager: self.agent_manager.get().cloned(),
                     active_model: Some(turn.model_ref.clone()),
                     team_context: turn.team_context.clone(),
                     team_manager: self
@@ -1073,8 +1073,8 @@ impl SessionProcessor {
                                     agent_switch_requested = true;
                                     return true;
                                 }
-                                if meta.get("task_complete").is_some() {
-                                    task_complete_requested = true;
+                                if meta.get("agent_complete").is_some() {
+                                    agent_complete_requested = true;
                                     return true;
                                 }
                             }
@@ -1585,7 +1585,7 @@ impl SessionProcessor {
                         calls: batch_entries,
                     });
                 }
-                if agent_switch_requested || task_complete_requested || watchdog_timed_out {
+                if agent_switch_requested || agent_complete_requested || watchdog_timed_out {
                     break;
                 }
                 // Auto task status updates (P-10: reuse the `active_spec_id`
@@ -1649,7 +1649,7 @@ impl SessionProcessor {
             // Background task injection (sub-agents)
             {
                 let _scope = profiler.scope("loop.background.total");
-                if let Some(tm) = self.task_manager.get() {
+                if let Some(tm) = self.agent_manager.get() {
                     // P-11: skip the lock+scan when no background tasks are
                     // pending. The flag is set by `spawn_background` and
                     // cleared by `drain_completed` when nothing remains.

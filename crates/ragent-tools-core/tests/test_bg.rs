@@ -17,6 +17,7 @@ async fn test_background_command_captures_stdout() {
         "echo hello-bg && echo done".to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");
@@ -47,6 +48,7 @@ async fn test_background_command_failed_exit_code() {
         "exit 7".to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");
@@ -65,6 +67,7 @@ async fn test_background_command_tail() {
         "printf 'line1\\nline2\\nline3\\nline4\\nline5\\n'".to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");
@@ -93,6 +96,7 @@ async fn test_background_command_progress_parsing() {
         script.to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");
@@ -129,6 +133,7 @@ async fn test_background_command_events() {
         "echo event-test".to_string(),
         std::env::current_dir().unwrap(),
         Some(Arc::clone(&bus)),
+        "event-session".to_string(),
     )
     .await
     .expect("spawn should succeed");
@@ -159,6 +164,7 @@ async fn test_background_command_cancel() {
         "sleep 30".to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");
@@ -181,6 +187,7 @@ async fn test_background_command_wait_timeout() {
         "sleep 5".to_string(),
         std::env::current_dir().unwrap(),
         None,
+        String::new(),
     )
     .await
     .expect("spawn should succeed");

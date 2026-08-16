@@ -46,7 +46,7 @@ fn make_ctx(
         working_dir: working_dir.to_path_buf(),
         event_bus,
         storage: None,
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: None,
         team_manager: None,
@@ -213,7 +213,7 @@ async fn test_team_idle_publishes_teammate_idle_event() {
         working_dir: dir.clone(),
         event_bus: bus.clone(),
         storage: None,
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: Some(Arc::new(ragent_agent::tool::TeamContext {
             team_name: "idle-event-team".to_string(),

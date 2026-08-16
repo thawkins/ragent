@@ -26,7 +26,7 @@ pub mod office_read;
 pub mod office_write;
 pub mod pdf_read;
 pub mod pdf_write;
-pub mod todo;
+pub mod task;
 pub mod webfetch;
 pub mod websearch;
 
@@ -55,9 +55,13 @@ pub mod storage {
     use anyhow::Result;
     use serde::{Deserialize, Serialize};
 
-    /// Row representation of a TODO item.
+    /// Row representation of a task item.
+    ///
+    /// (todo2tasks T-001: extended with `active_form`, `owner`, `metadata`,
+    /// and `blocked_by` fields. `#[serde(default)]` on each new field
+    /// ensures legacy JSON rows deserialize without error — FR-002.)
     #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct TodoRow {
+    pub struct TaskRow {
         pub id: String,
         pub session_id: String,
         pub title: String,
@@ -65,6 +69,23 @@ pub mod storage {
         pub description: String,
         pub created_at: String,
         pub updated_at: String,
+        /// Present-continuous phrase shown in progress indicators (FR-007).
+        #[serde(default)]
+        pub active_form: Option<String>,
+        /// Free-form owner label naming the agent/worker responsible (FR-006).
+        #[serde(default)]
+        pub owner: Option<String>,
+        /// Arbitrary key-value metadata (FR-008). Defaults to `{}`.
+        #[serde(default = "default_metadata_object")]
+        pub metadata: serde_json::Value,
+        /// Task IDs that must reach `completed` before this task (FR-001).
+        #[serde(default)]
+        pub blocked_by: Vec<String>,
+    }
+
+    /// Default value for `TaskRow::metadata` — an empty JSON object.
+    fn default_metadata_object() -> serde_json::Value {
+        serde_json::Value::Object(serde_json::Map::new())
     }
 
     /// Row representation of a structured memory.
@@ -92,25 +113,124 @@ pub mod storage {
 
     /// Storage backend abstraction used by session-scoped tools.
     pub trait StorageBackend: Send + Sync {
-        fn get_todos(&self, session_id: &str, status: Option<&str>) -> Result<Vec<TodoRow>>;
-        fn create_todo(
+        fn list_tasks(&self, session_id: &str, status: Option<&str>) -> Result<Vec<TaskRow>>;
+
+        /// Creates a task row with a simplified, legacy-compatible set
+        /// of fields.
+        ///
+        /// Implementors that support the full Task model should implement
+        /// [`create_task`] directly and leave this method as the provided
+        /// default.
+        fn create_task_simple(
             &self,
             id: &str,
             session_id: &str,
             title: &str,
             status: &str,
             description: &str,
-        ) -> Result<()>;
-        fn update_todo(
+        ) -> Result<()> {
+            self.create_task(
+                id,
+                session_id,
+                title,
+                description,
+                status,
+                None,
+                None,
+                &serde_json::Value::Object(serde_json::Map::new()),
+                &[],
+            )
+        }
+
+        /// Creates a new Task row with all Task-model fields populated
+        /// (todo2tasks T-007, FR-009, FR-011, FR-012).
+        ///
+        /// This is the canonical method.  Implementors that do not
+        /// support the full Task model can implement `create_task_simple`
+        /// and leave this default, which delegates to the simple variant.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the storage backend fails to persist the
+        /// row.
+        #[allow(clippy::too_many_arguments)]
+        fn create_task(
+            &self,
+            id: &str,
+            session_id: &str,
+            subject: &str,
+            description: &str,
+            status: &str,
+            active_form: Option<&str>,
+            owner: Option<&str>,
+            metadata: &serde_json::Value,
+            blocked_by: &[String],
+        ) -> Result<()> {
+            let _ = (active_form, owner, metadata, blocked_by);
+            self.create_task_simple(id, session_id, subject, status, description)
+        }
+
+        /// Updates a task row with a simplified, legacy-compatible set
+        /// of fields.
+        ///
+        /// Implementors that support the full Task model should implement
+        /// [`update_task`] directly and leave this method as the provided
+        /// default.
+        fn update_task_simple(
             &self,
             id: &str,
             session_id: &str,
             title: Option<&str>,
             status: Option<&str>,
             description: Option<&str>,
-        ) -> Result<bool>;
-        fn delete_todo(&self, id: &str, session_id: &str) -> Result<bool>;
-        fn clear_todos(&self, session_id: &str) -> Result<usize>;
+        ) -> Result<bool> {
+            self.update_task(
+                id,
+                session_id,
+                title,
+                status,
+                description,
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+
+        /// Updates a Task row with all Task-model fields (todo2tasks T-008,
+        /// T-017).
+        ///
+        /// Each `Option<T>` parameter is `None` → unchanged.  For
+        /// `active_form` and `owner`, `Some(None)` clears the field to
+        /// empty; `Some(Some(v))` sets it.  `blocked_by` is a full
+        /// replacement (`Some(slice)` replaces, `None` leaves unchanged).
+        ///
+        /// This is the canonical method.  Implementors that do not
+        /// support the full Task model can implement `update_task_simple`
+        /// and leave this default, which delegates to the simple variant.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the storage backend fails.  Returns
+        /// `Ok(false)` if no row matched `id` + `session_id`.
+        #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+        fn update_task(
+            &self,
+            id: &str,
+            session_id: &str,
+            subject: Option<&str>,
+            status: Option<&str>,
+            description: Option<&str>,
+            active_form: Option<Option<&str>>,
+            owner: Option<Option<&str>>,
+            metadata: Option<&serde_json::Value>,
+            blocked_by: Option<&[String]>,
+        ) -> Result<bool> {
+            let _ = (active_form, owner, metadata, blocked_by);
+            self.update_task_simple(id, session_id, subject, status, description)
+        }
+        fn delete_task(&self, id: &str, session_id: &str) -> Result<bool>;
+        fn clear_tasks(&self, session_id: &str) -> Result<usize>;
 
         fn get_memory(&self, id: i64) -> Result<Option<MemoryRow>>;
         fn get_memory_tags(&self, id: i64) -> Result<Vec<String>>;
@@ -307,8 +427,15 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(webfetch::WebFetchTool));
     registry.register(Arc::new(websearch::WebSearchTool));
     registry.register(Arc::new(http_request::HttpRequestTool));
-    registry.register(Arc::new(todo::TodoReadTool));
-    registry.register(Arc::new(todo::TodoWriteTool));
+    // todo2tasks T-011: register all four task tools (FR-011, FR-017).
+    // TaskGetTool (T-009, FR-011, FR-014) and TaskListTool (T-010,
+    // FR-011, FR-015) are read-only; TaskCreateTool (T-007) and
+    // TaskUpdateTool (T-008/T-017) are write tools. All four use the
+    // "task" permission category and are hardwired auto-approve.
+    registry.register(Arc::new(task::TaskCreateTool));
+    registry.register(Arc::new(task::TaskUpdateTool));
+    registry.register(Arc::new(task::TaskGetTool));
+    registry.register(Arc::new(task::TaskListTool));
     registry.register(Arc::new(codeindex_search::CodeIndexSearchTool));
     registry.register(Arc::new(codeindex_status::CodeIndexStatusTool));
     registry.register(Arc::new(codeindex_symbols::CodeIndexSymbolsTool));

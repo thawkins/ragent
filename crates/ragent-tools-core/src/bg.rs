@@ -59,7 +59,8 @@ impl BackgroundCommand {
     ///
     /// `id` is the caller-assigned task identifier (usually a UUID). `command`
     /// is run through the same shell discovery and security checks as the
-    /// [`bash`](crate::bash) tool.
+    /// [`bash`](crate::bash) tool. `session_id` identifies the owning session so
+    /// lifecycle events can be routed to the correct TUI panel.
     ///
     /// # Errors
     ///
@@ -70,6 +71,7 @@ impl BackgroundCommand {
         command: String,
         working_dir: PathBuf,
         event_bus: Option<Arc<EventBus>>,
+        session_id: String,
     ) -> Result<Self> {
         if !working_dir.exists() {
             bail!(
@@ -111,6 +113,7 @@ impl BackgroundCommand {
 
         let id_reader = id.clone();
         let command_reader = command.clone();
+        let session_id_reader = session_id.clone();
         let bus_reader = event_bus.clone();
         tokio::spawn(Self::reader_task(
             Arc::clone(&inner),
@@ -118,6 +121,7 @@ impl BackgroundCommand {
             stderr,
             id_reader,
             command_reader,
+            session_id_reader,
             bus_reader,
         ));
 
@@ -125,6 +129,7 @@ impl BackgroundCommand {
             Arc::clone(&inner),
             id,
             command,
+            session_id,
             event_bus,
         ));
 
@@ -243,6 +248,7 @@ impl BackgroundCommand {
         stderr: ChildStderr,
         task_id: String,
         command: String,
+        session_id: String,
         event_bus: Option<Arc<EventBus>>,
     ) {
         let stdout_reader = BufReader::new(stdout);
@@ -251,6 +257,7 @@ impl BackgroundCommand {
         let inner_stdout = Arc::clone(&inner);
         let event_bus_stdout = event_bus.clone();
         let task_id_stdout = task_id.clone();
+        let session_id_stdout = session_id.clone();
         let command_stdout = command.clone();
         let stdout_handle = tokio::spawn(async move {
             let mut lines = stdout_reader.lines();
@@ -262,6 +269,7 @@ impl BackgroundCommand {
                     true,
                     &task_id_stdout,
                     &command_stdout,
+                    &session_id_stdout,
                     event_bus_stdout.as_ref(),
                 );
             }
@@ -269,6 +277,7 @@ impl BackgroundCommand {
 
         let inner_stderr = Arc::clone(&inner);
         let task_id_stderr = task_id.clone();
+        let session_id_stderr = session_id.clone();
         let stderr_handle = tokio::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -279,6 +288,7 @@ impl BackgroundCommand {
                     false,
                     &task_id_stderr,
                     &command,
+                    &session_id_stderr,
                     event_bus.as_ref(),
                 );
             }
@@ -294,6 +304,7 @@ impl BackgroundCommand {
         is_stdout: bool,
         task_id: &str,
         command: &str,
+        session_id: &str,
         event_bus: Option<&Arc<EventBus>>,
     ) {
         let trimmed = line.trim_start();
@@ -332,7 +343,7 @@ impl BackgroundCommand {
 
         if let (Some(bus), Some(progress)) = (event_bus, progress_update) {
             bus.publish(Event::BackgroundTaskUpdated {
-                session_id: "background".to_string(),
+                session_id: session_id.to_string(),
                 task_id: task_id.to_string(),
                 status: guard.status.clone(),
                 progress: Some(progress),
@@ -371,6 +382,7 @@ impl BackgroundCommand {
         inner: Arc<Mutex<Inner>>,
         task_id: String,
         command: String,
+        session_id: String,
         event_bus: Option<Arc<EventBus>>,
     ) {
         // Poll the child with `try_wait` so the [`Inner::child`] handle remains
@@ -428,13 +440,13 @@ impl BackgroundCommand {
 
         if let Some(bus) = event_bus {
             bus.publish(Event::BackgroundTaskUpdated {
-                session_id: "background".to_string(),
+                session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 status: final_status.clone(),
                 progress: Some(progress),
             });
             bus.publish(Event::BackgroundTaskCompleted {
-                session_id: "background".to_string(),
+                session_id: session_id.clone(),
                 task_id: task_id.clone(),
                 status: final_status,
                 exit_code,

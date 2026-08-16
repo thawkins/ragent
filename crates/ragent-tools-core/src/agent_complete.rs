@@ -1,4 +1,4 @@
-//! `task_complete` — Signal that the current autonomous task is complete.
+//! `agent_complete` — Signal that the current autonomous task is complete.
 //!
 //! Used by agents in autopilot mode to indicate that a task has finished
 //! and to provide a human-readable summary. The TUI displays the summary
@@ -11,16 +11,16 @@
 //!
 //! | Tool | Purpose | Required parameters |
 //! |------|---------|---------------------|
-//! | `task_complete`     | Signal the **current autonomous task** is done — ends the session loop. | `summary` (string) |
+//! | `agent_complete`     | Signal the **current autonomous task** is done — ends the session loop. | `summary` (string) |
 //! | `team_task_complete` | Mark a **team task** as completed (used inside a team session). | `team_name` (string), `task_id` (string) |
 //!
 //! `team_task_complete` takes `task_id` and `team_name` — NOT `summary`.
-//! `task_complete` takes `summary` — NOT `task_id` or `team_name`.
+//! `agent_complete` takes `summary` — NOT `task_id` or `team_name`.
 //!
 //! Common mistakes to avoid:
-//! - Calling `task_complete` with `task_id=...` (use `team_task_complete` if you have a team task).
-//! - Calling `task_complete` with a `result` or `output` key (the only field is `summary`).
-//! - Calling `task_complete` to "submit" a result mid-task — it **ends the loop**; only call it when the
+//! - Calling `agent_complete` with `task_id=...` (use `team_task_complete` if you have a team task).
+//! - Calling `agent_complete` with a `result` or `output` key (the only field is `summary`).
+//! - Calling `agent_complete` to "submit" a result mid-task — it **ends the loop**; only call it when the
 //!   requested work is genuinely complete (e.g. files written, tests passing).
 
 use anyhow::{Context, Result};
@@ -42,12 +42,12 @@ use super::{Tool, ToolContext, ToolOutput};
 /// This tool takes ONLY a `summary`. It does NOT take `task_id`, `team_name`,
 /// `result`, or any other key. If you are inside a team session and have a
 /// team task to mark complete, use `team_task_complete` instead.
-pub struct TaskCompleteTool;
+pub struct AgentCompleteTool;
 
 #[async_trait::async_trait]
-impl Tool for TaskCompleteTool {
+impl Tool for AgentCompleteTool {
     fn name(&self) -> &'static str {
-        "task_complete"
+        "agent_complete"
     }
 
     fn description(&self) -> &'static str {
@@ -63,7 +63,7 @@ impl Tool for TaskCompleteTool {
          - Do NOT call this to 'submit' a result mid-task — calling it ENDS the loop.\n\
          - Do NOT call this before all requested files/outputs have been produced.\n\
          \n\n\
-         Example: task_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")"
+         Example: agent_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")"
     }
 
     fn parameters_schema(&self) -> Value {
@@ -90,7 +90,7 @@ impl Tool for TaskCompleteTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let summary = input["summary"]
             .as_str()
-            .context("Missing required 'summary' parameter for task_complete. \
+            .context("Missing required 'summary' parameter for agent_complete. \
                       The only valid parameter is `summary` (string). \
                       If you intended to mark a team task complete, use `team_task_complete` with `team_name` and `task_id`.")?;
 
@@ -102,7 +102,7 @@ impl Tool for TaskCompleteTool {
         Ok(ToolOutput {
             content: format!("✅ Task complete.\n\n{summary}"),
             metadata: Some(json!({
-                "task_complete": true,
+                "agent_complete": true,
                 "summary": summary
             })),
         })

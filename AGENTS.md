@@ -88,10 +88,11 @@ You have access to the following tools. Use ONLY these exact tool names — do n
 - `patch` — Apply a unified diff patch to one or more files.
 - `make_directory` — Create a directory at the given path, including any missing parent directories.
 - `calculator` — Evaluate a mathematical expression.
-- `think` — Record a short reasoning note without changing project state.
-- `todo_read` — List TODO items for the current session.
-- `todo_write` — Add, update, remove, or clear TODO items.
-- `memory_store` — Store a structured memory with category, tags, and confidence score.
+- `think` — Record a short reasoning note without changing project state.  - `task_create` — Create a new session-scoped task with subject, description, optional owner, active_form, metadata, and blocked_by dependencies.
+  - `task_update` — Update a task's status (pending, in_progress, completed), subject, description, owner, metadata, or dependencies.
+  - `task_get` — Retrieve the full record of a single task by ID.
+  - `task_list` — List all tasks for the current session, optionally filtered by status.
+  - `memory_store` — Store a structured memory with category, tags, and confidence score.
 - `memory_recall` — Search structured memories using full-text query with optional category/tag filters.
 - `memory_forget` — Delete structured memories by ID or filter criteria.
 - `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
@@ -135,7 +136,7 @@ There is no `search` or `search_in_repo` tool. Use `grep` for every text search 
 ### Shell Execution Rules
 
 - For simple commands or code snippets, use `bash` with the `command` parameter.
-- Timeout defaults to 600 seconds.
+- Timeout defaults to 1000 seconds.
 - The `bash_reset` tool resets the persistent shell state.
 
 ### Important
@@ -167,12 +168,12 @@ When reading files with the `read` tool:
 
 Use the `Bash` tool to run the following cargo commands:
 
-- `cargo build` — Build debug binary; allow up to 600 seconds.
-- `cargo build --release` — Build optimized release binary; allow up to 600 seconds.
+- `cargo build` — Build debug binary; allow up to 1000 seconds.
+- `cargo build --release` — Build optimized release binary; allow up to 1000 seconds.
 - `cargo check` — Check code without building.
 - Build only debug builds unless specifically asked to perform a `release build`.
 
-Builds can take a long time, so allow up to 600 seconds for a rebuild.
+Builds can take a long time, so allow up to 1000 seconds for a rebuild.
 
 ## Test Commands
 
@@ -183,7 +184,7 @@ Use the Bash tool to run the following `cargo` commands
 - `cargo test -- --nocapture` — Run tests with output visible
 - `cargo test --lib` — Test library only (skip integration tests)
 - **Test Timeout**: All test runs should have a 10-minute timeout to prevent hanging
-  - Use `timeout 600 cargo test` on Unix/Linux
+  - Use `timeout 1000 cargo test` on Unix/Linux
   - Use `cargo test --test-threads=1` for sequential execution if needed
 
 ### Test Organization
@@ -261,7 +262,7 @@ When asked to use a team or when a task benefits from parallel reviewers / worke
    **Always pass `context`** — the user's specific request details: which directories/files to
    target, what task to perform, and where to write output. This context is prepended to every
    teammate's spawn prompt so they know exactly what to work on.
-2. **Wait for results**: Call `team_wait` after creation. This blocks until every teammate becomes idle. **Do NOT use `wait_tasks` for teammates — `wait_tasks` only tracks `new_task` sub-agents.**
+2. **Wait for results**: Call `team_wait` after creation. This blocks until every teammate becomes idle. **Do NOT use `wait_agents` for teammates — `wait_agents` only tracks `new_agent` sub-agents.**
 3. **Read results**: Use `team_status` or read the team's output files to collect teammate findings.
 4. **Do not duplicate work**: Do not independently read files or do analysis that a teammate is already doing. Wait for them first.
 
@@ -279,7 +280,7 @@ team_status                        ← read what they found
 4. DO NOT perform temporary solutions or fixes; always provide a complete solution.
 5. DO NOT declare an issue as fixed unless it has been confirmed; 90% of assertions of completion turn out to be false.
 6. No unsafe code.
-7. No .unwrap() on user-facing paths. 
+7. No .unwrap() on user-facing paths.
 
 ## Versioning
 
@@ -302,7 +303,7 @@ team_status                        ← read what they found
 
 ## Task Tracking
 
-- Use `todo_read` and `todo_write` to track tasks
-- Always mark the task as "done" when work on a task is done.
+- Use `task_create`, `task_update`, `task_get`, and `task_list` to track tasks.
+- Always mark the task as "completed" when work on a task is done.
 
 For more details, see README.md and QUICKSTART.md.

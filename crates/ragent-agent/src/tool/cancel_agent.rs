@@ -1,4 +1,4 @@
-//! The `cancel_task` tool — cancels a running background sub-agent task.
+//! The `cancel_agent` tool — cancels a running background sub-agent task.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -9,19 +9,19 @@ use super::{Tool, ToolContext, ToolOutput};
 ///
 /// Parameters:
 /// - `task_id` (string, required): The ID of the task to cancel.
-pub struct CancelTaskTool;
+pub struct CancelAgentTool;
 
 #[async_trait::async_trait]
-impl Tool for CancelTaskTool {
+impl Tool for CancelAgentTool {
     fn name(&self) -> &'static str {
-        "cancel_task"
+        "cancel_agent"
     }
 
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "Cancel a running background sub-agent task that was spawned with background: true. \
              REQUIRED parameter: 'task_id' (string, the unique task identifier returned by \
-             new_task when background mode was used). The task must belong to the current \
+             new_agent when background mode was used). The task must belong to the current \
              session. Common gotcha: do not use this tool for team tasks — inside a team, \
              use team tools such as team_shutdown_teammate instead."
     }
@@ -48,7 +48,7 @@ impl Tool for CancelTaskTool {
     ///
     /// Returns an error if:
     /// - The `task_id` parameter is missing or invalid
-    /// - `TaskManager` is not available in the context
+    /// - `AgentManager` is not available in the context
     /// - The task does not belong to the current session
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task_id = input
@@ -56,15 +56,15 @@ impl Tool for CancelTaskTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: task_id"))?;
 
-        let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
+        let agent_manager = ctx.agent_manager.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
                 "Sub-agent management is not available in this context. \
-                     TaskManager has not been initialised."
+                     AgentManager has not been initialised."
             )
         })?;
 
         // Verify the task belongs to this session
-        let entry = task_manager.get_task(task_id).await;
+        let entry = agent_manager.get_task(task_id).await;
         match entry {
             Some(ref e) if e.parent_session_id != ctx.session_id => {
                 anyhow::bail!(
@@ -84,7 +84,7 @@ impl Tool for CancelTaskTool {
             _ => {}
         }
 
-        match task_manager.cancel_task(task_id).await {
+        match agent_manager.cancel_agent(task_id).await {
             Ok(()) => Ok(ToolOutput {
                 content: format!("Task '{task_id}' has been cancelled."),
                 metadata: Some(json!({

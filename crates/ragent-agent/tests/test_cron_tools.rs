@@ -19,7 +19,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
         working_dir: PathBuf::from(WD),
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: None,
         team_manager: None,

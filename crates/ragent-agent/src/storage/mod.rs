@@ -2,7 +2,7 @@
 //!
 //! This module is a thin re-export of the canonical implementation in
 //! [`ragent_storage`].  The agent crate previously held its own ~2,200-line
-//! copy of `Storage`, `SessionRow`, `TodoRow`, `MemoryRow`, the
+//! copy of `Storage`, `SessionRow`, `TaskRow`, `MemoryRow`, the
 //! `encrypt_key` / `decrypt_key` / `obfuscate_key` / `deobfuscate_key`
 //! helpers, and the knowledge-graph / embedding-search methods
 //! (`list_entities`, `list_relationships`, `query_entity_neighbours`,
@@ -23,6 +23,6 @@
 
 pub use ragent_storage::{
     EmbeddingMatch, InitiativeMilestone, InitiativeRow, KgEntityRow, KgRelationshipRow, MemoryRow,
-    RunCostSummaryRow, SessionRow, Storage, TodoRow, decrypt_key, deobfuscate_key, encrypt_key,
-    obfuscate_key,
+    RunCostSummaryRow, SessionRow, Storage, TaskRow, TaskUpdateParams, decrypt_key,
+    deobfuscate_key, encrypt_key, obfuscate_key,
 };

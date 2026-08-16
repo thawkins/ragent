@@ -80,10 +80,6 @@ pub(crate) fn summarise_error(raw: &str) -> String {
     }
 }
 
-pub(crate) fn is_discovery_notice(message: &str) -> bool {
-    message.starts_with("📋 Instruction File Discovery")
-}
-
 /// Remove control characters (except newlines and tabs) and ANSI escape
 /// sequences from strings before they are displayed in the TUI.
 ///

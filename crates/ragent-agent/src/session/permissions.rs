@@ -9,7 +9,7 @@
 //!   checked independently,
 //! - stripping the `timeout [nnn]` wrapper prefix,
 //! - identifying tools that are hardwired to auto-approve (codeindex, team,
-//!   task, todo, `ask_user`), and
+//!   task, `ask_user`), and
 //! - driving the interactive permission prompt via the event bus.
 
 use std::sync::Arc;
@@ -154,8 +154,10 @@ pub(crate) fn extract_command_name(command: &str) -> String {
 }
 
 /// Return `true` if the tool is hardwired to auto-approve (no interactive
-/// prompt). Covers codeindex tools, team tools, `*_task` tools, `task_complete`,
-/// `list_tasks`, `wait_tasks`, `todo_*`, and `ask_user`.
+/// prompt). Covers codeindex tools, team tools, sub-agent tools
+/// (`new_agent`, `cancel_agent`, `list_agents`, `wait_agents`,
+/// `agent_complete`), `task_*` (T-011, FR-017),
+/// and `ask_user`.
 pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
     const AUTO_APPROVED_CODEINDEX_TOOLS: &[&str] = &[
         "codeindex_search",
@@ -165,13 +167,17 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         "codeindex_status",
         "codeindex_reindex",
     ];
+    const AUTO_APPROVED_AGENT_TOOLS: &[&str] = &[
+        "new_agent",
+        "cancel_agent",
+        "list_agents",
+        "wait_agents",
+        "agent_complete",
+    ];
     AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
         || tool_name.starts_with("team_")
-        || tool_name.ends_with("_task")
-        || tool_name == "task_complete"
-        || tool_name == "list_tasks"
-        || tool_name == "wait_tasks"
-        || tool_name.starts_with("todo_")
+        || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
+        || tool_name.starts_with("task_")
         || tool_name == "ask_user"
 }
 
@@ -205,8 +211,8 @@ pub async fn check_permission_with_prompt(
         return Ok(PermissionAction::Allow);
     }
 
-    // Codeindex tools, team tools, and *_task tools are hardwired helpers and
-    // must never trigger interactive permission prompts.
+    // Codeindex tools, team tools, and task_* tools are hardwired helpers
+    // and must never trigger interactive permission prompts.
     if is_hardwired_auto_approved_tool(tool_name) {
         return Ok(PermissionAction::Allow);
     }

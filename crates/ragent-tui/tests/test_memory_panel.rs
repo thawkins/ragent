@@ -5,10 +5,10 @@
 //!   and `input_handler.rs` (scroll, scrollbar drag, left-click selection
 //!   start, right-click context menu) to recognise clicks inside
 //!   `memory_area` so users can select text in and open the context menu on
-//!   the Memory panel the same way they can on the Log / Profile / TODO
+//!   the Memory panel the same way they can on the Log / Profile / Tasks
 //!   panels (FR-013).
 //! - **T-012**: `Alt+M` toggle flips `show_memory` (FR-003), mutual exclusion
-//!   with `show_log` / `show_todo` / `show_profile` (FR-004), `Alt+M` does
+//!   with `show_log` / `show_tasks_panel` / `show_profile` (FR-004), `Alt+M` does
 //!   not insert `m` into the input buffer (FR-011), `render_memory_panel`
 //!   with populated and missing files (FR-015), and scroll-offset bounds
 //!   (FR-009).
@@ -55,7 +55,7 @@ fn make_app() -> App {
         tool_registry,
         permission_checker,
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
@@ -160,7 +160,7 @@ const fn mouse_scroll_down(col: u16, row: u16) -> MouseEvent {
 
 /// Render the app into a string buffer of the given terminal size.
 ///
-/// Mirrors the helper in `test_todo_panel.rs`: draws `layout::render` into a
+/// Mirrors the helper in `test_tasks_panel.rs`: draws `layout::render` into a
 /// `TestBackend` and flattens the cell buffer into a single string so tests
 /// can assert on visible text.
 fn render_app_to_string(app: &mut App, width: u16, height: u16) -> String {
@@ -301,7 +301,7 @@ fn test_mouse_scroll_down_on_memory_decrements_memory_scroll_offset() {
 #[test]
 fn test_drag_starts_on_memory_scrollbar_column() {
     // Clicking the rightmost column of `memory_area` (the scrollbar gutter,
-    // matching the Log / Profile / TODO behaviour) should initiate a
+    // matching the Log / Profile / Tasks behaviour) should initiate a
     // `ScrollbarDragPane::Memory` drag and clear any active text selection.
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
@@ -508,7 +508,7 @@ fn test_toggle_memory_status_message_reflects_state() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// T-012: Mutual exclusion with log / todo / profile panels (FR-004)
+// T-012: Mutual exclusion with log / tasks / profile panels (FR-004)
 // ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -537,23 +537,26 @@ fn test_toggle_memory_mutually_excludes_log_panel() {
 }
 
 #[test]
-fn test_toggle_memory_mutually_excludes_todo_panel() {
-    // FR-004: enabling the Memory panel must hide the TODO panel, and
-    // enabling the TODO panel must hide the Memory panel.
+fn test_toggle_memory_mutually_excludes_tasks_panel() {
+    // FR-004: enabling the Memory panel must hide the Tasks panel, and
+    // enabling the Tasks panel must hide the Memory panel.
     let mut app = make_app();
-    app.show_todo = true;
+    app.show_tasks_panel = true;
     app.show_memory = false;
 
     app.handle_key_event(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::ALT));
     assert!(app.show_memory);
-    assert!(!app.show_todo, "TODO panel must hide when Memory is shown");
+    assert!(
+        !app.show_tasks_panel,
+        "Tasks panel must hide when Memory is shown"
+    );
 
-    // Re-enable TODO panel — Memory must be dismissed.
+    // Re-enable Tasks panel — Memory must be dismissed.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::ALT));
-    assert!(app.show_todo);
+    assert!(app.show_tasks_panel);
     assert!(
         !app.show_memory,
-        "Memory panel must hide when TODO is shown"
+        "Memory panel must hide when Tasks is shown"
     );
 }
 
@@ -695,7 +698,7 @@ fn test_render_memory_panel_sets_memory_area_rect() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let _ = render_app_to_string(&mut app, 120, 40);
@@ -738,7 +741,7 @@ fn test_render_memory_panel_with_populated_project_memory() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let text = render_app_to_string(&mut app, 140, 40);
@@ -765,7 +768,7 @@ fn test_render_memory_panel_with_missing_files_shows_placeholder() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let text = render_app_to_string(&mut app, 140, 40);
@@ -860,7 +863,7 @@ fn test_log_scroll_down_on_memory_does_not_underflow_below_zero() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.memory_scroll_offset = 0;
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
@@ -879,7 +882,7 @@ fn test_log_scroll_up_on_memory_increments_offset() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     assert_eq!(app.memory_scroll_offset, 0);
 
     app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
@@ -938,7 +941,7 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let tool = MemoryStoreTool;
@@ -947,7 +950,7 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
         working_dir: dir.path().to_path_buf(),
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(app.storage.clone()),
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: None,
         team_manager: None,
@@ -1004,7 +1007,7 @@ fn test_render_memory_panel_shows_tags_for_structured_memories() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let text = render_app_to_string(&mut app, 140, 40);
@@ -1033,7 +1036,7 @@ fn test_render_memory_panel_omits_tags_line_when_memory_has_no_tags() {
     app.show_memory = true;
     app.show_log = false;
     app.show_profile = false;
-    app.show_todo = false;
+    app.show_tasks_panel = false;
     app.current_screen = ScreenMode::Chat;
 
     let text = render_app_to_string(&mut app, 140, 40);

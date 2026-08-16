@@ -16,7 +16,7 @@ lead acting as a bottleneck.
 
 ### 1.1 When to use Teams vs Subagents
 
-| Dimension | Subagents (`new_task`) | Teams |
+| Dimension | Subagents (`new_agent`) | Teams |
 |-----------|------------------------|-------|
 | Context | Own context; result summarised back | Own context; fully independent |
 | Communication | Reports to lead only | Teammates message each other directly |
@@ -461,7 +461,7 @@ Settings in `ragent.json`:
 
 | ID | Task | Notes |
 |----|------|-------|
-| M3-T1 | Define `TeamManager` struct; arc-wrap in `SessionProcessor` | Analogous to `TaskManager` |
+| M3-T1 | Define `TeamManager` struct; arc-wrap in `SessionProcessor` | Analogous to `AgentManager` |
 | M3-T2 | Implement `TeamManager::spawn_teammate()` — creates session, injects team system-prompt additions | Augments `build_system_prompt()` |
 | M3-T3 | Implement mailbox polling loop — background tokio task per teammate | `tokio::spawn` per member |
 | M3-T4 | Implement message delivery: teammate message → lead EventBus event | `Event::TeammateMessage` |

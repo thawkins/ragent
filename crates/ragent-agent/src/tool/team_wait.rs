@@ -4,7 +4,7 @@
 //! Returns a summary of each teammate's final status once all are idle,
 //! or a timeout message if the deadline is exceeded.
 //!
-//! This tool is the team-aware counterpart to `wait_tasks`.  Use it after
+//! This tool is the team-aware counterpart to `wait_agents`.  Use it after
 //! spawning teammates so the lead does not race ahead and duplicate their work.
 
 use std::collections::HashSet;
@@ -35,8 +35,8 @@ impl Tool for TeamWaitTool {
              of strings) to wait for a subset, and 'timeout_secs' (number, default 300). Use \
              this after team_spawn so the lead does not race ahead and duplicate the \
              teammates' work. Returns a summary of each teammate's completion status. \
-             Common gotcha: this is for team members only; do NOT use wait_tasks for \
-             teammates (it is for new_task sub-agents)."
+             Common gotcha: this is for team members only; do NOT use wait_agents for \
+             teammates (it is for new_agent sub-agents)."
     }
 
     fn parameters_schema(&self) -> Value {

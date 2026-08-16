@@ -1109,7 +1109,7 @@ pub fn default_permissions() -> PermissionRuleset {
         rule(Permission::Bash, "*", PermissionAction::Ask),
         rule(Permission::Web, "*", PermissionAction::Ask),
         rule(Permission::PlanEnter, "*", PermissionAction::Ask),
-        rule(Permission::Todo, "*", PermissionAction::Allow),
+        rule(Permission::Task, "*", PermissionAction::Allow),
         // Auto-approve all codeindex tools
         rule(
             Permission::Custom("tool:codeindex_search".to_string()),
@@ -2143,7 +2143,7 @@ pub fn build_system_prompt_with_context(
     )
 }
 
-/// System-prompt section that explains the difference between `task_complete`
+/// System-prompt section that explains the difference between `agent_complete`
 /// (autonomous loop signal) and `team_task_complete` (team workflow).  This
 /// is injected into every primary agent's system prompt so the model
 /// understands the distinction and stops confusing the two tools.
@@ -2158,11 +2158,11 @@ section carefully before calling any of them.\n\
 \n\
 | Tool | Required parameters | Purpose |\n\
 |------|---------------------|---------|\n\
-| `new_task`     | `agent` (string), `task` (string) | Spawn a sub-agent to perform a focused task. **Both `agent` AND `task` are required** — calls with only one of them will fail with `Missing required parameter: …`. |\n\
-| `list_tasks`   | _(none)_ | List sub-agent tasks for the current session (running and completed). |\n\
-| `wait_tasks`   | _(none)_ | Block until one or more background sub-agent tasks complete. |\n\
-| `cancel_task`  | `task_id` (string) | Cancel a running background sub-agent task. |\n\
-| `task_complete` | `summary` (string) | **TERMINAL signal**: the current autonomous task is done; ends the session loop and returns control to the user. **Takes ONLY `summary` — no `task_id`, no `team_name`, no `result`/`output`.** |\n\
+| `new_agent`     | `agent` (string), `task` (string) | Spawn a sub-agent to perform a focused task. **Both `agent` AND `task` are required** — calls with only one of them will fail with `Missing required parameter: …`. |\n\
+| `list_agents`   | _(none)_ | List sub-agent tasks for the current session (running and completed). |\n\
+| `wait_agents`   | _(none)_ | Block until one or more background sub-agent tasks complete. |\n\
+| `cancel_agent`  | `task_id` (string) | Cancel a running background sub-agent task. |\n\
+| `agent_complete` | `summary` (string) | **TERMINAL signal**: the current autonomous task is done; ends the session loop and returns control to the user. **Takes ONLY `summary` — no `task_id`, no `team_name`, no `result`/`output`.** |\n\
 \n\
 ### Team workflow — use these ONLY inside an active team\n\
 \n\
@@ -2176,31 +2176,31 @@ section carefully before calling any of them.\n\
 \n\
 ### Anti-confusion rules (MUST follow)\n\
 \n\
-1. **`task_complete` takes ONLY `summary`.** Do not pass `task_id`, `team_name`, \
+1. **`agent_complete` takes ONLY `summary`.** Do not pass `task_id`, `team_name`, \
    `result`, or `output` — they will be ignored and the call will fail with \
    \"Missing required 'summary' parameter\".\n\
 2. **`team_task_complete` takes `team_name` + `task_id`.** Do not call it with \
    only `summary` — it will fail.\n\
 3. **If you have a `task_id` to mark complete, you almost certainly want \
-   `team_task_complete` (inside a team) — NOT `task_complete`.**\n\
+   `team_task_complete` (inside a team) — NOT `agent_complete`.**\n\
 4. **If you want to signal \"I am done with the user's request\", call \
-   `task_complete(summary: \"…\")` — NOT `team_task_complete`.**\n\
-5. **`task_complete` is a TERMINAL tool — it ENDS the session loop.** Do not \
+   `agent_complete(summary: \"…\")` — NOT `team_task_complete`.**\n\
+5. **`agent_complete` is a TERMINAL tool — it ENDS the session loop.** Do not \
    call it to \"submit\" a result mid-task or before all requested files/outputs \
    have been produced. Only call it when the work is genuinely complete.\n\
-6. **`new_task` requires BOTH `agent` AND `task`.** If you call it with just one, \
+6. **`new_agent` requires BOTH `agent` AND `task`.** If you call it with just one, \
    the call will fail and you will need to retry with both supplied.\n\
 \n\
 Examples:\n\
 ```\n\
 # Correct: signal the autonomous task is done\n\
-task_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")\n\
+agent_complete(summary: \"Implemented feature X, wrote 3 tests, updated docs\")\n\
 \n\
 # Correct: mark a team task complete (inside a team)\n\
 team_task_complete(team_name: \"audit-team\", task_id: \"task-001\")\n\
 \n\
-# WRONG — don't pass task_id to task_complete:\n\
-task_complete(task_id: \"task-001\", summary: \"done\")  # will fail\n\
+# WRONG — don't pass task_id to agent_complete:\n\
+agent_complete(task_id: \"task-001\", summary: \"done\")  # will fail\n\
 \n\
 # WRONG — don't call team_task_complete to end the autonomous loop:\n\
 team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team\n\
@@ -2217,7 +2217,7 @@ team_task_complete(team_name: \"x\", task_id: \"y\")  # only works inside a team
 /// path taken by tests and the sub-agent fallback).
 ///
 /// The system prompt always ends with [`TASK_TOOL_FAMILY_GUIDANCE`] so the
-/// model understands the difference between `task_complete` (autonomous loop
+/// model understands the difference between `agent_complete` (autonomous loop
 /// signal) and `team_task_complete` (team workflow).
 pub fn build_system_prompt_with_storage(
     agent: &AgentInfo,
@@ -2457,7 +2457,7 @@ fn build_system_prompt_with_storage_inner(
          action.\n\n",
     );
 
-    // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
+    // Sub-agent spawning guidance (new_agent tool) — shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {
         let builtins = builtin_agents();
@@ -2570,8 +2570,8 @@ fn build_system_prompt_with_storage_inner(
               - When in doubt, use `background: true`.\n\n\
               **CRITICAL — Concurrency limit for background tasks:**\n\
               - You can run at most **MAX_BG_TASKS** background tasks at once in this session.\n\
-              - Never call `new_task` with `background: true` if it would exceed this limit.\n\
-              - If the limit is reached, call `wait_tasks` (preferred) or `list_tasks`, then spawn only\n\
+              - Never call `new_agent` with `background: true` if it would exceed this limit.\n\
+              - If the limit is reached, call `wait_agents` (preferred) or `list_agents`, then spawn only\n\
                 after one finishes. Queue additional work in batches.\n\
               - Do not spam retries when you see \"Maximum concurrent background tasks reached\".\n\n\
               **CRITICAL — Parallel explore agents for large codebase reviews:**\n\
@@ -2581,7 +2581,7 @@ fn build_system_prompt_with_storage_inner(
                  Spawn at most **MAX_BG_TASKS** background agents in one batch.\n\
               2. Spawn a separate `explore` agent for EACH area in the SAME response turn,\n\
                  ALL with `background: true`. They will run concurrently.\n\
-              3. Use `list_tasks` to check progress. Synthesise results when all complete.\n\
+              3. Use `list_agents` to check progress. Synthesise results when all complete.\n\
               This is dramatically faster and cheaper than sequential exploration.\n\n\
              **CRITICAL — Batch all questions into one explore call:**\n\
              The explore agent is stateless — it loses ALL context between calls. Every call starts fresh.\n\
@@ -2605,8 +2605,8 @@ fn build_system_prompt_with_storage_inner(
              ```json\n\
              {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
              ```\n\n\
-              Use `wait_tasks` to block until background tasks finish (preferred — no polling).\n\
-              Use `list_tasks` to check status without blocking. Use `cancel_task` to stop a task early.\n\n",
+              Use `wait_agents` to block until background tasks finish (preferred — no polling).\n\
+              Use `list_agents` to check status without blocking. Use `cancel_agent` to stop a task early.\n\n",
         );
         section = section.replace("MAX_BG_TASKS", &max_background_agents.to_string());
 
@@ -2681,7 +2681,7 @@ fn build_system_prompt_with_storage_inner(
                                          ",
                                         );
     // -------------------------------------------------------------------
-    // Task tool family — the difference between `task_complete` and
+    // Task tool family — the difference between `agent_complete` and
     // `team_task_complete` trips up many models, leading to the wrong
     // tool being called with the wrong parameters.  This section is
     // injected into every primary agent's system prompt so the

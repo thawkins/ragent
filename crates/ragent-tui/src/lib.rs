@@ -505,7 +505,7 @@ pub async fn run_tui(
     // -- Cron scheduler startup --
     // Start the background cron scheduler (FR-010, FR-017). It ticks every
     // 30 seconds on a background task and never blocks the TUI event loop.
-    // The scheduler spawns agent runs via the new_task path and advances
+    // The scheduler spawns agent runs via the new_agent path and advances
     // next_due for repeating events (FR-004, FR-005).
     let cron_working_dir = std::env::current_dir().unwrap_or_default();
     let cron_scheduler = app::cron::start_cron_scheduler(

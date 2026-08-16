@@ -2,7 +2,7 @@
 #![allow(clippy::redundant_pub_crate)]
 #[cfg(test)]
 mod app_tests {
-    use crate::app::helpers::{is_discovery_notice, try_extract_research_code_block};
+    use crate::app::helpers::try_extract_research_code_block;
     use crate::app::{App, ModelPickerEntry};
     use ragent_agent::{
         agent, event::EventBus, permission::PermissionChecker, provider, session::SessionManager,
@@ -25,7 +25,7 @@ mod app_tests {
             tool_registry,
             permission_checker,
             event_bus: event_bus.clone(),
-            task_manager: std::sync::OnceLock::new(),
+            agent_manager: std::sync::OnceLock::new(),
             bg_service: std::sync::OnceLock::new(),
             team_manager: std::sync::OnceLock::new(),
             // M8-T1: team-context cache (unused in tests, but required by the
@@ -337,28 +337,6 @@ mod app_tests {
             App::load_persisted_thinking_level(&storage),
             Some(ThinkingLevel::Auto)
         );
-    }
-
-    // ────────────────────────────────────────────────────────────────────
-    // is_discovery_notice: matches the multi-line discovery summary
-    // emitted by `InstructionFileDiscovery::format_summary()` so the
-    // TUI can suppress it in the status bar (it is also rendered into
-    // the message window).
-    // ────────────────────────────────────────────────────────────────────
-
-    #[test]
-    pub(crate) fn test_is_discovery_notice_matches_canonical_heading() {
-        let msg =
-            "📋 Instruction File Discovery\n  Searched for: AGENTS.md\n  Working directory: /tmp\n";
-        assert!(is_discovery_notice(msg));
-    }
-
-    #[test]
-    pub(crate) fn test_is_discovery_notice_matches_with_dash_variant() {
-        // Loader may pass either the heading line on its own or as the
-        // first line of a multi-line summary; both should be detected.
-        let heading_only = "📋 Instruction File Discovery";
-        assert!(is_discovery_notice(heading_only));
     }
 
     #[test]

@@ -2038,7 +2038,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     // Entering log mode: dismiss the other side panels so only
                     // one occupies the side column (FR-012).
                     self.show_profile = false;
-                    self.show_todo = false;
+                    self.show_tasks_panel = false;
                     self.show_memory = false;
                     self.show_telemetry = false;
                 }
@@ -2048,31 +2048,104 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     "log panel hidden".to_string()
                 };
             }
-            "todo" => {
-                // `/todo` slash alias — toggles the TODO side panel (FR-010,
-                // optional). Mirrors the `/log` alias above and the Alt+T
-                // InputAction::ToggleTodo handler in input_handler.rs. The
-                // actual TODO mutation commands (`/todo add`, etc.) are handled
-                // by a different dispatch path; this arm only fires when `args`
-                // is empty, so it never shadows those subcommands.
+            "task" => {
                 if args.is_empty() {
-                    self.show_todo = !self.show_todo;
-                    if self.show_todo {
+                    // `/task` (no args) toggles the Tasks side panel.
+                    self.show_tasks_panel = !self.show_tasks_panel;
+                    if self.show_tasks_panel {
                         self.show_log = false;
                         self.show_profile = false;
                         self.show_memory = false;
                         self.show_telemetry = false;
                     }
-                    self.status = if self.show_todo {
-                        "todo panel visible".to_string()
+                    self.status = if self.show_tasks_panel {
+                        "tasks panel visible".to_string()
                     } else {
-                        "todo panel hidden".to_string()
+                        "tasks panel hidden".to_string()
                     };
+                } else {
+                    let sub = args.split_whitespace().next().unwrap_or("");
+                    let rest = args
+                        .split_whitespace()
+                        .skip(1)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    match sub {
+                        "list" => self.render_task_list(
+                            if rest.is_empty() { None } else { Some(&rest) },
+                            "task list",
+                        ),
+                        "help" | "" => {
+                            let help = "\
+From: /task help
+
+## /task — Task management
+
+Manage the session task list (stored in ragent’s task service).
+
+| Subcommand | Description |
+|------------|-------------|
+| `/task` | Toggle the Tasks side panel |
+| `/task list` | List all tasks for the current session |
+| `/task add <subject>` | Use `task_create` to add a task |
+| `/task create <subject>` | Alias for `add` |
+| `/task update <id> <status>` | Use `task_update` to update a task |
+| `/task get <id>` | Use `task_get` to inspect a task |
+| `/task help` | Show this help text |
+
+Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
+                            self.append_assistant_text(help);
+                            self.status = "task help".to_string();
+                        }
+                        "add" | "create" => {
+                            self.append_assistant_text(
+                                "From: /task add\nUse the `task_create` tool to add a task. \
+                                 Example: task_create with `subject` and `description`.\n",
+                            );
+                            self.status = "Use agent tool: task_create".to_string();
+                        }
+                        "update" => {
+                            self.append_assistant_text(
+                                "From: /task update\nUse the `task_update` tool to update a task. \
+                                 Example: task_update with `task_id` and `status`.\n",
+                            );
+                            self.status = "Use agent tool: task_update".to_string();
+                        }
+                        "get" => {
+                            self.append_assistant_text(
+                                "From: /task get\nUse the `task_get` tool to inspect a task. \
+                                 Example: task_get with `task_id`.\n",
+                            );
+                            self.status = "Use agent tool: task_get".to_string();
+                        }
+                        _ => {
+                            let help = "\
+From: /task help
+
+## /task — Task management
+
+Manage the session task list (stored in ragent’s task service).
+
+| Subcommand | Description |
+|------------|-------------|
+| `/task` | Toggle the Tasks side panel |
+| `/task list` | List all tasks for the current session |
+| `/task add <subject>` | Use `task_create` to add a task |
+| `/task create <subject>` | Alias for `add` |
+| `/task update <id> <status>` | Use `task_update` to update a task |
+| `/task get <id>` | Use `task_get` to inspect a task |
+| `/task help` | Show this help text |
+
+Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
+                            self.append_assistant_text(help);
+                            self.status = "task help".to_string();
+                        }
+                    }
                 }
             }
             "telemetry_panel" => {
                 // `/telemetry_panel` slash alias — toggles the Telemetry side
-                // panel. Mirrors the `/todo` alias and the Alt+O
+                // panel. Mirrors the `/task` alias and the Alt+O
                 // InputAction::ToggleTelemetry handler. This is purely a UI
                 // toggle; the `/telemetry counters` command still prints the
                 // same values into the chat transcript.
@@ -2080,7 +2153,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 if self.show_telemetry {
                     self.show_log = false;
                     self.show_profile = false;
-                    self.show_todo = false;
+                    self.show_tasks_panel = false;
                     self.show_memory = false;
                 }
                 self.status = if self.show_telemetry {
@@ -2771,52 +2844,11 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.status = "skills".to_string();
             }
             "tasks" => {
-                if self.active_tasks.is_empty() {
-                    self.status = "No active background tasks".to_string();
-                    self.push_log_no_agent(LogLevel::Info, "No active tasks".to_string());
+                if !self.ensure_session() {
                     return;
                 }
-
-                let mut output = String::from("From: /tasks\nActive Background Tasks:\n\n");
-                output.push_str(&format!(
-                    "  {:<12}  {:<20}  {:<12}  Description\n",
-                    "Task ID", "Agent", "Status"
-                ));
-                output.push_str(&format!(
-                    "  {:-<12}  {:-<20}  {:-<12}  {:-<20}\n",
-                    "", "", "", ""
-                ));
-
-                for task in &self.active_tasks {
-                    let task_id = format!("{}...", &task.id[..8.min(task.id.len())]);
-                    let status_str = format!("{}", task.status);
-                    output.push_str(&format!(
-                        "  {:<12}  {:<20}  {:<12}  {}\n",
-                        task_id,
-                        task.agent_name,
-                        status_str,
-                        task.result.as_deref().unwrap_or("(running)")
-                    ));
-                }
-
-                output.push_str(&format!(
-                    "\nTo cancel a task, use: /cancel <task_id_prefix>\n"
-                ));
-                output.push_str(&format!(
-                    "{} task(s) running, {} completed\n",
-                    self.active_tasks
-                        .iter()
-                        .filter(|t| t.status == ragent_agent::task::TaskStatus::Running)
-                        .count(),
-                    self.active_tasks
-                        .iter()
-                        .filter(|t| t.status == ragent_agent::task::TaskStatus::Completed)
-                        .count()
-                ));
-
-                self.append_assistant_text(&output);
-
-                self.status = "tasks".to_string();
+                let status_filter = if args.is_empty() { None } else { Some(args) };
+                self.render_task_list(status_filter, "tasks");
             }
             "mcp" => {
                 let mcp_args: Vec<&str> = args.split_whitespace().collect();
@@ -3066,7 +3098,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           working_dir: working_dir_clone.clone(),
                                                                                                                                                                                                                           event_bus: event_bus.clone(),
                                                                                                                                                                                                                           storage: Some(storage.clone()),
-                                                                                                                                                                                                                          task_manager: None,
+                                                                                                                                                                                                                          agent_manager: None,
                                                                                                                                                                                                                           active_model: active_model_clone,
                                                                                                                                                                                                                           team_context: None,
                                                                                                                                                                                                                           team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
@@ -3982,56 +4014,6 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             LogLevel::Warn,
                             format!("unknown /team subcommand: {}", sub),
                         );
-                    }
-                }
-            }
-            "todos" => {
-                if !self.ensure_session() {
-                    return;
-                }
-                let Some(session_id) = self.session_id.clone() else {
-                    self.status = "No active session".to_string();
-                    return;
-                };
-                let storage = self.session_processor.session_manager.storage();
-
-                // Fetch todos from storage
-                let status_filter = if args.is_empty() { None } else { Some(args) };
-                match storage.get_todos(&session_id, status_filter) {
-                    Ok(todos) => {
-                        let mut output = String::from("From: /todo_list\n");
-                        if todos.is_empty() {
-                            output.push_str("No TODO items found");
-                            if let Some(filter) = status_filter {
-                                output.push_str(&format!(" with status '{filter}'"));
-                            }
-                            output.push_str(".\n");
-                        } else {
-                            output.push_str(&format!("## TODOs ({} items)\n\n", todos.len()));
-                            for todo in &todos {
-                                let status_icon = match todo.status.as_str() {
-                                    "pending" => "⏳",
-                                    "in_progress" => "🔄",
-                                    "done" => "✅",
-                                    "blocked" => "🚫",
-                                    _ => "❓",
-                                };
-                                output.push_str(&format!(
-                                    "- {} **{}** — {} `[{}]`\n",
-                                    status_icon, todo.id, todo.title, todo.status
-                                ));
-                                if !todo.description.is_empty() {
-                                    output.push_str(&format!("  {}\n", todo.description));
-                                }
-                            }
-                        }
-                        self.append_assistant_text(&output);
-
-                        self.status = format!("{} todo(s)", todos.len());
-                    }
-                    Err(e) => {
-                        self.status = format!("Failed to read todos: {}", e);
-                        self.push_log_no_agent(LogLevel::Error, format!("todo_list error: {}", e));
                     }
                 }
             }
@@ -6736,7 +6718,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 match args.trim() {
                     "show" | "" => {
                         // Toggle the Memory side panel (FR-008), mirroring the
-                        // `/log` and `/todo` slash aliases. The textual
+                        // `/log` and `/task` slash aliases. The textual
                         // `/memory show` output is still appended to the chat
                         // so users get both the transcript and the live panel.
                         self.show_memory = !self.show_memory;
@@ -6746,7 +6728,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             // (FR-004 mutual-exclusion policy).
                             self.show_log = false;
                             self.show_profile = false;
-                            self.show_todo = false;
+                            self.show_tasks_panel = false;
                             self.show_telemetry = false;
                         }
                         self.status = if self.show_memory {
@@ -8283,6 +8265,56 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
             }
         }
         self.assert_ui_invariants();
+    }
+
+    /// Render a list of session tasks into the chat transcript.
+    ///
+    /// `from_cmd` is used for the "From: /..." header (e.g. "task list" or
+    /// "tasks"). `status_filter` is an optional status string passed by the
+    /// user. This is shared by `/task list` and `/tasks`.
+    fn render_task_list(&mut self, status_filter: Option<&str>, from_cmd: &str) {
+        let Some(session_id) = self.session_id.clone() else {
+            self.status = "No active session".to_string();
+            return;
+        };
+        let storage = self.session_processor.session_manager.storage();
+
+        match storage.list_tasks(&session_id, status_filter) {
+            Ok(tasks) => {
+                let mut output = format!("From: /{}\n", from_cmd);
+                if tasks.is_empty() {
+                    output.push_str("No tasks found");
+                    if let Some(filter) = status_filter {
+                        output.push_str(&format!(" with status '{filter}'"));
+                    }
+                    output.push_str(".\n");
+                } else {
+                    output.push_str(&format!("## Tasks ({} items)\n\n", tasks.len()));
+                    for task in &tasks {
+                        let status_icon = match task.status.as_str() {
+                            "pending" => "⏳",
+                            "in_progress" => "🔄",
+                            "done" | "completed" => "✅",
+                            "blocked" => "🚫",
+                            _ => "❓",
+                        };
+                        output.push_str(&format!(
+                            "- {} **{}** — {} `[{}]`\n",
+                            status_icon, task.id, task.title, task.status
+                        ));
+                        if !task.description.is_empty() {
+                            output.push_str(&format!("  {}\n", task.description));
+                        }
+                    }
+                }
+                self.append_assistant_text(&output);
+                self.status = format!("{} task(s)", tasks.len());
+            }
+            Err(e) => {
+                self.status = format!("Failed to read tasks: {}", e);
+                self.push_log_no_agent(LogLevel::Error, format!("task_list error: {}", e));
+            }
+        }
     }
 
     /// Build the formatted action-loop timing report, or `None` when no

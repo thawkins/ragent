@@ -276,6 +276,79 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         &mut kill_task_ids,
     );
 
+    // ── background shell tasks (bg tool) ─────────────────────────────────
+    if !app.bg_tasks.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " Background shell tasks ",
+            Style::default()
+                .fg(colors::HINT)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        for task in &app.bg_tasks {
+            let tid = short_id(&task.id);
+            let elapsed = format_elapsed(task.created_at);
+            let status_str = task.status.as_str();
+            let (dot_color, name_color) = match status_str {
+                "running" => (Color::Yellow, Color::Yellow),
+                "completed" => (Color::Cyan, Color::Cyan),
+                "failed" | "cancelled" => (Color::Red, Color::Red),
+                _ => (Color::DarkGray, Color::DarkGray),
+            };
+            let command_label = {
+                let s = task.command.clone();
+                if s.chars().count() > 24 {
+                    let truncated: String = s.chars().take(21).collect();
+                    format!("{}...", truncated)
+                } else {
+                    s
+                }
+            };
+            let mut spans = vec![
+                Span::styled("◦ ", Style::default().fg(dot_color)),
+                Span::styled(format!("{:<10} ", tid), Style::default().fg(colors::HINT)),
+                Span::styled(
+                    format!("{:<28}", command_label),
+                    Style::default().fg(name_color),
+                ),
+                Span::styled(format!("{:<8} ", "bg"), Style::default().fg(name_color)),
+                Span::styled(
+                    format!("{:>8} ", elapsed),
+                    Style::default().fg(colors::HINT),
+                ),
+                Span::styled(format!("{:>7}", "-"), Style::default().fg(colors::HINT)),
+            ];
+
+            let is_terminal = matches!(status_str, "completed" | "failed" | "cancelled");
+            if !is_terminal {
+                spans.push(Span::styled("  ", Style::default()));
+                spans.push(Span::styled(
+                    "⏹",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled("  ", Style::default()));
+                spans.push(Span::styled(
+                    "✕",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ));
+
+                let btn_x: u16 = 66;
+                let kill_x: u16 = 72;
+                button_areas.push(Rect::new(btn_x, 0, 6, 1));
+                kill_areas.push(Rect::new(kill_x, 0, 4, 1));
+                button_task_ids.push(task.id.clone());
+                kill_task_ids.push(task.id.clone());
+            } else {
+                button_areas.push(Rect::default());
+                kill_areas.push(Rect::default());
+                button_task_ids.push(String::new());
+                kill_task_ids.push(String::new());
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+
     let total_lines = lines.len() as u16;
     let paragraph = Paragraph::new(lines);
 

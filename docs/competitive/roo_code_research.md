@@ -311,7 +311,7 @@ Sub-tasks "boomerang" back to the parent agent upon completion with results and 
 - `search_files`, `list_directory`
 - `execute_command`
 - `browser_action` (screenshots, navigation)
-- `new_task` (spawn sub-agents)
+- `new_agent` (spawn sub-agents)
 - `switch_mode`
 
 **MCP Tools (Extensible):**

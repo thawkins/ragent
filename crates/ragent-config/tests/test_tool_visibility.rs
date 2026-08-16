@@ -78,8 +78,8 @@ fn test_tool_family_names_returns_expected_family_members() {
     assert!(teams.contains(&"team_create"));
     assert!(teams.contains(&"team_wait"));
     let agents = tool_family_names("agents").expect("agents family should exist");
-    assert!(agents.contains(&"new_task"));
-    assert!(agents.contains(&"wait_tasks"));
+    assert!(agents.contains(&"new_agent"));
+    assert!(agents.contains(&"wait_agents"));
     let plan = tool_family_names("plan").expect("plan family should exist");
     assert!(plan.contains(&"plan_enter"));
     assert!(plan.contains(&"plan_exit"));
@@ -102,7 +102,7 @@ fn test_effective_hidden_tools_combines_legacy_and_family_switches() {
     assert!(hidden.contains(&"github_list_issues".to_string()));
     assert!(hidden.contains(&"github_review_pr".to_string()));
     assert!(hidden.contains(&"team_create".to_string()));
-    assert!(hidden.contains(&"new_task".to_string()));
+    assert!(hidden.contains(&"new_agent".to_string()));
     assert!(hidden.contains(&"plan_enter".to_string()));
     assert!(hidden.contains(&"codeindex_search".to_string()));
 }

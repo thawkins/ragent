@@ -1393,7 +1393,7 @@ Manage background shell tasks: spawn, list, status, output, tail, cancel, wait, 
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `cancel_task` (agent:control)
+### `cancel_agent` (agent:control)
 Cancel a running background sub-agent task.
 
 **Input schema:**
@@ -1571,7 +1571,7 @@ Manage durable initiatives — long-lived project goals with milestones that per
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `list_tasks` (none)
+### `list_agents` (none)
 List sub-agent tasks for the current session (running and completed).
 
 **Input schema:**
@@ -1718,7 +1718,7 @@ Store a structured memory with a category, tags, and confidence score. Categorie
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `new_task` (agent:spawn)
+### `new_agent` (agent:spawn)
 Spawn a sub-agent to perform a focused task. Requires both 'agent' and 'task' parameters.
 
 **Input schema:**
@@ -1964,7 +1964,7 @@ Update the status of a task within a spec. Statuses: pending, in_progress, compl
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `task_complete` (agent:control)
+### `agent_complete` (agent:control)
 Signal that the current autonomous task is done; ends the session loop and returns control to the user.
 
 **Input schema:**
@@ -2468,8 +2468,8 @@ Record a short reasoning note without changing project state.
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `todo_read` (none)
-List TODO items for the current session, optionally filtered by status.
+### `task_list` (none)
+List all tasks for the current session, optionally filtered by status.
 
 **Input schema:**
 ```json
@@ -2478,40 +2478,7 @@ List TODO items for the current session, optionally filtered by status.
   "properties": {
     "status": {
       "type": "string",
-      "description": "Filter by status: pending, in_progress, done, blocked, or all (default: all)"
-    }
-  }
-}
-```
-**Output:** Human-readable result string (and optional structured metadata).
-
-### `todo_write` (none)
-Add, update, remove, or clear TODO items for the current session.
-
-**Input schema:**
-```json
-{
-  "type": "object",
-  "properties": {
-    "action": {
-      "type": "string",
-      "description": "The action to perform"
-    },
-    "title": {
-      "type": "string",
-      "description": "Title for the TODO item"
-    },
-    "description": {
-      "type": "string",
-      "description": "Optional description"
-    },
-    "id": {
-      "type": "string",
-      "description": "TODO item ID"
-    },
-    "status": {
-      "type": "string",
-      "description": "Status: pending, in_progress, done, or blocked"
+      "description": "Filter by status: pending, in_progress, completed, or all (default: all)"
     }
   }
 }
@@ -2543,7 +2510,7 @@ Alias for `write`. Write content to an existing file. Creates parent directories
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
-### `wait_tasks` (agent:control)
+### `wait_agents` (agent:control)
 Block until one or more background sub-agent tasks complete.
 
 **Input schema:**

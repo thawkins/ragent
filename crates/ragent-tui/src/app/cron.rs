@@ -10,7 +10,7 @@
 //! ## T-010: Agent spawning and next_due advancement
 //!
 //! When a due event is found, the scheduler spawns a background agent run via
-//! the `new_task` / `spawn_background` path (FR-004, FR-005). For repeating
+//! the `new_agent` / `spawn_background` path (FR-004, FR-005). For repeating
 //! events, `next_due` is advanced by one duration interval. For one-shot
 //! events, the event is disabled so it does not fire again. Each execution is
 //! logged to `<working_dir>/log/cron-<timestamp>.jsonl` (FR-003, FR-006).
@@ -88,7 +88,7 @@ impl Drop for CronSchedulerHandle {
 ///
 /// - `storage` — shared SQLite storage handle for querying due cron events.
 /// - `session_processor` �� shared session processor for spawning agent runs
-///   via the `new_task` / `spawn_background` path (FR-004, FR-005).
+///   via the `new_agent` / `spawn_background` path (FR-004, FR-005).
 /// - `working_dir` — project working directory used for execution logging
 ///   (`<working_dir>/log/cron-<timestamp>.jsonl`).
 pub fn start_cron_scheduler(
@@ -306,7 +306,7 @@ async fn fire_cron_event(
     // Determine if this is a repeating or one-shot event.
     let is_repeating = event.duration_secs.is_some() && event.schedule_form != "one_shot";
 
-    // Attempt to spawn a background agent run via the new_task path.
+    // Attempt to spawn a background agent run via the new_agent path.
     // For stateful events, load the cross-run loop state and inject it
     // into the prompt (FR-004).
     let effective_prompt = if event.stateful {
@@ -388,9 +388,9 @@ async fn fire_cron_event(
     }
 }
 
-/// Spawn a background agent run for a due cron event via the `new_task` path.
+/// Spawn a background agent run for a due cron event via the `new_agent` path.
 ///
-/// Uses `TaskManager::spawn_background` which creates an isolated session,
+/// Uses `AgentManager::spawn_background` which creates an isolated session,
 /// resolves the agent, and runs the prompt in a background tokio task.
 async fn spawn_agent_run(
     session_processor: &ragent_agent::session::processor::SessionProcessor,
@@ -398,12 +398,12 @@ async fn spawn_agent_run(
     prompt: &str,
     working_dir: &std::path::Path,
 ) -> anyhow::Result<ragent_agent::task::TaskEntry> {
-    let task_manager = session_processor
-        .task_manager
+    let agent_manager = session_processor
+        .agent_manager
         .get()
-        .ok_or_else(|| anyhow::anyhow!("TaskManager not initialized"))?;
+        .ok_or_else(|| anyhow::anyhow!("AgentManager not initialized"))?;
 
-    task_manager
+    agent_manager
         .spawn_background(
             CRON_PARENT_SESSION_ID,
             &event.agent_type,
@@ -414,7 +414,7 @@ async fn spawn_agent_run(
         .await
 }
 
-/// Spawn a background monitor task that polls the TaskManager until the
+/// Spawn a background monitor task that polls the AgentManager until the
 /// spawned agent run completes, then removes the event ID from the
 /// `running_events` set (FR-012).
 ///
@@ -429,10 +429,10 @@ fn spawn_completion_monitor(
     stateful: bool,
     working_dir: PathBuf,
 ) {
-    let task_manager = match session_processor.task_manager.get().cloned() {
+    let agent_manager = match session_processor.agent_manager.get().cloned() {
         Some(tm) => tm,
         None => {
-            // Should not happen (we just spawned via the TaskManager), but
+            // Should not happen (we just spawned via the AgentManager), but
             // if it does, remove the event ID immediately.
             if let Ok(mut set) = running_events.lock() {
                 set.remove(&event_id);
@@ -446,7 +446,7 @@ fn spawn_completion_monitor(
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
 
-            let task = task_manager.get_task(&task_id).await;
+            let task = agent_manager.get_task(&task_id).await;
             let done = match task {
                 Some(entry) => entry.status != ragent_agent::task::TaskStatus::Running,
                 None => true, // task was removed — consider it done
@@ -465,7 +465,7 @@ fn spawn_completion_monitor(
                 // FR-004: For stateful events, parse the completed task's
                 // output for `<loop-state>` and `<inbox>` tags.
                 if stateful {
-                    if let Some(entry) = task_manager.get_task(&task_id).await {
+                    if let Some(entry) = agent_manager.get_task(&task_id).await {
                         if let Some(result) = &entry.result {
                             let parsed = ragent_agent::loop_state::parse_tags(result);
                             if !parsed.loop_state.is_empty() {
@@ -685,7 +685,7 @@ mod tests {
     }
 
     /// Verify that `cron_tick` picks up a due event and processes it
-    /// (spawning fails gracefully because no TaskManager is set).
+    /// (spawning fails gracefully because no AgentManager is set).
     #[tokio::test]
     async fn test_cron_tick_with_due_event() {
         let storage = Storage::open_in_memory().expect("storage");
@@ -704,7 +704,7 @@ mod tests {
         let running_events: RunningEvents = Arc::new(Mutex::new(HashSet::new()));
         cron_tick(&storage, &processor, &working_dir, &running_events).await;
         // The one-shot event should be disabled after firing (FR-005),
-        // even though the spawn failed (no TaskManager set).
+        // even though the spawn failed (no AgentManager set).
         let row = storage
             .get_cron_event("test-due")
             .expect("get")
@@ -930,7 +930,7 @@ mod tests {
     /// Integration test: a repeating event fires, logs, and advances
     /// `next_due` by exactly one duration interval (FR-004, FR-006).
     ///
-    /// Because the test processor has no `TaskManager`, the spawn fails and
+    /// Because the test processor has no `AgentManager`, the spawn fails and
     /// the outcome is `"error"`. We still verify the full pipeline:
     /// the log entry is written with the correct fields, the event remains
     /// enabled, and `next_due` advances by exactly one interval.
@@ -995,10 +995,10 @@ mod tests {
         assert_eq!(entry.agent_type, "general");
         assert_eq!(entry.prompt, "run integration test");
         assert_eq!(entry.schedule, "from past every 1h");
-        // Outcome is "error" because spawn fails without a TaskManager.
+        // Outcome is "error" because spawn fails without a AgentManager.
         assert_eq!(
             entry.outcome, "error",
-            "outcome should be 'error' (spawn fails without TaskManager)"
+            "outcome should be 'error' (spawn fails without AgentManager)"
         );
         assert!(
             entry.error.is_some(),
@@ -1012,7 +1012,7 @@ mod tests {
     /// Integration test: a one-shot event fires, logs, and is disabled
     /// (FR-005, FR-006).
     ///
-    /// Because the test processor has no `TaskManager`, the spawn fails and
+    /// Because the test processor has no `AgentManager`, the spawn fails and
     /// the outcome is `"error"`. We still verify the full pipeline:
     /// the log entry is written with the correct fields, and the event is
     /// disabled so it does not fire again.
@@ -1059,7 +1059,7 @@ mod tests {
         assert_eq!(entry.schedule, "at past");
         assert_eq!(
             entry.outcome, "error",
-            "outcome should be 'error' (spawn fails without TaskManager)"
+            "outcome should be 'error' (spawn fails without AgentManager)"
         );
         assert!(
             entry.error.is_some(),
@@ -1377,7 +1377,7 @@ mod tests {
     ///
     /// After the running set is manually cleared (simulating completion
     /// monitor removal), a second tick fires the event normally (producing
-    /// an `"error"` log since spawn still fails without a TaskManager).
+    /// an `"error"` log since spawn still fails without a AgentManager).
     #[tokio::test]
     async fn test_integration_double_fire_skip_then_fire_after_clear() {
         let storage = Storage::open_in_memory().expect("storage");
@@ -1469,7 +1469,7 @@ mod tests {
             .expect("reset next_due");
 
         // Second tick: should now fire normally (no double-fire guard).
-        // The spawn fails (no TaskManager) so outcome is "error".
+        // The spawn fails (no AgentManager) so outcome is "error".
         cron_tick(&storage, &processor, &working_dir, &running_events).await;
 
         let logs2 =
@@ -1523,8 +1523,8 @@ mod tests {
 
     /// Create a minimal `SessionProcessor` for unit tests.
     ///
-    /// The `TaskManager` is not set, so `spawn_background` will fail with
-    /// "TaskManager not initialized". This is intentional — we want to
+    /// The `AgentManager` is not set, so `spawn_background` will fail with
+    /// "AgentManager not initialized". This is intentional — we want to
     /// verify that the tick handles spawn failures gracefully.
     fn create_test_processor() -> ragent_agent::session::processor::SessionProcessor {
         use std::sync::Arc;
@@ -1547,7 +1547,7 @@ mod tests {
             tool_registry,
             permission_checker,
             event_bus,
-            task_manager: std::sync::OnceLock::new(),
+            agent_manager: std::sync::OnceLock::new(),
             team_manager: std::sync::OnceLock::new(),
             team_context_cache: std::sync::Arc::new(parking_lot::RwLock::new(
                 std::collections::HashMap::new(),

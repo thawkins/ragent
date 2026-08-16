@@ -11,7 +11,7 @@ fn ctx_in(dir: &std::path::Path) -> ToolContext {
         working_dir: dir.to_path_buf(),
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
-        task_manager: None,
+        agent_manager: None,
         active_model: None,
         team_context: None,
         team_manager: None,

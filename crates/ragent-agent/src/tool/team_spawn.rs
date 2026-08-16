@@ -30,8 +30,8 @@ impl Tool for TeamSpawnTool {
              user/project/none) for persistent memory scope. CRITICAL: spawn ONE teammate \
              per independent work item — never assign a list of items to one teammate \
              (context overflow). After spawning all teammates in the same response turn, \
-             call team_wait to block until they finish. Do NOT use wait_tasks for teammates. \
-             Common gotcha: wait_tasks is for new_task sub-agents, not team members."
+             call team_wait to block until they finish. Do NOT use wait_agents for teammates. \
+             Common gotcha: wait_agents is for new_agent sub-agents, not team members."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -314,7 +314,7 @@ impl Tool for TeamSpawnTool {
             content: format!(
                 "Teammate '{teammate_name}' spawned in team '{team_name}'.\nAgent ID: {agent_id}\n\
                            Model: {model_display}{task_assignment_msg}\n\
-                           ⏳ Teammate is now working. Call `team_wait` (not `wait_tasks`) after all spawns \
+                           ⏳ Teammate is now working. Call `team_wait` (not `wait_agents`) after all spawns \
                            to block until teammates finish before the lead continues."
             ),
             metadata: MetadataBuilder::new()

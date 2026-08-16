@@ -100,7 +100,7 @@ Unit tests (fast, low-effort)
 
 Integration tests (requires process / DB)
 - File tools: create an in-memory session with a temporary directory and attempt to read/write files both inside and outside the directory; assert outside operations are rejected.
-- TaskManager / spawn_background: spawn background tasks up to limit and assert limit enforced.
+- AgentManager / spawn_background: spawn background tasks up to limit and assert limit enforced.
 - End-to-end: start router with test AppState, set provider auth in Storage, call POST /opt and ensure provider auth is retrieved and not leaked in logs.
 
 Property tests / fuzzing
@@ -130,7 +130,7 @@ B. rate_limiter Mutex<HashMap> in AppState (crates/ragent-server/src/routes/mod.
 
 Estimated effort: Small (2–4 hours) to replace with DashMap and unit tests.
 
-C. TaskManager RwLock over large HashMap (crates/ragent-core/src/task/mod.rs)
+C. AgentManager RwLock over large HashMap (crates/ragent-core/src/task/mod.rs)
 - Observation: tasks: Arc<RwLock<HashMap<...>>> may be a hotspot if many tasks are inserted/updated concurrently.
 - Recommendation: Use DashMap or fine-grained locking per-entry for writes. Keep RwLock for low-frequency operations and use atomic flags for cancel; or use tokio::sync::Mutex per-task id entry.
 
@@ -161,7 +161,7 @@ Milestone 3 — Shell execution hardening (Priority: P0, estimated 3–7 days)
 
 Milestone 4 — Concurrency & performance (Priority: P1, estimated 2–5 days)
 - Task 4.1 (0.5d) — Replace rate_limiter Mutex<HashMap> with DashMap; add tests.
-- Task 4.2 (1–3d) — Replace TaskManager tasks RwLock with DashMap or sharded storage.
+- Task 4.2 (1–3d) — Replace AgentManager tasks RwLock with DashMap or sharded storage.
 - Task 4.3 (1d) — Evaluate DB performance: enable WAL mode and consider connection pooling.
 - Task 4.4 (0.5d) — SSE backpressure: limit number of active SSE clients per session and drop heavy events.
 
@@ -188,7 +188,7 @@ Verification checklist (before merge):
 - [ ] Bash/shell: BashTool no longer executes arbitrary shell strings by default. Shell execution requires explicit enable and runs in a sandboxed environment or is disallowed.
 - [ ] Logging: No un-redacted logging of commands, prompts, or secrets. Automated tests to detect logging of fields named api_key/token/command.
 - [ ] Tests: New unit and integration tests added (see section 3). CI runs them.
-- [ ] Performance: rate_limiter and TaskManager locking hotspots addressed and benchmarks added where needed.
+- [ ] Performance: rate_limiter and AgentManager locking hotspots addressed and benchmarks added where needed.
 
 Appendix — Quick code pointers (exact files)
 - Storage obfuscation: crates/ragent-core/src/storage/mod.rs (OBFUSCATION_KEY, obfuscate_key/deobfuscate_key)

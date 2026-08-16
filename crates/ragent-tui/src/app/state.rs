@@ -180,6 +180,23 @@ pub struct LogEntry {
     pub agent_id: Option<String>,
 }
 
+/// A background shell task spawned via the `bg` tool, as displayed in the TUI.
+#[derive(Debug, Clone)]
+pub struct BgTaskView {
+    /// Unique task identifier.
+    pub id: String,
+    /// Session this task belongs to.
+    pub session_id: String,
+    /// Shell command being executed.
+    pub command: String,
+    /// Current status: `running`, `completed`, `failed`, or `cancelled`.
+    pub status: String,
+    /// When the task was created.
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When the task completed, if finished.
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// A single completed LLM request used for `/llmstats` aggregation.
 #[derive(Debug, Clone)]
 pub struct LlmRequestStat {
@@ -668,19 +685,15 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tasks",
-        description: "Show background task status and cancel tasks",
+        description: "List task items for the current session (alias: /task list)",
     },
     SlashCommandDef {
         trigger: "mcp",
         description: "Show MCP server status (/mcp discover | /mcp connect <id> | /mcp disconnect <id>)",
     },
     SlashCommandDef {
-        trigger: "todos",
-        description: "Show TODO items for the current session",
-    },
-    SlashCommandDef {
-        trigger: "todo",
-        description: "Toggle the TODO side panel (Alt+T alias); use `/todos` to list items",
+        trigger: "task",
+        description: "Toggle the TASKS side panel, or list/help tasks: /task [list|help]",
     },
     SlashCommandDef {
         trigger: "team",
@@ -917,8 +930,8 @@ pub enum ScrollbarDragPane {
     Log,
     /// Dragging the profile pane scrollbar.
     Profile,
-    /// Dragging the TODO pane scrollbar.
-    Todo,
+    /// Dragging the Tasks pane scrollbar.
+    Tasks,
     /// Dragging the Memory pane scrollbar.
     Memory,
     /// Dragging the Telemetry pane scrollbar.
@@ -934,8 +947,8 @@ pub enum SelectionPane {
     Log,
     /// Selection in the profile pane.
     Profile,
-    /// Selection in the TODO pane.
-    Todo,
+    /// Selection in the Tasks pane.
+    Tasks,
     /// Selection in the Memory pane.
     Memory,
     /// Selection in the Telemetry pane.
@@ -1215,7 +1228,7 @@ pub struct App {
     /// Whether the realtime profiling panel is visible.
     pub show_profile: bool,
     /// Whether the TODO panel is visible.
-    pub show_todo: bool,
+    pub show_tasks_panel: bool,
     /// Whether the Memory panel is visible (toggled via Alt+M).
     pub show_memory: bool,
     /// Whether the Telemetry panel is visible (toggled via Alt+O).
@@ -1227,7 +1240,7 @@ pub struct App {
     /// Scroll offset for the profile panel (lines from bottom).
     pub profile_scroll_offset: u16,
     /// Scroll offset for the TODO panel (lines from top).
-    pub todo_scroll_offset: u16,
+    pub tasks_scroll_offset: u16,
     /// Scroll offset for the Memory panel (lines from top).
     pub memory_scroll_offset: u16,
     /// Scroll offset for the Telemetry panel (lines from top).
@@ -1239,7 +1252,7 @@ pub struct App {
     /// Cached area of the profiler panel.
     pub profile_area: Rect,
     /// Cached area of the TODO panel (set during render for mouse hit-testing).
-    pub todo_area: Rect,
+    pub tasks_area: Rect,
     /// Cached area of the Memory panel (set during render for mouse hit-testing).
     pub memory_area: Rect,
     /// Cached area of the Telemetry panel (set during render for mouse hit-testing).
@@ -1251,7 +1264,7 @@ pub struct App {
     /// Maximum scroll value for the profile pane (set during render).
     pub profile_max_scroll: u16,
     /// Maximum scroll value for the TODO pane (set during render).
-    pub todo_max_scroll: u16,
+    pub tasks_max_scroll: u16,
     /// Maximum scroll value for the Memory pane (set during render).
     pub memory_max_scroll: u16,
     /// Maximum scroll value for the Telemetry pane (set during render).
@@ -1281,7 +1294,7 @@ pub struct App {
     /// Plain-text lines from the last profile pane render (for copy).
     pub profile_content_lines: Vec<String>,
     /// Plain-text lines from the last TODO pane render (for copy).
-    pub todo_content_lines: Vec<String>,
+    pub tasks_content_lines: Vec<String>,
     /// Plain-text lines from the last Memory pane render (for copy).
     pub memory_content_lines: Vec<String>,
     /// Plain-text lines from the last Telemetry pane render (for copy).
@@ -1372,6 +1385,8 @@ pub struct App {
     pub next_agent_index: u32,
     /// Active background sub-agent tasks (F14).
     pub active_tasks: Vec<ragent_agent::task::TaskEntry>,
+    /// Active background shell tasks spawned via the `bg` tool (M3).
+    pub bg_tasks: Vec<BgTaskView>,
     /// Whether the keybindings help panel is currently visible.
     pub show_shortcuts: bool,
     /// Whether Ctrl+C has armed a guarded keyboard exit sequence.
@@ -1463,7 +1478,7 @@ pub struct App {
 
     // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
     /// True when autopilot mode is active. Agent continues autonomously until
-    /// task_complete is called, limits are hit, or the user runs /autopilot off.
+    /// agent_complete is called, limits are hit, or the user runs /autopilot off.
     pub autopilot_enabled: bool,
     /// Maximum number of tokens to consume before stopping autopilot.
     pub autopilot_token_budget: Option<u64>,

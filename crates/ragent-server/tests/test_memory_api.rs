@@ -30,7 +30,7 @@ fn test_state(token: &str) -> AppState {
         tool_registry: Arc::new(ToolRegistry::new()),
         permission_checker: Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![]))),
         event_bus: event_bus.clone(),
-        task_manager: std::sync::OnceLock::new(),
+        agent_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),

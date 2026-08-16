@@ -596,7 +596,7 @@ impl Storage {
             -- Stores one-shot and repeating events with their schedule
             -- definition, enabled flag, and computed next-due timestamp.
             -- The scheduler reads enabled events whose next_due has passed
-            -- and spawns agent runs via the existing new_task path.
+            -- and spawns agent runs via the existing new_agent path.
             CREATE TABLE IF NOT EXISTS cron_events (
             id TEXT PRIMARY KEY,
             agent_type TEXT NOT NULL,
@@ -645,6 +645,34 @@ impl Storage {
                 // recording the result here is safe.
                 self.has_format_version
                     .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+
+        // todo2tasks T-002: additive migration for the Task model columns.
+        // Adds `active_form`, `owner`, `metadata` (JSON text), and
+        // `blocked_by` (JSON text array) to the `todos` table.  Existing
+        // rows receive safe defaults via ADD COLUMN … DEFAULT (FR-002):
+        //   active_form → NULL   (TaskRow.active_form = None)
+        //   owner       → NULL   (TaskRow.owner = None)
+        //   metadata    → '{}'    (empty JSON object)
+        //   blocked_by  → '[]'    (empty JSON array)
+        for (col, default_expr) in &[
+            ("active_form", "NULL"),
+            ("owner", "NULL"),
+            ("metadata", "'{}'"),
+            ("blocked_by", "'[]'"),
+        ] {
+            let has_col: bool = conn
+                .prepare(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='{col}'"
+                ))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                let sql =
+                    format!("ALTER TABLE todos ADD COLUMN {col} TEXT DEFAULT {default_expr};");
+                conn.execute_batch(&sql)?;
             }
         }
 
@@ -1439,7 +1467,7 @@ impl Storage {
     // ── Todo CRUD ───────────────────────────────────────────────────
 
     /// Creates a new TODO item in the given session.
-    pub fn create_todo(
+    pub fn create_task_simple(
         &self,
         id: &str,
         session_id: &str,
@@ -1460,53 +1488,39 @@ impl Storage {
     /// Lists TODO items for a session, optionally filtered by status.
     ///
     /// Pass `Some("pending")` etc. to filter, or `None` / `Some("all")` for all.
-    pub fn get_todos(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<TodoRow>> {
+    pub fn list_tasks(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<TaskRow>> {
         let conn = lock_conn!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, session_id, title, status, description, created_at, updated_at
+                    "SELECT id, session_id, title, status, description, created_at, updated_at,
+                            active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1 AND status = ?2
                      ORDER BY created_at",
                 )?;
-                stmt.query_map(params![session_id, s], |row| {
-                    Ok(TodoRow {
-                        id: row.get(0)?,
-                        session_id: row.get(1)?,
-                        title: row.get(2)?,
-                        status: row.get(3)?,
-                        description: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                    })
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
+                stmt.query_map(params![session_id, s], map_task_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
             _ => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, session_id, title, status, description, created_at, updated_at
+                    "SELECT id, session_id, title, status, description, created_at, updated_at,
+                            active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1
                      ORDER BY created_at",
                 )?;
-                stmt.query_map(params![session_id], |row| {
-                    Ok(TodoRow {
-                        id: row.get(0)?,
-                        session_id: row.get(1)?,
-                        title: row.get(2)?,
-                        status: row.get(3)?,
-                        description: row.get(4)?,
-                        created_at: row.get(5)?,
-                        updated_at: row.get(6)?,
-                    })
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?
+                stmt.query_map(params![session_id], map_task_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
             }
         };
         Ok(rows)
     }
 
     /// Updates a TODO item's status and/or title/description.
-    pub fn update_todo(
+    pub fn update_task_simple(
         &self,
         id: &str,
         session_id: &str,
@@ -1570,7 +1584,7 @@ impl Storage {
     }
 
     /// Deletes a TODO item.
-    pub fn delete_todo(&self, id: &str, session_id: &str) -> Result<bool> {
+    pub fn delete_task(&self, id: &str, session_id: &str) -> Result<bool> {
         let conn = lock_conn!(self)?;
         let changed = conn.execute(
             "DELETE FROM todos WHERE id = ?1 AND session_id = ?2",
@@ -1580,13 +1594,268 @@ impl Storage {
     }
 
     /// Deletes all TODO items for a session. Returns the number removed.
-    pub fn clear_todos(&self, session_id: &str) -> Result<usize> {
+    pub fn clear_tasks(&self, session_id: &str) -> Result<usize> {
         let conn = lock_conn!(self)?;
         let changed = conn.execute(
             "DELETE FROM todos WHERE session_id = ?1",
             params![session_id],
         )?;
         Ok(changed)
+    }
+
+    // ── Task CRUD (todo2tasks T-003) ───────────────────────────────
+
+    /// Creates a new Task row in the `todos` table with all Task-model
+    /// columns populated.
+    ///
+    /// This is the Task-layer replacement for [`create_task_simple`](Self::create_task_simple),
+    /// accepting the four new columns added by the T-002 migration:
+    /// `active_form`, `owner`, `metadata` (JSON text), and `blocked_by`
+    /// (JSON text array).
+    ///
+    /// # Arguments
+    ///
+    /// * `id` — unique task identifier (generated by the caller via the
+    ///   existing `generate_todo_id` scheme, FR-012).
+    /// * `session_id` — session this task belongs to (FR-001).
+    /// * `subject` — imperative title (stored in the `title` column).
+    /// * `description` — free-text description carrying acceptance criteria.
+    /// * `status` — initial status; callers should pass `"pending"`.
+    /// * `active_form` — present-continuous phrase for progress indicators
+    ///   (FR-007); `None` when not provided.
+    /// * `owner` — free-form owner label (FR-006); `None` when not provided.
+    /// * `metadata` — JSON text blob (FR-008); pass `"{}"` for empty.
+    /// * `blocked_by` — task IDs that must reach `completed` before this
+    ///   task is available (FR-001); empty slice for no dependencies.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails (e.g., duplicate id or
+    /// foreign-key violation).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_task(
+        &self,
+        id: &str,
+        session_id: &str,
+        subject: &str,
+        description: &str,
+        status: &str,
+        active_form: Option<&str>,
+        owner: Option<&str>,
+        metadata: &str,
+        blocked_by: &[String],
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let blocked_by_json = serde_json::to_string(blocked_by)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO todos
+             (id, session_id, title, status, description, created_at, updated_at,
+              active_form, owner, metadata, blocked_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                id,
+                session_id,
+                subject,
+                status,
+                description,
+                &now,
+                &now,
+                active_form,
+                owner,
+                metadata,
+                &blocked_by_json
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Fetches a single Task by `id` and `session_id`, returning `None`
+    /// if it does not exist.
+    ///
+    /// Reads all 11 columns including the Task-model fields added by
+    /// T-002.  Satisfies FR-014 (TaskGet output) at the storage layer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_task(&self, id: &str, session_id: &str) -> Result<Option<TaskRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, title, status, description, created_at, updated_at,
+                    active_form, owner, metadata, blocked_by
+             FROM todos WHERE id = ?1 AND session_id = ?2",
+        )?;
+        let row = stmt
+            .query_row(params![id, session_id], map_task_row)
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Lists all Tasks for a session, optionally filtered by status,
+    /// ordered by `created_at`.
+    ///
+    /// This is the Task-layer alias for [`list_tasks`](Self::list_tasks),
+    /// reading all 11 columns.  Satisfies FR-015 (TaskList output) at
+    /// the storage layer.
+    ///
+    /// Pass `Some("pending")` etc. to filter, or `None` / `Some("all")`
+    /// for all statuses.
+    pub fn list_task_rows(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<TaskRow>> {
+        self.list_tasks(session_id, status_filter)
+    }
+
+    /// Updates a Task row, setting any combination of the Task-model
+    /// fields.
+    ///
+    /// This is the Task-layer replacement for [`update_task_simple`](Self::update_task_simple),
+    /// supporting all columns including `active_form`, `owner`, `metadata`,
+    /// and `blocked_by` (FR-013).
+    ///
+    /// The [`TaskUpdateParams`] struct uses `Option<Option<…>>` for
+    /// `active_form` and `owner` to distinguish "don't change this
+    /// field" (`None`) from "clear it to NULL" (`Some(None)`) from
+    /// "set it to a value" (`Some(Some(…))`).  For `blocked_by`,
+    /// `None` means "don't change" and `Some(slice)` means "replace
+    /// the entire dependency list" — the `add_blocked_by` / `add_blocks`
+    /// merge semantics are a tool-layer concern (T-008).
+    ///
+    /// # Returns
+    ///
+    /// `true` if a row was updated, `false` if no matching task was
+    /// found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the SQL update fails.
+    pub fn update_task(
+        &self,
+        id: &str,
+        session_id: &str,
+        params: &TaskUpdateParams<'_>,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut sets: Vec<String> = vec!["updated_at = ?1".to_string()];
+        let mut idx = 2u32;
+        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
+
+        if let Some(subject) = params.subject {
+            sets.push(format!("title = ?{idx}"));
+            vals.push(Box::new(subject.to_string()));
+            idx += 1;
+        }
+        if let Some(status) = params.status {
+            sets.push(format!("status = ?{idx}"));
+            vals.push(Box::new(status.to_string()));
+            idx += 1;
+        }
+        if let Some(description) = params.description {
+            sets.push(format!("description = ?{idx}"));
+            vals.push(Box::new(description.to_string()));
+            idx += 1;
+        }
+        if let Some(active_form) = params.active_form {
+            sets.push(format!("active_form = ?{idx}"));
+            vals.push(Box::new(active_form.map(|s| s.to_string())));
+            idx += 1;
+        }
+        if let Some(owner) = params.owner {
+            sets.push(format!("owner = ?{idx}"));
+            vals.push(Box::new(owner.map(|s| s.to_string())));
+            idx += 1;
+        }
+        if let Some(metadata) = params.metadata {
+            sets.push(format!("metadata = ?{idx}"));
+            vals.push(Box::new(metadata.to_string()));
+            idx += 1;
+        }
+        if let Some(blocked_by) = params.blocked_by {
+            let json = serde_json::to_string(blocked_by)?;
+            sets.push(format!("blocked_by = ?{idx}"));
+            vals.push(Box::new(json));
+            idx += 1;
+        }
+
+        // id and session_id placeholders
+        let id_ph = format!("?{idx}");
+        let sid_ph = format!("?{}", idx + 1);
+        vals.push(Box::new(id.to_string()));
+        vals.push(Box::new(session_id.to_string()));
+
+        let sql = format!(
+            "UPDATE todos SET {} WHERE id = {} AND session_id = {}",
+            sets.join(", "),
+            id_ph,
+            sid_ph
+        );
+        let sql_params: Vec<&dyn rusqlite::types::ToSql> =
+            vals.iter().map(std::convert::AsRef::as_ref).collect();
+        let changed = conn.execute(&sql, sql_params.as_slice())?;
+        Ok(changed > 0)
+    }
+
+    // ── Task DAG derivation (todo2tasks T-004) ─────────────────────
+
+    /// Fetches a single Task with derived DAG fields (`blocks`, `is_blocked`,
+    /// `is_available`) computed from the full session task set.
+    ///
+    /// Satisfies FR-005 (blocked status derivation) and FR-014 (TaskGet
+    /// output with derived `blocks`) at the storage layer.
+    ///
+    /// Returns `None` if no task with the given `id` exists in `session_id`.
+    pub fn get_task_view(&self, id: &str, session_id: &str) -> Result<Option<TaskView>> {
+        let tasks = self.list_tasks(session_id, None)?;
+        let dag = compute_task_dag(&tasks);
+        let task = tasks.iter().find(|t| t.id == id);
+        match task {
+            Some(t) => {
+                let derived = dag.get(&t.id).cloned().unwrap_or_default();
+                Ok(Some(TaskView {
+                    task: t.clone(),
+                    derived,
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Lists all Tasks for a session with derived DAG fields (`blocks`,
+    /// `is_blocked`, `is_available`), ordered by `created_at`.
+    ///
+    /// Satisfies FR-005 and FR-015 (TaskList output with derived fields)
+    /// at the storage layer.
+    ///
+    /// Pass `Some("pending")` etc. to filter, or `None` / `Some("all")`
+    /// for all statuses.  The DAG is always computed from the **full**
+    /// (unfiltered) task set so that `blocks` and `is_blocked` are
+    /// correct regardless of the status filter.
+    pub fn list_task_views(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<TaskView>> {
+        let all_tasks = self.list_tasks(session_id, None)?;
+        let dag = compute_task_dag(&all_tasks);
+        let filtered = match status_filter {
+            Some(s) if s != "all" => all_tasks
+                .iter()
+                .filter(|t| t.status == s)
+                .cloned()
+                .collect::<Vec<_>>(),
+            _ => all_tasks,
+        };
+        Ok(filtered
+            .into_iter()
+            .map(|t| {
+                let derived = dag.get(&t.id).cloned().unwrap_or_default();
+                TaskView { task: t, derived }
+            })
+            .collect())
     }
 
     // ── Durable Initiatives (JCODEPLAN M8) ──────────────────────────
@@ -3672,8 +3941,13 @@ fn initiative_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InitiativeRo
 }
 
 /// Row representation of a TODO item.
+///
+/// (todo2tasks T-001: extended with `active_form`, `owner`, `metadata`,
+/// and `blocked_by` fields to support the Task model.  T-002: the
+/// corresponding SQLite columns are added via additive `ALTER TABLE`
+/// migration with safe defaults — see FR-002.)
 #[derive(Debug, Clone)]
-pub struct TodoRow {
+pub struct TaskRow {
     /// Unique todo identifier.
     pub id: String,
     /// Session this todo belongs to.
@@ -3688,6 +3962,321 @@ pub struct TodoRow {
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
+    /// Present-continuous phrase shown in progress indicators (FR-007).
+    /// `None` when not set (legacy rows or tasks without an active form).
+    pub active_form: Option<String>,
+    /// Free-form owner label naming the agent/worker responsible (FR-006).
+    /// `None` when not set.
+    pub owner: Option<String>,
+    /// Arbitrary key-value metadata stored as a JSON text blob (FR-008).
+    /// Defaults to `"{}"` for rows that predate the T-002 migration.
+    pub metadata: String,
+    /// Task IDs that must reach `completed` before this task is available
+    /// (FR-001).  Empty for rows that predate the T-002 migration;
+    /// persisted as a JSON array in SQLite.
+    pub blocked_by: Vec<String>,
+}
+
+/// Optional-field container for [`Storage::update_task`] (todo2tasks T-003,
+/// FR-013).
+///
+/// Every field is `Option`:
+/// - `None` → **do not change** this column.
+/// - `Some(value)` → set the column to `value`.
+///
+/// For `active_form` and `owner`, which are nullable, a nested
+/// `Option<Option<&str>>` is used so the caller can distinguish
+/// "leave unchanged" (`None`) from "clear to NULL" (`Some(None)`)
+/// from "set to a string" (`Some(Some("…"))`).
+///
+/// For `blocked_by`, `None` means "leave the dependency list unchanged"
+/// and `Some(slice)` means "replace the entire list".  The
+/// `add_blocked_by` / `add_blocks` merge semantics are a tool-layer
+/// concern (T-008), not a storage-layer one.
+#[derive(Debug, Default, Clone)]
+pub struct TaskUpdateParams<'a> {
+    /// New imperative subject (stored in the `title` column).
+    pub subject: Option<&'a str>,
+    /// New status: `"pending"`, `"in_progress"`, or `"completed"`.
+    /// The caller is responsible for rejecting `"blocked"` (FR-005,
+    /// T-017) and validating the transition.
+    pub status: Option<&'a str>,
+    /// New description text.
+    pub description: Option<&'a str>,
+    /// New active-form phrase.
+    /// `None` → unchanged; `Some(None)` → clear to NULL; `Some(Some(x))` → set.
+    pub active_form: Option<Option<&'a str>>,
+    /// New owner label.
+    /// `None` → unchanged; `Some(None)` → clear to NULL; `Some(Some(x))` → set.
+    pub owner: Option<Option<&'a str>>,
+    /// New metadata JSON text blob (FR-008).
+    pub metadata: Option<&'a str>,
+    /// Full replacement for the `blocked_by` dependency list (FR-001).
+    /// `None` → unchanged; `Some(slice)` → replace.
+    pub blocked_by: Option<&'a [String]>,
+}
+
+// ── Task DAG derivation (todo2tasks T-004) ────────────────────────────
+
+/// Derived/computed DAG fields for a single task (todo2tasks T-004,
+/// FR-005).
+///
+/// These fields are **not stored** in the database — they are computed
+/// at read time from the full session task set by
+/// [`compute_task_dag`].
+///
+/// # Fields
+///
+/// - `blocks` — inverse edges: task IDs that list *this* task in their
+///   `blocked_by`.  Satisfies FR-014 (TaskGet output includes derived
+///   `blocks`).
+/// - `is_blocked` — `true` if this task's status is `"pending"` and at
+///   least one ID in its `blocked_by` list is not `"completed"`
+///   (FR-005).  A `"blocked"` status value is never stored; blocked-ness
+///   is always derived.
+/// - `is_available` — `true` if this task's status is `"pending"`, its
+///   `owner` is `None` or empty, and every ID in its `blocked_by` list
+///   is `"completed"` (or `blocked_by` is empty).  See the spec's
+///   Definitions section.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TaskDerived {
+    /// Task IDs that this task blocks (inverse of `blocked_by`).
+    pub blocks: Vec<String>,
+    /// Derived blocked flag (FR-005).
+    pub is_blocked: bool,
+    /// Derived available flag.
+    pub is_available: bool,
+}
+
+/// A task row paired with its derived DAG fields, for read/display
+/// purposes (todo2tasks T-004).
+///
+/// Returned by [`Storage::get_task_view`] and
+/// [`Storage::list_task_views`].  The tool layer (T-009 / T-010) will
+/// consume this to produce `task_get` / `task_list` output.
+#[derive(Debug, Clone)]
+pub struct TaskView {
+    /// The raw task row from the `todos` table.
+    pub task: TaskRow,
+    /// Derived DAG fields computed from the full session task set.
+    pub derived: TaskDerived,
+}
+
+/// Computes derived DAG fields for all tasks in a session
+/// (todo2tasks T-004, FR-005).
+///
+/// Given a slice of [`TaskRow`] values (typically from
+/// [`Storage::list_tasks`]), this function:
+///
+/// 1. Builds a status lookup map (`id` → `status`) so that
+///    `blocked_by` references can be resolved without scanning the
+///    slice repeatedly.
+/// 2. Computes the **inverse edge** (`blocks`) for each task: if task
+///    `B` lists `A` in `B.blocked_by`, then `A` blocks `B`, so `A`'s
+///    `blocks` set includes `B`.
+/// 3. Computes `is_blocked` per FR-005: status is `"pending"` **and**
+///    at least one `blocked_by` ID is not `"completed"`.
+/// 4. Computes `is_available`: status is `"pending"`, owner is
+///    `None`/empty, and all `blocked_by` IDs are `"completed"`
+///    (or `blocked_by` is empty).
+///
+/// # Edge cases
+///
+/// - A `blocked_by` entry that does not correspond to any task in the
+///   slice is treated as "not completed" — the task stays blocked.
+///   This should not happen in normal operation (T-017 validates
+///   references), but the graceful fallback prevents panic.
+/// - Tasks with status `"in_progress"` or `"completed"` are never
+///   blocked or available.
+///
+/// # Returns
+///
+/// A `HashMap<String, TaskDerived>` keyed by task ID.
+pub fn compute_task_dag(tasks: &[TaskRow]) -> std::collections::HashMap<String, TaskDerived> {
+    use std::collections::HashMap;
+
+    // Build id → status lookup for O(1) blocked_by resolution.
+    let status_map: HashMap<&str, &str> = tasks
+        .iter()
+        .map(|t| (t.id.as_str(), t.status.as_str()))
+        .collect();
+
+    let mut dag: HashMap<String, TaskDerived> = HashMap::with_capacity(tasks.len());
+
+    // First pass: compute is_blocked and is_available for each task.
+    for t in tasks {
+        let mut derived = TaskDerived::default();
+
+        if t.status == "pending" {
+            // is_blocked: at least one blocker is not completed.
+            let any_unfinished = t.blocked_by.iter().any(|dep_id| {
+                status_map
+                    .get(dep_id.as_str())
+                    .is_none_or(|s| *s != "completed")
+            });
+            derived.is_blocked = !t.blocked_by.is_empty() && any_unfinished;
+
+            // is_available: owner is empty and all blockers are completed.
+            let owner_empty = t.owner.as_deref().is_none_or(|o| o.is_empty());
+            let all_blockers_done = t.blocked_by.iter().all(|dep_id| {
+                status_map
+                    .get(dep_id.as_str())
+                    .is_some_and(|s| *s == "completed")
+            });
+            derived.is_available = owner_empty && all_blockers_done;
+        }
+
+        dag.insert(t.id.clone(), derived);
+    }
+
+    // Second pass: compute inverse edges (blocks).
+    // If B lists A in blocked_by, then A blocks B.
+    for t in tasks {
+        for dep_id in &t.blocked_by {
+            if let Some(dep_derived) = dag.get_mut(dep_id)
+                && !dep_derived.blocks.contains(&t.id)
+            {
+                dep_derived.blocks.push(t.id.clone());
+            }
+        }
+    }
+
+    // Sort blocks vectors for deterministic output.
+    for derived in dag.values_mut() {
+        derived.blocks.sort();
+    }
+
+    dag
+}
+
+// ── Cycle detection (todo2tasks T-005, FR-004) ────────────────────────
+
+/// Error returned when adding a dependency edge would create a cycle
+/// in the session task graph (todo2tasks T-005, FR-004).
+///
+/// The `cycle_path` field lists the task IDs that form the cycle,
+/// starting and ending with the same ID, e.g. `["a", "b", "c", "a"]`
+/// means `a → b → c → a` (a depends on b, b depends on c, c depends
+/// on a).
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("dependency cycle detected: {} (would create a circular dependency)", cycle_path.join(" → "))]
+pub struct CycleError {
+    /// Ordered list of task IDs forming the cycle, starting and ending
+    /// with the same ID.
+    pub cycle_path: Vec<String>,
+}
+
+/// Checks whether adding a `blocked_by` edge from `source` to `target`
+/// would create a dependency cycle in the session task graph
+/// (todo2tasks T-005, FR-004).
+///
+/// "Source depends on target" means `target` is being added to
+/// `source`'s `blocked_by` list.  A cycle exists if `target` already
+/// (directly or transitively) depends on `source`, because the new
+/// edge would close the loop: `source → target → … → source`.
+///
+/// The function performs a depth-first search from `target` following
+/// existing `blocked_by` edges.  If `source` is reachable from
+/// `target`, the path is reconstructed and returned as a
+/// [`CycleError`].
+///
+/// # Arguments
+///
+/// - `tasks` — all tasks in the session (the full graph snapshot).
+/// - `source` — the task ID that will gain a new dependency on
+///   `target`.
+/// - `target` — the task ID being added to `source`'s `blocked_by`.
+///
+/// # Returns
+///
+/// - `Ok(())` if the edge is safe (no cycle).
+/// - `Err(CycleError)` if the edge would create a cycle, with
+///   `cycle_path` showing the full loop starting at `source`.
+///
+/// # Edge cases
+///
+/// - `source == target` is a self-loop and is always rejected.
+/// - `blocked_by` references to task IDs not in `tasks` are silently
+///   ignored (they lead nowhere in the DFS).  T-017 validates
+///   references separately.
+///
+/// # Performance
+///
+/// O(N + E) where N is the number of tasks and E is the number of
+/// `blocked_by` edges, using stdlib `HashMap` / `HashSet` only
+/// (NFR-003 — no new dependencies).
+pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(), CycleError> {
+    use std::collections::{HashMap, HashSet};
+
+    // Self-loop: a task cannot depend on itself.
+    if source == target {
+        return Err(CycleError {
+            cycle_path: vec![source.to_string(), source.to_string()],
+        });
+    }
+
+    // Build adjacency list: task_id → blocked_by list.
+    let adj: HashMap<&str, &[String]> = tasks
+        .iter()
+        .map(|t| (t.id.as_str(), t.blocked_by.as_slice()))
+        .collect();
+
+    // DFS from target following blocked_by edges.
+    // If we reach source, we found a cycle: source → target → … → source.
+    let mut visited: HashSet<&str> = HashSet::new();
+    // Stack entries: (current node, path from target to current node).
+    let mut stack: Vec<(&str, Vec<String>)> = vec![(target, vec![target.to_string()])];
+
+    while let Some((node, path)) = stack.pop() {
+        if node == source {
+            // Found a path target → … → source.
+            // Full cycle: source → target → … → source.
+            let mut cycle_path = vec![source.to_string()];
+            cycle_path.extend(path);
+            return Err(CycleError { cycle_path });
+        }
+
+        if !visited.insert(node) {
+            continue;
+        }
+
+        // Follow blocked_by edges from this node.
+        if let Some(deps) = adj.get(node) {
+            for dep in deps.iter().rev() {
+                if !visited.contains(dep.as_str()) {
+                    let mut new_path = path.clone();
+                    new_path.push(dep.clone());
+                    stack.push((dep, new_path));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Maps a `rusqlite::Row` to a [`TaskRow`], reading the 4 new Task-model
+/// columns added by the todo2tasks T-002 migration (`active_form`, `owner`,
+/// `metadata`, `blocked_by`).  Legacy rows that predate the migration get
+/// safe defaults from the `ADD COLUMN … DEFAULT` clause (FR-002):
+/// `active_form` and `owner` are `NULL` → `None`; `metadata` is `'{}'`;
+/// `blocked_by` is `'[]'` → empty `Vec`.
+fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRow> {
+    let metadata_str: String = row.get(9)?;
+    let blocked_by_str: String = row.get(10)?;
+    Ok(TaskRow {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        title: row.get(2)?,
+        status: row.get(3)?,
+        description: row.get(4)?,
+        created_at: row.get(5)?,
+        updated_at: row.get(6)?,
+        active_form: row.get(7)?,
+        owner: row.get(8)?,
+        metadata: metadata_str,
+        blocked_by: serde_json::from_str(&blocked_by_str).unwrap_or_default(),
+    })
 }
 
 /// Row representation of a persisted run-cost summary (FR-018).

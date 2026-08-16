@@ -38,8 +38,8 @@ use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
 };
 use crate::widgets::message_widget::{
-    canonical_tool_name, capitalize_tool_name, read_line_range, tool_inline_diff,
-    tool_input_summary, tool_result_summary,
+    canonical_tool_name, capitalize_tool_name, is_agent_notice, read_line_range,
+    render_agent_notice_lines, tool_inline_diff, tool_input_summary, tool_result_summary,
 };
 
 fn shorten_middle(s: &str, max_chars: usize) -> String {
@@ -138,7 +138,7 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     app.agents_button_area = Rect::new(agents_x, y, button_w, h);
     app.teams_button_area = Rect::new(teams_x, y, button_w, h);
 
-    let agents_enabled = !app.active_tasks.is_empty();
+    let agents_enabled = !app.active_tasks.is_empty() || !app.bg_tasks.is_empty();
     let teams_enabled = app.active_team.is_some();
     let agents_active = agents_enabled && app.show_agents_window;
     let teams_active = teams_enabled && app.show_teams_window;
@@ -2379,10 +2379,15 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Use responsive split based on terminal width. Only one side panel is
     // visible at a time (mutual exclusion enforced in the toggle handlers), but
     // the `show_log && show_profile` branch is kept for the legacy stacked mode
-    // reachable via the `/log` + `/profile` slash commands. The TODO panel is a
+    // reachable via the `/log` + `/profile` slash commands. The Tasks panel is a
     // third sibling (FR-004, FR-012) and is rendered alone in the side column
-    // when `show_todo` is true.
-    if app.show_log || app.show_profile || app.show_todo || app.show_memory || app.show_telemetry {
+    // when `show_tasks_panel` is true.
+    if app.show_log
+        || app.show_profile
+        || app.show_tasks_panel
+        || app.show_memory
+        || app.show_telemetry
+    {
         let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -2396,21 +2401,21 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_messages(frame, app, h_chunks[0]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, h_chunks[0]);
 
-        // The TODO panel is mutually exclusive with log/profile/memory/telemetry
+        // The Tasks panel is mutually exclusive with log/profile/memory/telemetry
         // (FR-012), so it gets its own branch that renders alone in the side
         // column.
-        if app.show_todo {
+        if app.show_tasks_panel {
             app.log_area = Rect::default();
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
             app.memory_area = Rect::default();
             app.telemetry_area = Rect::default();
-            app.todo_area = h_chunks[1];
-            render_todo_panel(frame, app, h_chunks[1]);
-            apply_selection_highlight(frame, app, SelectionPane::Todo, h_chunks[1]);
+            app.tasks_area = h_chunks[1];
+            render_tasks_panel(frame, app, h_chunks[1]);
+            apply_selection_highlight(frame, app, SelectionPane::Tasks, h_chunks[1]);
         } else if app.show_memory {
-            // The Memory panel is mutually exclusive with log/profile/todo/telemetry
+            // The Memory panel is mutually exclusive with log/profile/task/telemetry
             // (FR-004), so it gets its own branch that renders alone in the
             // side column. Clearing the other side-panel areas ensures mouse
             // hit-testing and scrollbar drag dispatch never target a panel
@@ -2419,19 +2424,19 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
-            app.todo_area = Rect::default();
+            app.tasks_area = Rect::default();
             app.telemetry_area = Rect::default();
             app.memory_area = h_chunks[1];
             render_memory_panel(frame, app, h_chunks[1]);
             apply_selection_highlight(frame, app, SelectionPane::Memory, h_chunks[1]);
         } else if app.show_telemetry {
-            // The Telemetry panel is mutually exclusive with log/profile/todo/memory,
+            // The Telemetry panel is mutually exclusive with log/profile/task/memory,
             // so it renders alone in the side column.
             app.log_area = Rect::default();
             app.profile_area = Rect::default();
             app.active_agents_area = Rect::default();
             app.teams_area = Rect::default();
-            app.todo_area = Rect::default();
+            app.tasks_area = Rect::default();
             app.memory_area = Rect::default();
             app.telemetry_area = h_chunks[1];
             render_telemetry_panel(frame, app, h_chunks[1]);
@@ -2478,7 +2483,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.message_area = chunks[2];
         app.log_area = Rect::default();
         app.profile_area = Rect::default();
-        app.todo_area = Rect::default();
+        app.tasks_area = Rect::default();
         app.memory_area = Rect::default();
         app.telemetry_area = Rect::default();
         app.active_agents_area = Rect::default();
@@ -3152,30 +3157,35 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// Render the TODO side panel.
+/// Render the TASKS side panel (todo2tasks T-015, FR-005, FR-007, FR-018).
 ///
-/// Lists the TODO items belonging to the active session (`app.session_id`),
-/// re-queried from `Storage::get_todos` on each frame so edits made via the
-/// `todo_write` tool or `/todo` slash command are reflected without a toggle
-/// (FR-014). Each row is rendered as `[<STATUS>] <title>` with the status
-/// prefix coloured according to FR-007. When no rows are returned the panel
-/// shows a `No TODO items` placeholder in dark gray (FR-005); if the storage
-/// query fails the panel shows `Failed to load TODOs` in red and does not
-/// panic (NFR-005). A vertical scrollbar is rendered when the row count
-/// exceeds the visible height (FR-008).
+/// Lists the tasks belonging to the active session (`app.session_id`),
+/// re-queried from `Storage::list_tasks` on each frame so edits made via the
+/// `task_create` / `task_update` tools are reflected without a toggle.
+/// Each row is rendered as `[<STATUS>] <subject>` with the status prefix
+/// coloured: `pending` = yellow, `in_progress` = cyan, `completed` = green,
+/// `blocked` = red (FR-007). When a task is derived-blocked (FR-005), the
+/// entire line is rendered in red and a `[blocked by #id, …]` annotation
+/// is appended (FR-018). An `(owner)` suffix is appended when the task has
+/// an owner set (FR-018). When a task is `in_progress` and has an
+/// `active_form`, it is rendered as an indented sub-line beneath the
+/// subject (FR-018). When no rows are returned the panel shows a `No tasks`
+/// placeholder in dark gray; if the storage query fails the panel shows
+/// `Failed to load tasks` in red and does not panic. A vertical scrollbar
+/// is rendered when the row count exceeds the visible height.
 ///
 /// # Arguments
 /// - `frame` — the ratatui frame to render into.
-/// - `app` — mutable `App` state; reads `session_id`, `todo_scroll_offset`,
-///   and `storage`; writes `todo_area`, `todo_max_scroll`, and
-///   `todo_content_lines`.
+/// - `app` — mutable `App` state; reads `session_id`, `tasks_scroll_offset`,
+///   and `storage`; writes `tasks_area`, `tasks_max_scroll`, and
+///   `tasks_content_lines`.
 /// - `area` — the rect allocated to the panel by the side-panel split.
-fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(Span::styled(
-            " TODO ",
+            " TASKS ",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -3183,9 +3193,9 @@ fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    app.todo_area = area;
+    app.tasks_area = area;
 
-    // Resolve the session to display TODOs for. Fall back to the primary
+    // Resolve the session to display tasks for. Fall back to the primary
     // session id when no specific agent session is selected, mirroring the
     // log panel's session-resolution logic.
     let session_id = app
@@ -3193,48 +3203,97 @@ fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         .clone()
         .or_else(|| app.session_id.clone());
 
-    let rows_result: anyhow::Result<Vec<ragent_storage::TodoRow>> = match &session_id {
+    let rows_result: anyhow::Result<Vec<ragent_storage::TaskRow>> = match &session_id {
         Some(sid) => app
             .storage
-            .get_todos(sid, None)
+            .list_tasks(sid, None)
             .map_err(|e| anyhow::anyhow!(e.to_string())),
         None => Ok(Vec::new()),
     };
 
     let lines: Vec<Line> = match rows_result {
         Ok(rows) if rows.is_empty() => {
-            app.todo_max_scroll = 0;
+            app.tasks_max_scroll = 0;
             vec![Line::from(Span::styled(
-                "No TODO items",
+                "No tasks",
                 Style::default().fg(Color::DarkGray),
             ))]
         }
-        Ok(rows) => rows
-            .iter()
-            .map(|row| {
+        Ok(rows) => {
+            // Compute derived DAG fields so we can show [blocked by …]
+            // annotations (FR-005, FR-018).
+            let dag = ragent_storage::compute_task_dag(&rows);
+
+            let mut all_lines: Vec<Line> = Vec::new();
+            for row in &rows {
                 let status_upper = row.status.to_uppercase();
                 let status_color = match status_upper.as_str() {
                     "PENDING" => Color::Yellow,
                     "IN_PROGRESS" => Color::Cyan,
-                    "DONE" => Color::Green,
+                    "COMPLETED" | "DONE" => Color::Green,
                     "BLOCKED" => Color::Red,
                     _ => Color::DarkGray,
                 };
-                Line::from(vec![
+
+                // Determine if this task is derived-blocked (FR-005).
+                let derived = dag.get(&row.id);
+                let is_derived_blocked = derived.is_some_and(|d| d.is_blocked);
+
+                // Use red for derived-blocked pending tasks (FR-018).
+                let line_color = if is_derived_blocked {
+                    Color::Red
+                } else {
+                    status_color
+                };
+
+                let mut spans = vec![
                     Span::styled(
                         format!("[{status_upper}] "),
-                        Style::default()
-                            .fg(status_color)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(line_color).add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(row.title.clone()),
-                ])
-            })
-            .collect(),
+                    Span::styled(row.title.clone(), Style::default().fg(line_color)),
+                ];
+
+                // Append (owner) suffix when owner is set (FR-018).
+                if let Some(ref owner) = row.owner
+                    && !owner.is_empty()
+                {
+                    spans.push(Span::styled(
+                        format!(" ({owner})"),
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                }
+
+                // Append [blocked by #id, …] when derived blocked (FR-018).
+                if is_derived_blocked {
+                    let deps: Vec<String> =
+                        row.blocked_by.iter().map(|id| format!("#{id}")).collect();
+                    spans.push(Span::styled(
+                        format!(" [blocked by {}]", deps.join(", ")),
+                        Style::default().fg(Color::Red),
+                    ));
+                }
+
+                all_lines.push(Line::from(spans));
+
+                // Render active_form as indented sub-line when in_progress
+                // (FR-018).
+                if row.status == "in_progress"
+                    && let Some(ref active) = row.active_form
+                    && !active.is_empty()
+                {
+                    all_lines.push(Line::from(Span::styled(
+                        format!("  → {active}"),
+                        Style::default().fg(Color::Cyan),
+                    )));
+                }
+            }
+            all_lines
+        }
         Err(_) => {
-            app.todo_max_scroll = 0;
+            app.tasks_max_scroll = 0;
             vec![Line::from(Span::styled(
-                "Failed to load TODOs",
+                "Failed to load tasks",
                 Style::default().fg(Color::Red),
             ))]
         }
@@ -3243,14 +3302,14 @@ fn render_todo_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Cache plain-text content for text selection copy, matching the log
     // panel's wrapping behaviour.
     let todo_inner_width = inner.width as usize;
-    app.todo_content_lines = build_wrapped_content_lines(&lines, todo_inner_width);
+    app.tasks_content_lines = build_wrapped_content_lines(&lines, todo_inner_width);
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     let total_lines = paragraph.line_count(inner.width) as u16;
     let visible_height = inner.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
-    app.todo_max_scroll = max_scroll;
-    let scroll = app.todo_scroll_offset.min(max_scroll);
+    app.tasks_max_scroll = max_scroll;
+    let scroll = app.tasks_scroll_offset.min(max_scroll);
     let paragraph = paragraph.scroll((scroll, 0));
     frame.render_widget(paragraph, inner);
 
@@ -3774,6 +3833,12 @@ fn messages_to_lines<'a>(
         for part in &msg.parts {
             match part {
                 MessagePart::Text { text } => {
+                    // Agent notices are rendered in bright yellow, one item per line.
+                    if msg.role == Role::Assistant && is_agent_notice(text) {
+                        lines.extend(render_agent_notice_lines(text));
+                        continue;
+                    }
+
                     let (dot, dot_style, indent) = match msg.role {
                         Role::User => (
                             "You: ",
@@ -4056,7 +4121,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Filter messages to the selected agent's session.
     // For now, messages are still stored globally, so we match by session_id if available.
-    // TODO: Implement proper multi-session message storage to filter by _display_session.
+    // Tasks: Implement proper multi-session message storage to filter by _display_session.
     // This is a placeholder for future multi-session message handling.
     let messages_to_show = &app.messages;
 
@@ -4226,7 +4291,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Alt+V", "Paste image from clipboard as attachment"),
     ("Alt+L", "Toggle log panel visibility"),
     ("Alt+P", "Toggle profiler panel visibility"),
-    ("Alt+T", "Toggle TODO panel visibility"),
+    ("Alt+T", "Toggle Tasks panel visibility"),
     ("Alt+O", "Toggle telemetry panel visibility"),
     ("Alt+Y", "Toggle YOLO mode (bypass safety checks)"),
     // ── Sending ─────────────────────────────────────────────────────────
@@ -4948,6 +5013,37 @@ mod tests {
     use ragent_agent::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
     use serde_json::json;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_messages_to_lines_renders_agent_notice_bright_yellow_one_line_per_item() {
+        let message = Message::new(
+            "s1",
+            Role::Assistant,
+            vec![MessagePart::Text {
+                text: "📋 Agent Notice\nFirst item\nSecond item".to_string(),
+            }],
+        );
+
+        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
+        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
+
+        // Header plus each list item gets its own line.
+        assert!(rendered.iter().any(|line| line.contains("📋 Agent Notice")));
+        assert!(rendered.iter().any(|line| line.contains("First item")));
+        assert!(rendered.iter().any(|line| line.contains("Second item")));
+
+        // All notice lines are styled bright yellow + bold.
+        for line in &lines {
+            for span in line.spans.iter() {
+                assert_eq!(span.style.fg, Some(ratatui::style::Color::Yellow));
+                assert!(
+                    span.style
+                        .add_modifier
+                        .contains(ratatui::style::Modifier::BOLD)
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_messages_to_lines_renders_full_thinktool_output_multiline() {

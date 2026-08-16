@@ -1,6 +1,31 @@
 # Changelog
 
+## Version: 1.0.32
+
+### Changed
+
+- Bumped workspace version to 1.0.32.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.31
+
+### Fixed
+
+- Background shell tasks spawned with the `bg` tool now emit
+  `BackgroundTaskUpdated` and `BackgroundTaskCompleted` events with the
+  correct owning `session_id`, so the TUI Agents panel updates and removes
+  rows as tasks finish instead of leaving them stuck in the `running` state.
+
+### Changed
+
+- Removed the legacy `/todo` and `/todos` slash-command aliases. The Tasks
+  side panel and task service are now accessed through `/task` (toggle panel
+  or subcommands) and `/tasks` (list task items). The TUI internal task-panel
+  identifiers (`show_todo`, `todo_area`, `SelectionPane::Todo`,
+  `InputAction::ToggleTodo`, etc.) have been renamed to task-specific names.
+- Updated `QUICKSTART.md` to point to the Agents panel for background tasks
+  and `/task list` for session tasks.
 
 ### Fixed — CI clippy and dead-code lint failures
 
@@ -349,7 +374,7 @@ for the implementation plan with gap-resolution tracking (FR-020).
   post-compaction continuation nudges across loop iterations.
 - `crates/ragent-agent/src/session/processor.rs` updated to thread the
   `last_task_completed_at` guard so autopilot auto-continue is
-  suppressed after `task_complete`.
+  suppressed after `agent_complete`.
 - `crates/ragent-agent/tests/test_compaction_integration.rs` updated
   to match the simplified loop.
 
@@ -531,7 +556,7 @@ for the implementation plan with gap-resolution tracking (FR-020).
 
 ### Fixed — Sub-agent and background-agent model resolution
 
-- Background agents and sub-agents (`new_task`) now use the user's
+- Background agents and sub-agents (`new_agent`) now use the user's
   persisted `selected_model` setting from Storage instead of falling
   back to `Config::default()` and `resolve_default_model`, which
   typically picked Anthropic even when no API key was configured.
@@ -1341,7 +1366,7 @@ now applies the evidence-based prompt-engineering guidance from
 - Added `App::last_task_completed_at` timestamp set when a `TaskCompleted`
   event arrives. `poll_autopilot_continue` now suppresses the auto-continue
   and disables autopilot when the agent already signalled completion, so
-  autopilot no longer keeps re-prompting after `task_complete`.
+  autopilot no longer keeps re-prompting after `agent_complete`.
 - The `FinishReason` handler also guards against re-entering autopilot
   continue when a `TaskCompleted` was already consumed this turn.
 
@@ -2796,7 +2821,7 @@ Post-refactor report: `docs/reports/dupes-final.txt`.
     `text_buffer` moved via `mem::take`.
   - `get_messages` routed through `storage_op`; cached config keyed by
     file mtimes; `build_turn_chat_messages` returns the context window;
-    `TaskManager.has_pending_background` AtomicBool skips drain scans;
+    `AgentManager.has_pending_background` AtomicBool skips drain scans;
     interim-save hash uses `serde_json::to_vec` bytes.
   - `ToolsSent` published only on step 1; added `Event::ToolCallBatch` +
     `ToolCallBatchEntry` and SSE forwarding; tool-result preview scan
@@ -3417,7 +3442,7 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 
 ### Fixed
 - **HuggingFace provider discovery failed** — The HuggingFace `/v1/models` router endpoint is public and now works without an API token; discovery no longer errors out immediately when `HF_TOKEN` is unset.  Added `HUGGING_FACE_HUB_TOKEN` as a recognised token source for consistency with the TUI configured-provider detection.  When dynamic discovery fails or returns no models, the TUI now falls back to the provider's static default catalog instead of showing an empty "No models are currently available" dialog.  Empty discovery results are no longer cached, preventing a transient failure from permanently hiding the default models.
-- **Task tool family guidance** — Added a dedicated `## Task Tool Family` section to every primary agent's system prompt that clearly distinguishes `task_complete` (autonomous loop signal — only takes `summary`) from `team_task_complete` (team workflow — only takes `team_name` + `task_id`).  The `task_complete`, `team_task_complete`, and `new_task` tool descriptions and JSON schemas now explicitly warn against the most common parameter-confusion mistakes and reject unknown keys via `additionalProperties: false`.  `task_complete` and `list_tasks` are now hardwired auto-approved so the agent can always finish or inspect background tasks without a permission prompt.
+- **Task tool family guidance** — Added a dedicated `## Task Tool Family` section to every primary agent's system prompt that clearly distinguishes `agent_complete` (autonomous loop signal — only takes `summary`) from `team_task_complete` (team workflow — only takes `team_name` + `task_id`).  The `agent_complete`, `team_task_complete`, and `new_agent` tool descriptions and JSON schemas now explicitly warn against the most common parameter-confusion mistakes and reject unknown keys via `additionalProperties: false`.  `agent_complete` and `list_agents` are now hardwired auto-approved so the agent can always finish or inspect background tasks without a permission prompt.
 
 ## Version: 0.1.0-alpha.108
 
@@ -3474,7 +3499,7 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 - **TUI** — Added `/compress` slash command, compression status bar indicator, and improved status bar layout.
 - **Spec commands** — Major refactor of spec command handling with expanded `/spec impl` and `/spec implement` support.
 - **Bedrock provider** — Refinements to credential handling and SigV4 signing.
-- **Multiple tool refinements** — Updated codeindex_search, list_tasks, memory_search, office_write, and spec_list tools.
+- **Multiple tool refinements** — Updated codeindex_search, list_agents, memory_search, office_write, and spec_list tools.
 - **Test improvements** — Updated multiple test files for compatibility with new APIs and module structure.
 - **TUI toggle persistence** — `/codeindex`, `/internal-llm`, and `/tools` toggles now save to a project-local `.ragent/ragent.json` (creating the directory if needed) instead of falling back to the global config. They also skip writes when the target value has not changed, avoiding unnecessary file churn.
 - **YOLO mode persistence** — YOLO mode state is now saved to the config file (`yolo: true/false`) and restored on startup. Toggling via `/yolo` or the `InputAction::ToggleYolo` keybinding persists the new state immediately.
