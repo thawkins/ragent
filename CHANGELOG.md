@@ -1,5 +1,14 @@
 # Changelog
 
+## Version: 1.0.33
+
+### Changed
+
+- Fixed rustfmt formatting in `crates/ragent-tools-core/src/apply_patch.rs`.
+- Bumped workspace version to 1.0.33.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.32
 
 ### Changed
