@@ -26,3 +26,13 @@ fn test_session_state_stores_thinking_config() {
     state.set_thinking(ThinkingConfig::off());
     assert_eq!(state.thinking(), &ThinkingConfig::off());
 }
+
+#[test]
+fn test_session_state_persists_last_reported_input_tokens() {
+    let mut state = SessionState::new("test-session");
+    assert_eq!(state.last_reported_input_tokens(), 0);
+    state.set_last_reported_input_tokens(12345);
+    assert_eq!(state.last_reported_input_tokens(), 12345);
+    state.clear();
+    assert_eq!(state.last_reported_input_tokens(), 0);
+}

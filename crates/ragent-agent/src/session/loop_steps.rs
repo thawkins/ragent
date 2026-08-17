@@ -625,7 +625,19 @@ impl SessionProcessor {
         };
 
         let compressed_this_turn = false;
-        let last_reported_input_tokens: u64 = 0;
+        let last_reported_input_tokens: u64 = {
+            let session_state_lock = self
+                .session_manager
+                .as_ref()
+                .session_state_cache(session_id);
+            match session_state_lock.lock() {
+                Ok(guard) => guard.last_reported_input_tokens(),
+                Err(_) => {
+                    tracing::warn!(session_id, "session_state cache lock poisoned");
+                    0
+                }
+            }
+        };
 
         // P-3: resolve the model's context window. Some providers (notably the
         // virtual Model Router) report `0` because the real window belongs to
@@ -936,7 +948,19 @@ impl SessionProcessor {
                                 match compact_result {
                                     Ok(outcome) => {
                                         loop_state.compressed_this_turn = true;
-                                        loop_state.last_reported_input_tokens = 0;
+                                        loop_state.last_reported_input_tokens =
+                                            outcome.compressed_tokens as u64;
+                                        {
+                                            let session_state_lock = self
+                                                .session_manager
+                                                .as_ref()
+                                                .session_state_cache(session_id);
+                                            if let Ok(mut guard) = session_state_lock.lock() {
+                                                guard.set_last_reported_input_tokens(
+                                                    outcome.compressed_tokens as u64,
+                                                );
+                                            }
+                                        }
                                         tracing::info!(
                                             original_tokens = outcome.original_tokens,
                                             compressed_tokens = outcome.compressed_tokens,
@@ -1122,6 +1146,19 @@ impl SessionProcessor {
                         } => {
                             last_input_tokens = input_tokens;
                             last_output_tokens = output_tokens;
+                            // Persist the provider-reported input tokens in the
+                            // per-session state cache so the next turn's start-of-turn
+                            // compaction check can use the same usage value shown in
+                            // the TUI status bar instead of resetting to zero.
+                            {
+                                let session_state_lock = self
+                                    .session_manager
+                                    .as_ref()
+                                    .session_state_cache(session_id);
+                                if let Ok(mut guard) = session_state_lock.lock() {
+                                    guard.set_last_reported_input_tokens(input_tokens);
+                                }
+                            }
                             llm_recorder.record_usage(
                                 &turn.model_ref.model_id,
                                 &turn.model_ref.provider_id,
@@ -1181,7 +1218,19 @@ impl SessionProcessor {
                                 match compact_result {
                                     Ok(outcome) => {
                                         loop_state.compressed_this_turn = true;
-                                        loop_state.last_reported_input_tokens = 0;
+                                        loop_state.last_reported_input_tokens =
+                                            outcome.compressed_tokens as u64;
+                                        {
+                                            let session_state_lock = self
+                                                .session_manager
+                                                .as_ref()
+                                                .session_state_cache(session_id);
+                                            if let Ok(mut guard) = session_state_lock.lock() {
+                                                guard.set_last_reported_input_tokens(
+                                                    outcome.compressed_tokens as u64,
+                                                );
+                                            }
+                                        }
                                         tracing::info!(
                                             original_tokens = outcome.original_tokens,
                                             compressed_tokens = outcome.compressed_tokens,

@@ -449,6 +449,12 @@ pub struct SessionState {
     /// that does not mutate the history can skip the JSON serialisation
     /// step as well.
     cached_serialised: Option<Vec<u8>>,
+    /// Provider-reported input token count from the most recent LLM request.
+    ///
+    /// Persisted across turns so the start-of-turn pre-send compaction check
+    /// can use the same usage value shown in the TUI status bar instead of
+    /// falling back to the tool-heavy local estimate every turn.
+    last_reported_input_tokens: u64,
 }
 
 impl SessionState {
@@ -463,6 +469,7 @@ impl SessionState {
             thinking: ThinkingConfig::default(),
             last_history_version: 0,
             cached_serialised: None,
+            last_reported_input_tokens: 0,
         }
     }
 
@@ -490,6 +497,18 @@ impl SessionState {
         self.last_updated = std::time::Instant::now();
         self.last_history_version = 0;
         self.cached_serialised = None;
+        self.last_reported_input_tokens = 0;
+    }
+
+    /// Return the provider-reported input token count from the most recent LLM request.
+    #[must_use]
+    pub fn last_reported_input_tokens(&self) -> u64 {
+        self.last_reported_input_tokens
+    }
+
+    /// Update the provider-reported input token count from the most recent LLM request.
+    pub fn set_last_reported_input_tokens(&mut self, tokens: u64) {
+        self.last_reported_input_tokens = tokens;
     }
 
     /// Return the cached chat-message list when the supplied history

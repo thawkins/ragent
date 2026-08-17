@@ -809,6 +809,16 @@ impl SessionProcessor {
                     context_window,
                     0,
                 );
+                tracing::debug!(
+                    session_id,
+                    effective_tokens = decision.effective_tokens,
+                    threshold = decision.threshold,
+                    context_window,
+                    estimated_tokens = decision.estimated_tokens,
+                    last_reported_input_tokens,
+                    should_compact = decision.should_compact,
+                    "pre-send compaction trigger evaluation"
+                );
                 if decision.should_compact {
                     // Convert the provider-facing chat messages into the
                     // internal `Message` form the compaction runner expects,
@@ -855,7 +865,18 @@ impl SessionProcessor {
                             );
                             chat_messages = Arc::new(new_chat);
                             compressed_this_turn = true;
-                            last_reported_input_tokens = 0;
+                            last_reported_input_tokens = outcome.compressed_tokens as u64;
+                            {
+                                let session_state_lock = self
+                                    .session_manager
+                                    .as_ref()
+                                    .session_state_cache(session_id);
+                                if let Ok(mut guard) = session_state_lock.lock() {
+                                    guard.set_last_reported_input_tokens(
+                                        outcome.compressed_tokens as u64,
+                                    );
+                                }
+                            }
                             tracing::info!(
                                 original_tokens = outcome.original_tokens,
                                 compressed_tokens = outcome.compressed_tokens,
@@ -906,6 +927,17 @@ impl SessionProcessor {
 
             if llm_result.last_input_tokens > 0 {
                 last_reported_input_tokens = llm_result.last_input_tokens;
+                // Persist the provider-reported input tokens into the session state cache
+                // so the next turn starts with the same usage value shown in the TUI.
+                {
+                    let session_state_lock = self
+                        .session_manager
+                        .as_ref()
+                        .session_state_cache(session_id);
+                    if let Ok(mut guard) = session_state_lock.lock() {
+                        guard.set_last_reported_input_tokens(llm_result.last_input_tokens);
+                    }
+                }
             }
 
             // Collect parts from this turn

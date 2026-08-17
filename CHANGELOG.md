@@ -1,5 +1,26 @@
 # Changelog
 
+## Version: 1.0.34
+
+### Fixed
+
+- Start-of-turn context compaction now uses the same provider-reported input
+  token count shown in the TUI status bar. The previous turn's reported usage
+  is persisted in the per-session state cache, preventing the trigger from
+  falling back to the tool-heavy local estimate and firing when the displayed
+  usage percentage is well below the 70 % floor. Emergency overflow and pre-send
+  compaction paths also persist the compressed-token estimate so the next turn's
+  usage percentage remains accurate after compaction.
+- Added debug logging for every pre-send compaction trigger evaluation so users
+  can inspect `effective_tokens`, `threshold`, `context_window`, and
+  `last_reported_input_tokens` when diagnosing compaction behaviour.
+
+### Changed
+
+- Bumped workspace version to 1.0.34.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.33
 
 ### Changed
