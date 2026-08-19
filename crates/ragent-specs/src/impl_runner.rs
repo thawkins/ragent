@@ -71,6 +71,23 @@ pub struct ImplResult {
     pub prompt: String,
     /// Summary text for display.
     pub summary: String,
+    /// Milestone groupings for the tasks that will be executed, used by
+    /// the TUI to create parent/subtask session tasks.
+    pub milestone_groups: Vec<MilestoneGroup>,
+}
+
+/// A group of spec tasks that belong to a single milestone.
+///
+/// Used by the TUI to create a parent session task for the milestone and
+/// subtasks for each spec task inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MilestoneGroup {
+    /// Milestone display name (heading text from `### Milestone N: Name`).
+    pub name: String,
+    /// Deliverable text from the milestone section, if present.
+    pub deliverable: String,
+    /// Spec task IDs that belong to this milestone, in execution order.
+    pub task_ids: Vec<String>,
 }
 
 // ── SpecImplRunner ────────────────────────────────────────────────────────
@@ -90,6 +107,8 @@ pub struct SpecImplRunner {
     tasks: Vec<PlanTask>,
     /// Execution order (indices into `tasks`).
     execution_order: Vec<usize>,
+    /// Parsed milestones from PLAN.md, used to look up deliverables.
+    milestones: Vec<crate::plan_parser::Milestone>,
     /// Options for this run.
     options: ImplOptions,
 }
@@ -120,6 +139,7 @@ impl SpecImplRunner {
 
         // Parse PLAN.md tasks
         let tasks = PlanParser::parse(&spec.plan_md)?;
+        let milestones = PlanParser::parse_milestones(&spec.plan_md);
 
         // Resolve execution order
         let execution_order = if let Some(ref task_id) = options.task_id {
@@ -136,6 +156,7 @@ impl SpecImplRunner {
             specs_root,
             tasks,
             execution_order,
+            milestones,
             options,
         })
     }
@@ -164,6 +185,46 @@ impl SpecImplRunner {
     #[must_use]
     pub const fn total_to_execute(&self) -> usize {
         self.execution_order.len()
+    }
+
+    /// Group the tasks that will be executed by milestone.
+    ///
+    /// Tasks without an assigned milestone are placed under a synthetic
+    /// "Unmapped Tasks" group so every spec task has a parent session task.
+    /// The groups and task IDs are returned in execution order.
+    #[must_use]
+    pub fn milestone_groups(&self) -> Vec<MilestoneGroup> {
+        let deliverables: HashMap<&str, &str> = self
+            .milestones
+            .iter()
+            .map(|m| (m.name.as_str(), m.deliverable.as_str()))
+            .collect();
+        let mut groups: Vec<MilestoneGroup> = Vec::new();
+        let mut index: HashMap<String, usize> = HashMap::new();
+        for &idx in &self.execution_order {
+            let task = &self.tasks[idx];
+            let name = task
+                .milestone
+                .clone()
+                .unwrap_or_else(|| "Unmapped Tasks".to_string());
+            match index.get(&name) {
+                Some(&i) => {
+                    groups[i].task_ids.push(task.id.clone());
+                }
+                None => {
+                    index.insert(name.clone(), groups.len());
+                    groups.push(MilestoneGroup {
+                        name: name.clone(),
+                        deliverable: deliverables
+                            .get(name.as_str())
+                            .map(|s| s.to_string())
+                            .unwrap_or_default(),
+                        task_ids: vec![task.id.clone()],
+                    });
+                }
+            }
+        }
+        groups
     }
 
     /// Get the task ID at the given 1-based rank in the execution order.
@@ -254,6 +315,7 @@ impl SpecImplRunner {
                 execution_order: self.execution_order.clone(),
                 prompt: String::new(),
                 summary: self.build_dry_run_display(),
+                milestone_groups: self.milestone_groups(),
             });
         }
 
@@ -283,6 +345,7 @@ impl SpecImplRunner {
             execution_order: self.execution_order.clone(),
             prompt,
             summary,
+            milestone_groups: self.milestone_groups(),
         })
     }
 
@@ -889,6 +952,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -898,6 +962,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -907,6 +972,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-004".into(),
@@ -916,6 +982,7 @@ mod tests {
                 priority: Priority::Medium,
                 dependencies: vec!["T-002".into(), "T-003".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         let deps = find_dependents(&tasks, "T-001");
@@ -939,6 +1006,7 @@ mod tests {
                     priority: Priority::Critical,
                     dependencies: vec![],
                     status: TaskStatus::Pending,
+                    milestone: None,
                 },
                 PlanTask {
                     id: "T-002".into(),
@@ -948,6 +1016,7 @@ mod tests {
                     priority: Priority::High,
                     dependencies: vec!["T-001".into()],
                     status: TaskStatus::Pending,
+                    milestone: None,
                 },
                 PlanTask {
                     id: "T-003".into(),
@@ -957,10 +1026,12 @@ mod tests {
                     priority: Priority::Medium,
                     dependencies: vec!["T-002".into()],
                     status: TaskStatus::Pending,
+                    milestone: None,
                 },
             ],
             execution_order: vec![0, 1, 2],
             options: ImplOptions::default(),
+            milestones: vec![],
         };
         let summary = runner.effort_summary();
         assert_eq!(summary, "1×S, 1×M, 1×L");
@@ -981,6 +1052,7 @@ mod tests {
                 priority: Priority::Medium,
                 dependencies: vec![],
                 status: TaskStatus::Pending,
+                milestone: None,
             })
             .collect();
         let execution_order: Vec<usize> = (0..tasks.len()).collect();
@@ -990,6 +1062,7 @@ mod tests {
             tasks,
             execution_order,
             options: ImplOptions::default(),
+            milestones: vec![],
         }
     }
 
@@ -1095,6 +1168,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 1);
     }
@@ -1109,6 +1183,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 2);
     }
@@ -1123,6 +1198,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 3);
     }
@@ -1137,6 +1213,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 4);
     }
@@ -1151,6 +1228,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 5);
     }
@@ -1165,6 +1243,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 6);
     }
@@ -1180,6 +1259,7 @@ mod tests {
             priority: Priority::Medium,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         };
         assert_eq!(file_creation_tier(&task), 2);
     }
@@ -1212,5 +1292,103 @@ mod tests {
             !summary.contains("File Creation Order Advisory"),
             "summary should not include warning when order is correct: {summary}"
         );
+    }
+}
+
+#[cfg(test)]
+mod milestone_tests {
+    use super::*;
+    use crate::plan_parser::{Effort, Priority};
+    use crate::spec::TaskStatus;
+
+    #[test]
+    fn test_milestone_groups_group_by_milestone() {
+        let tasks = vec![
+            PlanTask {
+                id: "T-001".into(),
+                title: "Define types".into(),
+                requirement: "FR-001".into(),
+                effort: Effort::S,
+                priority: Priority::Critical,
+                dependencies: vec![],
+                status: TaskStatus::Pending,
+                milestone: Some("Milestone 1: Core".into()),
+            },
+            PlanTask {
+                id: "T-002".into(),
+                title: "Build parser".into(),
+                requirement: "FR-002".into(),
+                effort: Effort::M,
+                priority: Priority::High,
+                dependencies: vec!["T-001".into()],
+                status: TaskStatus::Pending,
+                milestone: Some("Milestone 1: Core".into()),
+            },
+            PlanTask {
+                id: "T-003".into(),
+                title: "Add tests".into(),
+                requirement: "FR-003".into(),
+                effort: Effort::M,
+                priority: Priority::High,
+                dependencies: vec!["T-002".into()],
+                status: TaskStatus::Pending,
+                milestone: Some("Milestone 2: Tests".into()),
+            },
+        ];
+        let execution_order = vec![0, 1, 2];
+        let runner = SpecImplRunner {
+            spec_name: "test".into(),
+            specs_root: PathBuf::from("/tmp"),
+            tasks,
+            execution_order,
+            options: ImplOptions::default(),
+            milestones: vec![],
+        };
+        let groups = runner.milestone_groups();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "Milestone 1: Core");
+        assert_eq!(groups[0].task_ids, vec!["T-001", "T-002"]);
+        assert_eq!(groups[1].name, "Milestone 2: Tests");
+        assert_eq!(groups[1].task_ids, vec!["T-003"]);
+    }
+
+    #[test]
+    fn test_milestone_groups_unmapped_tasks_are_grouped() {
+        let tasks = vec![
+            PlanTask {
+                id: "T-001".into(),
+                title: "A".into(),
+                requirement: "FR-001".into(),
+                effort: Effort::S,
+                priority: Priority::Medium,
+                dependencies: vec![],
+                status: TaskStatus::Pending,
+                milestone: Some("Known".into()),
+            },
+            PlanTask {
+                id: "T-002".into(),
+                title: "B".into(),
+                requirement: "FR-002".into(),
+                effort: Effort::S,
+                priority: Priority::Medium,
+                dependencies: vec![],
+                status: TaskStatus::Pending,
+                milestone: None,
+            },
+        ];
+        let execution_order = vec![0, 1];
+        let runner = SpecImplRunner {
+            spec_name: "test".into(),
+            specs_root: PathBuf::from("/tmp"),
+            tasks,
+            execution_order,
+            options: ImplOptions::default(),
+            milestones: vec![],
+        };
+        let groups = runner.milestone_groups();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "Known");
+        assert_eq!(groups[1].name, "Unmapped Tasks");
+        assert_eq!(groups[1].task_ids, vec!["T-002"]);
     }
 }

@@ -85,6 +85,13 @@ impl App {
         let agent_name = agent_info.name.clone();
 
         let cwd_path = std::env::current_dir().unwrap_or_default();
+        let log_window_path = {
+            let log_dir = cwd_path.join("log");
+            let _ = std::fs::create_dir_all(&log_dir);
+            let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+            Some(log_dir.join(format!("logwindow-{ts}.log")))
+        };
+
         let t0 = Instant::now();
         let builtin_agents = ragent_agent::agent::create_builtin_agents();
         sub.record("App: builtin agents", t0.elapsed());
@@ -196,6 +203,7 @@ impl App {
             show_memory: false,
             show_telemetry: false,
             log_entries: Vec::new(),
+            log_window_path,
             log_scroll_offset: 0,
             profile_scroll_offset: 0,
             tasks_scroll_offset: 0,

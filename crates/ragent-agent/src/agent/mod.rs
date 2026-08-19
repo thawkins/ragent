@@ -474,6 +474,14 @@ pub struct AgentInfo {
     /// selection.  Built-in agents set this to `false` so `/provider` works.
     #[serde(default)]
     pub model_pinned: bool,
+    /// Per-agent stream stall timeout in seconds.
+    ///
+    /// When `Some`, the session processor uses this value instead of
+    /// `stream_config.timeout_secs` for per-chunk stall detection.  This lets
+    /// long-running agents (e.g. background sub-agents) extend the silence
+    /// budget without changing the global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stall_timeout_secs: Option<u64>,
 }
 
 impl AgentInfo {
@@ -506,6 +514,7 @@ impl AgentInfo {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         }
     }
 }
@@ -571,6 +580,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: Some(ThinkingConfig::off()),
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
         AgentInfo {
             name: "general".to_string(),
@@ -597,6 +607,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
         AgentInfo {
             name: "build".to_string(),
@@ -620,6 +631,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
         AgentInfo {
             name: "plan".to_string(),
@@ -643,6 +655,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
         AgentInfo {
             name: "explore".to_string(),
@@ -666,6 +679,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
         AgentInfo {
             name: "title".to_string(),
@@ -687,6 +701,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             thinking: None,
             options: std::sync::Arc::new(HashMap::new()),
             model_pinned: false,
+            stall_timeout_secs: None,
         },
                                       AgentInfo {
                                           name: "summary".to_string(),
@@ -708,6 +723,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                                           thinking: None,
                                           options: std::sync::Arc::new(HashMap::new()),
                                           model_pinned: false,
+            stall_timeout_secs: None,
                                       },
                                       // ── Domain-specific agents ───────────────────────────────────────
                                       AgentInfo {
@@ -745,6 +761,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "python-coder".to_string(),
@@ -782,6 +799,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "typescript-coder".to_string(),
@@ -819,6 +837,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "fastapi-agent".to_string(),
@@ -855,6 +874,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "security-auditor".to_string(),
@@ -887,6 +907,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "test-writer".to_string(),
@@ -922,6 +943,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "documenter".to_string(),
@@ -956,6 +978,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "devops-agent".to_string(),
@@ -992,6 +1015,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "database-agent".to_string(),
@@ -1028,6 +1052,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                       options: std::sync::Arc::new(HashMap::new()),
                       model_pinned: false,
+            stall_timeout_secs: None,
                   },
                   AgentInfo {
                       name: "frontend-agent".to_string(),
@@ -1065,6 +1090,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       thinking: None,
                     options: std::sync::Arc::new(HashMap::new()),
                     model_pinned: false,
+            stall_timeout_secs: None,
                 },
             ]
 }

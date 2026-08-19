@@ -177,22 +177,23 @@ pub fn find_flexible_replacement_range(
     let hay: Vec<char> = content.chars().collect();
     let pat: Vec<char> = decoded.chars().collect();
     let byte_offsets: Vec<usize> = content.char_indices().map(|(i, _)| i).collect();
+    if pat.is_empty() {
+        return Err(FindError::NotFound);
+    }
 
     // Fold consecutive whitespace runs in the pattern down to a single space
-    // marker and record the folded positions that represent whitespace runs.
-    let mut pat_folded: Vec<char> = Vec::with_capacity(pat.len());
-    let mut run_positions: Vec<usize> = Vec::new();
+    // marker. Every space in the folded pattern represents a whitespace run.
+    let mut pat_folded: Vec<(char, bool)> = Vec::with_capacity(pat.len());
     {
         let mut idx = 0;
         while idx < pat.len() {
             if pat[idx].is_whitespace() {
-                run_positions.push(pat_folded.len());
-                pat_folded.push(' ');
+                pat_folded.push((' ', true));
                 while idx < pat.len() && pat[idx].is_whitespace() {
                     idx += 1;
                 }
             } else {
-                pat_folded.push(pat[idx]);
+                pat_folded.push((pat[idx], false));
                 idx += 1;
             }
         }
@@ -200,16 +201,35 @@ pub fn find_flexible_replacement_range(
 
     let mut matches: Vec<(usize, usize)> = Vec::new();
     if !pat_folded.is_empty() {
-        'anchors: for si in 0..hay.len() {
-            // Allow match to start at whitespace if pattern starts with whitespace
-            if !hay[si].is_whitespace() && hay[si] != pat_folded[0] {
-                continue; // anchored literals cannot start on whitespace
+        // Precompute candidate start char indices so we do not scan every
+        // character position. For non-whitespace-leading patterns this also
+        // prevents matches that begin in the middle of unrelated text.
+        let starts_with_ws = pat_folded[0].1;
+        let first_lit = pat_folded[0].0;
+        let mut candidate_indices: Vec<usize> = Vec::new();
+        for (i, c) in hay.iter().enumerate() {
+            if starts_with_ws {
+                if c.is_whitespace() && (i == 0 || !hay[i - 1].is_whitespace()) {
+                    candidate_indices.push(i);
+                }
+            } else if *c == first_lit {
+                candidate_indices.push(i);
+            }
+        }
+
+        'anchors: for &si in &candidate_indices {
+            // When the pattern starts with a literal it must be aligned with
+            // the literal in the content (candidate construction guarantees
+            // this, but guard against an empty haystack).
+            if !starts_with_ws && (si >= hay.len() || hay[si] != first_lit) {
+                continue;
             }
             let mut h = si;
             let mut p = 0;
             let mut ok = true;
             while p < pat_folded.len() {
-                if pat_folded[p] == ' ' && run_positions.contains(&p) {
+                let (pc, is_run) = pat_folded[p];
+                if is_run {
                     // A folded whitespace run must consume ≥1 whitespace chars.
                     let start_h = h;
                     while h < hay.len() && hay[h].is_whitespace() {
@@ -221,7 +241,7 @@ pub fn find_flexible_replacement_range(
                     }
                     p += 1;
                 } else {
-                    if h >= hay.len() || hay[h] != pat_folded[p] {
+                    if h >= hay.len() || hay[h] != pc {
                         ok = false;
                         break;
                     }
@@ -257,6 +277,8 @@ pub fn find_flexible_replacement_range(
                     .match_indices(decoded.as_str())
                     .any(|(pos, _)| pos == s && pos + decoded.len() == e)
                 {
+                    // The match span differs from every exact copy, so the
+                    // needle is still ambiguous across the exact copies.
                     return Err(FindError::MultipleMatches(exact_count));
                 }
             }
@@ -429,27 +451,27 @@ fn indent_normalised_matches(content: &str, needle: &str) -> Vec<(usize, usize, 
     if needle_lines.is_empty() {
         return Vec::new();
     }
-    let content_lines: Vec<&str> = content.lines().collect();
-    // Build the byte offset at which each line starts.
-    let mut starts: Vec<usize> = Vec::with_capacity(content_lines.len());
-    let mut off = 0usize;
-    for line in &content_lines {
-        starts.push(off);
-        off += line.len() + 1; // + '\n'
-    }
+    // Keep line terminators as part of each line so byte ranges are exact.
+    let content_lines: Vec<&str> = content.split_inclusive('\n').collect();
 
     let mut out = Vec::new();
     let n = needle_lines.len();
     for (i, block) in content_lines.windows(n).enumerate() {
-        if needle_lines
-            .iter()
-            .zip(block.iter())
-            .all(|(nl, cl)| nl.trim_start() == cl.trim_start())
-        {
-            let start = starts[i];
+        if needle_lines.iter().zip(block.iter()).all(|(nl, cl)| {
+            let cl_body = cl.strip_suffix('\n').unwrap_or(cl);
+            nl.trim_start() == cl_body.trim_start()
+        }) {
+            let start = content_lines[..i].iter().map(|l| l.len()).sum();
             let last = i + n - 1;
-            let end = starts[last] + content_lines[last].len();
-            out.push((start, end, i, last));
+            let mut end: usize = block.iter().map(|l| l.len()).sum();
+            // The byte range should include the terminating newlines of every
+            // matched line *except* the final line, mirroring the original
+            // `.lines()`-based behaviour: we replace the line content but leave
+            // the file's own newline separators in place.
+            if block[last].ends_with('\n') {
+                end -= 1;
+            }
+            out.push((start, start + end, i, last));
         }
     }
     out
@@ -457,10 +479,10 @@ fn indent_normalised_matches(content: &str, needle: &str) -> Vec<(usize, usize, 
 
 /// Re-apply the file's own indentation onto `new_str` line by line.
 ///
-/// The needle's non-blank lines are zipped with the matched file block: the
-/// leading whitespace of each matched file line replaces whatever leading
-/// whitespace the caller put on the corresponding `new_str` line. Blank
-/// `new_str` lines are left untouched.
+/// The needle's non-blank lines are zipped with the matched file block (using
+/// `split_inclusive('\n')` so newlines are preserved): the leading whitespace of
+/// each matched file line replaces whatever leading whitespace the caller put on
+/// the corresponding `new_str` line. Blank `new_str` lines are left untouched.
 ///
 /// Returns `None` when the shape is incompatible (blank/non-blank mismatch
 /// between a pair of lines), in which case the lane match is discarded.
@@ -470,7 +492,7 @@ fn indent_reapply(
     end_line: usize,
     new_str: &str,
 ) -> Option<String> {
-    let content_lines: Vec<&str> = content.lines().collect();
+    let content_lines: Vec<&str> = content.split_inclusive('\n').collect();
     let block = &content_lines[start_line..=end_line];
     let new_lines: Vec<&str> = new_str.lines().collect();
     if new_lines.len() != block.len() {
@@ -479,24 +501,36 @@ fn indent_reapply(
     let mut out = String::new();
     for (cl, nl) in block.iter().zip(new_lines.iter()) {
         if nl.trim().is_empty() {
-            if !cl.trim().is_empty() {
+            let cl_body = cl.strip_suffix('\n').unwrap_or(cl);
+            let cl_trimmed = cl_body.trim();
+            if !cl_trimmed.is_empty() {
                 // The needle claimed this line is blank but the file line is
                 // not — indentation transfer would be misleading.
                 return None;
             }
             out.push_str(nl);
         } else {
-            if cl.trim().is_empty() {
+            let cl_body = cl.strip_suffix('\n').unwrap_or(cl);
+            let cl_trimmed = cl_body.trim();
+            if cl_trimmed.is_empty() {
                 return None;
             }
             let indent = &cl[..cl.len() - cl.trim_start().len()];
             out.push_str(indent);
             out.push_str(nl.trim_start());
         }
-        out.push('\n');
+        if cl.ends_with('\n') {
+            out.push('\n');
+        }
     }
-    // Preserve no-trailing-newline shape of the caller's new_str.
-    if !new_str.ends_with('\n') {
+    // Preserve the caller's new_str trailing-newline shape. If the caller
+    // supplied a trailing newline we keep one; otherwise trim it. This mirrors
+    // the old `.lines()`-based behaviour for files ending in a newline while
+    // avoiding spurious newline insertion when the matched block is at EOF
+    // without one.
+    if new_str.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    } else if !new_str.ends_with('\n') && out.ends_with('\n') {
         out.pop();
     }
     Some(out)
@@ -656,12 +690,27 @@ pub fn not_found_hint(
     };
     let lead = edit_index.map_or_else(String::new, |i| format!("Edit {i}: "));
     match nearest_window(content, needle) {
-        Some((line, _n, matched, total, snippet)) => format!(
-            "{lead}old_string not found in {}{mode}. It almost matches a block starting at line {line} \
-             ({matched} / {total} needle lines match). Re-read the file to refresh your buffer and rebuild \
-             old_string from the snippet below:\n---\n{snippet}\n---",
-            path.display()
-        ),
+        Some((line, n, matched, total, _snippet)) => {
+            let content_lines: Vec<&str> = content.lines().collect();
+            let start_idx = line.saturating_sub(1);
+            let end_idx = (start_idx + n + 2).min(content_lines.len());
+            let context_start = start_idx.saturating_sub(2);
+            let mut numbered = String::new();
+            for (idx, line) in content_lines
+                .iter()
+                .enumerate()
+                .take(end_idx)
+                .skip(context_start)
+            {
+                numbered.push_str(&format!("{:4} | {}\n", idx + 1, line));
+            }
+            format!(
+                "{lead}old_string not found in {}{mode}. It almost matches a block \
+                 starting at line {line} ({matched} / {total} needle lines match). \
+                 Re-read the file and rebuild old_string from the snippet below:\n---\n{numbered}---",
+                path.display()
+            )
+        }
         None => format!(
             "{lead}{}{mode}",
             format_match_failure(&FindDiag::not_found(), path)
@@ -696,25 +745,31 @@ fn byte_offset_to_line(content: &str, offset: usize) -> usize {
 /// The hint is appended to a `MultipleMatches` error so the model can extend
 /// the needle on the next attempt rather than guess.
 #[must_use]
-pub fn disambiguation_hint(content: &str, starts: &[usize]) -> String {
+pub fn disambiguation_hint(content: &str, needle: &str, starts: &[usize]) -> String {
     if starts.is_empty() {
         return String::new();
     }
-    let mut out = String::from("Match locations (byte offset, line):\n");
+    let content_lines: Vec<&str> = content.lines().collect();
+    let needle_line_count = needle.lines().count().max(1);
+    let mut out = String::from("Match candidates (add unique context from one of these blocks):\n");
     for (i, &s) in starts.iter().enumerate() {
-        let line_no = byte_offset_to_line(content, s);
-        // Show the matched line plus one following line as context.
-        let line_start = content[..s].rfind('\n').map_or(0, |p| p + 1);
-        let first_end = content[s..].find('\n').map_or(content.len(), |p| s + p);
-        let second_end = content[first_end + 1..]
-            .find('\n')
-            .map_or(first_end, |p| first_end + 1 + p);
-        let snippet = &content[line_start..second_end.min(content.len())];
+        let start_line = byte_offset_to_line(content, s).saturating_sub(1);
+        let end_line = (start_line + needle_line_count + 1).min(content_lines.len());
+        let context_start = start_line.saturating_sub(3);
+        let mut snippet = String::new();
+        for (line_no, line) in content_lines
+            .iter()
+            .enumerate()
+            .take(end_line)
+            .skip(context_start)
+        {
+            snippet.push_str(&format!("{:4} | {}\n", line_no + 1, line));
+        }
         out.push_str(&format!(
-            "  {}. offset {} (line {}):\n{}\n",
+            "  {}. offset {} (line {}):\n{}",
             i + 1,
             s,
-            line_no,
+            start_line + 1,
             snippet
         ));
     }

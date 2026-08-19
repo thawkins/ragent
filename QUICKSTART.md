@@ -288,41 +288,40 @@ Ragent loads configuration from multiple sources (last wins):
   "default_agent": "general",
 
   // Provider configuration
-  "provider": {
-    "anthropic": {
-      "env": ["ANTHROPIC_API_KEY"],
-      "thinking": {
-        "enabled": true,
-        "level": "low"
-      }
-    },
-    "generic_openai": {
-      "env": ["GENERIC_OPENAI_API_KEY"],
-      "api": {
-        "base_url": "http://127.0.0.1:8080"
-      }
-    },
-    "ollama": {
-      "api": {
-        "base_url": "http://localhost:11434"
+  "provider": {      "anthropic": {
+        "env": ["ANTHROPIC_API_KEY"],
+        "thinking": {
+          "enabled": true,
+          "level": "low"
+        }
       },
-      "models": {
-        "llama3.2": {
-          "name": "Llama 3.2"
+      "generic_openai": {
+        "env": ["GENERIC_OPENAI_API_KEY"],
+        "api": {
+          "base_url": "http://127.0.0.1:8080"
+        }
+      },
+      "ollama": {
+        "api": {
+          "base_url": "http://localhost:11434"
         },
-        "qwen2.5-coder:32b": {
-          "name": "Qwen 2.5 Coder 32B",
-          "thinking": {
-            "enabled": true,
-            "level": "high"
+        "models": {
+          "llama3.2": {
+            "name": "Llama 3.2"
+          },
+          "qwen2.5-coder:32b": {
+            "name": "Qwen 2.5 Coder 32B",
+            "thinking": {
+              "enabled": true,
+              "level": "high"
+            }
           }
         }
       }
-    }
-  },
+    },
 
-  // Custom agent definitions
-  "agent": {
+    // Custom agent definitions
+    "agent": {
     "build": {
       "model": "anthropic/claude-sonnet-4-20250514",
       "prompt": "You are a senior software engineer.",
@@ -348,17 +347,18 @@ Ragent loads configuration from multiple sources (last wins):
     "Use descriptive variable names"
   ],
 
-      // Context-window compaction (OpenCode-derived summarisation)
-      "compaction": {
-        "auto": true,          // auto-summarise before send (FR-008)
-        "threshold": 0.7,    // trigger at 70% of the model's context window
-        "buffer": 0.10,       // fallback response/safety buffer as a fraction of the window when threshold is null (FR-011)
-        "keep": { "tokens": 0.20 }  // fraction of the window kept as recent turns verbatim (FR-011)
-      },
+  // Context-window compaction (OpenCode-derived summarisation)
+  "compaction": {
+    "auto": true,          // auto-summarise before send (FR-008)
+    "threshold": 0.7,    // trigger at 70% of the model's context window
+    "buffer": 0.10,       // fallback response/safety buffer as a fraction of the window when threshold is null (FR-011)
+    "keep": { "tokens": 0.20 }  // fraction of the window kept as recent turns verbatim (FR-011)
+  },
 
-      // OpenTelemetry metrics export (optional)
-      "telemetry": {
-        "otel": {      "enabled": false,
+  // OpenTelemetry metrics export (optional)
+  "telemetry": {
+    "otel": {
+      "enabled": false,
       "endpoint": "http://localhost:4318",
       "protocol": "http",
       "export_interval_seconds": 30,
@@ -368,6 +368,13 @@ Ragent loads configuration from multiple sources (last wins):
       "metrics": { "ragent.snapshot.restores": false },
       "internal_port": null
     }
+  },
+
+  // Finance data provider (optional)
+  // Default uses free Yahoo Finance. To use Alpha Vantage instead:
+  "finance": {
+    "provider": "alpha_vantage",
+    "api_key": "YOUR_ALPHA_VANTAGE_API_KEY"
   }
 }
 ```

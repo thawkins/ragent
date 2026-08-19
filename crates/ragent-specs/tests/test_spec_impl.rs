@@ -192,6 +192,7 @@ fn test_find_dependents_transitive() {
             priority: Priority::Critical,
             dependencies: vec![],
             status: TaskStatus::Pending,
+            milestone: None,
         },
         PlanTask {
             id: "T-002".into(),
@@ -201,6 +202,7 @@ fn test_find_dependents_transitive() {
             priority: Priority::High,
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
+            milestone: None,
         },
         PlanTask {
             id: "T-003".into(),
@@ -210,6 +212,7 @@ fn test_find_dependents_transitive() {
             priority: Priority::High,
             dependencies: vec!["T-001".into()],
             status: TaskStatus::Pending,
+            milestone: None,
         },
         PlanTask {
             id: "T-004".into(),
@@ -219,6 +222,7 @@ fn test_find_dependents_transitive() {
             priority: Priority::Medium,
             dependencies: vec!["T-002".into(), "T-003".into()],
             status: TaskStatus::Pending,
+            milestone: None,
         },
     ];
 
@@ -249,6 +253,7 @@ fn test_build_single_task_prompt_contains_required_fields() {
         priority: Priority::Critical,
         dependencies: vec!["T-001".into()],
         status: TaskStatus::Pending,
+        milestone: None,
     };
     let prompt = SpecImplRunner::build_single_task_prompt(&task, "myspec", 2, 5);
 
@@ -298,6 +303,7 @@ fn test_build_single_task_prompt_independent_of_dependencies() {
         priority: Priority::Critical,
         dependencies: vec![],
         status: TaskStatus::Pending,
+        milestone: None,
     };
     let task_with_deps = PlanTask {
         id: "T-001".into(),
@@ -307,6 +313,7 @@ fn test_build_single_task_prompt_independent_of_dependencies() {
         priority: Priority::Critical,
         dependencies: vec!["T-000".into()],
         status: TaskStatus::Pending,
+        milestone: None,
     };
 
     let p1 = SpecImplRunner::build_single_task_prompt(&task_no_deps, "s", 1, 1);

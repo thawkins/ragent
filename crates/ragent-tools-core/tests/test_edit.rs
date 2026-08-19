@@ -12,9 +12,9 @@ use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root};
 
 mod replace {
     pub(crate) use ragent_tools_core::replace::{
-        CascadeFail, CascadeMatch, FindDiag, FindError, MatchLane, disambiguation_hint,
-        find_flexible_replacement_range, find_replacement_cascade, format_match_failure,
-        length_note, not_found_hint,
+        CascadeFail, CascadeMatch, FindDiag, FindError, MatchLane, decode_escapes,
+        disambiguation_hint, find_flexible_replacement_range, find_replacement_cascade,
+        format_match_failure, length_note, not_found_hint,
     };
 }
 

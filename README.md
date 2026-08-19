@@ -25,29 +25,31 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
     banned commands, denied patterns, directory escape prevention, syntax validation,
-    obfuscation detection, and user allowlist/denylist)
-  - **Search** — grep
-  - **Web** — webfetch, websearch, http_request
-    - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
-      click, type, fill_form, select, wait, eval, scroll, upload, press,
-      screenshot, status, setup)
-    - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
-      codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
-      hardwired always-allowed)
-    - **Memory** — memory_read, memory_write, memory_replace, memory_store,
-      memory_recall, memory_forget, memory_search, memory_migrate,
-      conversation_search, session_search
-    - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
-    - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
-      and repository management
-    - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
-    - **Sub-agents** — new_agent, cancel_agent, list_agents, wait_agents, agent_complete
-    - **Planning** — plan_enter, plan_exit
-    - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
-    - **Task Management** — task_create, task_update, task_get, task_list
-    - **Interactive** — question, think
-    - **Utility** — calculator, get_env
-    - **Code search & navigation** — codeindex_search, codeindex_symbols,
+    obfuscation detection, and user allowlist/denylist)    - **Search** — grep
+    - **Web** — webfetch, websearch, http_request
+      - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
+        click, type, fill_form, select, wait, eval, scroll, upload, press,
+        screenshot, status, setup)
+      - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
+        codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
+        hardwired always-allowed)
+      - **Memory** — memory_read, memory_write, memory_replace, memory_store,
+        memory_recall, memory_forget, memory_search, memory_migrate,
+        conversation_search, session_search
+      - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
+      - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
+        and repository management
+      - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
+      - **Sub-agents** — new_agent, cancel_agent, list_agents, wait_agents, agent_complete
+      - **Planning** — plan_enter, plan_exit
+      - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
+      - **Task Management** — task_create, task_update, task_get, task_list
+      - **Interactive** — question, think
+      - **Utility** — calculator, get_env
+      - **Stocks & currency** — stock_quote, stock_history, stock_fundamentals,
+        stock_search, stock_options, currency_rate, currency_history. Free Yahoo
+        Finance is the default; Alpha Vantage can be configured in `ragent.json`.
+      - **Code search & navigation** — codeindex_search, codeindex_symbols,
       codeindex_references, codeindex_dependencies, codeindex_status, codeindex_reindex
     - **MasterFetch** — mf_fetch, mf_search, mf_crawl, mf_cache_clear for web content
       extraction, search, and crawling; `mf_search` runs DuckDuckGo, Brave,

@@ -236,6 +236,38 @@ async fn test_edit_multiple_matches_errors() {
         msg.contains("exactly once") || msg.contains("unique"),
         "error should guide toward uniqueness: {msg}"
     );
+    assert!(
+        msg.contains("   1 | dup") && msg.contains("   3 | dup"),
+        "error should list numbered candidates: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn test_edit_collapse_whitespace_multiple_matches_uses_decoded_needle() {
+    // Regression: when collapse_whitespace is enabled and old_string contains
+    // backslash escape sequences, the disambiguation offsets must be computed
+    // from the decoded needle, not the raw backslash characters.
+    let tmp = TempDir::new().unwrap();
+    write_file(tmp.path(), "a.rs", "alpha\nbeta\ngamma\nalpha\nbeta\n");
+    let input = json!({
+        "file_path": "a.rs",
+        "old_string": "alpha\\nbeta",
+        "new_string": "ALPHA\\nBETA",
+        "collapse_whitespace": true,
+    });
+    let err = EditTool
+        .execute(input, &ctx(tmp.path()))
+        .await
+        .expect_err("non-unique old_string must error");
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("2 times"),
+        "error should report the match count: {msg}"
+    );
+    assert!(
+        msg.contains("   1 | alpha") && msg.contains("   4 | alpha"),
+        "error should disambiguate with decoded line numbers: {msg}"
+    );
 }
 
 // ── NotFound (FR-004) ────────────────────────────────────────────────────────

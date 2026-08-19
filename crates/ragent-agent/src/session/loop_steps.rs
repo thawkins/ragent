@@ -1037,7 +1037,9 @@ impl SessionProcessor {
                     // poll in `stream_config.timeout_secs` (default 120s) and
                     // synthesise a retryable `StreamEvent::Error` on timeout so
                     // the existing retry logic can re-attempt the call.
-                    let stall_secs = self.stream_config.timeout_secs;
+                    let stall_secs = agent
+                        .stall_timeout_secs
+                        .unwrap_or(self.stream_config.timeout_secs);
                     let next_event = match tokio::time::timeout(
                         std::time::Duration::from_secs(stall_secs),
                         stream.next(),

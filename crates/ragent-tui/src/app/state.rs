@@ -1235,6 +1235,8 @@ pub struct App {
     pub show_telemetry: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
+    /// Optional file path used to spool log-panel contents when it is visible.
+    pub log_window_path: Option<std::path::PathBuf>,
     /// Scroll offset for the log panel (lines from bottom).
     pub log_scroll_offset: u16,
     /// Scroll offset for the profile panel (lines from bottom).
@@ -1654,6 +1656,12 @@ pub struct SpecImplState {
     /// sequential driver can advance through the original execution order
     /// without rebuilding the runner after every task.
     pub runner: ragent_specs::SpecImplRunner,
+    /// Mapping from milestone name to the parent session task ID created for it.
+    pub milestone_parent_tasks: std::collections::HashMap<String, String>,
+    /// Mapping from spec task ID to the session subtask ID created for it.
+    pub spec_task_to_session_task: std::collections::HashMap<String, String>,
+    /// Mapping from session subtask ID back to milestone name.
+    pub session_task_to_milestone: std::collections::HashMap<String, String>,
 }
 
 /// Specialised agent behaviour modes (M2 Task 2.3).

@@ -13,6 +13,7 @@ pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub(crate) mod codeindex_utils;
 pub mod document_extract;
+pub mod finance;
 pub mod gmail;
 pub mod http_request;
 pub mod libreoffice_common;
@@ -454,6 +455,22 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(masterfetch::tools::screenshot::MfScreenshotTool));
     registry.register(Arc::new(masterfetch::tools::cache_clear::MfCacheClearTool));
     registry.register(Arc::new(masterfetch::tools::version::MfVersionTool));
+
+    // yfinance tools (T-015)
+    registry.register(Arc::new(finance::tools::quote::StockQuoteTool::new()));
+    registry.register(Arc::new(finance::tools::history::StockHistoryTool));
+    registry.register(Arc::new(
+        finance::tools::fundamentals::StockFundamentalsTool,
+    ));
+    registry.register(Arc::new(finance::tools::currency_rate::CurrencyRateTool));
+    registry.register(Arc::new(
+        finance::tools::currency_history::CurrencyHistoryTool,
+    ));
+    registry.register(Arc::new(finance::tools::search::StockSearchTool));
+    registry.register(Arc::new(finance::tools::options::StockOptionsTool));
+    registry.register(Arc::new(
+        finance::tools::recommendations::StockRecommendationsTool,
+    ));
 
     registry
 }

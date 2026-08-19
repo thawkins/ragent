@@ -13,19 +13,20 @@ fn test_tool_visibility_defaults_match_phase_one_plan() {
     assert!(!config.tool_visibility.agents);
     assert!(!config.tool_visibility.plan);
     assert!(config.tool_visibility.codeindex);
+    assert!(config.tool_visibility.finance);
 }
 
 #[test]
 fn test_config_parses_tool_visibility_section() {
     let config: Config = serde_json::from_str(
-        r#"{
-            "tool_visibility": {
-                "office": true,
-                "teams": true,
-                "agents": true,
-                "plan": true,
-                "codeindex": false
-            }
+        r#"{              "tool_visibility": {
+                  "office": true,
+                  "teams": true,
+                  "agents": true,
+                  "plan": true,
+                  "codeindex": false,
+                  "finance": false
+              }
         }"#,
     )
     .expect("config should parse");
@@ -37,6 +38,7 @@ fn test_config_parses_tool_visibility_section() {
     assert!(config.tool_visibility.agents);
     assert!(config.tool_visibility.plan);
     assert!(!config.tool_visibility.codeindex);
+    assert!(!config.tool_visibility.finance);
 }
 
 #[test]
@@ -48,6 +50,7 @@ fn test_merge_preserves_unspecified_tool_visibility_switches() {
     base.tool_visibility.agents = true;
     base.tool_visibility.plan = true;
     base.tool_visibility.codeindex = false;
+    base.tool_visibility.finance = true;
 
     let overlay: Config = serde_json::from_str(
         r#"{
@@ -67,6 +70,7 @@ fn test_merge_preserves_unspecified_tool_visibility_switches() {
     assert!(merged.tool_visibility.plan);
     assert!(merged.tool_visibility.codeindex);
     assert!(!merged.tool_visibility.gitlab);
+    assert!(merged.tool_visibility.finance);
 }
 
 #[test]
@@ -83,6 +87,9 @@ fn test_tool_family_names_returns_expected_family_members() {
     let plan = tool_family_names("plan").expect("plan family should exist");
     assert!(plan.contains(&"plan_enter"));
     assert!(plan.contains(&"plan_exit"));
+    let finance = tool_family_names("finance").expect("finance family should exist");
+    assert!(finance.contains(&"stock_quote"));
+    assert!(finance.contains(&"stock_options"));
     assert!(tool_family_names("missing").is_none());
 }
 
@@ -95,6 +102,7 @@ fn test_effective_hidden_tools_combines_legacy_and_family_switches() {
     config.tool_visibility.agents = false;
     config.tool_visibility.plan = false;
     config.tool_visibility.codeindex = false;
+    config.tool_visibility.finance = false;
 
     let hidden = config.effective_hidden_tools();
 
@@ -105,6 +113,8 @@ fn test_effective_hidden_tools_combines_legacy_and_family_switches() {
     assert!(hidden.contains(&"new_agent".to_string()));
     assert!(hidden.contains(&"plan_enter".to_string()));
     assert!(hidden.contains(&"codeindex_search".to_string()));
+    assert!(hidden.contains(&"stock_quote".to_string()));
+    assert!(hidden.contains(&"stock_options".to_string()));
 }
 
 #[test]

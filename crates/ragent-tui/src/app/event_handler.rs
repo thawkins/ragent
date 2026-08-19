@@ -25,6 +25,7 @@ use crate::app::state::{
 
 // Helpers
 use crate::app::helpers::{short_session_id, summarise_error};
+use crate::widgets::message_widget::truncate_str;
 
 // Re-export status types from theme
 
@@ -1063,10 +1064,13 @@ impl App {
                     })
                     .unwrap_or_default();
                 let icon = if success { "✓" } else { "✗" };
-                self.push_log_no_agent(
-                    LogLevel::Tool,
-                    format!("{}← {} {} {}", step_tag, tool, icon, content),
-                );
+                let display_content = truncate_str(content, 512);
+                let log_line = if display_content.is_empty() {
+                    format!("{}← {} {}", step_tag, tool, icon)
+                } else {
+                    format!("{}← {} {} {}", step_tag, tool, icon, display_content)
+                };
+                self.push_log_no_agent(LogLevel::Tool, log_line);
                 self.needs_redraw = true;
             }
             Event::SubagentStart {
@@ -1077,7 +1081,7 @@ impl App {
                 ref task,
                 background,
                 ..
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 telemetry_counters::increment_subagent_spawns(1);
                 telemetry_counters::add_agents_active(1);
                 // Map the child session's short_sid to the agent name for display
@@ -1123,7 +1127,7 @@ impl App {
                 ref summary,
                 success,
                 ..
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 telemetry_counters::add_agents_active(-1);
                 telemetry_counters::increment_agents_completed(1);
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
@@ -1143,7 +1147,7 @@ impl App {
             Event::SubagentCancelled {
                 ref session_id,
                 ref task_id,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                     self.active_tasks.remove(idx);
                 }
@@ -1156,7 +1160,7 @@ impl App {
                 ref session_id,
                 ref task_id,
                 child_session_id: _,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
                     task.status = ragent_agent::task::TaskStatus::Suspended;
                 }
@@ -1169,7 +1173,7 @@ impl App {
                 ref session_id,
                 ref task_id,
                 child_session_id: _,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(task) = self.active_tasks.iter_mut().find(|t| t.id == *task_id) {
                     task.status = ragent_agent::task::TaskStatus::Running;
                 }
@@ -1183,7 +1187,7 @@ impl App {
                 ref task_id,
                 force,
                 child_session_id: _,
-            } if self.is_current_session(session_id) => {
+            } if self.is_current_or_descendant_session(session_id) => {
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                     self.active_tasks.remove(idx);
                 }
@@ -2026,6 +2030,20 @@ impl App {
 
     pub(crate) fn is_current_session(&self, session_id: &str) -> bool {
         self.session_id.as_deref() == Some(session_id)
+    }
+
+    /// Returns `true` for the primary session or any session that is a
+    /// known descendant (sub-agent spawned by this TUI's agent tree).
+    /// This lets nested sub-agents show up in the Agents panel even when
+    /// the intermediate parent has already completed and been removed from
+    /// `active_tasks`.
+    pub(crate) fn is_current_or_descendant_session(&self, session_id: &str) -> bool {
+        if self.session_id.as_deref() == Some(session_id) {
+            return true;
+        }
+        self.active_tasks
+            .iter()
+            .any(|t| t.child_session_id == session_id || t.parent_session_id == session_id)
     }
 
     pub(crate) fn refresh_research_progress_message(&mut self, name: &str) {

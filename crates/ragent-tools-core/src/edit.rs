@@ -314,15 +314,16 @@ impl Tool for EditTool {
                     bail!(err);
                 }
                 Err(FindError::MultipleMatches(n)) => {
+                    let decoded = super::replace::decode_escapes(old_string);
                     let starts: Vec<usize> = content
-                        .match_indices(old_string)
+                        .match_indices(decoded.as_str())
                         .take(3)
                         .map(|(i, _)| i)
                         .collect();
                     let err = format!(
                         "{} (collapse_whitespace mode: escapes decoded, whitespace runs collapsed)\n{}",
                         format_match_failure(&super::replace::FindDiag::multiple(n), &path),
-                        disambiguation_hint(&content, &starts)
+                        disambiguation_hint(&content, old_string, &starts)
                     );
                     log_edit_operation_ex(
                         &ctx.working_dir,
@@ -374,7 +375,7 @@ impl Tool for EditTool {
                 }) => {
                     // P2.7: show each candidate's location so the model can
                     // extend old_string on the next attempt.
-                    let hint = disambiguation_hint(&content, &starts);
+                    let hint = disambiguation_hint(&content, old_string, &starts);
                     let err = format!(
                         "{}\n{}",
                         format_match_failure(&super::replace::FindDiag::multiple(count), &path),

@@ -25,13 +25,13 @@ pub use constitution::{
 };
 pub use error::SpecError;
 pub use git::{BranchResult, create_spec_branch, spec_branch_name};
-pub use impl_runner::{ImplOptions, ImplResult, SpecImplRunner};
+pub use impl_runner::{ImplOptions, ImplResult, MilestoneGroup, SpecImplRunner};
 pub use io::SpecIo;
 pub use manager::{
     SortBy, SpecFilter, SpecManager, SpecSearchResult, is_valid_transition, next_statuses,
 };
 pub use plan_parser::{
-    Effort, PhaseMinusOneGate, PhaseMinusOneGates, PlanParser, PlanTask, Priority,
+    Effort, Milestone, PhaseMinusOneGate, PhaseMinusOneGates, PlanParser, PlanTask, Priority,
     REQUIRED_GATE_NAMES,
 };
 pub use spec::{Plan, Requirement, Spec, SpecId, SpecStatus, Task, TaskStatus};

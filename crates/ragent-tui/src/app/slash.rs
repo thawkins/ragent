@@ -2029,7 +2029,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         .unwrap_or_else(|| "none".to_string())
                 );
                 self.append_assistant_text(&diag);
-
                 self.status = "inputdiag".to_string();
             }
             "log" => {
@@ -2041,6 +2040,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.show_tasks_panel = false;
                     self.show_memory = false;
                     self.show_telemetry = false;
+                    self.spool_log_window_history();
                 }
                 self.status = if self.show_log {
                     "log panel visible".to_string()
@@ -5840,6 +5840,24 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                 .map(|&i| runner.tasks()[i].id.clone())
                                                 .collect();
                                             let total = task_ids.len();
+
+                                            // Create milestone parent tasks and subtasks in
+                                            // the session task tracker so the implementation
+                                            // run is visible alongside regular tasks.
+                                            let session_id =
+                                                self.session_id.clone().unwrap_or_default();
+                                            let (
+                                                milestone_parents,
+                                                spec_task_to_session,
+                                                session_task_to_milestone,
+                                            ) = create_spec_impl_session_tasks(
+                                                self,
+                                                &session_id,
+                                                &spec_id,
+                                                &runner,
+                                                &impl_result.milestone_groups,
+                                            );
+
                                             self.spec_impl_state =
                                                 Some(crate::app::state::SpecImplState {
                                                     spec_id: spec_id.clone(),
@@ -5848,6 +5866,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                                     current_rank: 1,
                                                     total,
                                                     runner: runner.clone(),
+                                                    milestone_parent_tasks: milestone_parents,
+                                                    spec_task_to_session_task: spec_task_to_session,
+                                                    session_task_to_milestone,
                                                 });
 
                                             // Dispatch the first task's prompt.
@@ -9632,6 +9653,160 @@ fn redact_secrets(input: &str) -> String {
         .to_string();
 
     result
+}
+
+/// Create session tasks for a `/spec impl` run.
+///
+/// For each milestone group, creates a parent `task_create` row, then
+/// creates a subtask for every spec task inside that milestone. Subtasks
+/// are linked to their milestone parent via `metadata.parent_task_id` and
+/// to their spec task via `metadata.spec_task_id`. Spec-task dependencies
+/// are mirrored as `blocked_by` between the corresponding session
+/// subtasks where both exist.
+///
+/// Returns three maps:
+/// - milestone name → parent session task ID
+/// - spec task ID → session subtask ID
+/// - session subtask ID → milestone name
+#[allow(clippy::type_complexity)]
+fn create_spec_impl_session_tasks(
+    app: &mut App,
+    session_id: &str,
+    spec_id: &str,
+    runner: &ragent_specs::SpecImplRunner,
+    milestone_groups: &[ragent_specs::MilestoneGroup],
+) -> (
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, String>,
+) {
+    use uuid::Uuid;
+
+    let mut milestone_parents = std::collections::HashMap::new();
+    let mut spec_task_to_session = std::collections::HashMap::new();
+    let mut session_task_to_milestone = std::collections::HashMap::new();
+
+    if session_id.is_empty() {
+        app.push_log_no_agent(
+            crate::app::LogLevel::Warn,
+            "spec impl: no active session; skipping milestone task creation".to_string(),
+        );
+        return (
+            milestone_parents,
+            spec_task_to_session,
+            session_task_to_milestone,
+        );
+    }
+
+    let task_by_id: std::collections::HashMap<&str, &ragent_specs::PlanTask> =
+        runner.tasks().iter().map(|t| (t.id.as_str(), t)).collect();
+    let _ = task_by_id;
+
+    // Phase 1: create milestone parent tasks.
+    for group in milestone_groups {
+        let parent_id = format!("task-{}", Uuid::new_v4().simple());
+        let description = if group.deliverable.is_empty() {
+            format!("Milestone for spec {spec_id}")
+        } else {
+            group.deliverable.clone()
+        };
+        let metadata = serde_json::json!({
+            "spec_id": spec_id,
+            "milestone": group.name,
+            "kind": "milestone",
+        })
+        .to_string();
+        let active_form = format!("Implementing {}", group.name);
+
+        if let Err(e) = app.storage.create_task(
+            &parent_id,
+            session_id,
+            &group.name,
+            &description,
+            "pending",
+            Some(&active_form),
+            None,
+            &metadata,
+            &[],
+        ) {
+            app.push_log_no_agent(
+                crate::app::LogLevel::Warn,
+                format!(
+                    "spec impl: failed to create milestone task for '{}': {e}",
+                    group.name
+                ),
+            );
+            continue;
+        }
+        milestone_parents.insert(group.name.clone(), parent_id);
+    }
+
+    // Phase 2: create subtasks in execution order.
+    for &idx in runner.execution_order() {
+        let task = &runner.tasks()[idx];
+        let milestone_name = task
+            .milestone
+            .clone()
+            .unwrap_or_else(|| "Unmapped Tasks".to_string());
+        let Some(parent_id) = milestone_parents.get(&milestone_name) else {
+            continue;
+        };
+
+        let blocked_by: Vec<String> = task
+            .dependencies
+            .iter()
+            .filter_map(|dep_id| spec_task_to_session.get(dep_id).cloned())
+            .collect();
+
+        let subtask_id = format!("task-{}", Uuid::new_v4().simple());
+        let metadata = serde_json::json!({
+            "spec_id": spec_id,
+            "milestone": milestone_name,
+            "parent_task_id": parent_id,
+            "spec_task_id": task.id,
+            "kind": "milestone-subtask",
+        })
+        .to_string();
+        let active_form = format!("Implementing task {}", task.id);
+
+        if let Err(e) = app.storage.create_task(
+            &subtask_id,
+            session_id,
+            &task.title,
+            &task.requirement,
+            "pending",
+            Some(&active_form),
+            None,
+            &metadata,
+            &blocked_by,
+        ) {
+            app.push_log_no_agent(
+                crate::app::LogLevel::Warn,
+                format!("spec impl: failed to create subtask for {}: {e}", task.id),
+            );
+            continue;
+        }
+
+        spec_task_to_session.insert(task.id.clone(), subtask_id.clone());
+        session_task_to_milestone.insert(subtask_id, milestone_name);
+    }
+
+    if !milestone_parents.is_empty() || !spec_task_to_session.is_empty() {
+        app.push_log_no_agent(
+            crate::app::LogLevel::Info,
+            format!(
+                "spec impl: created {} milestone task(s) and {} subtask(s)",
+                milestone_parents.len(),
+                spec_task_to_session.len()
+            ),
+        );
+    }
+
+    (
+        milestone_parents,
+        spec_task_to_session,
+        session_task_to_milestone,
+    )
 }
 
 /// Handle the `/template` slash command for listing and applying reusable prompt templates.

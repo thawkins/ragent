@@ -949,6 +949,7 @@ impl App {
                         self.show_tasks_panel = false;
                         self.show_memory = false;
                         self.show_telemetry = false;
+                        self.spool_log_window_history();
                     } else {
                         if self
                             .text_selection

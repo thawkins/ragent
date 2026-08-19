@@ -200,6 +200,9 @@ pub struct Config {
     /// disabled / empty so existing workflows are not disrupted.
     #[serde(default, skip_serializing_if = "ResearchConfig::is_empty")]
     pub research: ResearchConfig,
+    /// Paid finance-provider configuration.
+    #[serde(default)]
+    pub finance: crate::finance::FinanceProviderConfig,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -235,6 +238,8 @@ pub struct ToolVisibilitySpecified {
     pub masterfetch: bool,
     /// `true` when `browser` was explicitly set in the source JSON or via a setter.
     pub browser: bool,
+    /// `true` when `finance` was explicitly set in the source JSON or via a setter.
+    pub finance: bool,
 }
 
 /// Tool-family visibility configuration.
@@ -278,6 +283,12 @@ pub struct ToolVisibilityConfig {
     /// When serialised, this field is only written if the user explicitly set it
     /// (tracked by [`ToolVisibilitySpecified::browser`]).
     pub browser: bool,
+    /// Finance tools (`stock_quote`, `stock_history`, `stock_fundamentals`,
+    /// `currency_rate`, `currency_history`, `stock_search`, `stock_options`).
+    /// Default `true` — the finance tools are visible by default.
+    /// When serialised, this field is only written if the user explicitly set it
+    /// (tracked by [`ToolVisibilitySpecified::finance`]).
+    pub finance: bool,
     /// Tracks which switches were explicitly set, so merge/serialise can
     /// distinguish "user set this" from "this is just the default".
     pub specified: ToolVisibilitySpecified,
@@ -296,6 +307,7 @@ impl ToolVisibilityConfig {
             ("codeindex", self.codeindex),
             ("masterfetch", self.masterfetch),
             ("browser", self.browser),
+            ("finance", self.finance),
         ]
         .into_iter()
     }
@@ -330,6 +342,9 @@ impl Serialize for ToolVisibilityConfig {
         if self.specified.browser {
             count += 1;
         }
+        if self.specified.finance {
+            count += 1;
+        }
         let mut s = serializer.serialize_struct("ToolVisibilityConfig", count)?;
         s.serialize_field("office", &self.office)?;
         s.serialize_field("github", &self.github)?;
@@ -345,6 +360,9 @@ impl Serialize for ToolVisibilityConfig {
         }
         if self.specified.browser {
             s.serialize_field("browser", &self.browser)?;
+        }
+        if self.specified.finance {
+            s.serialize_field("finance", &self.finance)?;
         }
         s.end()
     }
@@ -467,6 +485,7 @@ impl Default for ToolVisibilityConfig {
             codeindex: true,
             masterfetch: true,
             browser: true,
+            finance: true,
             specified: ToolVisibilitySpecified::default(),
         }
     }
@@ -488,6 +507,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             codeindex: Option<bool>,
             masterfetch: Option<bool>,
             browser: Option<bool>,
+            finance: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
@@ -501,6 +521,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             masterfetch: raw.masterfetch.unwrap_or_else(default_true),
             browser: raw.browser.unwrap_or_else(default_true),
+            finance: raw.finance.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
                 github: raw.github.is_some(),
@@ -511,6 +532,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 codeindex: raw.codeindex.is_some(),
                 masterfetch: raw.masterfetch.is_some(),
                 browser: raw.browser.is_some(),
+                finance: raw.finance.is_some(),
             },
         })
     }
@@ -613,6 +635,15 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "mf_version",
         ]),
         "browser" => Some(&["browser"]),
+        "finance" => Some(&[
+            "stock_quote",
+            "stock_history",
+            "stock_fundamentals",
+            "currency_rate",
+            "currency_history",
+            "stock_search",
+            "stock_options",
+        ]),
         _ => None,
     }
 }
@@ -1853,6 +1884,10 @@ impl Config {
             base.tool_visibility.browser = overlay.tool_visibility.browser;
             base.tool_visibility.specified.browser = true;
         }
+        if overlay.tool_visibility.specified.finance {
+            base.tool_visibility.finance = overlay.tool_visibility.finance;
+            base.tool_visibility.specified.finance = true;
+        }
 
         // Compaction: overlay takes precedence.
         base.compaction = overlay.compaction;
@@ -1882,6 +1917,13 @@ impl Config {
         }
         if overlay.research.oa_min_full_text_chars != default_oa_min_full_text_chars() {
             base.research.oa_min_full_text_chars = overlay.research.oa_min_full_text_chars;
+        }
+
+        // Finance provider config: overlay takes precedence when it contains
+        // any explicit setting, so project-level Alpha Vantage credentials are
+        // not silently discarded by the default Yahoo config.
+        if overlay.finance.is_explicitly_configured() {
+            base.finance = overlay.finance;
         }
 
         base

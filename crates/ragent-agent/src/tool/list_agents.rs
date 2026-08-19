@@ -142,14 +142,7 @@ impl Tool for ListAgentsTool {
                 &task.id
             };
 
-            let status = match task.status {
-                crate::task::TaskStatus::Running => "⏳ running",
-                crate::task::TaskStatus::Completed => "✅ completed",
-                crate::task::TaskStatus::Failed => "❌ failed",
-                crate::task::TaskStatus::Cancelled => "🚫 cancelled",
-                crate::task::TaskStatus::Suspended => "⏸ suspended",
-                crate::task::TaskStatus::Terminating => "💀 terminating",
-            };
+            let status = format!("{} {}", status_emoji(&task.status), task.status);
             let duration = if let Some(completed) = task.completed_at {
                 let dur = completed - task.created_at;
                 format!("{}s", dur.num_seconds())
@@ -185,15 +178,9 @@ impl Tool for ListAgentsTool {
 
 /// Format detailed information about a single task.
 fn format_task_detail(task: &crate::task::TaskEntry) -> String {
-    let status = match task.status {
-        crate::task::TaskStatus::Running => "⏳ Running",
-        crate::task::TaskStatus::Completed => "✅ Completed",
-        crate::task::TaskStatus::Failed => "❌ Failed",
-        crate::task::TaskStatus::Cancelled => "🚫 Cancelled",
-        crate::task::TaskStatus::Suspended => "⏸ Suspended",
-        crate::task::TaskStatus::Terminating => "💀 Terminating",
-    };
-
+    let mut status_words = task.status.to_string();
+    let first = status_words.remove(0).to_uppercase().to_string();
+    let status = format!("{} {first}{status_words}", status_emoji(&task.status));
     let duration = if let Some(completed) = task.completed_at {
         let dur = completed - task.created_at;
         format!("{}s", dur.num_seconds())
@@ -232,4 +219,16 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
     }
 
     detail
+}
+
+/// Returns the emoji marker used to visually represent a task status.
+fn status_emoji(status: &crate::task::TaskStatus) -> &'static str {
+    match status {
+        crate::task::TaskStatus::Running => "⏳",
+        crate::task::TaskStatus::Completed => "✅",
+        crate::task::TaskStatus::Failed => "❌",
+        crate::task::TaskStatus::Cancelled => "🚫",
+        crate::task::TaskStatus::Suspended => "⏸",
+        crate::task::TaskStatus::Terminating => "💀",
+    }
 }

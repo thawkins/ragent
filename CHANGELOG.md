@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+## Version: 1.0.35
+
+### Changed
+
+- Bumped workspace version to 1.0.35.
+- Updated `h2` crate to 0.4.16 to resolve RUSTSEC-2026-0258.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.34
 
 ### Fixed

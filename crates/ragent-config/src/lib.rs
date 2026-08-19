@@ -12,6 +12,7 @@ pub mod compaction;
 pub mod config;
 pub mod dir_lists;
 pub mod edit_log;
+pub mod finance;
 pub mod permission;
 pub mod telemetry;
 pub mod trigger;

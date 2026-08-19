@@ -27,6 +27,9 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 chrono = { workspace = true }
+rand = "0.9"
+paft-decimal = "0.9"
+paft-money = "0.9"
 uuid = { workspace = true }
 dirs = { workspace = true }
 html2text = { workspace = true }
@@ -38,6 +41,7 @@ tokio-tungstenite = { workspace = true }
 regex = { workspace = true }
 percent-encoding = "2"
 docx-rust = { workspace = true }
+yfinance-rs = "0.9.1"
 calamine = { workspace = true }
 rust_xlsxwriter = { workspace = true }
 ooxmlsdk = { workspace = true }

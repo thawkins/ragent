@@ -50,6 +50,7 @@ async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }
 regex = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = []

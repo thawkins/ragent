@@ -1541,15 +1541,58 @@ impl App {
     }
 
     /// Push a log entry at the given level, tagging it with an optional agent id
-    /// and the current session id.
+    /// and the current session id. When the log panel is visible, the entry is
+    /// also appended to the log-window spool file under the project's `log/`
+    /// directory.
     pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
-        self.log_entries.push(LogEntry {
+        let entry = LogEntry {
             timestamp: chrono::Utc::now(),
             level,
-            message,
+            message: message.clone(),
             session_id: self.session_id.clone(),
             agent_id,
-        });
+        };
+        self.log_entries.push(entry);
+        if self.show_log {
+            if let Some(ref path) = self.log_window_path {
+                self.append_log_entry_to_spool(path, level, &message);
+            }
+        }
+    }
+
+    /// Append a single formatted log line to the log-window spool file.
+    fn append_log_entry_to_spool(&self, path: &std::path::Path, level: LogLevel, message: &str) {
+        use std::io::Write;
+        let level_str = match level {
+            LogLevel::Info => "INF",
+            LogLevel::Tool => "TUL",
+            LogLevel::Warn => "WRN",
+            LogLevel::Error => "ERR",
+        };
+        let ts = chrono::Utc::now().to_rfc3339();
+        let line = format!("{ts} {level_str} {message}\n");
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = file.write_all(line.as_bytes());
+        }
+    }
+
+    /// Flush every current log entry to the log-window spool file. Called when
+    /// the log panel is toggled on so the file contains the full history that
+    /// is currently visible in the panel.
+    pub(crate) fn spool_log_window_history(&mut self) {
+        if !self.show_log {
+            return;
+        }
+        let Some(ref path) = self.log_window_path else {
+            return;
+        };
+        for entry in &self.log_entries {
+            self.append_log_entry_to_spool(path, entry.level, &entry.message);
+        }
     }
 
     /// Convenience wrapper for [`push_log`](Self::push_log) with no agent id.

@@ -495,6 +495,7 @@ async fn main() -> Result<()> {
     startup.record("Model selection", t0.elapsed());
 
     let max_background_agents = config.experimental.max_background_agents;
+    let background_agent_timeout = config.experimental.background_agent_timeout;
     let stream_config = config.stream.clone();
 
     let config = Arc::new(tokio::sync::RwLock::new(config));
@@ -576,6 +577,7 @@ async fn main() -> Result<()> {
         event_bus.clone(),
         session_processor.clone(),
         max_background_agents,
+        background_agent_timeout,
     ));
     let _ = session_processor.agent_manager.set(agent_manager);
     tracing::debug!(max_background_agents, "Agent manager initialized");

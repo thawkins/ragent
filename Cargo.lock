@@ -180,7 +180,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -191,7 +191,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -704,6 +704,9 @@ name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "bitpacking"
@@ -802,6 +805,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "brotli"
+version = "8.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5cc91aac060a7a1e25823bdccbfb6af1875b88f17c6daac97894eed8207166b3"
+dependencies = [
+ "alloc-no-stdlib",
+ "alloc-stdlib",
+ "brotli-decompressor",
 ]
 
 [[package]]
@@ -992,6 +1006,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-tz"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+dependencies = [
+ "chrono",
+ "phf 0.12.1",
+ "serde",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1146,6 +1171,7 @@ version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce2548391e9c1929c21bf6aa2680af86fe4c1b33e6cea9ac1cfeec0bd11218cf"
 dependencies = [
+ "brotli",
  "compression-core",
  "flate2",
  "memchr",
@@ -1664,7 +1690,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1780,7 +1806,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2274,9 +2300,9 @@ checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "h2"
-version = "0.4.15"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2532,6 +2558,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
+ "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -2584,7 +2611,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2893,7 +2920,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2901,6 +2928,32 @@ name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
+
+[[package]]
+name = "isin"
+version = "0.1.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19bcf2544150282ebe712b4615813c1986bb014564928b1c4a4a567402d6bf02"
+
+[[package]]
+name = "iso_country"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20633e788d3948ea7336861fdb09ec247f5dae4267e8f0743fa97de26c28624d"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
+name = "iso_currency"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fed4b3f0921193400b1df556228bfd917c57c7fa38bda904d552653c5c3b641b"
+dependencies = [
+ "iso_country",
+ "proc-macro2",
+ "quote",
+]
 
 [[package]]
 name = "itertools"
@@ -4235,6 +4288,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moka"
+version = "0.12.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4293f18e7567a1caf3c584855554377025c65e0aa445344d04171f5ad63d19b9"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "equivalent",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "tagptr",
+ "uuid",
+]
+
+[[package]]
 name = "monostate"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4397,7 +4467,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4790,6 +4860,129 @@ dependencies = [
 ]
 
 [[package]]
+name = "paft"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5729112e2baa2d34081d336cce5ec26583cb1631ea9141c0052dedef98a19e89"
+dependencies = [
+ "iso_currency",
+ "paft-aggregates",
+ "paft-core",
+ "paft-decimal",
+ "paft-domain",
+ "paft-fundamentals",
+ "paft-market",
+ "paft-money",
+ "paft-utils",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-aggregates"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6e4607765171c9f8272b94444f18509c543d844438c78e84db744d37bdf126e"
+dependencies = [
+ "chrono",
+ "paft-domain",
+ "paft-money",
+ "serde",
+]
+
+[[package]]
+name = "paft-core"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e120cb167a9dc7d31445f706f79c950ee71aa6989ec32e1750f830d11eed892"
+dependencies = [
+ "chrono",
+ "paft-utils",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-decimal"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c316206b71765363a2e4316291c53503ac760adb23b308a910ac41d5b118638"
+dependencies = [
+ "rust_decimal",
+ "serde",
+]
+
+[[package]]
+name = "paft-domain"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "866260e42c908cd0a5c2e6d1cbaea9db12becd6a329c1ef684d3aa9191a46368"
+dependencies = [
+ "chrono",
+ "isin",
+ "paft-core",
+ "paft-utils",
+ "serde",
+ "smol_str",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-fundamentals"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e651c0e4e1b62af13c751cddee03f770a3de955fa41acf48af3397e16658b47"
+dependencies = [
+ "chrono",
+ "paft-core",
+ "paft-decimal",
+ "paft-domain",
+ "paft-money",
+ "paft-utils",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-market"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c0199cab0c1e12b2e11b67962101ba8b84b281b34c86cc9d8ea9d915a6a3dc3"
+dependencies = [
+ "bitflags 2.13.1",
+ "chrono",
+ "chrono-tz",
+ "paft-decimal",
+ "paft-domain",
+ "paft-money",
+ "paft-utils",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-money"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0856a6cd715506023e2029094c1b101662e8ee16cbb0da87db8c3d1443ff7b4"
+dependencies = [
+ "iso_currency",
+ "paft-decimal",
+ "paft-utils",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "paft-utils"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c9eeb29f4898718b6489a6d29ab8d17e398589c2605fc65ed48a7a2858dfab8"
+dependencies = [
+ "smol_str",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4892,6 +5085,15 @@ dependencies = [
 
 [[package]]
 name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_shared 0.12.1",
+]
+
+[[package]]
+name = "phf"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1562dc717473dbaa4c1f85a36410e03c047b2e7df7f45ee938fbef64ae7fadf"
@@ -4964,6 +5166,15 @@ name = "phf_shared"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67eabc2ef2a60eb7faa00097bd1ffdb5bd28e62bf39990626a582201b7a754e5"
+dependencies = [
+ "siphasher 1.0.3",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
 dependencies = [
  "siphasher 1.0.3",
 ]
@@ -5389,7 +5600,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -5427,9 +5638,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.5",
+ "socket2 0.5.10",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5483,7 +5694,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5510,7 +5721,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5585,7 +5796,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5612,7 +5823,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5702,7 +5913,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5733,7 +5944,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5794,7 +6005,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5883,6 +6094,8 @@ dependencies = [
  "ndarray",
  "ooxmlsdk",
  "ort",
+ "paft-decimal",
+ "paft-money",
  "pdf-extract",
  "percent-encoding",
  "printpdf",
@@ -5892,6 +6105,7 @@ dependencies = [
  "ragent-storage",
  "ragent-tools-core",
  "ragent-types",
+ "rand 0.9.5",
  "readability-rs",
  "regex",
  "reqwest 0.12.28",
@@ -5908,6 +6122,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "yfinance-rs",
  "zip 7.2.0",
 ]
 
@@ -5931,7 +6146,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.34"
+version = "1.0.35"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5974,6 +6189,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -6296,6 +6512,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
+ "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -6549,7 +6766,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6564,6 +6781,18 @@ dependencies = [
  "rustls-webpki",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dab5152771c58876a2146916e53e35057e1a4dfa2b9df0f0305b07f611fdea4d"
+dependencies = [
+ "openssl-probe",
+ "rustls-pki-types",
+ "schannel",
+ "security-framework",
 ]
 
 [[package]]
@@ -6746,6 +6975,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "serde_field_result"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12d3829c58a858ded6f18dc9bb4fcd42415851a9c3b2e44dff2908479ad09b6e"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6952,6 +7191,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "smol_str"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
+dependencies = [
+ "borsh",
+ "serde_core",
+]
+
+[[package]]
 name = "socket2"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6968,7 +7217,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7247,6 +7496,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tagptr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
+
+[[package]]
 name = "tantivy"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7414,7 +7669,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8564,7 +8819,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -9004,6 +9259,28 @@ name = "xmlparser"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
+
+[[package]]
+name = "yfinance-rs"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d71693be5300f2e9b1cee66f2efe6ea08655583333dcbf314c14c2f6807ce07a"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "futures",
+ "getrandom 0.3.4",
+ "moka",
+ "paft",
+ "reqwest 0.12.28",
+ "rust_decimal",
+ "serde",
+ "serde_field_result",
+ "serde_json",
+ "tokio",
+ "unicode-normalization",
+ "url",
+]
 
 [[package]]
 name = "yoke"

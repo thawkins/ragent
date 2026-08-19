@@ -118,6 +118,44 @@ pub struct PlanTask {
     pub dependencies: Vec<String>,
     /// Current status.
     pub status: TaskStatus,
+    /// Milestone this task belongs to, parsed from the `## Milestones`
+    /// section by matching the bullet text to the task title.
+    pub milestone: Option<String>,
+}
+
+// ── Milestone ─────────────────────────────────────────────────────────────
+
+/// A milestone parsed from a PLAN.md `## Milestones` section.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Milestone {
+    /// Display name, e.g. "Milestone 1: Core Types".
+    pub name: String,
+    /// Deliverable description from the `**Deliverable:**` line, if present.
+    pub deliverable: String,
+    /// Task title hints extracted from the bullet list under this milestone.
+    pub items: Vec<String>,
+}
+
+impl Milestone {
+    /// Normalise a bullet line into a comparable title.
+    ///
+    /// Strips leading checkbox markers (`- [ ]`, `- [x]`), leading dashes/bullets,
+    /// and surrounding whitespace, then lowercases the result.
+    #[must_use]
+    pub fn normalise_item(text: &str) -> String {
+        let text = text.trim();
+        // Strip markdown checkbox
+        let text = text
+            .strip_prefix("- [ ]")
+            .or_else(|| text.strip_prefix("- [x]"))
+            .or_else(|| text.strip_prefix("- [X]"))
+            .unwrap_or(text)
+            .trim();
+        // Strip plain bullet dash or asterisk
+        let text = text.strip_prefix("-").unwrap_or(text).trim();
+        let text = text.strip_prefix('*').unwrap_or(text).trim();
+        text.to_lowercase()
+    }
 }
 
 // ── Phase -1 Gates (FR-008) ───────────────────────────────────────────────
@@ -438,10 +476,109 @@ impl PlanParser {
                 priority,
                 dependencies,
                 status,
+                milestone: None,
             });
         }
 
+        // Attach milestones based on title matching
+        let milestones = Self::parse_milestones(plan_md);
+        Self::attach_milestones(&mut tasks, &milestones);
+
         tasks
+    }
+
+    /// Parse the `## Milestones` section from a PLAN.md string.
+    ///
+    /// Detects `### Milestone N: Name` headings and extracts bullet items
+    /// under each until the next `###` milestone or a top-level `##` heading.
+    /// Empty sections are ignored; tasks not matched to any milestone keep
+    /// `milestone = None`.
+    pub fn parse_milestones(plan_md: &str) -> Vec<Milestone> {
+        let mut milestones = Vec::new();
+        let mut current: Option<Milestone> = None;
+        let mut in_milestones_section = false;
+
+        for line in plan_md.lines() {
+            let trimmed = line.trim();
+
+            // Enter milestones section
+            if trimmed.eq_ignore_ascii_case("## Milestones") {
+                in_milestones_section = true;
+                continue;
+            }
+
+            // Leave section at next top-level ## heading
+            if in_milestones_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
+                break;
+            }
+
+            if !in_milestones_section || trimmed.is_empty() {
+                continue;
+            }
+
+            // New milestone heading: `### Milestone N: Name`
+            if trimmed.starts_with("### ") {
+                if let Some(m) = current.take()
+                    && (!m.items.is_empty() || !m.name.is_empty())
+                {
+                    milestones.push(m);
+                }
+                let name = trimmed.strip_prefix("###").unwrap_or(trimmed).trim();
+                current = Some(Milestone {
+                    name: name.to_string(),
+                    deliverable: String::new(),
+                    items: Vec::new(),
+                });
+                continue;
+            }
+
+            let Some(ref mut m) = current else { continue };
+
+            // Deliverable line: case-insensitive `**Deliverable:** ...`
+            let lowered = trimmed.to_lowercase();
+            if lowered.starts_with("**deliverable:**") {
+                let prefix_len = "**deliverable:**".len();
+                m.deliverable = trimmed[prefix_len..].trim().to_string();
+                continue;
+            }
+
+            // Bullet item under milestone
+            if trimmed.starts_with('-') || trimmed.starts_with('*') {
+                let normalised = Milestone::normalise_item(trimmed);
+                if !normalised.is_empty() {
+                    m.items.push(normalised);
+                }
+            }
+        }
+
+        if let Some(m) = current.take()
+            && (!m.items.is_empty() || !m.name.is_empty())
+        {
+            milestones.push(m);
+        }
+
+        milestones
+    }
+
+    /// Attach milestone names to tasks by matching normalised bullet text
+    /// to the lowercased task title. Each task is assigned to the first
+    /// milestone whose items match its title.
+    fn attach_milestones(tasks: &mut [PlanTask], milestones: &[Milestone]) {
+        if milestones.is_empty() {
+            return;
+        }
+        for task in tasks.iter_mut() {
+            let title_lower = task.title.to_lowercase();
+            for m in milestones {
+                if m.items
+                    .iter()
+                    .any(|item| title_lower == *item || title_lower.contains(item))
+                {
+                    task.milestone = Some(m.name.clone());
+                    break;
+                }
+            }
+        }
     }
 
     /// Parse a comma-separated dependency string.
@@ -704,6 +841,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -713,6 +851,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -722,6 +861,7 @@ mod tests {
                 priority: Priority::Medium,
                 dependencies: vec!["T-002".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         let order = resolve_execution_order(&tasks).unwrap();
@@ -748,6 +888,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -757,6 +898,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -766,6 +908,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-004".into(),
@@ -775,6 +918,7 @@ mod tests {
                 priority: Priority::Medium,
                 dependencies: vec!["T-002".into(), "T-003".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         let order = resolve_execution_order(&tasks).unwrap();
@@ -800,6 +944,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec!["T-002".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -809,6 +954,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         let result = resolve_execution_order(&tasks);
@@ -838,6 +984,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -847,6 +994,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -856,6 +1004,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
             PlanTask {
                 id: "T-004".into(),
@@ -865,6 +1014,7 @@ mod tests {
                 priority: Priority::Medium,
                 dependencies: vec!["T-002".into(), "T-003".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         // --task T-003 should include T-001 and T-003
@@ -886,6 +1036,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Completed,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -895,6 +1046,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::InProgress,
+                milestone: None,
             },
             PlanTask {
                 id: "T-003".into(),
@@ -904,6 +1056,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-002".into()],
                 status: TaskStatus::Pending,
+                milestone: None,
             },
         ];
         let order = resolve_execution_order(&tasks).unwrap();
@@ -925,6 +1078,7 @@ mod tests {
                 priority: Priority::Critical,
                 dependencies: vec![],
                 status: TaskStatus::Completed,
+                milestone: None,
             },
             PlanTask {
                 id: "T-002".into(),
@@ -934,6 +1088,7 @@ mod tests {
                 priority: Priority::High,
                 dependencies: vec!["T-001".into()],
                 status: TaskStatus::Blocked,
+                milestone: None,
             },
         ];
         let order = resolve_execution_order(&tasks).unwrap();
@@ -1190,4 +1345,92 @@ A trailing comment.
         assert!(REQUIRED_GATE_NAMES.contains(&"Anti-Abstraction"));
         assert!(REQUIRED_GATE_NAMES.contains(&"Integration-First"));
     }
+}
+
+// ── Milestone tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_milestone_normalise_item() {
+    assert_eq!(
+        Milestone::normalise_item("- [ ] Define types"),
+        "define types"
+    );
+    assert_eq!(
+        Milestone::normalise_item("- [x] Build parser"),
+        "build parser"
+    );
+    assert_eq!(Milestone::normalise_item("- Add tests"), "add tests");
+    assert_eq!(Milestone::normalise_item("* Finalise API"), "finalise api");
+    assert_eq!(Milestone::normalise_item(""), "");
+}
+
+#[test]
+fn test_parse_milestones_extracts_names_deliverables_and_items() {
+    let md = r"# Plan
+
+## Milestones
+
+### Milestone 1: Core Types
+**Deliverable:** Typed plan-task structures.
+
+- [ ] Define types
+- [ ] Build parser
+
+### Milestone 2: Tests
+**Deliverable:** Verified behaviour.
+
+- Add tests
+
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|----|-------|-------------|--------|----------|--------------|
+| T-001 | Define types | FR-001 | S | Critical | — |
+| T-002 | Build parser | FR-002 | M | High | T-001 |
+| T-003 | Add tests | FR-003 | M | High | T-002 |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    assert_eq!(
+        tasks[0].milestone.as_deref(),
+        Some("Milestone 1: Core Types")
+    );
+    assert_eq!(
+        tasks[1].milestone.as_deref(),
+        Some("Milestone 1: Core Types")
+    );
+    assert_eq!(tasks[2].milestone.as_deref(), Some("Milestone 2: Tests"));
+}
+
+#[test]
+fn test_parse_milestones_unmapped_tasks_are_none() {
+    let md = r"## Milestones
+
+### Milestone 1: Core
+- [ ] Unrelated task
+
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|----|-------|-------------|--------|----------|--------------|
+| T-001 | Real task | FR-001 | S | Critical | — |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    assert_eq!(tasks[0].milestone, None);
+}
+
+#[test]
+fn test_parse_milestones_case_insensitive_match() {
+    let md = r"## Milestones
+
+### M1
+- define TYPES
+
+## Tasks
+
+| ID | Title | Requirement | Effort | Priority | Dependencies |
+|----|-------|-------------|--------|----------|--------------|
+| T-001 | Define Types | FR-001 | S | Critical | — |
+";
+    let tasks = PlanParser::parse(md).unwrap();
+    assert_eq!(tasks[0].milestone.as_deref(), Some("M1"));
 }

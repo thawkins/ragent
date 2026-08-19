@@ -320,7 +320,7 @@ fn nearest_window_below_threshold_returns_none() {
 fn disambiguation_hint_lists_offsets_and_lines() {
     let content = "foo = 1;\nbar();\nfoo = 2;\n";
     let starts: Vec<usize> = content.match_indices("foo").map(|(i, _)| i).collect();
-    let hint = disambiguation_hint(content, &starts);
+    let hint = disambiguation_hint(content, "foo", &starts);
     assert!(
         hint.contains("offset 0"),
         "should list first offset: {hint}"
@@ -333,4 +333,28 @@ fn disambiguation_hint_lists_offsets_and_lines() {
     assert!(hint.contains("line 3"), "should name line numbers: {hint}");
     assert!(hint.contains("foo = 1;"), "should show context: {hint}");
     assert!(hint.contains("foo = 2;"), "should show context: {hint}");
+}
+
+#[test]
+fn disambiguation_hint_numbers_context_lines_for_multiline_needle() {
+    let content = "fn a() {\n    x = 1;\n}\nfn b() {\n    x = 2;\n}\n";
+    let needle = "    x = ?;\n}";
+    let starts: Vec<usize> = content
+        .match_indices("    x = 1;\n}")
+        .map(|(i, _)| i)
+        .collect();
+    let hint = disambiguation_hint(content, needle, &starts);
+    // The new hint is line-numbered and includes surrounding function names.
+    assert!(
+        hint.contains("   1 | fn a() {"),
+        "should show function context: {hint}"
+    );
+    assert!(
+        hint.contains("   2 |     x = 1;"),
+        "should show matched line: {hint}"
+    );
+    assert!(
+        hint.contains("Match candidates (add unique context from one of these blocks)"),
+        "should invite unique context: {hint}"
+    );
 }

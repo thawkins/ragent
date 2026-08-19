@@ -339,8 +339,9 @@ impl Tool for MultiEditTool {
                                 false,
                             ),
                             FindError::MultipleMatches(n) => {
+                                let decoded = super::replace::decode_escapes(&op.old_str);
                                 let starts: Vec<usize> = original
-                                    .match_indices(&op.old_str)
+                                    .match_indices(decoded.as_str())
                                     .take(3)
                                     .map(|(x, _)| x)
                                     .collect();
@@ -348,7 +349,7 @@ impl Tool for MultiEditTool {
                                     "Edit {}: {}\n{}",
                                     i,
                                     format_match_failure(&FindDiag::multiple(n), &op.path),
-                                    disambiguation_hint(original, &starts)
+                                    disambiguation_hint(original, &op.old_str, &starts)
                                 )
                             }
                         };
@@ -403,7 +404,7 @@ impl Tool for MultiEditTool {
                             "Edit {}: {}\n{}",
                             i,
                             format_match_failure(&FindDiag::multiple(count), &op.path),
-                            disambiguation_hint(original, &starts)
+                            disambiguation_hint(original, &op.old_str, &starts)
                         );
                         return Err(fail_match(
                             ctx,

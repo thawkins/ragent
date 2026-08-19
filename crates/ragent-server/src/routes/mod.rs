@@ -119,7 +119,8 @@ pub fn router(state: AppState) -> Router {
         // Memory API (Milestone 8)
         .nest("/memory", memory::memory_routes())
         // Research API (research system)
-        .nest("/research", research::research_routes()) // Orchestration endpoints (Milestone 3 — Task 3.1)        .route("/orchestrator/metrics", get(orch_metrics))
+        .nest("/research", research::research_routes())
+        // Orchestration endpoints (Milestone 3 — Task 3.1)
         .route("/orchestrator/start", post(orch_start))
         .route("/orchestrator/jobs/{id}", get(orch_job))
         .route_layer(middleware::from_fn_with_state(
@@ -165,19 +166,14 @@ async fn auth_middleware(
         .get("authorization")
         .and_then(|v| v.to_str().ok());
 
-    match auth_header {
-        Some(header) if header.len() > 7 && header[..7].eq_ignore_ascii_case("Bearer ") => {
-            let provided = &header[7..];
-            if constant_time_eq(provided, &state.auth_token) {
-                next.run(request).await
-            } else {
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({ "error": "unauthorized" })),
-                )
-                    .into_response()
-            }
-        }
+    let provided = auth_header.and_then(|h| {
+        h.get(..7)
+            .filter(|p| p.eq_ignore_ascii_case("bearer "))
+            .map(|_| &h[7..])
+    });
+
+    match provided {
+        Some(token) if constant_time_eq(token, &state.auth_token) => next.run(request).await,
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": "unauthorized" })),

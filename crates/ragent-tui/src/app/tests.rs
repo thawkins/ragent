@@ -612,4 +612,84 @@ mod app_tests {
             panic!("expected a ToolCall part");
         }
     }
+
+    #[test]
+    fn test_nested_subagent_events_are_tracked() {
+        use ragent_agent::event::Event;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "primary".to_string(),
+        });
+
+        // Primary spawns a direct subagent.
+        app.handle_event(Event::SubagentStart {
+            session_id: "primary".to_string(),
+            task_id: "explore-abc".to_string(),
+            child_session_id: "child-1".to_string(),
+            agent: "explore".to_string(),
+            task: "inspect repo".to_string(),
+            background: true,
+        });
+        assert_eq!(app.active_tasks.len(), 1);
+
+        // The direct subagent spawns its own subagent.
+        app.handle_event(Event::SubagentStart {
+            session_id: "child-1".to_string(),
+            task_id: "build-def".to_string(),
+            child_session_id: "child-2".to_string(),
+            agent: "build".to_string(),
+            task: "fix bug".to_string(),
+            background: true,
+        });
+        assert_eq!(app.active_tasks.len(), 2);
+
+        // Lifecycle updates on the nested subagent are handled even after the
+        // intermediate parent has completed and been removed.
+        app.handle_event(Event::SubagentComplete {
+            session_id: "primary".to_string(),
+            task_id: "explore-abc".to_string(),
+            child_session_id: "child-1".to_string(),
+            summary: "done".to_string(),
+            success: true,
+            duration_ms: 100,
+        });
+        assert_eq!(app.active_tasks.len(), 1);
+
+        app.handle_event(Event::SubagentComplete {
+            session_id: "child-1".to_string(),
+            task_id: "build-def".to_string(),
+            child_session_id: "child-2".to_string(),
+            summary: "fixed".to_string(),
+            success: true,
+            duration_ms: 200,
+        });
+        assert!(app.active_tasks.is_empty());
+    }
+
+    #[test]
+    fn test_is_current_or_descendant_session_recognises_nested_tasks() {
+        use ragent_agent::event::Event;
+
+        let mut app = test_app();
+        app.handle_event(Event::SessionCreated {
+            session_id: "primary".to_string(),
+        });
+
+        assert!(app.is_current_session("primary"));
+        assert!(!app.is_current_or_descendant_session("child-1"));
+
+        app.handle_event(Event::SubagentStart {
+            session_id: "primary".to_string(),
+            task_id: "explore-abc".to_string(),
+            child_session_id: "child-1".to_string(),
+            agent: "explore".to_string(),
+            task: "inspect".to_string(),
+            background: true,
+        });
+
+        assert!(app.is_current_or_descendant_session("primary"));
+        assert!(app.is_current_or_descendant_session("child-1"));
+        assert!(!app.is_current_or_descendant_session("child-2"));
+    }
 }

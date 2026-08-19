@@ -166,6 +166,9 @@ pub struct AgentManager {
     processor: Arc<SessionProcessor>,
     /// Maximum concurrent background tasks.
     max_background: usize,
+    /// Maximum runtime in seconds for a background sub-agent task before it
+    /// is forcibly cancelled.
+    background_timeout_secs: u64,
     /// P-11: flag set whenever a background task is spawned and cleared by
     /// `drain_completed` when no completed tasks remain to report. The
     /// agent loop checks this flag before calling `drain_completed` so the
@@ -180,6 +183,7 @@ impl AgentManager {
         event_bus: Arc<EventBus>,
         processor: Arc<SessionProcessor>,
         max_background: usize,
+        background_timeout_secs: u64,
     ) -> Self {
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
@@ -187,6 +191,7 @@ impl AgentManager {
             event_bus,
             processor,
             max_background,
+            background_timeout_secs,
             has_pending_background: AtomicBool::new(false),
         }
     }
@@ -424,6 +429,7 @@ impl AgentManager {
         let tasks = self.tasks.clone();
         let cancel_flags = self.cancel_flags.clone();
         let processor = self.processor.clone();
+        let background_timeout_secs = self.background_timeout_secs;
         let tid = task_id.clone();
         let csid = child_sid.clone();
         let working_dir_buf = working_dir.to_path_buf();
@@ -462,6 +468,7 @@ impl AgentManager {
                 }
             };
             agent_info.mode = AgentMode::Subagent;
+            agent_info.stall_timeout_secs = Some(background_timeout_secs);
 
             // Apply explicit model override if provided.
             if let Some(ref model_str) = model
@@ -501,9 +508,16 @@ impl AgentManager {
                 }
             }
 
-            let result = processor
-                .process_message(&csid, &prompt, &agent_info, cancel_flag)
-                .await;
+            let result = tokio::time::timeout(
+                tokio::time::Duration::from_secs(background_timeout_secs),
+                processor.process_message(&csid, &prompt, &agent_info, cancel_flag.clone()),
+            )
+            .await
+            .map_err(|_| {
+                cancel_flag.store(true, Ordering::Relaxed);
+                anyhow::anyhow!("background agent timed out after {background_timeout_secs}s")
+            })
+            .and_then(|r| r);
 
             let duration_ms = start.elapsed().as_millis() as u64;
 
