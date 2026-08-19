@@ -1,6 +1,6 @@
 //! `stock_fundamentals` tool — key metrics for a company.
 
-use crate::finance::default_provider;
+use crate::finance::tools::with_yahoo_fallback;
 use crate::{Tool, ToolContext, ToolOutput};
 use serde_json::{Value, json};
 
@@ -39,14 +39,23 @@ impl Tool for StockFundamentalsTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<ToolOutput> {
         let req: StockFundamentalsInput = serde_json::from_value(input)?;
-        let provider = default_provider(ctx.config.as_ref().map(|c| &c.finance));
-        let fundamentals = provider
-            .fundamentals(&req.symbol.to_ascii_uppercase())
-            .await?;
+        let symbol = req.symbol.to_ascii_uppercase();
+        let provider_name =
+            crate::finance::default_provider(ctx.config.as_ref().map(|c| &c.finance))
+                .name()
+                .to_string();
+
+        crate::finance::tools::log_provider_choice(ctx, self.name(), &provider_name);
+
+        let fundamentals = with_yahoo_fallback(ctx, |p| {
+            let symbol = symbol.clone();
+            async move { p.fundamentals(&symbol).await }
+        })
+        .await?;
 
         Ok(ToolOutput {
             content: serde_json::to_string_pretty(&fundamentals)?,
-            metadata: Some(json!({ "provider": provider.name() })),
+            metadata: Some(json!({ "provider": provider_name })),
         })
     }
 }

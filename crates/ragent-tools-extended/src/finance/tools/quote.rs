@@ -1,6 +1,6 @@
 //! `stock_quote` tool — latest price and session data for a ticker.
 
-use crate::finance::{QuoteCache, default_provider};
+use crate::finance::{QuoteCache, default_provider, yahoo_fallback_provider};
 use crate::{Tool, ToolContext, ToolOutput};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -63,20 +63,57 @@ impl Tool for StockQuoteTool {
         let req: StockQuoteInput = serde_json::from_value(input)?;
         let symbol = req.symbol.to_ascii_uppercase();
         let provider = default_provider(ctx.config.as_ref().map(|c| &c.finance));
+        let provider_name = provider.name().to_string();
 
-        if let Some(cached) = self.cache.get(provider.name(), &symbol) {
+        crate::finance::tools::log_provider_choice(ctx, self.name(), &provider_name);
+
+        if let Some(cached) = self.cache.get(&provider_name, &symbol) {
             return Ok(ToolOutput {
                 content: serde_json::to_string_pretty(&cached)?,
-                metadata: Some(json!({ "provider": provider.name(), "cached": true })),
+                metadata: Some(json!({ "provider": provider_name, "cached": true })),
             });
         }
 
-        let quote = provider.quote(&symbol).await?;
-        self.cache.set(provider.name(), &symbol, quote.clone());
+        let quote = match provider.quote(&symbol).await {
+            Ok(q) => q,
+            Err(crate::finance::FinanceError::ProviderFailure { message, .. })
+                if message.to_ascii_lowercase().contains("symbol")
+                    && message.to_ascii_lowercase().contains("missing or invalid") =>
+            {
+                let cfg = ctx.config.as_ref().map(|c| &c.finance);
+                if cfg.map(|c| c.yahoo_fallback_enabled()).unwrap_or(false) {
+                    ctx.event_bus.publish(crate::event::Event::AgentNotice {
+                        session_id: ctx.session_id.clone(),
+                        message: format!(
+                            "stock_quote: falling back to yahoo after symbol failure for {}",
+                            symbol
+                        ),
+                    });
+                    let yahoo = yahoo_fallback_provider(cfg);
+                    yahoo.quote(&symbol).await?
+                } else {
+                    ctx.event_bus.publish(crate::event::Event::AgentNotice {
+                        session_id: ctx.session_id.clone(),
+                        message: format!(
+                            "stock_quote: paid provider symbol failure and yahoo fallback is disabled for {}",
+                            symbol
+                        ),
+                    });
+                    return Err(crate::finance::FinanceError::ProviderFailure {
+                        provider: provider_name,
+                        message,
+                    }
+                    .into());
+                }
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        self.cache.set(&provider_name, &symbol, quote.clone());
 
         Ok(ToolOutput {
             content: serde_json::to_string_pretty(&quote)?,
-            metadata: Some(json!({ "provider": provider.name(), "cached": false })),
+            metadata: Some(json!({ "provider": provider_name, "cached": false })),
         })
     }
 }

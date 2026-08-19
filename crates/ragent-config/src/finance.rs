@@ -29,6 +29,14 @@ pub struct FinanceProviderConfig {
     /// trigger provider-side rate limits. Defaults to 5 seconds.
     #[serde(default = "default_min_call_interval_seconds")]
     pub min_call_interval_seconds: u64,
+    /// Whether to fall back to the free Yahoo provider when the configured
+    /// paid provider fails for a symbol or endpoint.
+    ///
+    /// When `None`, fallback is enabled for the free Yahoo provider and disabled
+    /// when a paid provider is explicitly configured, so paid-provider errors are
+    /// surfaced clearly instead of being masked by Yahoo rate-limit messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yahoo_fallback: Option<bool>,
 }
 
 fn default_provider() -> String {
@@ -48,6 +56,7 @@ impl Default for FinanceProviderConfig {
             requests_per_minute: None,
             user_agent: None,
             min_call_interval_seconds: default_min_call_interval_seconds(),
+            yahoo_fallback: None,
         }
     }
 }
@@ -70,5 +79,18 @@ impl FinanceProviderConfig {
             || self.requests_per_minute.is_some()
             || self.user_agent.is_some()
             || self.min_call_interval_seconds != default_min_call_interval_seconds()
+            || self.yahoo_fallback.is_some()
+    }
+
+    /// Returns true when the free Yahoo provider may be used as a fallback for
+    /// a paid provider failure.
+    ///
+    /// Default logic: enabled for the free Yahoo provider, disabled when a paid
+    /// provider is explicitly configured so its errors are not hidden behind a
+    /// Yahoo rate-limit message. Users can override with `yahoo_fallback`.
+    #[must_use]
+    pub fn yahoo_fallback_enabled(&self) -> bool {
+        self.yahoo_fallback
+            .unwrap_or_else(|| !self.is_paid_provider_configured())
     }
 }

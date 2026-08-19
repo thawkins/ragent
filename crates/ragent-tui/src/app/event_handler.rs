@@ -1064,7 +1064,7 @@ impl App {
                     })
                     .unwrap_or_default();
                 let icon = if success { "✓" } else { "✗" };
-                let display_content = truncate_str(content, 512);
+                let display_content = truncate_str(content, 2516);
                 let log_line = if display_content.is_empty() {
                     format!("{}← {} {}", step_tag, tool, icon)
                 } else {

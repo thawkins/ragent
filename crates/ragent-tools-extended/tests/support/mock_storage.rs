@@ -39,6 +39,7 @@ impl MockStorage {
 
     /// Seed a full task row with all Task-model fields (todo2tasks T-009).
     #[allow(dead_code)] // used by task tool integration tests
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn seed_task(
         &self,
         id: &str,

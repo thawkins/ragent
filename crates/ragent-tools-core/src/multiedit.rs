@@ -37,8 +37,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
+use super::edit_common::{check_stale_file, record_edit_timestamp};
 use super::edit_log::{EntryExtras, log_edit_operation, log_edit_operation_ex};
 use super::path_util::resolve_path;
 use super::replace::{
@@ -615,72 +615,4 @@ impl Tool for MultiEditTool {
     }
 }
 
-/// Check whether the file was modified after the session last read it
-/// (editrenewal FR-003 / FR-009). When a read timestamp has been recorded for
-/// `path`, compare the current on-disk mtime against it and return an error if
-/// the file is newer. When no timestamp has been recorded, the check is a
-/// no-op (no baseline available).
-///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
-/// re-imports this source via `#[path]`.
-#[allow(dead_code)]
-fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
-    let recorded = ctx
-        .read_timestamps
-        .read()
-        .ok()
-        .and_then(|map| map.get(path).copied());
-
-    let Some(recorded_millis) = recorded else {
-        return Ok(());
-    };
-
-    let current_millis = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .map(|mtime| {
-            mtime
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis() as u64)
-        });
-
-    let Some(current_millis) = current_millis else {
-        return Ok(());
-    };
-
-    // 1ms tolerance for filesystem mtime granularity.
-    if current_millis > recorded_millis.saturating_add(1) {
-        bail!(
-            "File '{}' was modified after it was last read by this session \
-             (read mtime {}ms, current mtime {}ms). Re-read the file before \
-             editing to avoid clobbering external changes.",
-            path.display(),
-            recorded_millis,
-            current_millis
-        );
-    }
-
-    Ok(())
-}
-
-/// Record (or refresh) the edit timestamp for `path` so a follow-up edit in
-/// the same session does not trip the stale-file check on a file we just
-/// wrote.
-///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
-/// re-imports this source via `#[path]`.
-#[allow(dead_code)]
-fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
-    if let Ok(meta) = std::fs::metadata(path)
-        && let Ok(mtime) = meta.modified()
-    {
-        let millis = mtime
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
-        if let Ok(mut map) = ctx.read_timestamps.write() {
-            map.insert(path.to_path_buf(), millis);
-        }
-    }
-}
-
-// ── Unit tests ───────────────────────────────────────────────────────────────
+// Unit tests

@@ -42,6 +42,9 @@ impl Tool for StockOptionsTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<ToolOutput> {
         let req: StockOptionsInput = serde_json::from_value(input)?;
         let provider = default_provider(ctx.config.as_ref().map(|c| &c.finance));
+
+        crate::finance::tools::log_provider_choice(ctx, self.name(), provider.name());
+
         let expiration = req.expiration.as_deref();
         let contracts = provider
             .options(&req.symbol.to_ascii_uppercase(), expiration)

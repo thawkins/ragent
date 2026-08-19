@@ -47,6 +47,9 @@ impl Tool for StockRecommendationsTool {
             crate::finance::default_provider(ctx.config.as_ref().map(|c| &c.finance))
                 .name()
                 .to_string();
+
+        crate::finance::tools::log_provider_choice(ctx, self.name(), &provider_name);
+
         let periods = with_yahoo_fallback(ctx, |p| {
             let symbol = symbol.clone();
             async move { p.recommendations(&symbol).await }

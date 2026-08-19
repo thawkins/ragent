@@ -8,7 +8,7 @@
 //! and requests-per-minute) so that all finance tools share a single
 //! `YfClient`, cookie/crumb state, rate-limit backoff, and throttle.
 
-use crate::finance::providers::yahoo::YahooFinanceProvider;
+use crate::finance::providers::{twelvedata::TwelveDataProvider, yahoo::YahooFinanceProvider};
 use crate::finance::{
     CurrencyRate, FinanceError, FinanceProvider, FinanceResult, Fundamentals, OhlcvBar,
     OptionContract, Quote, RecommendationPeriod, SearchResult, wait_for_min_interval,
@@ -116,7 +116,11 @@ impl PaidProvider {
             .unwrap_or("https://www.alphavantage.co/query");
         let mut url = format!("{}?function={}&apikey={}", base, function, self.api_key);
         for (k, v) in params {
-            url.push_str(&format!("&{}={}", k, v));
+            url.reserve(k.len() + v.len() + 2);
+            url.push('&');
+            url.push_str(k);
+            url.push('=');
+            url.push_str(v);
         }
         url
     }
@@ -490,6 +494,15 @@ pub fn paid_provider_from_config(
                 config.base_url.clone(),
             )?))
         }
+        "twelvedata" => {
+            let api_key = config.api_key.as_ref().ok_or_else(|| {
+                FinanceError::ConfigError("TwelveData API key missing".to_string())
+            })?;
+            Ok(Arc::new(TwelveDataProvider::new(
+                api_key,
+                config.base_url.clone(),
+            )?))
+        }
         _ => Err(FinanceError::ConfigError(format!(
             "paid provider '{}' is not supported",
             config.provider
@@ -507,9 +520,17 @@ pub fn default_provider(
 ) -> Arc<dyn FinanceProvider> {
     if let Some(cfg) = config
         && cfg.is_paid_provider_configured()
-        && let Ok(provider) = paid_provider_from_config(cfg)
     {
-        return provider;
+        match paid_provider_from_config(cfg) {
+            Ok(provider) => return provider,
+            Err(err) => {
+                tracing::warn!(
+                    provider = %cfg.provider,
+                    error = %err,
+                    "configured paid finance provider could not be constructed; falling back to yahoo"
+                );
+            }
+        }
     }
     get_or_create_yahoo_provider(config)
 }

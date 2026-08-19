@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## Version: 1.0.36
+
+### Changed
+
+- Bumped workspace version to 1.0.36.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
+### Fixed
+
+- Finance provider selection now surfaces the configured paid provider
+  (TwelveData/Alpha Vantage) instead of silently falling back to Yahoo when the
+  paid provider fails for a symbol or endpoint. A new `finance.yahoo_fallback`
+  option controls this; it defaults to `false` when a paid provider is
+  configured, and `true` for the free Yahoo provider. The rate-limit error
+  message now mentions TwelveData alongside Alpha Vantage.
+- Removed undocumented `#[allow(dead_code)]` const placeholders in
+  `crates/ragent-tools-extended/src/finance/tools/mod.rs`, resolving the
+  dead-code reason check CI job failure.
+
 ## Version: 1.0.35
 
 ### Changed

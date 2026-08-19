@@ -25,6 +25,10 @@ mod file_lock {
 mod path_util {
     pub(crate) use ragent_tools_core::path_util::resolve_path;
 }
+
+#[path = "../src/edit_common.rs"]
+mod edit_common;
+
 mod edit_log {
     pub(crate) use ragent_tools_core::edit_log::{
         EntryExtras, log_edit_operation, log_edit_operation_ex,

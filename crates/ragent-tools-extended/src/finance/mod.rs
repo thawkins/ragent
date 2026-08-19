@@ -21,8 +21,8 @@ pub use model::{
 };
 pub use provider::FinanceProvider;
 pub use providers::{
-    PaidProvider, YahooFinanceProvider, default_provider, paid_provider_from_config,
-    yahoo_fallback_provider,
+    PaidProvider, TwelveDataProvider, YahooFinanceProvider, default_provider,
+    paid_provider_from_config, yahoo_fallback_provider,
 };
 pub use rate_limit::{MAX_BACKOFF_SECONDS, RateLimiter};
 pub use throttle::wait_for_min_interval;

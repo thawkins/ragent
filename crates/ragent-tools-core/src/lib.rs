@@ -11,6 +11,9 @@ pub mod replace;
 // Shared path-resolution helper (DUPPLAN.md Milestone B).
 pub mod path_util;
 
+// Shared stale-file / timestamp helpers used by edit and multi_edit.
+pub(crate) mod edit_common;
+
 // File operation tools
 pub mod append_file;
 pub mod apply_patch;

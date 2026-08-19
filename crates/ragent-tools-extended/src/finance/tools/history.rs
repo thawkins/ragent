@@ -1,6 +1,6 @@
 //! `stock_history` tool — historical OHLCV bars for a ticker.
 
-use crate::finance::default_provider;
+use crate::finance::{default_provider, yahoo_fallback_provider};
 use crate::{Tool, ToolContext, ToolOutput};
 use serde_json::{Value, json};
 
@@ -52,14 +52,50 @@ impl Tool for StockHistoryTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> anyhow::Result<ToolOutput> {
         let req: StockHistoryInput = serde_json::from_value(input)?;
+        let symbol = req.symbol.to_ascii_uppercase();
         let provider = default_provider(ctx.config.as_ref().map(|c| &c.finance));
-        let bars = provider
-            .history(&req.symbol.to_ascii_uppercase(), &req.interval, &req.period)
-            .await?;
+        let provider_name = provider.name().to_string();
+
+        crate::finance::tools::log_provider_choice(ctx, self.name(), &provider_name);
+
+        let bars = match provider.history(&symbol, &req.interval, &req.period).await {
+            Ok(b) => b,
+            Err(crate::finance::FinanceError::ProviderFailure { message, .. })
+                if message.to_ascii_lowercase().contains("symbol")
+                    && message.to_ascii_lowercase().contains("missing or invalid") =>
+            {
+                let cfg = ctx.config.as_ref().map(|c| &c.finance);
+                if cfg.map(|c| c.yahoo_fallback_enabled()).unwrap_or(false) {
+                    ctx.event_bus.publish(crate::event::Event::AgentNotice {
+                        session_id: ctx.session_id.clone(),
+                        message: format!(
+                            "stock_history: falling back to yahoo after symbol failure for {}",
+                            symbol
+                        ),
+                    });
+                    let yahoo = yahoo_fallback_provider(cfg);
+                    yahoo.history(&symbol, &req.interval, &req.period).await?
+                } else {
+                    ctx.event_bus.publish(crate::event::Event::AgentNotice {
+                        session_id: ctx.session_id.clone(),
+                        message: format!(
+                            "stock_history: paid provider symbol failure and yahoo fallback is disabled for {}",
+                            symbol
+                        ),
+                    });
+                    return Err(crate::finance::FinanceError::ProviderFailure {
+                        provider: provider_name,
+                        message,
+                    }
+                    .into());
+                }
+            }
+            Err(e) => return Err(e.into()),
+        };
 
         Ok(ToolOutput {
             content: serde_json::to_string_pretty(&bars)?,
-            metadata: Some(json!({ "provider": provider.name(), "count": bars.len() })),
+            metadata: Some(json!({ "provider": provider_name, "count": bars.len() })),
         })
     }
 }

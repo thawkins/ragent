@@ -13,7 +13,7 @@ pub enum FinanceError {
     SymbolNotFound { symbol: String },
 
     /// The provider rate-limited the request.
-    #[error("rate limit hit for provider {provider}{}; try again later or configure a paid provider such as alpha_vantage", retry_after.map(|s| format!(" (retry after {}s)", s)).unwrap_or_default())]
+    #[error("rate limit hit for provider {provider}{}; try again later or configure a paid provider such as alpha_vantage or twelvedata", retry_after.map(|s| format!(" (retry after {}s)", s)).unwrap_or_default())]
     RateLimit {
         provider: String,
         retry_after: Option<u64>,
@@ -58,8 +58,8 @@ mod tests {
         let err = FinanceError::SymbolNotFound {
             symbol: "INVALID".to_string(),
         };
-        assert_eq!(err.is_symbol_not_found(), true);
-        assert_eq!(err.is_rate_limit(), false);
+        assert!(err.is_symbol_not_found());
+        assert!(!err.is_rate_limit());
         assert_eq!(err.to_string(), "symbol not found: INVALID");
     }
 
@@ -69,7 +69,7 @@ mod tests {
             provider: "yahoo".to_string(),
             retry_after: Some(30),
         };
-        assert_eq!(err.is_rate_limit(), true);
+        assert!(err.is_rate_limit());
         assert!(
             err.to_string()
                 .contains("rate limit hit for provider yahoo")

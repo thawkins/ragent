@@ -67,8 +67,8 @@
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::path::Path;
-use std::time::SystemTime;
 
+use super::edit_common::{check_stale_file, record_edit_timestamp};
 use super::edit_log::{EntryExtras, log_edit_operation, log_edit_operation_ex};
 use super::path_util::resolve_path;
 use super::replace::{
@@ -450,14 +450,11 @@ impl Tool for EditTool {
         write_result?;
 
         // Record the new mtime so a subsequent edit in the same session does not
-        // trip the stale-file check on the file we just wrote.
+        // trip the stale-file check on the file we just wrote. This also updates
+        // the read baseline (P1.2) so the next edit sees the post-write content.
         record_edit_timestamp(&path, ctx);
 
-        // P1.2: the session's buffer for this file is now out of date; update
-        // the read timestamp so the next edit sees the post-write baseline.
-        refresh_read_timestamp(&path, ctx);
-
-        // ── Build the result snippet (FR-008) ─────────────────────────────────
+        // ── Build the result snippet (FR-008) ───────────────���─────────────────
         let snippet = build_snippet(&new_content, start, start + new_str.len());
 
         // `old_string` may be the user-provided text; report the replaced byte span size.
@@ -607,91 +604,6 @@ async fn create_file(
         content: snippet,
         metadata: Some(metadata),
     })
-}
-
-/// Check whether the file was modified after the session last read it
-/// (FR-003). When a read timestamp has been recorded for `path`, compare the
-/// current on-disk mtime against it and reject the edit if the file is newer.
-///
-/// When no timestamp has been recorded, the edit proceeds — no baseline is
-/// available, so the stale-file check is a no-op. This keeps the tool usable
-/// for one-shot edits while delivering the critical safety property for
-/// sessions that use the `read` tool before editing.
-///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
-/// re-imports this source via `#[path]`.
-#[allow(dead_code)]
-fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
-    let recorded = ctx
-        .read_timestamps
-        .read()
-        .ok()
-        .and_then(|map| map.get(path).copied());
-
-    let Some(recorded_millis) = recorded else {
-        return Ok(());
-    };
-
-    let current_millis = std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .map(|mtime| {
-            mtime
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis() as u64)
-        });
-
-    let Some(current_millis) = current_millis else {
-        return Ok(());
-    };
-
-    // Allow a small 1ms tolerance to avoid spurious rejections from filesystem
-    // mtime granularity rounding when the read and the edit happen in the same
-    // tick.
-    if current_millis > recorded_millis.saturating_add(1) {
-        bail!(
-            "File '{}' was modified after it was last read by this session \
-             (read mtime {}ms, current mtime {}ms). Re-read the file before \
-             editing to avoid clobbering external changes.",
-            path.display(),
-            recorded_millis,
-            current_millis
-        );
-    }
-
-    Ok(())
-}
-
-/// Update the session's recorded read timestamp for `path` to the on-disk
-/// mtime after a successful edit (P1.2: read-after-write guard). The post-edit
-/// state becomes the new baseline, so a subsequent edit on the same file is
-/// judged against the live content rather than the stale pre-edit buffer.
-///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
-/// re-imports this source via `#[path]`.
-#[allow(dead_code)]
-fn refresh_read_timestamp(path: &Path, ctx: &ToolContext) {
-    record_edit_timestamp(path, ctx);
-}
-
-/// Record (or refresh) the edit timestamp for `path` so a follow-up edit in
-/// the same session does not trip the stale-file check on a file we just
-/// wrote.
-///
-/// `#[allow(dead_code)]` — used by the lib build but not by the test target that
-/// re-imports this source via `#[path]`.
-#[allow(dead_code)]
-fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
-    if let Ok(meta) = std::fs::metadata(path)
-        && let Ok(mtime) = meta.modified()
-    {
-        let millis = mtime
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
-        if let Ok(mut map) = ctx.read_timestamps.write() {
-            map.insert(path.to_path_buf(), millis);
-        }
-    }
 }
 
 /// Build a `cat -n`-style line-numbered snippet of `content` centred on the

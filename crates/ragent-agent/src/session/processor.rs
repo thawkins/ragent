@@ -1086,7 +1086,7 @@ impl SessionProcessor {
                                 .and_then(|m| m.get("lines"))
                                 .and_then(serde_json::Value::as_u64)
                                 .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                            let batch_content = ragent_types::truncate_bytes(&result_content, 200);
+                            let batch_content = result_content.clone();
                             batch_entries.push(ragent_types::event::ToolCallBatchEntry {
                                 call_id: tc.id.clone(),
                                 tool: tc.name.clone(),
@@ -1480,7 +1480,7 @@ impl SessionProcessor {
                             .and_then(|m| m.get("lines"))
                             .and_then(serde_json::Value::as_u64)
                             .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                        let result_preview = ragent_types::truncate_bytes(&result_content, 200);
+                        let result_preview = result_content.clone();
                         let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
                         event_bus.publish(Event::ToolResult {
                             session_id: session_id_str.clone(),
