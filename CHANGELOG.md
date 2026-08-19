@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## Version: 1.0.37
+
+### Changed
+
+- Bumped workspace version to 1.0.37.
+- Extended single tool-call watchdog timeout from 10 minutes to ~16 minutes
+  (1000 seconds) to better accommodate long-running operations.
+- Updated `mf_fetch` PDF extraction to use the workspace-patched `pdf-extract`
+  crate, which falls back to `PDFDocEncoding` instead of panicking on missing
+  Unicode maps. The panic-isolation wrapper is retained as a safety net.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.36
 
 ### Changed

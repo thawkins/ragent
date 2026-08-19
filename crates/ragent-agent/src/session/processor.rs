@@ -53,8 +53,8 @@ pub use crate::session::permissions::check_permission_with_prompt;
 pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
 
 /// Maximum wall-clock time a single tool call may run before the watchdog
-/// aborts it and terminates the agent run (600 seconds).
-const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_mins(10); // = 600s
+/// aborts it and terminates the agent run (1000 seconds).
+const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(1000); // ≈ 16m 40s
 
 /// Error type for a spawned tool-execution task in the agent loop.
 ///

@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.36"
+version = "1.0.37"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -272,6 +272,9 @@ ndarray = "0.17"
 # fetched page so the research References Index can report it. Default
 # features pull in all 75 language models (~300 MB of embedded FSTs).
 lingua = "1.8"
+
+[patch.crates-io]
+pdf-extract = { path = "vendor/pdf-extract" }
 
 [[bin]]
 name = "ragent"

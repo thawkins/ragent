@@ -1,23 +1,32 @@
 //! PDF text extraction helpers for `mf_fetch`.
 //!
-//! Provides a thin wrapper around the workspace `pdf-extract` crate so that
-//! `mf_fetch` can turn a fetched PDF document into readable text instead of
-//! returning raw binary bytes.
+//! Provides a thin wrapper around the workspace-patched `pdf-extract` crate so
+//! that `mf_fetch` can turn a fetched PDF document into readable text instead
+//! of returning raw binary bytes.
+//!
+//! The `pdf-extract` crate is vendored under `vendor/pdf-extract` and patched
+//! to fall back to `PDFDocEncoding` when a character is missing from the
+//! Unicode map and no explicit encoding is present. The upstream crate panics
+//! on that path; the patch avoids the panic entirely while preserving the
+//! original `catch_unwind` isolation as a safety net.
+//!
+//! See `vendor/pdf-extract/src/lib.rs` lines 832 and 882 for the patched
+//! fallback logic.
 
 use anyhow::{Context, Result};
 
 /// Extract plain text from a PDF byte slice.
 ///
-/// Delegates to `pdf_extract::extract_text_from_mem`. The output is a single
-/// string with page breaks approximated by newlines where the extractor
-/// provides them.
+/// Delegates to the patched `pdf_extract::extract_text_from_mem`. The output
+/// is a single string with page breaks approximated by newlines where the
+/// extractor provides them.
 ///
 /// # Panic isolation
 ///
-/// The underlying `pdf-extract` crate can panic on malformed or unusual PDFs
-/// (e.g. inside its CFF font parser). The call is wrapped in
-/// [`std::panic::catch_unwind`] so that such a panic is converted into an
-/// `Err` instead of aborting the calling task or process.
+/// Although the patched dependency avoids the known `missing unicode map and
+/// encoding` panic, the call is still wrapped in [`std::panic::catch_unwind`]
+/// so any unexpected extraction panic is converted into an `Err` rather than
+/// aborting the calling task or process.
 ///
 /// # Errors
 ///

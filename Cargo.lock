@@ -5045,8 +5045,6 @@ dependencies = [
 [[package]]
 name = "pdf-extract"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e28ba1758a3d3f361459645780e09570b573fc3c82637449e9963174c813a98"
 dependencies = [
  "adobe-cmap-parser",
  "cff-parser",
@@ -5694,7 +5692,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5721,7 +5719,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5796,7 +5794,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5823,7 +5821,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5913,7 +5911,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5944,7 +5942,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6005,7 +6003,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6146,7 +6144,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.36"
+version = "1.0.37"
 dependencies = [
  "anyhow",
  "arboard",
