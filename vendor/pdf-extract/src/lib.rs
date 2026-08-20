@@ -1,3 +1,7 @@
+#![allow(unreachable_pub)]
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 extern crate lopdf;
 
 use adobe_cmap_parser::{ByteMapping, CodeRange, CIDRange};
