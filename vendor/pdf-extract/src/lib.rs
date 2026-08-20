@@ -923,7 +923,13 @@ fn get_unicode_map<'a>(doc: &'a Document, font: &'a Dictionary) -> Option<HashMa
             let contents = get_contents(stream);
             dlog!("Stream: {}", String::from_utf8(contents.clone()).unwrap());
 
-            let cmap = adobe_cmap_parser::get_unicode_map(&contents).unwrap();
+            let cmap = match adobe_cmap_parser::get_unicode_map(&contents) {
+                Ok(cmap) => cmap,
+                Err(e) => {
+                    warn!("Ignoring malformed ToUnicode CMap for font: {}", e);
+                    return None;
+                }
+            };
             let mut unicode = HashMap::new();
             // "It must use the beginbfchar, endbfchar, beginbfrange, and endbfrange operators to
             // define the mapping from character codes to Unicode character sequences expressed in
@@ -1598,7 +1604,8 @@ impl<'a> Processor<'a> {
     }
 
     fn process_stream(&mut self, doc: &'a Document, content: Vec<u8>, resources: &'a Dictionary, media_box: &MediaBox, output: &mut dyn OutputDev, page_num: u32) -> Result<(), OutputError> {
-        let content = Content::decode(&content).unwrap();
+        let content = Content::decode(&content)
+            .map_err(OutputError::from)?;
         let mut font_table = HashMap::new();
         let mut gs: GraphicsState = GraphicsState {
             ts: TextState {
@@ -2419,7 +2426,7 @@ pub fn output_doc_page(doc: &Document, output: &mut dyn OutputDev, page_num: u32
 }
 
 fn output_doc_inner<'a>(page_num: u32, object_id: ObjectId, doc: &'a Document, p: & mut Processor<'a>, output: &mut dyn OutputDev, empty_resources: &'a Dictionary) -> Result<(), OutputError> {
-    let page_dict = doc.get_object(object_id).unwrap().as_dict().unwrap();
+    let page_dict = doc.get_object(object_id)?.as_dict()?;
     dlog!("page {} {:?}", page_num, page_dict);
     // XXX: Some pdfs lack a Resources directory
     let resources = get_inherited(doc, page_dict, b"Resources").unwrap_or(empty_resources);
@@ -2430,7 +2437,13 @@ fn output_doc_inner<'a>(page_num: u32, object_id: ObjectId, doc: &'a Document, p
     let art_box = get::<Option<Vec<f64>>>(&doc, page_dict, b"ArtBox")
         .map(|x| (x[0], x[1], x[2], x[3]));
     output.begin_page(page_num, &media_box, art_box)?;
-    p.process_stream(&doc, doc.get_page_content(object_id).unwrap(), resources, &media_box, output, page_num)?;
+    p.process_stream(&doc,
+        doc.get_page_content(object_id)?,
+        resources,
+        &media_box,
+        output,
+        page_num,
+    )?;
     output.end_page()?;
     Ok(())
 }

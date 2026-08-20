@@ -191,8 +191,10 @@ fn test_yahoo_fallback_can_be_explicitly_enabled_for_paid_provider() {
 
 #[test]
 fn test_yahoo_fallback_can_be_explicitly_disabled_for_yahoo_provider() {
-    let mut yahoo_config = FinanceProviderConfig::default();
-    yahoo_config.yahoo_fallback = Some(false);
+    let yahoo_config = FinanceProviderConfig {
+        yahoo_fallback: Some(false),
+        ..Default::default()
+    };
     assert!(!yahoo_config.yahoo_fallback_enabled());
 }
 

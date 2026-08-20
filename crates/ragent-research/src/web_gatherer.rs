@@ -445,6 +445,11 @@ pub struct WebGatherer {
     /// filtered out during gathering so only general web search results are
     /// captured. Defaults to `false`.
     disable_scholarly: bool,
+    /// When `true`, PDF documents returned by web search or supplied via
+    /// `--from-url` are captured as web sources. Defaults to `false`; most
+    /// PDFs require additional extraction time and are often paywalled or
+    /// large, so they are skipped unless explicitly enabled.
+    allow_pdf_web_sources: bool,
     /// Maximum number of retry attempts for a failed sub-query search
     /// (Milestone H-002). Retries use exponential backoff with a base delay of
     /// [`Self::search_retry_base_delay_ms`]. Defaults to
@@ -494,6 +499,8 @@ impl std::fmt::Debug for WebGatherer {
             .field("fetch_concurrency", &self.fetch_concurrency)
             .field("fetch_timeout_ms", &self.fetch_timeout.as_millis())
             .field("keep_low_relevance", &self.keep_low_relevance)
+            .field("disable_scholarly", &self.disable_scholarly)
+            .field("allow_pdf_web_sources", &self.allow_pdf_web_sources)
             .field("search_max_retries", &self.search_max_retries)
             .field(
                 "search_circuit_breaker_threshold",
@@ -522,6 +529,7 @@ impl WebGatherer {
             fetch_timeout: DEFAULT_FETCH_TIMEOUT,
             keep_low_relevance: false,
             disable_scholarly: false,
+            allow_pdf_web_sources: false,
             search_max_retries: DEFAULT_SEARCH_MAX_RETRIES,
             search_retry_base_delay_ms: DEFAULT_SEARCH_RETRY_BASE_DELAY_MS,
             search_circuit_breaker_threshold: DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD,
@@ -698,6 +706,20 @@ impl WebGatherer {
         self
     }
 
+    /// Allow PDF documents from the web to be captured as sources.
+    ///
+    /// When `false` (the default), any search hit whose URL or declared
+    /// `Content-Type` indicates a PDF is rejected before the expensive fetch
+    /// and extraction pass, and any `--from-url` seed that resolves to a PDF
+    /// is reported as a fetch failure. When `true`, PDFs are treated like
+    /// normal pages and are fetched/extracted by the underlying `webfetch`
+    /// tool.
+    #[must_use]
+    pub fn with_allow_pdf_web_sources(mut self, allow: bool) -> Self {
+        self.allow_pdf_web_sources = allow;
+        self
+    }
+
     /// Override the maximum number of retry attempts for a failed sub-query
     /// search (Milestone H-002). Retries use exponential backoff with a base
     /// delay of [`Self::search_retry_base_delay_ms`]. Setting this to `0`
@@ -746,6 +768,11 @@ impl WebGatherer {
     ///
     /// Returns the underlying fetch error when the page cannot be retrieved.
     pub async fn fetch_url_as_source(&self, url: &str) -> anyhow::Result<(Source, WebFetchedPage)> {
+        if !self.allow_pdf_web_sources && classify_web_source(url, None) == WebSourceKind::Pdf {
+            return Err(anyhow::anyhow!(
+                "PDF web source excluded; use --use-pdf to enable"
+            ));
+        }
         let page = tokio::time::timeout(
             self.fetch_timeout,
             self.fetch.fetch_with_limit(url, MAX_SOURCE_BODY_BYTES),
@@ -1219,6 +1246,34 @@ impl WebGatherer {
                                 reason,
                                 None,
                             );
+                            continue;
+                        }
+                        // Filter out PDF web sources unless explicitly enabled.
+                        if !self.allow_pdf_web_sources
+                            && classify_web_source(&hit.url, None) == WebSourceKind::Pdf
+                        {
+                            excluded_count += 1;
+                            let reason = "PDF web source excluded; use --use-pdf to enable";
+                            tracing::info!(
+                                query = %query,
+                                url = %hit.url,
+                                "research: skipping PDF web source (use --use-pdf to enable)"
+                            );
+                            log_rejected(
+                                &hit.url,
+                                &query,
+                                &hit.title,
+                                &hit.search_tool,
+                                &hit.search_engine,
+                                reason,
+                                None,
+                            );
+                            if let Some(obs) = observer {
+                                obs.on_event(GatherEvent::FetchFailed {
+                                    url: hit.url.clone(),
+                                    error: reason.to_string(),
+                                });
+                            }
                             continue;
                         }
                         considered_count += 1;
@@ -3381,7 +3436,8 @@ mod tests {
         let g = WebGatherer::new(
             Arc::new(FakeSearch::default()),
             Arc::new(TypedFetch { pages }),
-        );
+        )
+        .with_allow_pdf_web_sources(true);
 
         let (pdf_source, _) = g
             .fetch_url_as_source("https://example.com/paper.pdf")
@@ -3516,7 +3572,11 @@ mod tests {
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
-        let result = g.gather_with_observer("topic", 5, None).await.unwrap();
+        let result = g
+            .with_allow_pdf_web_sources(true)
+            .gather_with_observer("topic", 5, None)
+            .await
+            .unwrap();
         assert_eq!(result.pdf_count, 1);
         assert_eq!(result.youtube_count, 1);
         assert_eq!(result.sources.len(), 2);
@@ -4642,5 +4702,23 @@ mod tests {
             assert_eq!(*captured, result.sources.len());
             assert_eq!(*excluded, 0);
         }
+    }
+
+    /// PDF search hits are skipped by default, so they do not consume the
+    /// fetch budget or trigger expensive PDF extraction.
+    #[tokio::test]
+    async fn gather_skips_pdf_web_sources_by_default() {
+        let hits = vec![WebSearchHit {
+            url: "https://example.com/paper.pdf".into(),
+            title: "PDF".into(),
+            snippet: "topic Rust async".into(),
+            matched_query: String::new(),
+            search_tool: "mf_search".into(),
+            search_engine: "test".into(),
+        }];
+        let (g, _, _) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
+        let result = g.gather_with_observer("topic", 5, None).await.unwrap();
+        assert_eq!(result.pdf_count, 0);
+        assert!(result.sources.is_empty());
     }
 }

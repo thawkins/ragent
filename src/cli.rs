@@ -112,6 +112,10 @@ pub enum ResearchCommands {
         /// Disable scholarly search engines (e.g. OpenAlex) during web gathering.
         #[arg(long)]
         no_scholarly: bool,
+        /// Allow PDF documents from web search or --from-url to be captured
+        /// as sources. By default PDF web sources are skipped.
+        #[arg(long)]
+        use_pdf: bool,
         /// Override the maximum number of local scoring/spec-scan tasks that run
         /// in parallel during the local-gathering phase (default 8).
         #[arg(long, value_name = "N")]
@@ -213,6 +217,7 @@ pub async fn handle_research_command(
             use_specs,
             use_low_relevance,
             no_scholarly,
+            use_pdf,
             local_concurrently,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -244,6 +249,7 @@ pub async fn handle_research_command(
                 use_specs,
                 use_low_relevance,
                 no_papers: no_scholarly,
+                use_pdf,
                 local_concurrency: local_concurrently,
                 fetch_timeout_secs,
                 web_phase_timeout_secs,
@@ -356,6 +362,7 @@ pub async fn handle_research_command(
             use_specs,
             use_low_relevance,
             no_papers,
+            use_pdf,
             local_concurrency,
             fetch_timeout_secs,
             web_phase_timeout_secs,
@@ -417,6 +424,7 @@ pub async fn handle_research_command(
                 }),
                 use_low_relevance,
                 disable_scholarly: no_papers,
+                use_pdf_web_sources: use_pdf,
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
                 search_max_retries: search_max_retries

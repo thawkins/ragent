@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## Version: 1.0.38
+
+### Changed
+
+- Bumped workspace version to 1.0.38.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.37
 
 ### Changed

@@ -64,6 +64,7 @@ impl App {
                 use_specs,
                 use_low_relevance,
                 no_papers,
+                use_pdf,
                 fetch_timeout_secs,
                 local_concurrency,
                 web_phase_timeout_secs,
@@ -130,6 +131,7 @@ impl App {
                         .unwrap_or(OutputFormat::Report),
                     use_low_relevance,
                     disable_scholarly: no_papers,
+                    use_pdf_web_sources: use_pdf,
                     fetch_timeout_secs: fetch_timeout_secs.unwrap_or(30),
                     local_concurrency: local_concurrency
                         .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),

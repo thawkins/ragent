@@ -123,6 +123,10 @@ struct CreateResearchRequest {
     /// during web gathering.
     #[serde(default)]
     no_scholarly: bool,
+    /// `--use-pdf`: allow PDF documents returned by web search or `--from-url`
+    /// to be captured as sources. By default PDF web sources are skipped.
+    #[serde(default)]
+    use_pdf: bool,
     /// Override the maximum number of candidate pages fetched in parallel
     /// during the web-gathering phase. When `None` the engine default
     /// (`ragent_research::DEFAULT_FETCH_CONCURRENCY`, 10) is used.
@@ -169,6 +173,7 @@ async fn create_research(
         }),
         use_low_relevance: req.use_low_relevance,
         disable_scholarly: req.no_scholarly,
+        use_pdf_web_sources: req.use_pdf,
         fetch_timeout_secs: req.fetch_timeout_secs.unwrap_or(30),
         local_concurrency: req
             .local_concurrency

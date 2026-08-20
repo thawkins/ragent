@@ -71,6 +71,11 @@ pub enum ResearchCliCommand {
         /// backends are filtered out so only general web search results are
         /// captured.
         no_papers: bool,
+        /// `--use-pdf` — allow PDF documents returned by web search or
+        /// `--from-url` to be captured as sources. By default PDF web sources
+        /// are skipped because they require extra extraction time and are often
+        /// paywalled or large.
+        use_pdf: bool,
         /// `--fetch-timeout-secs N` — override the per-page fetch timeout.
         /// Pages that take longer than this are treated as a fetch failure so
         /// one slow URL cannot stall the whole gather pass. The default is
@@ -197,6 +202,7 @@ impl ResearchCliCommand {
                         use_specs: false,
                         use_low_relevance: false,
                         no_papers: false,
+                        use_pdf: false,
                         fetch_timeout_secs: None,
                         local_concurrency: None,
                         web_phase_timeout_secs: None,
@@ -241,6 +247,7 @@ impl ResearchCliCommand {
         let mut use_specs = false;
         let mut use_low_relevance = false;
         let mut no_papers = false;
+        let mut use_pdf = false;
         while i < rest.len() {
             let arg = rest[i];
             match arg {
@@ -388,6 +395,10 @@ impl ResearchCliCommand {
                     no_papers = true;
                     i += 1;
                 }
+                "--use-pdf" => {
+                    use_pdf = true;
+                    i += 1;
+                }
                 _ => {
                     if name.is_none() {
                         name = Some(arg.to_string());
@@ -418,6 +429,7 @@ impl ResearchCliCommand {
             use_specs,
             use_low_relevance,
             no_papers,
+            use_pdf,
             fetch_timeout_secs,
             local_concurrency,
             web_phase_timeout_secs,
@@ -494,7 +506,7 @@ impl ResearchCliCommand {
                SUBCOMMANDS:\n\
                                    create <name> [topic] [--from-url <URL>] [--iterations N] [--depth shallow|standard|deep] [--tier light|full|dissertation]\n\
                                          [--format report|executive-summary|comparison-table|source-bibliography|imrad]\n\
-                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--no-papers]\n\
+                                         [--sources-dir <path>] [--template <name>] [--fetch-concurrently N] [--use-local] [--use-specs] [--use-low-relevance] [--use-pdf] [--no-papers]\n\
                                          Run an information-gathering session and write RESEARCH.md.\n\
                                            --from-url            Fetch one or more URLs and use their content as the research subject\n\
                                                                  in place of (or alongside) an explicit topic. Each page is captured\n\
@@ -509,6 +521,7 @@ impl ResearchCliCommand {
                                          --use-local           Enable local-file scanning (in-project + extras).\n\
                                          --use-specs           Enable prior-spec cross-referencing.\n\
                                          --use-low-relevance   Keep low-relevance web sources instead of filtering them out.\n\
+                                         --use-pdf            Allow PDF documents from web search or --from-url to be captured.\\
                                            --no-papers           Disable scholarly search engines (e.g. OpenAlex) during web gathering.\n\
                    continue <name> [message] Resume an in-progress research item.\n\
                    list [--all]                  List every research item.\n\
@@ -1946,5 +1959,34 @@ mod tests {
         let t = truncate(&s, 5);
         assert_eq!(t.chars().count(), 5);
         assert!(t.ends_with('…'));
+    }
+
+    #[test]
+    fn parse_create_with_use_pdf_flag() {
+        let cmd = ResearchCliCommand::parse("create foo a topic --use-pdf");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                use_pdf,
+                ..
+            } => {
+                assert_eq!(name, "foo");
+                assert_eq!(topic, "a topic");
+                assert!(use_pdf);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_create_use_pdf_defaults_false() {
+        let cmd = ResearchCliCommand::parse("create foo a topic");
+        match cmd {
+            ResearchCliCommand::Create { use_pdf, .. } => {
+                assert!(!use_pdf);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
     }
 }

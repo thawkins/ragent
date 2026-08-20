@@ -227,6 +227,11 @@ pub struct SessionConfig {
     /// hits from scholarly search engines (e.g. OpenAlex) so only general
     /// web search results are captured.
     pub disable_scholarly: bool,
+    /// `--use-pdf`: when `true`, the web-gathering phase may capture PDF
+    /// documents returned by web search or supplied via `--from-url`. By default
+    /// PDF web sources are skipped because they require extra extraction time
+    /// and are often paywalled or large.
+    pub use_pdf_web_sources: bool,
     /// Maximum wall-clock time in seconds for a single page fetch. Pages that
     /// take longer are treated as a fetch failure so a slow URL cannot stall the
     /// whole gather pass. Defaults to 30 seconds.
@@ -335,6 +340,7 @@ impl Default for SessionConfig {
             output_format: OutputFormat::Report,
             use_low_relevance: false,
             disable_scholarly: false,
+            use_pdf_web_sources: false,
             fetch_timeout_secs: 30,
             local_concurrency: crate::local_gatherer::DEFAULT_LOCAL_CONCURRENCY,
             max_synthesis_sources: None,
@@ -1278,6 +1284,7 @@ impl ResearchSession {
                         ))
                         .with_keep_low_relevance(config.use_low_relevance)
                         .with_disable_scholarly(config.disable_scholarly)
+                        .with_allow_pdf_web_sources(config.use_pdf_web_sources)
                         .with_search_max_retries(config.search_max_retries)
                         .with_search_retry_base_delay_ms(config.search_retry_base_delay_ms)
                         .with_search_circuit_breaker_threshold(

@@ -7122,6 +7122,13 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                 let event_bus = self.event_bus.clone();
                 let sid = self.session_id.clone().unwrap_or_default();
                 let working_dir = std::env::current_dir().unwrap_or_default();
+                let storage = self.storage.clone();
+                let configured_provider = self.configured_provider.clone();
+                let selected_model = self.selected_model.clone();
+                let provider_health = self.provider_health.clone();
+                let code_index = self.code_index.clone();
+                let code_index_enabled = self.code_index_enabled;
+                let db_path = self.db_path.clone();
                 tokio::spawn(async move {
                     let mut lines = vec!["From: /doctor\n# Diagnostic Report\n".to_string()];
 
@@ -7159,6 +7166,66 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         }
                     ));
 
+                    // Check config parse/load
+                    let (config_ok, config_detail) = match ragent_agent::Config::load() {
+                        Ok(cfg) => {
+                            let paths = cfg.config_paths;
+                            if paths.is_empty() {
+                                (true, "using compiled defaults".to_string())
+                            } else {
+                                (true, format!("loaded {} config file(s)", paths.len()))
+                            }
+                        }
+                        Err(e) => (false, format!("parse error: {e:#}")),
+                    };
+                    lines.push(format!(
+                        "{} ragent config ({})",
+                        if config_ok { "✅" } else { "❌" },
+                        config_detail
+                    ));
+
+                    // Check storage / SQLite health
+                    let storage_detail = match storage.journal_mode() {
+                        Ok(mode) => format!("SQLite journal_mode={mode}"),
+                        Err(e) => format!("SQLite error: {e:#}"),
+                    };
+                    lines.push(format!(
+                        "{} storage database\n  {} ({})",
+                        if storage_detail.starts_with("SQLite error") {
+                            "❌"
+                        } else {
+                            "✅"
+                        },
+                        storage_detail,
+                        db_path.display()
+                    ));
+
+                    // Check active provider / model
+                    if let Some(ref prov) = configured_provider {
+                        let prov_source = match prov.source {
+                            ProviderSource::EnvVar => "env",
+                            ProviderSource::Database => "database",
+                            ProviderSource::AutoDiscovered => "auto-discovered",
+                        };
+                        let health_icon = match provider_health.load(Ordering::Relaxed) {
+                            1 => " ✅ reachable",
+                            2 => " ❌ unreachable",
+                            _ => " ⏳ health check pending",
+                        };
+                        let model_line = selected_model
+                            .as_deref()
+                            .map(|m| format!("model={m}"))
+                            .unwrap_or_else(|| "no explicit model".to_string());
+                        lines.push(format!(
+                            "✅ provider: {} ({} via {prov_source})\n  {model_line}{health_icon}",
+                            prov.name, prov.id
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "⚠️  no provider configured — run /provider or set an API-key env var"
+                        ));
+                    }
+
                     // Check memory dirs
                     let memory_dir_ok = if let Some(home) = dirs::home_dir() {
                         let p = home.join(".ragent").join("memory");
@@ -7171,6 +7238,34 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         if memory_dir_ok { "✅" } else { "❌" }
                     ));
 
+                    // Check memory system config
+                    let memory_config = ragent_agent::Config::load()
+                        .map(|c| c.memory)
+                        .unwrap_or_default();
+                    lines.push(format!(
+                        "{} memory system (blocks={}, structured={}, semantic={})",
+                        if memory_config.enabled {
+                            "✅"
+                        } else {
+                            "ℹ️  disabled"
+                        },
+                        if memory_config.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        },
+                        if memory_config.structured.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        },
+                        if memory_config.semantic.enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    ));
+
                     // Check project .ragent dir
                     let project_ragent_ok =
                         std::fs::create_dir_all(working_dir.join(".ragent")).is_ok();
@@ -7178,6 +7273,30 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         "{} project .ragent/ directory",
                         if project_ragent_ok { "✅" } else { "❌" }
                     ));
+
+                    // Check AGENTS.md / instruction files
+                    let (_agents_md, discovery) =
+                        ragent_agent::agent::collect_agents_md_content_with_discovery(&working_dir);
+                    match discovery.loaded_file {
+                        Some(ref path) => {
+                            let rel = path
+                                .strip_prefix(&working_dir)
+                                .unwrap_or(path)
+                                .display()
+                                .to_string();
+                            let source = if discovery.used_global_fallback {
+                                " (global fallback)"
+                            } else {
+                                ""
+                            };
+                            lines.push(format!("✅ project guidelines loaded: {rel}{source}"));
+                        }
+                        None => {
+                            lines.push(format!(
+                                "ℹ️  no AGENTS.md / instruction file found (optional)"
+                            ));
+                        }
+                    }
 
                     // Check MCP config (field is `mcp`)
                     let mcp_configured = ragent_agent::Config::load()
@@ -7191,6 +7310,38 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             "ℹ️  no MCP servers configured (optional)"
                         }
                     ));
+
+                    // Check tool registry
+                    let registry = ragent_agent::tool::create_default_registry();
+                    let tool_count = registry.list().len();
+                    lines.push(format!("✅ tool registry loaded ({} tools)", tool_count));
+
+                    // Check code index
+                    if code_index_enabled {
+                        if let Some(idx) = code_index {
+                            match idx.try_status() {
+                                Some(stats) => {
+                                    lines.push(format!(
+                                        "✅ code index: {} files, {} symbols, {:.1} KB",
+                                        stats.files_indexed,
+                                        stats.total_symbols,
+                                        stats.index_size_bytes as f64 / 1024.0
+                                    ));
+                                }
+                                None => {
+                                    lines.push(format!(
+                                        "⏳ code index: enabled, status busy/locked"
+                                    ));
+                                }
+                            }
+                        } else {
+                            lines.push(format!("⚠️  code index: enabled but no index instance"));
+                        }
+                    } else {
+                        lines.push(format!(
+                            "ℹ️  code index: disabled (use /codeindex on to enable)"
+                        ));
+                    }
 
                     // Check for update
                     lines.push("\n**Checking for updates…**".to_string());
@@ -7207,9 +7358,12 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                     lines.push("\n*Diagnostics complete.*".to_string());
 
-                    event_bus.publish(ragent_agent::event::Event::AgentError {
+                    // Diagnostics are a normal status report, not an error.
+                    // Use AgentNotice so the TUI shows the report in the chat
+                    // panel without setting the status bar to "error:".
+                    event_bus.publish(ragent_agent::event::Event::AgentNotice {
                         session_id: sid,
-                        error: lines.join("\n"),
+                        message: lines.join("\n"),
                     });
                 });
             }
