@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## Version: 1.0.41
+
+### Changed
+
+- Bumped workspace version to 1.0.41.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
+### Fixed — CI
+
+- Fixed `cargo fmt --check` failures in the CI Rustfmt job. Ran `cargo fmt`
+  to reformat four files that had formatting diffs from the 1.0.40 commit:
+  - `crates/ragent-llm/src/providers/router_classifier.rs` — closure body
+    wrapping.
+  - `crates/ragent-tools-extended/src/masterfetch/extractor.rs` —
+    `spawn` closure body wrapping.
+  - `crates/ragent-tools-extended/tests/test_pdf_expert_cff.rs` —
+    `Stream::new` argument wrapping.
+  - `crates/ragent-types/tests/test_panic_guard.rs` — `assert!` argument
+    wrapping.
+
 ## Version: 1.0.40
 
 ### Changed

@@ -134,9 +134,10 @@ impl PromptClassifier {
         weights: &WeightConfig,
         boundaries: &BoundaryConfig,
         attachments: &AttachmentInfo,
-    ) -> ClassificationResult {    let result = ragent_types::panic_guard::run(|| {
-        Self::classify(prompt, history_text, weights, boundaries, attachments)
-    });
+    ) -> ClassificationResult {
+        let result = ragent_types::panic_guard::run(|| {
+            Self::classify(prompt, history_text, weights, boundaries, attachments)
+        });
 
         match result {
             Ok(r) => {

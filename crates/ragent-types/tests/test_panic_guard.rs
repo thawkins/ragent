@@ -21,7 +21,10 @@ fn test_panic_guard_catches_panic_and_clears_flag() {
         panic!("deliberate test panic");
     });
     assert!(result.is_err());
-    assert!(!panic_guard::is_active(), "flag must be reset after the panic");
+    assert!(
+        !panic_guard::is_active(),
+        "flag must be reset after the panic"
+    );
 }
 
 #[test]

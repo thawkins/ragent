@@ -110,7 +110,10 @@ fn build_pdf_with_expert_cff() -> Vec<u8> {
     };
     let res_id = doc.add_object(Object::Dictionary(resources));
 
-    let contents = Stream::new(dictionary! {}, b"BT /F1 12 Tf 72 720 Td (hi) Tj ET".to_vec());
+    let contents = Stream::new(
+        dictionary! {},
+        b"BT /F1 12 Tf 72 720 Td (hi) Tj ET".to_vec(),
+    );
     let contents_id = doc.add_object(Object::Stream(contents));
 
     let page = dictionary! {

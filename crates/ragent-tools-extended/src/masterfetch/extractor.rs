@@ -467,7 +467,9 @@ fn extract_html2text(html: &str) -> Option<String> {
 pub(crate) fn run_html2text_isolated(html: String) -> Result<String, String> {
     std::thread::Builder::new()
         .name("mf-html2text".to_string())
-        .spawn(move || ragent_types::panic_guard::run(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH)))
+        .spawn(move || {
+            ragent_types::panic_guard::run(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH))
+        })
         .map_err(|e| format!("failed to spawn html2text thread: {e}"))?
         .join()
         .map_err(|_| "html2text panicked".to_string())?
