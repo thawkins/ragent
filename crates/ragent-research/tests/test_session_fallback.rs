@@ -32,6 +32,7 @@ fn web_source(title: &str, url: &str, body: &str) -> Source {
         media_type: "page".into(),
         language: None,
         oa_recovery: None,
+        author: None,
     }
 }
 

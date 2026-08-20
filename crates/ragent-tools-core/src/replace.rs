@@ -468,7 +468,9 @@ fn indent_normalised_matches(content: &str, needle: &str) -> Vec<(usize, usize, 
             // matched line *except* the final line, mirroring the original
             // `.lines()`-based behaviour: we replace the line content but leave
             // the file's own newline separators in place.
-            if block[last].ends_with('\n') {
+            // `last` is an absolute content-line index, not an index into the
+            // `windows(n)` slice (`block`), so index `content_lines` directly.
+            if content_lines[last].ends_with('\n') {
                 end -= 1;
             }
             out.push((start, start + end, i, last));
@@ -492,6 +494,9 @@ fn indent_reapply(
     end_line: usize,
     new_str: &str,
 ) -> Option<String> {
+    // Use the same line splitter as `indent_normalised_matches` so that line
+    // indices returned by that function are valid here, including the trailing
+    // empty segment produced when the file ends with a newline.
     let content_lines: Vec<&str> = content.split_inclusive('\n').collect();
     let block = &content_lines[start_line..=end_line];
     let new_lines: Vec<&str> = new_str.lines().collect();

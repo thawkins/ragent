@@ -1227,6 +1227,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let doc = ResearchDocument {
             item,
@@ -1388,7 +1389,7 @@ mod tests {
 
     #[test]
     fn extract_one_line_summary_skips_placeholder() {
-        let body = "## Executive Summary\n\n(no executive summary recorded yet — run a gathering pass to populate)\n\n## Top 5 Implications\n\n";
+        let body = "## Executive Summary\n\n(no executive summary recorded yet — run a gathering pass to populate)\n\n## Top 10 Implications\n\n";
         assert_eq!(extract_one_line_summary(body), "");
     }
 
@@ -1463,6 +1464,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         }];
         let doc = render_document_for(&name, "Rust Async", "topic", &sources, "summary", &[]);
         assert!(doc.content.contains("# Title: Rust Async"));
@@ -1509,6 +1511,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let doc = ResearchDocument {
             item,
@@ -1574,6 +1577,7 @@ mod frontmatter_tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         item.set_queries(vec!["Rust async".into(), "Tokio runtime".into()]);
         let doc = ResearchDocument {

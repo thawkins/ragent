@@ -88,6 +88,7 @@ fn web_source(index: usize, body: &str) -> Source {
         media_type: "page".into(),
         language: None,
         oa_recovery: None,
+        author: None,
     }
 }
 
@@ -296,6 +297,7 @@ fn manual_case_6_open_access_recovery_is_disclosed() {
             license: Some("CC-BY-4.0".into()),
             version: Some("publishedVersion".into()),
         })),
+        author: None,
     });
 
     let doc = ResearchDocument {

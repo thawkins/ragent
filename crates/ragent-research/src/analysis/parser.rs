@@ -20,7 +20,9 @@ pub(crate) fn parse_analysis_response(text: &str) -> AnalysisResult {
                 let raw = parse_numbered_list(&body);
                 result.findings = reorder_findings_by_dependency(&raw);
             }
-            "top 5 implications"
+            "top 10 implications"
+            | "top ten implications"
+            | "top 5 implications"
             | "top five implications"
             | "top implications"
             | "implications" => {

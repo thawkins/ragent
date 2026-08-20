@@ -1,5 +1,5 @@
 //! Synthesis prompt construction — build the LLM prompt that asks for the
-//! five required sections (Executive Summary, Top 5 Implications, Findings,
+//! six required sections (Executive Summary, Top 10 Implications, Findings,
 //! In-Project Cross-References, Open Questions).
 //!
 //! These helpers were previously inline in `analysis.rs`.
@@ -128,7 +128,7 @@ pub(crate) fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> S
 /// byte-identical to the legacy middle of `build_synthesis_prompt`.
 ///
 /// The prompt asks the model for the same raw sections regardless of the final
-/// output format: Executive Summary, Top 5 Implications, Findings,
+/// output format: Executive Summary, Top 10 Implications, Findings,
 /// In-Project Cross-References, and Open Questions. The document assembler
 /// reorders these sections to match the selected `OutputFormat`.
 ///
@@ -142,9 +142,9 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
         Some(OutputFormat::ExecutiveSummary) => {
             out.push_str("## Executive Summary\n");
             out.push_str("A very concise executive summary in 2-3 sentences.\n\n");
-            out.push_str("## Top 5 Implications\n");
+            out.push_str("## Top 10 Implications\n");
             out.push_str(
-                "Rank the top 5 practical consequences implied by the evidence. Output a numbered list `1.`..`5.` ordered by importance. Each entry must be one or two sentences. If fewer than 5 are justified, list only those.\n\n",
+                "Rank the top 10 practical consequences implied by the evidence. Output a numbered list `1.`..`10.` ordered by importance. Each entry must be one or two sentences. If fewer than 10 are justified, list only those.\n\n",
             );
             out.push_str("## Findings\n");
             out.push_str(
@@ -201,9 +201,9 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             out.push_str(
                 "A concise one-paragraph executive summary of what the sources collectively say about the topic.\n\n",
             );
-            out.push_str("## Top 5 Implications\n");
+            out.push_str("## Top 10 Implications\n");
             out.push_str(
-                "Rank the top 5 practical consequences implied by the evidence. Output a numbered list `1.`..`5.` ordered by importance. Each entry must be one or two sentences. If fewer than 5 are justified, list only those.\n\n",
+                "Rank the top 10 practical consequences implied by the evidence. Output a numbered list `1.`..`10.` ordered by importance. Each entry must be one or two sentences. If fewer than 10 are justified, list only those.\n\n",
             );
             out.push_str("## Findings\n");
             out.push_str(
@@ -240,7 +240,7 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
         out.push_str(
             "In addition to the five required paragraphs above, every finding must end with a sixth paragraph labeled:\n\n\
             **Sources Cited / Date Spread:**\n\
-            List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). Add one sentence explaining how the date range — and the recency of the evidence — affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
+            List every `[#N]` citation used in the finding, then report the earliest and latest publication dates among those cited web sources (use the `Published` line in each source header below; write `undated` when a cited source has no publication date). When the `Author` line for a cited source is not `unknown`, include the author name in this paragraph as well. Add one sentence explaining how the date range — and the recency of the evidence — affects the finding's confidence, relevance, or conclusions. If every cited source is undated, say so explicitly and explain the implication.\n\n\
             Example: `**Sources Cited / Date Spread:** [#3] [#7] — published 2024-01-05..2026-04-07; the finding relies on 2026 sources, so recency weighting increases confidence in current behavior.`\n\n"
         );
     }
@@ -255,12 +255,12 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             - When ranking evidence quality, prefer sources with clear publication dates and structured metadata; down-weight anonymous forums and undated pages unless they provide unique empirical signal.\n\n"
         );
     }
-    out.push_str("## Top 5 Implications\n");
+    out.push_str("## Top 10 Implications\n");
     out.push_str(
-        "Analyze the practical consequences of the evidence and rank the top 5 implications. \
-         Output a numbered list `1.`..`5.` ordered by importance or practicality. Each entry must be one \
+        "Analyze the practical consequences of the evidence and rank the top 10 implications. \
+         Output a numbered list `1.`..`10.` ordered by importance or practicality. Each entry must be one \
          or two sentences: state the consequence, why it matters for the topic, and (when relevant) \
-         cite the finding or source `[#N]` that supports it. If fewer than 5 distinct implications are \
+         cite the finding or source `[#N]` that supports it. If fewer than 10 distinct implications are \
          justified by the evidence, list only the justified ones — do not pad with speculation.\n\n",
     );
     out.push_str("## In-Project Cross-References\n");
@@ -292,7 +292,7 @@ pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
             (Headline, Observation, Analysis, Cross-reference / Dependencies, Implication) \
             and, when requested, the sixth **Sources Cited / Date Spread** \
             paragraph. Treat template sections as additional output, not as a \
-            substitute for the structured findings or the Top 5 Implications section.\n\n",
+            substitute for the structured findings or the Top 10 Implications section.\n\n",
         );
     }
     // T-007 (FR-008): append few-shot exemplar findings so the model can
@@ -338,13 +338,18 @@ pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bo
         } else {
             String::new()
         };
+        let author_line = match src.author.as_deref() {
+            Some(a) if !a.is_empty() => format!("\nAuthor: {a}"),
+            _ => "\nAuthor: unknown".to_string(),
+        };
         out.push_str(&format!(
-            "#### Source [#{index}] ({kind}) {title}\nPath/URL: {path}{published}\nRelevance: {rel}\n```text\n{body}\n```\n\n",
+            "#### Source [#{index}] ({kind}) {title}\nPath/URL: {path}{published}{author}\nRelevance: {rel}\n```text\n{body}\n```\n\n",
             index = src.index,
             kind = src.kind,
             title = src.title,
             path = src.path_or_url,
             published = published_line,
+            author = author_line,
             rel = if src.relevance.is_empty() {
                 "—".to_string()
             } else {
@@ -361,7 +366,7 @@ pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bo
 pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     out.push_str(
-        "\nNow produce only the five sections above: Executive Summary, Top 5 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
+        "\nNow produce only the six sections above: Executive Summary, Top 10 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
     );
     out.push_str(
         "Within Findings, always begin with a **Headline:** paragraph (maximum 15 words) and include the four required paragraphs (Observation, Analysis, ",

@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## Version: 1.0.40
+
+### Changed
+
+- Bumped workspace version to 1.0.40.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
+### Fixed — /research system
+
+- Fixed a `/research create` panic (`attempt to subtract with overflow` in
+  `html2text 0.16.7` `WrappedBlock::flush_word`) that aborted the whole
+  process when the web gatherer fetched an HTML page whose rendered line
+  exceeded the wrap width (typically large HTML tables). `html2text` is now
+  vendored at `vendor/html2text` with `saturating_sub` patches at both
+  `width - line.len` sites.
+- All remaining `html2text::from_read` call sites (masterfetch extractor,
+  legacy `webfetch`, TUI markdown renderer, `@url` reference resolver) now run
+  the conversion on a dedicated OS thread instead of `catch_unwind` on an
+  async/UI thread, so any residual third-party panic is confined to that
+  thread and can never unwind through the Tokio runtime or take the process
+  down.
+- Fixed a `/research create` panic (`explicit panic` from
+  `cff-parser-0.1.0` `Encoding::get_table`) caused by PDFs with CFF fonts
+  using `EncodingKind::Expert`. `extract_pdf_text` now runs
+  `pdf_extract::extract_text_from_mem` on a dedicated OS thread with
+  `panic_guard::run` inside, matching the `run_html2text_isolated` pattern.
+- In the `/research` report (`RESEARCH.md`) layout, the `## Open Questions`
+  section now appears directly under `## Top 10 Implications` instead of at the
+  end of the document (before `## References Index`). Unresolved gaps now
+  surface immediately after the ranked consequences. The IMRaD layout keeps
+  Open Questions under `## Discussion`.
+
+### Added
+
+- `cargo patch` entry mapping crates-io `html2text` to `vendor/html2text`,
+  mirroring the existing `vendor/pdf-extract` pattern.
+- Regression tests: `test_wide_table_cell_does_not_panic` (synthetic wide
+  table) and `test_mf_panic_repro.rs` (real-world mdBook fixture loop) in
+  `ragent-tools-extended`.
+- Regression test: `test_pdf_expert_cff.rs`
+  (`test_expert_cff_through_extract_pdf_text`) covering the CFF Expert
+  encoding panic path.
+- `panic_guard` module in `ragent-types` providing `run()` for isolating
+  panics on dedicated OS threads.
+
 ## Version: 1.0.39
 
 ### Changed

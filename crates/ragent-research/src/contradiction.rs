@@ -394,6 +394,7 @@ mod tests {
             media_type: "page".to_string(),
             language: None,
             oa_recovery: None,
+            author: None,
         }
     }
 

@@ -356,6 +356,7 @@ impl WebSearchTool for AgentWebSearchTool {
                         } else {
                             r.search_engine
                         },
+                        author: r.author,
                     })
                     .collect();
             if !from_json.is_empty() {
@@ -401,6 +402,12 @@ fn parse_mf_search_metadata(metadata: &serde_json::Value, tool_name: &str) -> Ve
                 .or_else(|| v.get("source").and_then(|s| s.as_str()))
                 .unwrap_or(tool_name)
                 .to_string();
+            let author = v
+                .get("author")
+                .and_then(|s| s.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
             Some(WebSearchHit {
                 title,
                 url,
@@ -408,6 +415,7 @@ fn parse_mf_search_metadata(metadata: &serde_json::Value, tool_name: &str) -> Ve
                 matched_query: String::new(),
                 search_tool: tool_name.to_string(),
                 search_engine,
+                author,
             })
         })
         .collect()
@@ -424,15 +432,15 @@ struct AgentWebFetchTool {
     legacy_verifier: Option<Box<dyn Fn() -> bool + Send + Sync>>,
 }
 
-/// Maximum number of bytes of raw HTML to download when extracting a
-/// publication date. The date metadata lives in the page `<head>`, which is
-/// always near the start of the document, so a small cap is plenty and keeps
-/// the extra request cheap.
-const DATE_EXTRACTION_MAX_HTML_BYTES: usize = 64 * 1024;
+/// Maximum number of bytes of raw HTML to download when extracting page
+/// metadata. Author and publication-date metadata live in the page `<head>`,
+/// which is always near the start of the document, so a small cap is plenty
+/// and keeps the extra request cheap.
+const HEAD_METADATA_MAX_HTML_BYTES: usize = 64 * 1024;
 
 /// User-Agent used for the supplementary raw-HTML fetch performed to extract
-/// a publication date. Mirrors the one used by the `webfetch` tool.
-const DATE_EXTRACTION_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
+/// page metadata. Mirrors the one used by the `webfetch` tool.
+const HEAD_METADATA_USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 #[async_trait]
 impl WebFetchTool for AgentWebFetchTool {
@@ -473,7 +481,7 @@ impl WebFetchTool for AgentWebFetchTool {
             None
         };
 
-        let (mut body, mut title, content_type, page_type, language) = if is_mf_fetch {
+        let (mut body, mut title, content_type, page_type, language, mut author) = if is_mf_fetch {
             parse_mf_fetch_output(url, &output.content, output.metadata.as_ref())
         } else {
             let title = output
@@ -501,6 +509,7 @@ impl WebFetchTool for AgentWebFetchTool {
                         .and_then(|v| v.as_str())
                         .map(String::from)
                 }),
+                None,
                 None,
             )
         };
@@ -588,12 +597,23 @@ impl WebFetchTool for AgentWebFetchTool {
             }
         }
 
-        // Opportunistically fetch the raw HTML head to extract a publication
-        // date from the page's embedded metadata. This is a best-effort step:
-        // any failure (network error, non-HTML content, missing date) simply
-        // leaves `published_at` as `None` so the research run is never aborted
-        // by a date-extraction failure.
-        let published_at = extract_published_at_for_url(url).await.unwrap_or(None);
+        // When the primary fetch did not yield an author, fall back to a
+        // supplementary raw-HTML head fetch and parse the embedded page
+        // metadata directly from the URL. Author information often lives in
+        // `article:author` / JSON-LD / standard `<meta name="author">` tags
+        // even when the search backend and the extracted metadata envelope
+        // did not report it. This runs unconditionally for the publication
+        // date (which the envelope does not always expose) and only when
+        // `author` is still `None`. Best-effort: any failure simply leaves the
+        // fields as `None`.
+        let need_author = author.is_none();
+        let page_meta = extract_head_metadata_for_url(url, need_author)
+            .await
+            .unwrap_or_default();
+        let published_at = page_meta.published_at;
+        if author.is_none() {
+            author = page_meta.author;
+        }
 
         Ok(WebFetchedPage {
             url: url.to_string(),
@@ -603,6 +623,7 @@ impl WebFetchTool for AgentWebFetchTool {
             content_type,
             page_type,
             language,
+            author,
         })
     }
 }
@@ -651,7 +672,7 @@ pub const MIN_READABILITY_EXTRACT_CHARS: usize = 500;
 /// Exposed for the integration tests in
 /// `crates/ragent-agent/tests/test_research_readability.rs`.
 pub fn readability_extract_ok(html: &str, url: &str) -> bool {
-    let result = std::panic::catch_unwind(|| {
+    let result = ragent_types::panic_guard::run(|| {
         let Ok(parsed_url) = url::Url::parse(url) else {
             return false;
         };
@@ -682,10 +703,12 @@ pub fn readability_extract_ok(html: &str, url: &str) -> bool {
 /// in the References Index and per-finding source lists. The function strips
 /// that header so the research layer only stores the actual content.
 ///
-/// Returns the `(body, title, content_type, page_type, detected_language)`
+/// Returns the `(body, title, content_type, page_type, detected_language, author)`
 /// tuple. The `detected_language` is read from the top-level
 /// `detected_language` field (present on HTML, PDF, and YouTube responses) with
 /// a fallback to the nested `metadata.detected_language` for older payloads.
+/// The `author` is read from the nested `metadata.author` field populated by
+/// `PageMetadata` extraction.
 #[allow(clippy::type_complexity)]
 fn parse_mf_fetch_output(
     url: &str,
@@ -694,6 +717,7 @@ fn parse_mf_fetch_output(
 ) -> (
     String,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -761,12 +785,49 @@ fn parse_mf_fetch_output(
                         .filter(|s| !s.is_empty())
                         .map(String::from)
                 });
-            return (body, title, content_type, page_type, detected_language);
+            // Author: prefer the nested `metadata.author` field, which is
+            // populated by `PageMetadata` extraction from `article:author` and
+            // JSON-LD `author`. Fall back to the top-level `author` field when
+            // present for older/custom payloads.
+            let author = envelope
+                .get("metadata")
+                .and_then(|m| m.get("author"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .or_else(|| {
+                    envelope
+                        .get("author")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                })
+                .or_else(|| {
+                    metadata
+                        .and_then(|m| m.get("author"))
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                });
+            return (
+                body,
+                title,
+                content_type,
+                page_type,
+                detected_language,
+                author,
+            );
         }
     }
 
     // Not an envelope: strip the `mf_fetch:` header block if present and use
-    // the remaining text as the page body.
+    // the remaining text as the page body. `mf_fetch` still reports the
+    // structured `ToolOutput.metadata`, where the full `PageMetadata` object
+    // (including `author`) is nested under the `metadata` key — honour that
+    // nested shape before falling back to a top-level `author` field.
     let body = strip_mf_fetch_header(content);
     let title = metadata
         .and_then(|m| m.get("title"))
@@ -774,6 +835,15 @@ fn parse_mf_fetch_output(
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(ToString::to_string)
+        .or_else(|| {
+            metadata
+                .and_then(|m| m.get("metadata"))
+                .and_then(|m| m.get("title"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(ToString::to_string)
+        })
         .unwrap_or_else(|| {
             body.lines()
                 .find(|l| !l.trim().is_empty())
@@ -792,13 +862,37 @@ fn parse_mf_fetch_output(
         .and_then(|m| m.get("detected_language"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
-        .map(String::from);
+        .map(String::from)
+        .or_else(|| {
+            metadata
+                .and_then(|m| m.get("metadata"))
+                .and_then(|m| m.get("detected_language"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        });
+    let author = metadata
+        .and_then(|m| m.get("metadata"))
+        .and_then(|m| m.get("author"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .or_else(|| {
+            metadata
+                .and_then(|m| m.get("author"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        });
     (
         body.to_string(),
         title,
         content_type,
         page_type,
         detected_language,
+        author,
     )
 }
 
@@ -851,30 +945,55 @@ fn parse_mf_fetch_youtube_body(content: &str) -> Option<(String, String)> {
     Some((title, transcript.trim_start().to_string()))
 }
 
-/// Fetch the raw HTML for `url` and attempt to extract a publication date.
+/// Publication metadata recovered from a page's own HTML `<head>`.
 ///
-/// Only the first [`DATE_EXTRACTION_MAX_HTML_BYTES`] bytes are read because
-/// publication-date metadata lives in the document `<head>`, which appears
-/// near the start of the response. Non-HTML responses and any network error
-/// are mapped to `Ok(None)` so callers can treat date extraction as
-/// best-effort.
-async fn extract_published_at_for_url(url: &str) -> Result<Option<chrono::DateTime<chrono::Utc>>> {
+/// Produced by the supplementary raw-HTML head fetch
+/// ([`extract_head_metadata_for_url`]). Both fields are optional: pages that
+/// do not embed parseable author/publication-date metadata simply leave the
+/// corresponding field as `None`.
+#[derive(Debug, Default)]
+struct HeadMetadata {
+    /// Publication date parsed from `article:published_time`, `datePublished`,
+    /// or other date metadata.
+    published_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Author parsed from `article:author`, Dublin Core creator tags, standard
+    /// `<meta name="author">`-style tags, or JSON-LD `author`; multiple
+    /// authors are joined with `", "`.
+    author: Option<String>,
+}
+
+/// Fetch the raw HTML for `url` and extract embedded head metadata.
+///
+/// This is the **URL-only fallback** for author provenance: when neither the
+/// search backend nor the `mf_fetch` metadata envelope reported an author, we
+/// still read the page's own HTML to look for standard author markup. Only
+/// the first [`HEAD_METADATA_MAX_HTML_BYTES`] bytes are read because the
+/// metadata lives in the document `<head>`, which appears near the start of
+/// the response.
+///
+/// `want_author` controls whether author extraction is attempted. When `false`
+/// the caller already has an author (e.g. from the metadata envelope or the
+/// search backend) and only the publication date is needed, so the more
+/// expensive metadata scan is skipped. Non-HTML responses and any network error
+/// are mapped to `Ok(HeadMetadata::default())` so callers can treat the
+/// extraction as best-effort.
+async fn extract_head_metadata_for_url(url: &str, want_author: bool) -> Result<HeadMetadata> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Ok(None);
+        return Ok(HeadMetadata::default());
     }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent(DATE_EXTRACTION_USER_AGENT)
+        .user_agent(HEAD_METADATA_USER_AGENT)
         .build()
-        .context("failed to build HTTP client for date extraction")?;
+        .context("failed to build HTTP client for head-metadata extraction")?;
     let response = client
         .get(url)
         .send()
         .await
-        .with_context(|| format!("date-extraction fetch failed for {url}"))?;
+        .with_context(|| format!("head-metadata fetch failed for {url}"))?;
     if !response.status().is_success() {
-        return Ok(None);
+        return Ok(HeadMetadata::default());
     }
     let content_type = response
         .headers()
@@ -883,22 +1002,34 @@ async fn extract_published_at_for_url(url: &str) -> Result<Option<chrono::DateTi
         .unwrap_or("")
         .to_string();
     if !content_type.contains("text/html") && !content_type.contains("application/xhtml") {
-        return Ok(None);
+        return Ok(HeadMetadata::default());
     }
-    // Read only the leading chunk: the <head> with the date metadata is at the
+    // Read only the leading chunk: the <head> with the metadata is at the
     // top of the document. `text()` reads the whole body; instead we take the
     // first bytes via a streaming read.
     let body_bytes = response
         .bytes()
         .await
-        .with_context(|| format!("failed to read body for date extraction: {url}"))?;
-    let head_chunk: &[u8] = if body_bytes.len() > DATE_EXTRACTION_MAX_HTML_BYTES {
-        &body_bytes[..DATE_EXTRACTION_MAX_HTML_BYTES]
+        .with_context(|| format!("failed to read body for head-metadata extraction: {url}"))?;
+    let head_chunk: &[u8] = if body_bytes.len() > HEAD_METADATA_MAX_HTML_BYTES {
+        &body_bytes[..HEAD_METADATA_MAX_HTML_BYTES]
     } else {
         &body_bytes
     };
     let html = String::from_utf8_lossy(head_chunk);
-    Ok(ragent_research::extract_published_at(&html))
+    let published_at = ragent_research::extract_published_at(&html);
+    let author = if want_author {
+        ragent_tools_extended::masterfetch::metadata::extract_metadata(&html)
+            .author
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+    Ok(HeadMetadata {
+        published_at,
+        author,
+    })
 }
 
 struct AgentLocalTool {
@@ -992,6 +1123,7 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
                         matched_query: String::new(),
                         search_tool: "websearch".to_string(),
                         search_engine: "tavily".to_string(),
+                        author: None,
                     });
                 }
                 current_snippet.clear();
@@ -1019,6 +1151,7 @@ pub fn parse_websearch_output(content: &str) -> Vec<WebSearchHit> {
             matched_query: String::new(),
             search_tool: "websearch".to_string(),
             search_engine: "tavily".to_string(),
+            author: None,
         });
     }
 
@@ -1100,6 +1233,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: r.author,
             })
             .collect::<Vec<_>>();
         assert_eq!(hits.len(), 2);

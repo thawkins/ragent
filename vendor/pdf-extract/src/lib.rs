@@ -407,35 +407,51 @@ impl<'a> PdfSimpleFont<'a> {
                     }
                     _ => { dlog!("font file {:?}", file) }
                 }
-            }
-
-            let font_file3 = get::<Option<&Object>>(doc, descriptor, b"FontFile3");
-            match font_file3 {
-                Some(&Object::Stream(ref s)) => {
-                    let subtype = get_name_string(doc, &s.dict, b"Subtype");
-                    dlog!("font file {}, {:?}", subtype, s);
-                    let s = get_contents(s);
-                    if subtype == "Type1C" {
-                        let table = cff_parser::Table::parse(&s).unwrap();
-                        let charset = table.charset.get_table();
-                        let encoding = table.encoding.get_table();
-                        let mut mapping = HashMap::new();
-                        for i in 0..encoding.len().min(charset.len()) {
-                            let cid = encoding[i];
-                            let sid = charset[i];
-                            let name = cff_parser::string_by_id(&table, sid).unwrap();
-                            let unicode = glyphnames::name_to_unicode(&name).or_else(|| {
-                                zapfglyphnames::zapfdigbats_names_to_unicode(name)
-                            });
-                            if let Some(unicode) = unicode {
-                                let str = String::from_utf16(&[unicode]).unwrap();
-                                mapping.insert(cid as u32, str);
+            }                let font_file3 = get::<Option<&Object>>(doc, descriptor, b"FontFile3");
+                match font_file3 {
+                    Some(&Object::Stream(ref s)) => {
+                        let subtype = get_name_string(doc, &s.dict, b"Subtype");
+                        dlog!("font file {}, {:?}", subtype, s);
+                        let s = get_contents(s);
+                        if subtype == "Type1C" {
+                            // Fault-tolerant CFF handling: any parse or mapping
+                            // failure degrades to keeping the font's other
+                            // encodings (standard / encoding dictionary /
+                            // ToUnicode map) instead of panicking.
+                            if let Some(table) = cff_parser::Table::parse(&s) {
+                                // `EncodingKind::Expert` makes
+                                // `Encoding::get_table()` panic in cff-parser
+                                // 0.1.0 (unimplemented path). Skip the CFF
+                                // mapping in that case.
+                                if !matches!(table.encoding.kind, cff_parser::EncodingKind::Expert) {
+                                    let charset = table.charset.get_table();
+                                    let encoding = table.encoding.get_table();
+                                    let mut mapping = HashMap::new();
+                                    for i in 0..encoding.len().min(charset.len()) {
+                                        let cid = encoding[i];
+                                        let sid = charset[i];
+                                        let Some(name) = cff_parser::string_by_id(&table, sid) else {
+                                            continue;
+                                        };
+                                        let unicode = glyphnames::name_to_unicode(&name).or_else(|| {
+                                            zapfglyphnames::zapfdigbats_names_to_unicode(name)
+                                        });
+                                        if let Some(unicode) = unicode {
+                                            if let Ok(str) = String::from_utf16(&[unicode]) {
+                                                mapping.insert(cid as u32, str);
+                                            }
+                                        }
+                                    }
+                                    unicode_map = Some(mapping);
+                                } else {
+                                    dlog!("font file uses CFF Expert encoding; skipping CFF unicode map");
+                                }
+                            } else {
+                                dlog!("font file contains an unparseable CFF table; skipping CFF unicode map");
                             }
+                            //
+                            //File::create(format!("/tmp/{}", base_name)).unwrap().write_all(&s);
                         }
-                        unicode_map = Some(mapping);
-                        //
-                        //File::create(format!("/tmp/{}", base_name)).unwrap().write_all(&s);
-                    }
 
                     //
                     //File::create(format!("/tmp/{}", base_name)).unwrap().write_all(&s);

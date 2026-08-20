@@ -2343,6 +2343,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }],
             }),
             Arc::new(FakeFetch {
@@ -2356,6 +2357,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     },
                 )]),
             }),
@@ -2439,6 +2441,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2517,6 +2520,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }])
             }
         }
@@ -2532,6 +2536,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2621,6 +2626,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2737,6 +2743,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2821,6 +2828,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2877,6 +2885,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -3373,6 +3382,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }],
             }),
             Arc::new(FakeFetch {
@@ -3386,6 +3396,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     },
                 )]),
             }),
@@ -3534,6 +3545,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }],
             }),
             Arc::new(FakeFetch {
@@ -3547,6 +3559,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     },
                 )]),
             }),
@@ -3649,6 +3662,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }],
             }),
             Arc::new(FakeFetch {
@@ -3662,6 +3676,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     },
                 )]),
             }),
@@ -3748,6 +3763,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }])
             }
         }
@@ -3764,6 +3780,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     })
                 } else {
                     Ok(WebFetchedPage {
@@ -3774,6 +3791,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     })
                 }
             }
@@ -3879,6 +3897,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     })
                 } else {
                     Ok(WebFetchedPage {
@@ -3889,6 +3908,7 @@ mod tests {
                         content_type: None,
                         page_type: None,
                         language: None,
+                        author: None,
                     })
                 }
             }
@@ -3960,6 +3980,7 @@ mod tests {
             relevance: relevance.to_string(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
             content_type: None,
             page_type: None,
             media_type: "page".to_string(),
@@ -3991,6 +4012,7 @@ mod tests {
             relevance: relevance.to_string(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
             content_type: None,
             page_type: None,
             media_type: "page".to_string(),
@@ -4029,6 +4051,7 @@ mod tests {
             relevance: relevance.to_string(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
             content_type: None,
             page_type: None,
             media_type: "page".to_string(),
@@ -4054,6 +4077,7 @@ mod tests {
             relevance: relevance.to_string(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
             content_type: None,
             page_type: None,
             media_type: "page".to_string(),
@@ -4096,6 +4120,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -4110,6 +4135,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: "test".into(),
                     search_engine: "test".into(),
+                    author: None,
                 }])
             }
         }
@@ -4258,6 +4284,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }

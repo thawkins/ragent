@@ -1718,6 +1718,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let edge = ContradictionEdge {
             claim_a: ContradictionClaim::from_source("claims better performance", 1, &src),

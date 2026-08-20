@@ -163,7 +163,7 @@ Default is `full`. If you only need a fast answer, use `--tier light`.
 
 | Format | Layout |
 |--------|--------|
-| `report` (default) | Topic, Search Queries, Executive Summary, Top 5 Implications, Findings, Findings Relationship Diagram, Cross-References, Open Questions, References Index |
+| `report` (default) | Topic, Search Queries, Executive Summary, Top 10 Implications, Open Questions, Findings, Findings Relationship Diagram, Cross-References, References Index |
 | `executive-summary` | One-page summary of the same content |
 | `comparison-table` | Comparison table across key entities |
 | `source-bibliography` | Bibliography of all captured sources |

@@ -180,14 +180,24 @@ impl App {
         let mut html_buf = String::new();
         html::push_html(&mut html_buf, parser);
 
-        let rendered =
-            match std::panic::catch_unwind(|| html2text::from_read(html_buf.as_bytes(), 120)) {
+        // html2text may panic on malformed HTML (word-wrapper subtraction
+        // overflow); run it on a dedicated thread so any panic unwinds only
+        // that thread, never the UI thread (which installs the panic hook).
+        let rendered = {
+            let html_owned = html_buf.clone();
+            match std::thread::Builder::new()
+                .name("md-html2text".to_string())
+                .spawn(move || html2text::from_read(html_owned.as_bytes(), 120))
+                .map_err(|e| e.to_string())
+                .and_then(|h| h.join().map_err(|_| "html2text panicked".to_string()))
+            {
                 Ok(Ok(text)) => sanitize_for_display(&text),
                 _ => {
                     // Fallback to sanitized text when markdown conversion panics or fails.
                     sanitize_for_display(text)
                 }
-            };
+            }
+        };
         let cleaned = rendered
             .lines()
             .map(|l| l.trim_end())

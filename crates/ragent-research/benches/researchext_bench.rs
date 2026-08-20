@@ -22,6 +22,7 @@ impl WebSearchTool for FixedSearch {
             matched_query: String::new(),
             search_tool: "mf_search".to_string(),
             search_engine: "duckduckgo, brave".to_string(),
+            author: None,
         }])
     }
 }
@@ -40,6 +41,7 @@ impl WebFetchTool for FixedFetch {
             content_type: None,
             page_type: None,
             language: None,
+            author: None,
         })
     }
 }

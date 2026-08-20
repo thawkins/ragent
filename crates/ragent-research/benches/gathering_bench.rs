@@ -95,6 +95,7 @@ fn make_hits(n: usize) -> Vec<WebSearchHit> {
             matched_query: String::new(),
             search_tool: "mf_search".to_string(),
             search_engine: "duckduckgo, brave".to_string(),
+            author: None,
         })
         .collect()
 }
@@ -112,6 +113,7 @@ fn make_pages(n: usize) -> HashMap<String, WebFetchedPage> {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             )
         })

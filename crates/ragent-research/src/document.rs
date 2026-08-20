@@ -12,11 +12,11 @@
 //!    ## Search Queries
 //!    ### Search Engine Summary   (after gathering, per-engine source counts)
 //!    ## Executive Summary
-//!    ## Top 5 Implications
+//!    ## Top 10 Implications
+//!    ## Open Questions
 //!    ## Findings
 //!    ## Findings Relationship Diagram
 //!    ## In-Project Cross-References
-//!    ## Open Questions
 //!    ## References Index
 //!    ```
 //!
@@ -54,11 +54,11 @@ pub const REQUIRED_SECTIONS: &[&str] = &[
     "Topic",
     "Search Queries",
     "Executive Summary",
-    "Top 5 Implications",
+    "Top 10 Implications",
+    "Open Questions",
     "Findings",
     "Findings Relationship Diagram",
     "In-Project Cross-References",
-    "Open Questions",
     "References Index",
 ];
 
@@ -76,7 +76,7 @@ pub struct ResearchDocument {
     /// Numbered findings — each entry is the body of one bullet under
     /// `## Findings`. References inside the body use the form `[#N]`.
     pub findings: Vec<String>,
-    /// Top 5 implications — one numbered entry per implication, in rank order.
+    /// Top 10 implications — one numbered entry per implication, in rank order.
     /// In the report layout this section now appears directly under
     /// `## Executive Summary`; in the IMRaD layout it is rendered under
     /// `## Discussion`.
@@ -84,7 +84,9 @@ pub struct ResearchDocument {
     /// In-project cross-references (FR-009). Each entry is one bullet under
     /// `## In-Project Cross-References`.
     pub cross_references: Vec<CrossReference>,
-    /// Open questions — one bullet per question.
+    /// Open questions — one bullet per question. In the report layout this
+    /// section appears directly under `## Top 10 Implications`; in the IMRaD
+    /// layout it is rendered under `## Discussion`.
     pub open_questions: Vec<String>,
     /// Optional contradiction graph produced by the full / dissertation
     /// pipeline (FR-005, T-007). When `None` the report layout omits the
@@ -254,9 +256,9 @@ fn derive_headline_from_observation(finding: &str, finding_number: usize) -> Str
 ///
 /// * [`OutputFormat::Report`](crate::run_config::OutputFormat::Report)
 ///   (default) and all other existing formats emit the legacy multi-section
-///   layout: Topic, Search Queries, Executive Summary, Top 5 Implications,
-///   Findings, Findings Relationship Diagram, In-Project Cross-References,
-///   Open Questions, References Index.
+///   layout: Topic, Search Queries, Executive Summary, Top 10 Implications,
+///   Open Questions, Findings, Findings Relationship Diagram,
+///   In-Project Cross-References, References Index.
 /// * [`OutputFormat::Imrad`](crate::run_config::OutputFormat::Imrad) emits
 ///   the `IMRaD` layout required by specs/imradreport: Abstract, Introduction,
 ///   Methods, Results, Discussion, References Index. The same `summary`,
@@ -307,11 +309,6 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     }
 }
 
-/// Build the body of a legacy multi-section `RESEARCH.md` report.
-///
-/// This preserves the original section order: Topic, Search Queries, Executive
-/// Summary, Top 5 Implications, Findings, Findings Relationship Diagram,
-/// In-Project Cross-References, Open Questions, References Index.
 /// Render the synthesis audit as a concise markdown section.
 fn render_synthesis_audit(audit: &SynthesisAudit) -> String {
     let mut out = String::new();
@@ -882,6 +879,11 @@ fn render_surgical_patch(result: &crate::patcher::PatchResult) -> String {
     out
 }
 
+/// Build the body of a legacy multi-section `RESEARCH.md` report.
+///
+/// This preserves the original section order: Topic, Search Queries, Executive
+/// Summary, Top 10 Implications, Open Questions, Findings, Findings
+/// Relationship Diagram, In-Project Cross-References, References Index.
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
 
@@ -925,8 +927,8 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     }
     body.push('\n');
 
-    // ── Top 5 Implications ──────────────────────────────────────────────
-    body.push_str("## Top 5 Implications\n\n");
+    // ── Top 10 Implications ──────────────────────────────────────────────
+    body.push_str("## Top 10 Implications\n\n");
     if doc.top_implications.is_empty() {
         body.push_str(
             "_(no ranked implications yet — the synthesis pass will populate this section)_\n\n",
@@ -940,8 +942,19 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push('\n');
     }
 
+    // ── Open Questions ───────────────────────────────────────────────────
+    body.push_str("## Open Questions\n\n");
+    if doc.open_questions.is_empty() {
+        body.push_str("_(none)_\n\n");
+    } else {
+        for q in &doc.open_questions {
+            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
+        }
+        body.push('\n');
+    }
+
     // ── Data Quality & Consistency ──────────────────────────────────────
-    // Synthesized overview of the QA artifacts, placed between the Top 5
+    // Synthesized overview of the QA artifacts, placed between the Top 10
     // Implications and Findings so the reader sees the quality summary before
     // diving into the detailed sections. Omitted entirely when no QA data
     // is present (standard gathering run without full-tier QA).
@@ -1149,17 +1162,6 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
                 escape_pipe(&strip_control_chars(&cr.path)),
                 escape_pipe(&strip_control_chars(&cr.relevance)),
             ));
-        }
-        body.push('\n');
-    }
-
-    // ── Open Questions ───────────────────────────────────────────────────
-    body.push_str("## Open Questions\n\n");
-    if doc.open_questions.is_empty() {
-        body.push_str("_(none)_\n\n");
-    } else {
-        for q in &doc.open_questions {
-            body.push_str(&format!("- {}\n", strip_control_chars(q).trim()));
         }
         body.push('\n');
     }
@@ -1564,9 +1566,9 @@ fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
 
 /// Build a `**Sources:**` paragraph for a finding that cites one or more
 /// captured sources. Each bullet contains the citation number, source title,
-/// and path/URL so the reader can map the finding back to the References
-/// Index. Returns `None` when there are no citations or none of the cited
-/// indices map to a known source.
+/// author (when known), and path/URL so the reader can map the finding back to
+/// the References Index. Returns `None` when there are no citations or none of
+/// the cited indices map to a known source.
 ///
 /// A `**Source date range:**` line is appended after the bullet list showing
 /// the earliest and latest publication dates of the cited *web* sources, so
@@ -1589,10 +1591,12 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     for idx in &indices {
         if let Some(src) = sources.get(idx - 1) {
             any = true;
+            let author = src.author().filter(|a| !a.is_empty());
             out.push_str(&format!(
-                "- [{idx}] {title} — {path}{published}\n",
+                "- [{idx}] {title}{author} — {path}{published}\n",
                 idx = idx,
                 title = src.title(),
+                author = author.map(|a| format!(" [{a}]")).unwrap_or_default(),
                 path = src.path_or_url(),
                 published = src
                     .published_at()
@@ -2363,6 +2367,7 @@ mod tests {
                 media_type: "page".into(),
                 language: None,
                 oa_recovery: None,
+                author: None,
             },
             Source::Web {
                 url: "https://b.example".into(),
@@ -2379,6 +2384,7 @@ mod tests {
                 media_type: "page".into(),
                 language: None,
                 oa_recovery: None,
+                author: None,
             },
         ];
         let mut graph = ContradictionGraph::empty();
@@ -2539,6 +2545,7 @@ mod tests {
                 license: Some("CC-BY-4.0".into()),
                 version: Some("publishedVersion".into()),
             })),
+            author: None,
         });
         let rendered = render_supporting_file(&item.sources[0]).expect("web source renders");
         assert!(rendered.contains("Open-access recovery"));
@@ -2577,7 +2584,7 @@ mod tests {
         let assembled = assemble_document(&doc);
         let body = &assembled.body;
         assert!(
-            body.contains("## Top 5 Implications"),
+            body.contains("## Top 10 Implications"),
             "section heading must be present"
         );
         assert!(body.contains("1. Adopt async/await for I/O-bound concurrency."));
@@ -2720,6 +2727,7 @@ mod tests {
             media_type: media_type.into(),
             language: None,
             oa_recovery: None,
+            author: None,
         }
     }
 
@@ -2919,6 +2927,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("# Web source"));
@@ -2943,6 +2952,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let out = render_supporting_file(&source).expect("web must produce a body");
         assert!(out.contains("no body captured"));
@@ -3002,6 +3012,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let out = render_bibliography(&[source]);
         assert!(out.contains("Example"));
@@ -3047,6 +3058,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -3091,6 +3103,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -3107,6 +3120,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec!["Mixed [#2] and [#1] and again [#2].".into()];
@@ -3145,6 +3159,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         item.add_source(Source::Web {
             published_at: Some(
@@ -3165,6 +3180,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         item.add_source(Source::Web {
             published_at: None,
@@ -3181,6 +3197,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -3222,6 +3239,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let mut doc = sample_doc(item);
         doc.findings = vec![
@@ -3268,6 +3286,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         });
         let mut doc = sample_doc(item);
         // The LLM already produced its own Sources paragraph.
@@ -3634,6 +3653,7 @@ mod tests {
                 media_type: "page".into(),
                 language: None,
                 oa_recovery: None,
+                author: None,
             },
             Source::Web {
                 url: "https://b.example".into(),
@@ -3650,6 +3670,7 @@ mod tests {
                 media_type: "page".into(),
                 language: None,
                 oa_recovery: None,
+                author: None,
             },
         ];
 
@@ -3820,8 +3841,8 @@ mod tests {
             assembled.body.contains("## Data Quality & Consistency"),
             "report layout must contain Data Quality & Consistency section"
         );
-        // The section must appear after Top 5 Implications and before Findings.
-        let implications_pos = assembled.body.find("## Top 5 Implications").unwrap();
+        // The section must appear after Top 10 Implications and before Findings.
+        let implications_pos = assembled.body.find("## Top 10 Implications").unwrap();
         let dq_pos = assembled
             .body
             .find("## Data Quality & Consistency")
@@ -3829,7 +3850,7 @@ mod tests {
         let findings_pos = assembled.body.find("## Findings").unwrap();
         assert!(
             implications_pos < dq_pos,
-            "DQ summary should come after Top 5 Implications"
+            "DQ summary should come after Top 10 Implications"
         );
         assert!(
             dq_pos < findings_pos,

@@ -243,6 +243,7 @@ fn imrad_references_index_unchanged() {
         media_type: "page".into(),
         language: None,
         oa_recovery: None,
+        author: None,
     });
 
     let assembled = assemble_document(&doc);

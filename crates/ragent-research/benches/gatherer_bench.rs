@@ -101,6 +101,7 @@ fn fake_hits(n: usize) -> Vec<WebSearchHit> {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo, brave".into(),
+            author: None,
         })
         .collect()
 }
@@ -118,6 +119,7 @@ fn fake_pages(n: usize) -> HashMap<String, WebFetchedPage> {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             )
         })

@@ -183,6 +183,7 @@ fn session_with_engine(
                 matched_query: "Rust async".into(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             }],
         }),
         Arc::new(FakeFetch {
@@ -196,6 +197,7 @@ fn session_with_engine(
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             )]),
         }),

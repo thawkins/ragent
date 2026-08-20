@@ -62,6 +62,7 @@ impl LocalSourceKind {
 /// those items will simply have an empty body until re-gathered.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "source_type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum Source {
     /// A web URL (article, blog post, API doc, etc.).
     Web {
@@ -119,6 +120,12 @@ pub enum Source {
         /// predates this field.
         #[serde(default)]
         language: Option<String>,
+        /// Author name extracted from the page's embedded metadata at fetch
+        /// time (e.g. `"Jane Doe"`), when the fetcher is able to determine one.
+        /// `None` when the page did not expose parseable author information, the
+        /// fetcher does not extract authors, or the source predates this field.
+        #[serde(default)]
+        author: Option<String>,
         /// Open-access recovery metadata. Populated when the source body was
         /// recovered from a legal OA copy via Unpaywall or Europe PMC
         /// (FR-010). `None` when the source was captured directly from the
@@ -285,6 +292,19 @@ impl Source {
         }
     }
 
+    /// Author name of the source, when known.
+    ///
+    /// Only [`Source::Web`] carries an extracted author (e.g. `"Jane Doe"`).
+    /// Local, spec, and other sources do not have a meaningful author and return
+    /// `None`.
+    #[must_use]
+    pub fn author(&self) -> Option<&str> {
+        match self {
+            Self::Web { author, .. } => author.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Optional relevance note for local, spec, and web sources.
     #[must_use]
     pub fn relevance(&self) -> Option<&str> {
@@ -433,6 +453,7 @@ mod tests {
                 license: Some("CC-BY-4.0".into()),
                 version: Some("publishedVersion".into()),
             })),
+            author: None,
         }
     }
 
@@ -475,6 +496,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert!(web.oa_recovery_note().is_none());
     }
@@ -496,6 +518,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(web.type_str(), "web");
 
@@ -552,6 +575,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(web.title(), "Example");
         assert_eq!(web.path_or_url(), "https://example.com");
@@ -594,6 +618,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(web.captured_at(), now);
     }
@@ -615,10 +640,62 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn web_author_accessor_returns_extracted_name() {
+        let with_author = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: None,
+            author: Some("Jane Doe".into()),
+        };
+        assert_eq!(with_author.author(), Some("Jane Doe"));
+
+        let without_author = Source::Web {
+            published_at: None,
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/web-01.md"),
+            body: "page text".into(),
+            relevance: String::new(),
+            search_tool: String::new(),
+            search_engine: String::new(),
+            content_type: None,
+            page_type: None,
+            media_type: "page".into(),
+            language: None,
+            oa_recovery: None,
+            author: None,
+        };
+        assert_eq!(without_author.author(), None);
+
+        let local = Source::Local {
+            path: "src/lib.rs".into(),
+            kind: LocalSourceKind::InProject,
+            captured_at: dt(),
+            body_path: PathBuf::from("sources/local-01.md"),
+            relevance: String::new(),
+            body: "code".into(),
+        };
+        assert_eq!(local.author(), None);
     }
 
     #[test]
@@ -714,6 +791,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(web.body(), Some("hello"));
         assert!(web.has_body());
@@ -733,6 +811,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(empty.body(), Some(""));
         assert!(!empty.has_body());
@@ -768,6 +847,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         let json = serde_json::to_string(&s).unwrap();
         let back: Source = serde_json::from_str(&json).unwrap();
@@ -792,6 +872,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance(), Some(""));
     }
@@ -815,6 +896,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance_rank(), 8);
     }
@@ -836,6 +918,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance_rank(), 7);
     }
@@ -857,6 +940,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance_rank(), 5);
     }
@@ -878,6 +962,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance_rank(), 3);
     }
@@ -899,6 +984,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         };
         assert_eq!(s.relevance_rank(), 1);
     }

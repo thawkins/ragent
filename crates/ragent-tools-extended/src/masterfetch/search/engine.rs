@@ -265,6 +265,11 @@ pub struct RawResult {
     pub source: String,
     /// Optional relevance score (0.0–1.0) if the engine provides one.
     pub score: Option<f64>,
+    /// Author name when the engine exposes one in the result payload (e.g.
+    /// Exa's `author` field or OpenAlex's `authorships[*].author.display_name`).
+    /// `None` for engines that never provide author metadata (DuckDuckGo,
+    /// Brave, Wikipedia).
+    pub author: Option<String>,
 }
 
 impl RawResult {
@@ -282,6 +287,7 @@ impl RawResult {
             snippet: snippet.into(),
             source: source.into(),
             score: None,
+            author: None,
         }
     }
 

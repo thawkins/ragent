@@ -16,7 +16,6 @@ pub struct WebFetchTool;
 const DEFAULT_MAX_LENGTH: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_REDIRECTS: usize = 5;
-const TEXT_WIDTH: usize = 120;
 const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 /// Extract the article text from HTML using the `readability-rs` crate, which
@@ -220,13 +219,15 @@ impl Tool for WebFetchTool {
 
 /// Convert HTML to plain text using html2text.
 ///
-/// `html2text` can panic on some real-world HTML documents, so we isolate it in
-/// `catch_unwind` and fall back to a simple tag stripper if it panics or errors.
+/// `html2text` can panic on some real-world HTML documents, so the rendering
+/// runs on a dedicated OS thread via
+/// [`crate::masterfetch::extractor::run_html2text_isolated`], keeping any
+/// panic off async runtime threads. Falls back to a simple tag stripper if
+/// html2text errors or panics.
 /// This is the legacy fallback when `readability-rs` cannot extract an article.
 fn html_to_text(html: &str) -> String {
-    let result = std::panic::catch_unwind(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH));
-    match result {
-        Ok(Ok(text)) => text,
+    match crate::masterfetch::extractor::run_html2text_isolated(html.to_string()) {
+        Ok(text) => text,
         _ => {
             // Fallback: strip tags manually when html2text fails or panics
             strip_tags(html)

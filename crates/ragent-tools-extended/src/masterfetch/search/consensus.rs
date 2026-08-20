@@ -155,6 +155,10 @@ pub struct ConsensusResult {
     pub engines_consensus: String,
     /// Hint for the agent about whether to fetch this result's content.
     pub fetch_hint: String,
+    /// Author name when one of the contributing engines exposed one in its
+    /// result payload (e.g. Exa's `author` field or OpenAlex's joined
+    /// `authorships` names). `None` when no engine provided an author.
+    pub author: Option<String>,
 }
 
 /// The complete output of the consensus merge pipeline.
@@ -267,6 +271,7 @@ pub fn merge_and_rank(reports: &[EngineReport], query: &str) -> MergeOutput {
             fetch_relevance: tier_from_score(sr.score).to_string(),
             engines_consensus: format!("{}/{}", sr.engine_count, total_engines),
             fetch_hint: hint_from_score(sr.score).to_string(),
+            author: sr.author.clone(),
         })
         .collect();
 
@@ -299,6 +304,7 @@ struct ScoredResult {
     source: String,
     score: f64,
     engine_count: usize,
+    author: Option<String>,
 }
 
 /// An entry in a result group, carrying the original flattened-list position
@@ -371,6 +377,8 @@ fn score_group(norm_url: &str, entries: &[GroupEntry], _total_engines: usize) ->
         source,
         score,
         engine_count,
+        // Prefer the first engine that reported an author for this URL.
+        author: entries.iter().find_map(|e| e.result.author.clone()),
     }
 }
 

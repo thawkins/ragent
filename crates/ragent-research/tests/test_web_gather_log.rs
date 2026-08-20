@@ -20,6 +20,7 @@ impl WebSearchTool for FakeSearch {
                 matched_query: query.to_string(),
                 search_tool: "fake-search".into(),
                 search_engine: "fake-engine".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://example.com/short".into(),
@@ -28,6 +29,7 @@ impl WebSearchTool for FakeSearch {
                 matched_query: query.to_string(),
                 search_tool: "fake-search".into(),
                 search_engine: "fake-engine".into(),
+                author: None,
             },
         ])
     }
@@ -51,6 +53,7 @@ impl WebFetchTool for FakeFetch {
             content_type: None,
             page_type: None,
             language: Some("English".into()),
+            author: None,
         })
     }
 }

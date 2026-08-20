@@ -61,14 +61,17 @@
 //!     expires_at      INTEGER NOT NULL,  -- created_at + ttl
 //!     size_bytes      INTEGER NOT NULL,
 //!     extraction_method TEXT,             -- extraction chain stage (added later; NULL for legacy entries)
+//!     metadata_json   TEXT,               -- serialized PageMetadata (added later; NULL for legacy entries)
 //!     PRIMARY KEY (url, extraction_type, css_selector, pages)
 //! );
 //! ```
 
 use std::sync::{Arc, Mutex};
 
+use super::PageMetadata;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, params};
+use serde_json;
 
 /// Default cache TTL: 1 hour (3600 seconds).
 pub const DEFAULT_CACHE_TTL: u64 = 3600;
@@ -171,6 +174,9 @@ pub struct CachedEntry {
     /// `"html2text"`, `"raw_text"`). `None` for entries stored before this
     /// signal was recorded.
     pub extraction_method: Option<String>,
+    /// Structured page metadata serialized at insert time (e.g. author, title,
+    /// publication date). `None` for entries stored before this field existed.
+    pub metadata: Option<PageMetadata>,
 }
 
 /// Configuration for a [`ContentCache`].
@@ -272,6 +278,7 @@ impl ContentCache {
                 expires_at      INTEGER NOT NULL,
                 size_bytes      INTEGER NOT NULL,
                 extraction_method TEXT,
+                metadata_json   TEXT,
                 PRIMARY KEY (url, extraction_type, css_selector, pages)
              );
              CREATE INDEX IF NOT EXISTS idx_fetch_cache_expires
@@ -290,6 +297,15 @@ impl ContentCache {
         if !has_method_column {
             conn.execute_batch("ALTER TABLE fetch_cache ADD COLUMN extraction_method TEXT;")
                 .context("migrating cache schema: adding extraction_method")?;
+        }
+
+        // Older databases also lack the metadata_json column.
+        let has_metadata_column = conn
+            .prepare("SELECT metadata_json FROM fetch_cache LIMIT 0")
+            .is_ok();
+        if !has_metadata_column {
+            conn.execute_batch("ALTER TABLE fetch_cache ADD COLUMN metadata_json TEXT;")
+                .context("migrating cache schema: adding metadata_json")?;
         }
 
         Ok(Self {
@@ -333,7 +349,7 @@ impl ContentCache {
 
         let row = conn
             .query_row(
-                "SELECT content, content_ok, status_code, content_type,
+                "SELECT content, content_ok, status_code, content_type, metadata_json,
                         created_at, expires_at, size_bytes, extraction_method
                  FROM fetch_cache
                  WHERE url = ?1
@@ -347,15 +363,19 @@ impl ContentCache {
                     key.pages_component(),
                 ],
                 |row| {
+                    let metadata_json: Option<String> = row.get(4)?;
+                    let metadata = metadata_json
+                        .and_then(|json| serde_json::from_str::<PageMetadata>(&json).ok());
                     Ok(CachedEntry {
                         content: row.get(0)?,
                         content_ok: row.get::<_, i64>(1)? != 0,
                         status_code: row.get::<_, i64>(2)? as u16,
                         content_type: row.get(3)?,
-                        created_at: row.get::<_, i64>(4)? as u64,
-                        expires_at: row.get::<_, i64>(5)? as u64,
-                        size_bytes: row.get::<_, i64>(6)? as usize,
-                        extraction_method: row.get::<_, Option<String>>(7)?,
+                        metadata,
+                        created_at: row.get::<_, i64>(5)? as u64,
+                        expires_at: row.get::<_, i64>(6)? as u64,
+                        size_bytes: row.get::<_, i64>(7)? as usize,
+                        extraction_method: row.get::<_, Option<String>>(8)?,
                     })
                 },
             )
@@ -423,6 +443,41 @@ impl ContentCache {
         ttl_seconds: u64,
         extraction_method: Option<&str>,
     ) -> Result<()> {
+        self.set_cached_with_metadata(
+            key,
+            content,
+            content_ok,
+            status_code,
+            content_type,
+            ttl_seconds,
+            extraction_method,
+            None,
+        )
+    }
+
+    /// Store a content entry in the cache, recording both the extraction-chain
+    /// stage and the structured page metadata.
+    ///
+    /// Behaves exactly like [`ContentCache::set_cached`]; the optional
+    /// `metadata` is serialized and stored so cache hits can restore author,
+    /// title, publication date, and other page metadata for downstream consumers
+    /// such as the research References Index.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `SQLite` write fails.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_cached_with_metadata(
+        &self,
+        key: &CacheKey,
+        content: &str,
+        content_ok: bool,
+        status_code: u16,
+        content_type: &str,
+        ttl_seconds: u64,
+        extraction_method: Option<&str>,
+        metadata: Option<&PageMetadata>,
+    ) -> Result<()> {
         // FR-018: bad content is never cached.
         if !content_ok {
             return Ok(());
@@ -432,13 +487,14 @@ impl ContentCache {
         let now = unix_now();
         let expires_at = now.saturating_add(ttl_seconds);
         let size_bytes = content.len() as i64;
+        let metadata_json = metadata.and_then(|m| serde_json::to_string(m).ok());
 
         conn.execute(
             "INSERT OR REPLACE INTO fetch_cache
                  (url, extraction_type, css_selector, pages,
                   content, content_ok, status_code, content_type,
-                  created_at, expires_at, size_bytes, extraction_method)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                  created_at, expires_at, size_bytes, extraction_method, metadata_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 key.url,
                 key.extraction_type,
@@ -452,6 +508,7 @@ impl ContentCache {
                 expires_at as i64,
                 size_bytes,
                 extraction_method,
+                metadata_json,
             ],
         )
         .context("inserting cache entry")?;

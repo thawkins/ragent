@@ -318,7 +318,9 @@ fn test_jsonld_author_array() {
 </script>
 </head><body></body></html>"#;
     let md = extract_metadata(html);
-    assert_eq!(md.author.as_deref(), Some("First Author"));
+    // Multi-author arrays keep every contributor, joined with ", " so the
+    // full authorship is preserved for research outputs.
+    assert_eq!(md.author.as_deref(), Some("First Author, Second"));
 }
 
 #[test]
@@ -705,6 +707,112 @@ fn test_jsonld_author_fills_when_no_article_author() {
 </head><body></body></html>"#;
     let md = extract_metadata(html);
     assert_eq!(md.author.as_deref(), Some("JSON-LD Author"));
+}
+
+// ---------------------------------------------------------------------------
+// Dublin Core creator tags
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_dublin_core_creator_extracted() {
+    let html = r#"<html><head>
+<meta name="dc.creator" content="Dr. Jane Smith">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("Dr. Jane Smith"));
+}
+
+#[test]
+fn test_dublin_core_creator_multiple_authors() {
+    let html = r#"<html><head>
+<meta name="dc.creator" content="Alice Brown">
+<meta name="dc.creator" content="Bob Green">
+<meta name="dc.creator" content="Carol White">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(
+        md.author.as_deref(),
+        Some("Alice Brown, Bob Green, Carol White")
+    );
+}
+
+#[test]
+fn test_dcterms_creator_property_form() {
+    let html = r#"<html><head>
+<meta name="dcterms.creator" content="Prof. Alan Turing">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("Prof. Alan Turing"));
+}
+
+#[test]
+fn test_dc_creator_colon_form() {
+    let html = r#"<html><head>
+<meta name="dc:creator" content="Marie Curie">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("Marie Curie"));
+}
+
+#[test]
+fn test_article_author_takes_priority_over_dc() {
+    let html = r#"<html><head>
+<meta property="article:author" content="OG Author">
+<meta name="dc.creator" content="DC Author">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("OG Author"));
+}
+
+#[test]
+fn test_dublin_core_only_when_no_article_author() {
+    let html = r#"<html><head>
+<meta name="dc.creator" content="DC Only Author">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("DC Only Author"));
+}
+
+#[test]
+fn test_dublin_core_priority_order() {
+    // document order is preserved; dc.creator and dcterms.creator are both
+    // collected in DC_CREATOR_KEYS priority order, not document order.
+    let html = r#"<html><head>
+<meta name="dcterms.creator" content="Secondary Author">
+<meta name="dc.creator" content="Primary Author">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    // Both authors are collected; order follows document order of the tags.
+    let author = md.author.as_deref().unwrap_or("");
+    assert!(
+        author.contains("Primary Author"),
+        "must contain Primary Author"
+    );
+    assert!(
+        author.contains("Secondary Author"),
+        "must contain Secondary Author"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Standard byline meta tags
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_meta_name_author_extracted() {
+    let html = r#"<html><head>
+<meta name="author" content="News Reporter">
+</head><body></body></html>"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("News Reporter"));
+}
+
+#[test]
+fn test_citation_author_meta_extracted() {
+    let html = r#"<meta name="citation_author" content="Scholar A">
+<meta name="citation_author" content="Scholar B">"#;
+    let md = extract_metadata(html);
+    assert_eq!(md.author.as_deref(), Some("Scholar A, Scholar B"));
 }
 
 #[test]

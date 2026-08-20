@@ -128,6 +128,7 @@ impl Tool for WebSearchTool {
                     "snippet": r.snippet,
                     "search_tool": "websearch",
                     "search_engine": r.source,
+                    "author": r.author,
                 })
             })
             .collect();
@@ -172,6 +173,10 @@ pub struct SearchResult {
     /// when multiple engines agree).
     #[serde(default)]
     pub search_engine: String,
+    /// Author name when a contributing search engine exposed one in its result
+    /// payload. `None` when no engine provided author metadata.
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 /// Extract structured search results from the JSON metadata emitted by

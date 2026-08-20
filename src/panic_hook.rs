@@ -26,6 +26,14 @@ use chrono::Utc;
 pub fn install() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic raised inside a deliberate contained-panic container
+        // (ragent_types::panic_guard) is about to be caught by the caller and
+        // degraded gracefully — do not write a panic report or chain to the
+        // default hook (which prints "thread panicked" noise and, in the TUI,
+        // tears down the terminal even though the app keeps running).
+        if ragent_types::panic_guard::is_active() {
+            return;
+        }
         // Always write the log file first, then chain to the default hook.
         write_panic_log(info);
         default_hook(info);

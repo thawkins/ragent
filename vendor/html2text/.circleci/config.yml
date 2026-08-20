@@ -1,0 +1,79 @@
+version: 2.1
+
+orbs:
+  win: circleci/windows@2.2.0
+
+jobs:
+  build-stable:
+    docker:
+      - image: cimg/rust:1.85.1
+    steps:
+      - checkout
+      - run: cargo --version
+      - run: cargo build
+      - run: cargo test
+      - run:
+          name: Install tools
+          command: |
+            rustup component add rustfmt clippy
+      - run:
+          name: Check formatting
+          command: |
+            cargo fmt --all -- --check --color=auto
+      - run:
+          name: Clippy
+          command: |
+            cargo clippy --all-features
+  build-css:
+    docker:
+      - image: cimg/rust:1.90
+    steps:
+      - checkout
+      - run: cargo --version
+      - run: cargo build --features=css
+      - run: cargo test --features=css
+  build-1-85:
+    docker:
+      - image: cimg/rust:1.85
+    steps:
+      - checkout
+      - run: cargo --version
+      - run: cargo build --features=css
+      - run: cargo test --features=css
+  build-windows:
+    executor:
+      name: win/default
+      size: medium
+      shell: bash.exe
+    environment:
+      PATHk
+    steps:
+      - checkout
+      - run:
+          name: Install Rust
+          command: |
+            curl https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe --output rustup-init.exe
+            ./rustup-init.exe -y
+      - run:
+          name: Update PATH and cargo config
+          command: |
+            echo "[net]" >> $USERPROFILE/.cargo/config
+            echo "git-fetch-with-cli = true" >> $USERPROFILE/.cargo/config
+            echo 'export PATH=$USERPROFILE/.cargo/bin:$PATH' >> $BASH_ENV
+      - run:
+          name: Build
+          command: |
+            cargo build
+      - run:
+          name: Tests
+          command: |
+            cargo test
+
+workflows:
+  version: 2
+  build:
+    jobs:
+      - "build-stable"
+      - "build-css"
+      - "build-1-85"
+      - "build-windows"

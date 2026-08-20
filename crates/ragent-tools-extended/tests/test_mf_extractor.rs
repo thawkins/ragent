@@ -623,3 +623,29 @@ fn test_html2text_overflow_panic_degrades_to_raw_text() {
         result.method
     );
 }
+
+// ---------------------------------------------------------------------------
+// Regression: html2text `flush_word` subtraction overflow (panic log
+// 20260820-092513). A table cell content wider than the render width used
+// to panic with "attempt to subtract with overflow" in debug builds.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_wide_table_cell_does_not_panic() {
+    let wide_a = "a".repeat(160);
+    let wide_b = "b".repeat(160);
+    let html = format!(
+        "<html><body>\
+         <p>before</p>\
+         <table width=\"100%\">\
+         <tr><td>{wide_a} {wide_b}</td></tr>\
+         </table>\
+         <p>after</p>\
+         </body></html>"
+    );
+    let opts = ExtractOptions::default();
+    let result = extract(&html, "https://example.com", "text/html", &opts).unwrap();
+    assert!(result.content.contains("before"));
+    assert!(result.content.contains("aaaa"));
+    assert!(result.content.contains("after"));
+}

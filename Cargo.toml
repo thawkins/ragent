@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.39"
+version = "1.0.40"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -258,6 +258,7 @@ hex = "0.4"
 
 ragent-specs = { path = "crates/ragent-specs" }
 ragent-research = { path = "crates/ragent-research" }
+ragent-types = { path = "crates/ragent-types" }
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -275,6 +276,10 @@ lingua = "1.8"
 
 [patch.crates-io]
 pdf-extract = { path = "vendor/pdf-extract" }
+# Vendored to fix a debug-mode panic (`attempt to subtract with overflow`) in
+# `WrappedBlock::flush_word` — upstream 0.16.7 computes `self.width - self.line.len`
+# with plain subtraction. See vendor/html2text/src/render/text_renderer.rs.
+html2text = { path = "vendor/html2text" }
 
 [[bin]]
 name = "ragent"
@@ -302,6 +307,7 @@ ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }
 ragent-research = { workspace = true }
 ragent-telemetry = { workspace = true }
+ragent-types = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }

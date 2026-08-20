@@ -146,10 +146,19 @@ async fn resolve_url(url: &str, raw: &str) -> Result<ResolvedRef> {
         .with_context(|| format!("Failed to read response from '@{raw}'"))?;
 
     // Simple HTML detection and conversion.  html2text can panic on malformed
-    // HTML, so isolate it and fall back to the raw body if it does.
+    // HTML (e.g. a subtraction overflow in its word wrapper), so run it on a
+    // dedicated OS thread — a panic there unwinds only that thread and is
+    // converted to `Err` by `JoinHandle::join`, never touching the async
+    // runtime's task machinery. Fall back to the raw body on failure.
     let processed = if body.trim_start().starts_with("<!") || body.trim_start().starts_with("<html")
     {
-        match std::panic::catch_unwind(|| html2text::from_read(body.as_bytes(), 120)) {
+        let html = body.clone();
+        match std::thread::Builder::new()
+            .name("ref-html2text".to_string())
+            .spawn(move || html2text::from_read(html.as_bytes(), 120))
+            .map_err(|e| e.to_string())
+            .and_then(|h| h.join().map_err(|_| "html2text panicked".to_string()))
+        {
             Ok(Ok(text)) => text,
             _ => body,
         }

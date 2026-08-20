@@ -191,7 +191,7 @@ impl std::fmt::Display for SourceType {
 /// some or all metadata. Empty strings are normalised to [`Option::None`]
 /// during extraction so downstream consumers can treat absent and blank
 /// values identically.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageMetadata {
     /// Page title (from `OpenGraph` `og:title` or `<title>`).
     pub title: Option<String>,
@@ -236,7 +236,7 @@ pub struct PageMetadata {
 /// structured fields rather than parsing error text. Hard-blocks (404, bot
 /// detection, auth walls) populate `content_ok = false` with a
 /// `next_action` hint rather than returning fake content.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnvelopeSignals {
     /// Detected page type.
     pub page_type: PageType,
@@ -329,6 +329,11 @@ pub struct SearchResult {
     /// Cross-engine consensus label (e.g. `"2/3"` meaning 2 of 3 engines
     /// returned this URL).
     pub engines_consensus: String,
+    /// Author name when a contributing engine exposed one (e.g. OpenAlex
+    /// `authorships` names or Exa's `author` field). `None` when no engine
+    /// provided author metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

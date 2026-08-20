@@ -11,10 +11,12 @@
 //!    characters.
 //! 2. **`html2text`** (fallback) — converts the full HTML to formatted plain
 //!    text. Used when readability fails or produces very short output (list
-//!    pages, tables, JS shells).
+//!    pages, tables, JS shells). The vendored crate (`vendor/html2text`)
+//!    patches a debug-mode subtraction overflow in the word wrapper, but is
+//!    still best-effort and may panic on adversarial input.
 //! 3. **Raw text** (last resort) — strips all HTML tags with
-//!    [`ragent_types::html::strip_tags`]. Used when `html2text` panics or
-//!    errors.
+//!    [`ragent_types::html::strip_tags`]. Used when `html2text` errors or is
+//!    skipped.
 //!
 //! Additional features:
 //!
@@ -328,11 +330,12 @@ fn extract_markdown(
     url: &str,
     max_chars: usize,
 ) -> Result<ExtractResult, ExtractError> {
-    // Outer catch_unwind: if *anything* in the chain panics, fall back to
+    // Outer contained panic: if *anything* in the chain panics, fall back to
     // stripping tags. This protects callers that run the extractor inside an
     // async web-gatherer task from an isolated renderer bug crashing the
-    // whole research pipeline.
-    let result = std::panic::catch_unwind(|| {
+    // whole research pipeline. `panic_guard::run` marks the panic as
+    // deliberate so the global panic hook does not tear down the terminal.
+    let result = ragent_types::panic_guard::run(|| {
         // Strip noise tags (script, style, nav, etc.) before extraction so
         // their text content never leaks into the output.
         let cleaned = strip_noise_tags(html);
@@ -360,9 +363,14 @@ fn extract_markdown(
             );
         } else {
             tracing::debug!("extractor: readability failed, falling back to html2text");
-        }
-
-        // Stage 2: html2text (fallback).
+        } // Stage 2: html2text (fallback).
+        //
+        // SAFETY NOTE: `html2text` may only be called outside of an async runtime
+        // context. A panic inside a `catch_unwind` on an async task thread still
+        // poisons Tokio task scheduling in some versions, so this call is
+        // dispatched to a dedicated blocking thread via
+        // [`run_html2text_isolated`]. Never call `html2text::from_read` directly
+        // from an async or Tokio-managed thread.
         if let Some(text) = extract_html2text(&cleaned)
             && !text.trim().is_empty()
         {
@@ -427,21 +435,44 @@ fn extract_readability(html: &str, url: &str) -> Option<(String, String)> {
 
 /// Convert HTML to formatted text using `html2text`.
 ///
-/// `html2text` can panic on some malformed HTML documents, so we isolate it
-/// in `catch_unwind`. Returns `None` if the call panics or errors.
+/// The conversion runs on a dedicated OS thread (not a Tokio worker) so that
+/// if `html2text` panics — it has a history of panicking on real-world HTML
+/// (e.g. mdBook-generated pages, and a subtraction overflow in `flush_word`)
+/// — the panic is confined to that thread and never unwinds through the
+/// async runtime's task machinery.
+///
+/// Returns `None` if the call errors or the thread panics.
 fn extract_html2text(html: &str) -> Option<String> {
-    let result = std::panic::catch_unwind(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH));
+    let result = run_html2text_isolated(html.to_string());
     match result {
-        Ok(Ok(text)) => Some(text),
-        Ok(Err(e)) => {
+        Ok(text) => Some(text),
+        Err(e) => {
             tracing::debug!(error = %e, "extractor: html2text errored");
             None
         }
-        Err(_) => {
-            tracing::debug!("extractor: html2text panicked");
-            None
-        }
     }
+}
+
+/// Run `html2text::from_read` on a dedicated OS thread.
+///
+/// Any panic in `html2text` unwinds only the spawned thread; the thread's
+/// `JoinHandle` converts it into an `Err` here, which we map to a plain
+/// error string. This keeps panics entirely off async runtime threads.
+///
+/// The input is moved into the thread so no `RefUnwindSafe` bounds are
+/// needed on the caller's data.
+///
+/// Exposed within the crate so other modules that need html2text rendering
+/// (e.g. `webfetch`) share the same isolation strategy.
+pub(crate) fn run_html2text_isolated(html: String) -> Result<String, String> {
+    std::thread::Builder::new()
+        .name("mf-html2text".to_string())
+        .spawn(move || ragent_types::panic_guard::run(|| html2text::from_read(html.as_bytes(), TEXT_WIDTH)))
+        .map_err(|e| format!("failed to spawn html2text thread: {e}"))?
+        .join()
+        .map_err(|_| "html2text panicked".to_string())?
+        .map_err(|_| "html2text panicked".to_string())?
+        .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

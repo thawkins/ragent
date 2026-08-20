@@ -174,7 +174,7 @@ fn all_required_sections_present_in_canonical_order() {
         "Topic",
         "Search Queries",
         "Executive Summary",
-        "Top 5 Implications",
+        "Top 10 Implications",
         "Findings",
         "In-Project Cross-References",
         "Open Questions",

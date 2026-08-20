@@ -80,6 +80,7 @@ async fn write_document_persists_supports_files_and_index() {
         media_type: "page".into(),
         language: None,
         oa_recovery: None,
+        author: None,
     });
     item.add_source(Source::Local {
         path: "src/lib.rs".into(),
@@ -352,6 +353,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 matched_query: "Rust lifetimes".into(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             }])
         }
     }
@@ -367,6 +369,7 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
                 content_type: None,
                 page_type: None,
                 language: Some("English".into()),
+                author: None,
             })
         }
     }

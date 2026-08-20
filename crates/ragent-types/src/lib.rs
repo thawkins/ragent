@@ -17,6 +17,7 @@ pub mod html;
 pub mod id;
 pub mod llm;
 pub mod message;
+pub mod panic_guard;
 pub mod permission;
 pub mod resource;
 pub mod sanitize;

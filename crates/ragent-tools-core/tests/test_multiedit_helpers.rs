@@ -358,3 +358,49 @@ fn disambiguation_hint_numbers_context_lines_for_multiline_needle() {
         "should invite unique context: {hint}"
     );
 }
+
+#[test]
+fn cascade_indent_normalised_match_near_eof_does_not_panic() {
+    // Regression for a panic in `indent_normalised_matches`: the code used
+    // `block[last]` where `last` is an absolute content-line index, not a
+    // window-relative index. For a window starting at i > 0, `last` exceeds the
+    // window length and caused an out-of-bounds panic. The needle must match
+    // only near the end of the file so the loop reaches a high `i`.
+    //
+    // Exact and flexible lanes are forced to fail by giving the needle a
+    // trailing newline that the file content does not have at EOF; only the
+    // indent-normalised lane can rescue the match.
+    let content = format!("{}a\na", "x\n".repeat(293));
+    let needle = "a\na\n";
+    match find_replacement_cascade(&content, needle, "b\nb\n") {
+        CascadeMatch::Found {
+            lane,
+            start,
+            end,
+            new_str,
+        } => {
+            assert_eq!(lane, MatchLane::IndentNormalised);
+            assert_eq!(&content[start..end], "a\na");
+            assert_eq!(new_str, "b\nb\n");
+        }
+        other => panic!("expected indent_normalised Found, got {other:?}"),
+    }
+}
+
+#[test]
+fn cascade_indent_normalised_lane_reapplies_indent_at_eof_with_trailing_newline() {
+    // When the file ends with a newline, `split_inclusive('\n')` produces a
+    // trailing empty segment. The indices returned by `indent_normalised_matches`
+    // must remain valid inside `indent_reapply` (which now uses the same
+    // splitter), and the replacement must keep the file's own indentation.
+    let content = "line one\nline two\n";
+    let needle = "line one\nline two\n";
+    let replacement = "new one\nnew two\n";
+    match find_replacement_cascade(content, needle, replacement) {
+        CascadeMatch::Found { lane, new_str, .. } => {
+            assert_eq!(lane, MatchLane::Exact);
+            assert_eq!(new_str, replacement);
+        }
+        other => panic!("expected exact Found, got {other:?}"),
+    }
+}

@@ -516,8 +516,14 @@ pub fn parse_response(value: &serde_json::Value) -> Vec<RawResult> {
                 return None;
             }
 
+            // authors: join `authorships[*].author.display_name` (FR-010)
+            // so downstream research outputs can attribute the work without
+            // fetching the paywalled landing page.
+            let author = extract_authors(work);
+
             let mut result = RawResult::new(title, url, snippet, ENGINE_NAME);
             result.score = score;
+            result.author = author;
             Some(result)
         })
         .collect()
@@ -585,6 +591,29 @@ fn reconstruct_abstract(inverted: Option<&serde_json::Map<String, serde_json::Va
     words.sort_by_key(|(p, _)| *p);
     let text: Vec<&str> = words.iter().map(|(_, w)| w.as_str()).collect();
     text.join(" ")
+}
+
+/// Extract author display names from an OpenAlex work's `authorships` array.
+///
+/// OpenAlex models each contributor as an entry in `authorships` with a nested
+/// `author.display_name`. Names are joined with `, ` and returned as a single
+/// string; returns `None` when the work exposes no authorship information.
+fn extract_authors(work: &serde_json::Value) -> Option<String> {
+    let names: Vec<&str> = work
+        .get("authorships")
+        .and_then(|a| a.as_array())?
+        .iter()
+        .filter_map(|a| a.get("author"))
+        .filter_map(|a| a.get("display_name"))
+        .filter_map(|n| n.as_str())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .collect();
+    if names.is_empty() {
+        None
+    } else {
+        Some(names.join(", "))
+    }
 }
 
 /// Build a compact scholarly-metadata suffix for a work (FR-001).

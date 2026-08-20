@@ -1545,13 +1545,19 @@ Every `RESEARCH.md` contains:
   (the `title` is a reduced-length version of the `## Summary` content, capped at
   80 characters, so the headline reflects the synthesis rather than the original
   prompt)
-- `# Title:` heading
-- `## Topic`
-- `## Summary`
-- `## Findings` (numbered)
-- `## In-Project Cross-References` (table)
-- `## Open Questions`
-- `## References Index` (table)
+  - `# Title:` heading
+  - `## Topic`
+  - `## Summary`
+  - `## Findings` (numbered)
+  - `## In-Project Cross-References` (table)
+  - `## Open Questions`
+  - `## References Index` (table)
+
+  Section order in the report layout: Topic → Search Queries → Executive
+  Summary → **Top 10 Implications → Open Questions** → Findings → Findings
+  Relationship Diagram → In-Project Cross-References → References Index.
+  Open Questions sits directly under Top 10 Implications so unresolved gaps
+  surface immediately after the ranked consequences.
 
 ### 11.5 Slash Commands
 

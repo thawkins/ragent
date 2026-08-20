@@ -25,6 +25,36 @@ use regex::Regex;
 
 use super::PageMetadata;
 
+/// Meta name keys checked for Dublin Core creator information, in priority
+/// order. Multiple authors are concatenated with `", "`.
+const DC_CREATOR_KEYS: &[&str] = &[
+    "dc.creator",
+    "dcterms.creator",
+    "dc:creator",
+    "dcterms:creator",
+    "dc.creator.personalname",
+];
+
+/// Standard `<meta name="...">` keys checked for byline information.
+const STANDARD_AUTHOR_KEYS: &[&str] = &[
+    "author",
+    "citation_author",
+    "byl",
+    "parsely-author",
+    "sailthru.author",
+    "twitter:creator",
+];
+
+/// Find the first non-empty value for any of the given meta keys.
+fn meta_values(metas: &[(String, String)], keys: &[&str]) -> Vec<String> {
+    metas
+        .iter()
+        .filter(|(k, _)| keys.iter().any(|key| k.eq_ignore_ascii_case(key)))
+        .map(|(_, v)| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Public extraction entry point
 // ---------------------------------------------------------------------------
@@ -88,7 +118,6 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
     let og_image = meta_value(&metas, "og:image");
     let article_published = meta_value(&metas, "article:published_time");
     let article_modified = meta_value(&metas, "article:modified_time");
-    let article_author = meta_value(&metas, "article:author");
 
     // Standard HTML fallbacks.
     let title_tag = extract_title_tag(html);
@@ -98,6 +127,30 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
 
     // Parse JSON-LD blocks.
     let jsonld = extract_jsonld(html);
+
+    // Author extraction priority:
+    // 1. article:author (OpenGraph article namespace)
+    // 2. Dublin Core creator tags (dc.creator, dcterms.creator, …)
+    // 3. Standard meta author tags (author, citation_author, byl, …)
+    // 4. JSON-LD author field
+    // Multiple authors are joined with ", ".
+    let author = meta_values(&metas, &["article:author"])
+        .into_iter()
+        .next()
+        .map_or_else(
+            || {
+                let dc = meta_values(&metas, DC_CREATOR_KEYS);
+                if !dc.is_empty() {
+                    return dc;
+                }
+                let std = meta_values(&metas, STANDARD_AUTHOR_KEYS);
+                if !std.is_empty() {
+                    return std;
+                }
+                jsonld.author.clone().map(|s| vec![s]).unwrap_or_default()
+            },
+            |a| vec![a],
+        );
 
     // Merge: OpenGraph > JSON-LD > standard HTML.
     PageMetadata {
@@ -110,7 +163,11 @@ pub fn extract_metadata(html: &str) -> PageMetadata {
         lang,
         published_time: article_published.or(jsonld.date_published),
         modified_time: article_modified.or(jsonld.date_modified),
-        author: article_author.or(jsonld.author),
+        author: if author.is_empty() {
+            None
+        } else {
+            Some(author.join(", "))
+        },
         detected_language: None,
     }
 }
@@ -320,9 +377,12 @@ fn extract_jsonld_object(obj: &serde_json::Value) -> JsonLdFields {
     }
 }
 
-/// Extract author name from a JSON-LD `author` field.
+/// Extract author name(s) from a JSON-LD `author` field.
 ///
-/// Handles: string, `{"name": "..."}`, `{"@type": "Person", "name": "..."}`.
+/// Handles: string, `{"name": "..."}`, `{"@type": "Person", "name": "..."}`,
+/// and arrays of any of the above. For arrays, all names are extracted and
+/// joined with `", "`, so multi-author articles keep every contributor rather
+/// than only the first entry.
 fn extract_author(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::String(s) => {
@@ -338,7 +398,18 @@ fn extract_author(value: &serde_json::Value) -> Option<String> {
             .and_then(|n| n.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
-        serde_json::Value::Array(arr) => arr.first().and_then(extract_author),
+        serde_json::Value::Array(arr) => {
+            let joined = arr
+                .iter()
+                .filter_map(extract_author)
+                .collect::<Vec<_>>()
+                .join(", ");
+            if joined.is_empty() {
+                None
+            } else {
+                Some(joined)
+            }
+        }
         _ => None,
     }
 }

@@ -547,6 +547,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             })
         }
     }
@@ -597,6 +598,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
         }]];
         let engine = engine_with_fake(hits);
         let state = engine.run("Rust", Arc::new(NoopObserver)).await.unwrap();

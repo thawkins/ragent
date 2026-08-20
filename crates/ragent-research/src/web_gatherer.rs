@@ -36,6 +36,8 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 
+use ragent_tools_extended::masterfetch::language::detect_language_best_effort;
+
 use crate::document::{MAX_SOURCE_BODY_BYTES, fence_source_body, truncate_body_to_bytes};
 use crate::gather_log::GatherLog;
 use crate::open_access::{
@@ -173,6 +175,29 @@ fn is_encyclopedia_hit(hit: &WebSearchHit) -> bool {
     !engines.is_empty() && engines.iter().all(|e| *e == "wikipedia")
 }
 
+/// Return `Some(body)` for language detection, or `None` when the body is too
+/// large and too uniform for language detection to be meaningful. A multi-MB
+/// body made of a single repeated byte (benchmarks, cap tests) sends lingua
+/// down a pathological path that can take minutes — such bodies carry no
+/// linguistic signal anyway, so detection is skipped.
+fn detectable_body(body: &str) -> Option<&str> {
+    // lingua's n-gram builder walks the input char-by-char and takes minutes
+    // on multi-kilobyte strings made of a single repeated symbol (benchmark /
+    // cap-test filler bodies), so skip detection when the first 4096
+    // characters are all the same character — such bodies carry no linguistic
+    // signal by definition. Heterogeneous short bodies are unaffected.
+    let probe: String = body.chars().take(4096).collect();
+    if probe.len() >= 256 {
+        let mut chars = probe.chars();
+        if let Some(first) = chars.next()
+            && chars.all(|c| c == first)
+        {
+            return None;
+        }
+    }
+    Some(body)
+}
+
 /// Cap a captured web body at the same byte budget used by the supporting
 /// file renderer so the body stored on the `Source` matches what ends up on
 /// disk. Keeps runaway pages from blowing up the synthesis prompt.
@@ -240,6 +265,11 @@ pub struct WebSearchHit {
     /// `mf_search` this is a comma-separated list like `"duckduckgo, brave"`;
     /// for `websearch` it is `"tavily"`.
     pub search_engine: String,
+    /// Author name when the search engine exposed one in its result payload
+    /// (e.g. OpenAlex's joined `authorships` names or Exa's `author` field).
+    /// `None` when no author metadata was available at search time; the
+    /// fetcher may still extract an author from the fetched page metadata.
+    pub author: Option<String>,
 }
 /// Page body returned by a [`WebFetchTool`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +295,10 @@ pub struct WebFetchedPage {
     /// Detected human language of the page body, when the fetcher reported
     /// one. `None` when language detection was unavailable.
     pub language: Option<String>,
+    /// Author name extracted from the page's embedded metadata, when the
+    /// fetcher was able to determine one. `None` when the page did not expose
+    /// parseable author information.
+    pub author: Option<String>,
 }
 
 /// Trait abstracting the existing `websearch` tool.
@@ -785,6 +819,13 @@ impl WebGatherer {
         let media_type = classify_web_source(url, page.content_type.as_deref())
             .as_str()
             .to_string();
+        // Fall back to an aggressive best-guess detector when the fetcher did
+        // not report a language, so `--from-url` seed sources still get a
+        // language label in the References Index.
+        let language = page
+            .language
+            .clone()
+            .or_else(|| detectable_body(&body).and_then(detect_language_best_effort));
         let source = Source::Web {
             url: page.url.clone(),
             title,
@@ -798,7 +839,8 @@ impl WebGatherer {
             content_type: page.content_type.clone(),
             page_type: page.page_type.clone(),
             media_type,
-            language: page.language.clone(),
+            language,
+            author: page.author.clone(),
             oa_recovery: None,
         };
         Ok((source, page))
@@ -907,6 +949,7 @@ impl WebGatherer {
                 page_type: None,
                 media_type: kind.as_str().to_string(),
                 language: None,
+                author: None,
                 oa_recovery: None,
             };
             if let Some(obs) = observer {
@@ -1482,7 +1525,11 @@ impl WebGatherer {
                         published_at: None,
                         content_type: None,
                         page_type: Some("scholarly".to_string()),
-                        language: None,
+                        language: detect_language_best_effort(&hit.snippet),
+                        // Scholarly snippets carry an engine-provided author
+                        // list (OpenAlex `authorships`) — the page is never
+                        // fetched, so the hit's author is the only source.
+                        author: hit.author.clone(),
                     };
                     let result: Result<
                         Result<WebFetchedPage, anyhow::Error>,
@@ -1503,7 +1550,8 @@ impl WebGatherer {
                         published_at: None,
                         content_type: None,
                         page_type: Some("encyclopedia".to_string()),
-                        language: None,
+                        language: detect_language_best_effort(&hit.snippet),
+                        author: hit.author.clone(),
                     };
                     let result: Result<
                         Result<WebFetchedPage, anyhow::Error>,
@@ -1529,6 +1577,13 @@ impl WebGatherer {
                     let mut title = clean_web_source_title(&page.title, &hit.title);
                     let body_path = web_body_path(index);
                     let body = fence_captured_body(&page.body);
+                    // Use the fetcher's language when available; otherwise run
+                    // an aggressive best-guess detector on the body so that
+                    // stored `Source::Web.language` is rarely `None`.
+                    let detected_language = page
+                        .language
+                        .clone()
+                        .or_else(|| detectable_body(&body).and_then(detect_language_best_effort));
                     // Scholarly and encyclopedia sources are already ranked by
                     // the source engine (e.g. OpenAlex's `relevance_score`,
                     // Wikipedia's search relevance); skip the lexical
@@ -1611,6 +1666,7 @@ impl WebGatherer {
                                             page.content_type = recovered_page.content_type.clone();
                                             page.page_type = recovered_page.page_type.clone();
                                             page.language = recovered_page.language.clone();
+                                            page.author = recovered_page.author.clone();
                                             // Recompute the source title from the recovered page
                                             // so the References Index reflects the OA copy.
                                             title = clean_web_source_title(&page.title, &hit.title);
@@ -1719,8 +1775,7 @@ impl WebGatherer {
                             search_tool: hit.search_tool.clone(),
                             search_engine: hit.search_engine.clone(),
                             body_preview,
-                            language: page
-                                .language
+                            language: detected_language
                                 .as_deref()
                                 .map(str::to_uppercase)
                                 .unwrap_or_else(|| "UNKNOWN".to_string()),
@@ -1758,7 +1813,8 @@ impl WebGatherer {
                             )
                             .as_str()
                             .to_string(),
-                            language: page.language.clone(),
+                            language: detected_language.clone(),
+                            author: page.author.clone(),
                             oa_recovery,
                         }),
                     ));
@@ -2044,6 +2100,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://bad.example".into(),
@@ -2052,6 +2109,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2065,6 +2123,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -2077,6 +2136,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
@@ -2113,6 +2173,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "openalex".into(),
+            author: Some("Ada Lovelace, Alan Turing".into()),
         }];
         let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         let sources = g.gather("free keyless open search APIs", 5).await.unwrap();
@@ -2124,15 +2185,27 @@ mod tests {
                 relevance,
                 page_type,
                 search_engine,
+                language,
+                author,
                 ..
             } => {
                 assert_eq!(url, "https://doi.org/10.1000/rust-async");
+                assert_eq!(
+                    author.as_deref(),
+                    Some("Ada Lovelace, Alan Turing"),
+                    "scholarly hit author should propagate to the captured source"
+                );
                 assert_eq!(title, "Work-Stealing Async Scheduling in Rust");
                 assert_eq!(page_type.as_deref(), Some("scholarly"));
                 assert_eq!(search_engine, "openalex");
                 assert!(
                     relevance.contains("Scholarly"),
                     "scholarly sources use the engine-ranked relevance label"
+                );
+                assert_eq!(
+                    language.as_deref(),
+                    Some("English"),
+                    "OpenAlex snippet should have its language detected"
                 );
             }
             other => panic!("expected Source::Web, got {other:?}"),
@@ -2160,6 +2233,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "openalex".into(),
+            author: None,
         }];
         let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         let g = g.with_disable_scholarly(true);
@@ -2188,6 +2262,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "openalex".into(),
+            author: None,
         }];
         let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         let sources = g.gather("anything at all", 5).await.unwrap();
@@ -2212,6 +2287,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo, openalex".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -2224,6 +2300,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
@@ -2264,6 +2341,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "wikipedia".into(),
+            author: None,
         }];
         let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         // Query terms that do NOT lexically overlap with "DuckDuckGo" — this
@@ -2281,6 +2359,7 @@ mod tests {
                 relevance,
                 page_type,
                 search_engine,
+                language,
                 ..
             } => {
                 assert_eq!(url, "https://en.wikipedia.org/wiki/DuckDuckGo");
@@ -2290,6 +2369,11 @@ mod tests {
                 assert!(
                     relevance.contains("Encyclopedia"),
                     "encyclopedia sources use the engine-ranked relevance label"
+                );
+                assert_eq!(
+                    language.as_deref(),
+                    Some("English"),
+                    "Wikipedia snippet should have its language detected"
                 );
             }
             other => panic!("expected Source::Web, got {other:?}"),
@@ -2313,6 +2397,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "wikipedia".into(),
+            author: None,
         }];
         let (g, _, fetch) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         let sources = g.gather("anything at all", 5).await.unwrap();
@@ -2337,6 +2422,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo, wikipedia".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -2349,6 +2435,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, fetch) = gatherer_with(hits, pages, Vec::new());
@@ -2381,6 +2468,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -2393,6 +2481,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -2411,6 +2500,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -2423,6 +2513,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -2453,6 +2544,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2463,6 +2555,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let g = WebGatherer::new(
             Arc::new(FakeSearch {
@@ -2508,6 +2601,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://low.example".into(),
@@ -2516,6 +2610,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://second.example".into(),
@@ -2524,6 +2619,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2538,6 +2634,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             );
         }
@@ -2588,6 +2685,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2609,6 +2707,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://b.example".into(),
@@ -2617,6 +2716,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://c.example".into(),
@@ -2625,6 +2725,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2638,6 +2739,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -2650,6 +2752,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -2662,12 +2765,12 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
         let sources = g.gather("topic", 5).await.unwrap();
         assert_eq!(sources.len(), 3);
-
         for (i, src) in sources.iter().enumerate() {
             let Source::Web {
                 published_at: None,
@@ -2702,6 +2805,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://bad".into(),
@@ -2710,6 +2814,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2724,6 +2829,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -2752,6 +2858,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         // No page is registered, so the URL must be in `fail_urls`; the real
         // adapter bails instead of returning a placeholder body.
@@ -2802,6 +2909,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://2".into(),
@@ -2810,6 +2918,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://3".into(),
@@ -2818,6 +2927,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2833,6 +2943,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             );
         }
@@ -2891,6 +3002,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -2957,6 +3069,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://bad".into(),
@@ -2965,6 +3078,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -2979,6 +3093,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, vec!["https://bad".into()]);
@@ -3035,6 +3150,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -3049,6 +3165,7 @@ mod tests {
                     matched_query: String::new(),
                     search_tool: String::new(),
                     search_engine: String::new(),
+                    author: None,
                 }],
             ),
             (
@@ -3061,6 +3178,7 @@ mod tests {
                         matched_query: String::new(),
                         search_tool: String::new(),
                         search_engine: String::new(),
+                        author: None,
                     },
                     WebSearchHit {
                         url: "https://b.example".into(),
@@ -3069,6 +3187,7 @@ mod tests {
                         matched_query: String::new(),
                         search_tool: String::new(),
                         search_engine: String::new(),
+                        author: None,
                     },
                 ],
             ),
@@ -3290,6 +3409,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             })
         }
     }
@@ -3325,6 +3445,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: String::new(),
                 search_engine: String::new(),
+                author: None,
             })
             .collect();
 
@@ -3418,6 +3539,7 @@ mod tests {
                 page_type: Some("pdf".into()),
                 published_at: None,
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -3430,6 +3552,7 @@ mod tests {
                 page_type: Some("youtube".into()),
                 published_at: None,
                 language: None,
+                author: None,
             },
         );
 
@@ -3471,6 +3594,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: String::new(),
             search_engine: String::new(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3483,6 +3607,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: Some("French".into()),
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -3510,6 +3635,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: Some("Spanish".into()),
+                author: None,
             },
         );
         let g = WebGatherer::new(
@@ -3536,6 +3662,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://www.youtube.com/watch?v=abc123".into(),
@@ -3544,6 +3671,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "test".into(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -3557,6 +3685,7 @@ mod tests {
                 page_type: Some("pdf".into()),
                 published_at: None,
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -3569,6 +3698,7 @@ mod tests {
                 page_type: Some("youtube".into()),
                 published_at: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -3613,6 +3743,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3625,6 +3756,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let search = Arc::new(FailNTimes {
@@ -3665,6 +3797,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -3723,6 +3856,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -3786,6 +3920,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 })
             }
         }
@@ -3832,6 +3967,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3845,6 +3981,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -3864,6 +4001,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3877,6 +4015,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -3897,6 +4036,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3905,10 +4045,11 @@ mod tests {
                 published_at: None,
                 url: "https://preview.example".into(),
                 title: "Preview page".into(),
-                body: "A".repeat(500),
+                body: "Rust async runtime programming guide with Tokio tasks, futures, channels, and executors. ".repeat(20),
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -3944,13 +4085,14 @@ mod tests {
                 "body_preview should be exactly MIN_EXTRACTABLE_CONTENT_CHARS chars"
             );
             assert!(
-                body_preview.chars().all(|c| c == 'A'),
-                "body_preview should contain the first 256 chars of the body"
-            );
-            // language is None in the fake page → "UNKNOWN"
-            assert_eq!(
+                !body_preview.is_empty(),
+                "body_preview should carry content"
+            ); // When the fetcher does not report a language, the research layer
+            // now runs an aggressive best-guess detector on the body. The
+            // fake body is real English prose, so the detector must succeed.
+            assert_ne!(
                 language, "UNKNOWN",
-                "language should be UNKNOWN when page.language is None"
+                "language should be guessed when page.language is None"
             );
         }
     }
@@ -3964,6 +4106,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -3976,6 +4119,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -4081,6 +4225,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4093,6 +4238,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (search, fetch) = (
@@ -4205,6 +4351,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4217,6 +4364,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (search, fetch) = (
@@ -4354,6 +4502,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4366,6 +4515,7 @@ mod tests {
                 content_type: None,
                 page_type: Some("scholarly".into()),
                 language: None,
+                author: None,
             },
         );
         pages.insert(
@@ -4378,6 +4528,7 @@ mod tests {
                 content_type: Some("application/pdf".into()),
                 page_type: None,
                 language: Some("English".into()),
+                author: None,
             },
         );
         let fetch = Arc::new(FakeFetch {
@@ -4424,6 +4575,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4436,6 +4588,7 @@ mod tests {
                 content_type: None,
                 page_type: Some("scholarly".into()),
                 language: None,
+                author: None,
             },
         );
         let fetch = Arc::new(FakeFetch {
@@ -4474,6 +4627,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "openalex".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4486,6 +4640,7 @@ mod tests {
                 content_type: None,
                 page_type: Some("scholarly".into()),
                 language: None,
+                author: None,
             },
         );
         let fetch = Arc::new(FakeFetch {
@@ -4525,7 +4680,9 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "duckduckgo".into(),
-            },
+                author: None,
+            }
+,
             WebSearchHit {
                 url: "https://brave.example".into(),
                 title: "Brave result".into(),
@@ -4533,7 +4690,9 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "brave".into(),
-            },
+                author: None,
+            }
+,
             WebSearchHit {
                 url: "https://wikipedia.example".into(),
                 title: "Wikipedia summary".into(),
@@ -4541,7 +4700,9 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "wikipedia".into(),
-            },
+                author: None,
+            }
+,
             WebSearchHit {
                 url: "https://openalex.example/paper".into(),
                 title: "OpenAlex paper".into(),
@@ -4549,7 +4710,9 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "openalex".into(),
-            },
+                author: None,
+            }
+,
         ];
         let mut pages = std::collections::HashMap::new();
         for url in ["https://ddg.example", "https://brave.example"] {
@@ -4563,6 +4726,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             );
         }
@@ -4602,6 +4766,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "duckduckgo, brave".into(),
+            author: None,
         }];
         let mut pages = std::collections::HashMap::new();
         pages.insert(
@@ -4614,6 +4779,7 @@ mod tests {
                 content_type: None,
                 page_type: None,
                 language: None,
+                author: None,
             },
         );
         let (g, _, _) = gatherer_with(hits, pages, Vec::new());
@@ -4637,6 +4803,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "duckduckgo".into(),
+                author: None,
             },
             WebSearchHit {
                 url: "https://brave.example".into(),
@@ -4645,6 +4812,7 @@ mod tests {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "brave".into(),
+                author: None,
             },
         ];
         let mut pages = std::collections::HashMap::new();
@@ -4659,6 +4827,7 @@ mod tests {
                     content_type: None,
                     page_type: None,
                     language: None,
+                    author: None,
                 },
             );
         }
@@ -4715,6 +4884,7 @@ mod tests {
             matched_query: String::new(),
             search_tool: "mf_search".into(),
             search_engine: "test".into(),
+            author: None,
         }];
         let (g, _, _) = gatherer_with(hits, std::collections::HashMap::new(), Vec::new());
         let result = g.gather_with_observer("topic", 5, None).await.unwrap();

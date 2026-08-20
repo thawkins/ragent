@@ -42,6 +42,7 @@ impl WebSearchTool for TopicFakeSearch {
                 matched_query: String::new(),
                 search_tool: "mf_search".into(),
                 search_engine: "duckduckgo, brave".into(),
+                author: None,
             })
             .collect();
         Ok(hits)
@@ -63,6 +64,7 @@ impl WebFetchTool for FakeFetch {
             content_type: None,
             page_type: None,
             language: None,
+            author: None,
         })
     }
 }

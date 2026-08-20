@@ -2436,8 +2436,6 @@ checksum = "ec9d92d097f4749b64e8cc33d924d9f40a2d4eb91402b458014b781f5733d60f"
 [[package]]
 name = "html2text"
 version = "0.16.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12d23156ea4dbe6b37ad48fab2da56ff27b0f6192fb5db210c44eb07bfe6e787"
 dependencies = [
  "html5ever 0.38.0",
  "tendril 0.5.1",
@@ -5692,7 +5690,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5708,6 +5706,7 @@ dependencies = [
  "ragent-specs",
  "ragent-telemetry",
  "ragent-tui",
+ "ragent-types",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5719,7 +5718,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -5794,7 +5793,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5821,7 +5820,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "blake3",
@@ -5911,7 +5910,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-research"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5942,7 +5941,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -6003,7 +6002,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6144,7 +6143,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "1.0.39"
+version = "1.0.40"
 dependencies = [
  "anyhow",
  "arboard",
@@ -7664,7 +7663,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.52.0",

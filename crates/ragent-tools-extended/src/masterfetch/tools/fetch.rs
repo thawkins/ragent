@@ -378,7 +378,9 @@ async fn fetch_one_url(
     let fetcher_used = "http";
     let extraction_method = extract_result.method.to_string();
 
-    // FR-018: cache successful content.
+    // FR-018: cache successful content, including structured page metadata
+    // so cache hits can restore author/title/date for research outputs.
+
     let content_type_for_cache = content_type.clone();
     let cache_ttl = params.cache_ttl;
     if content_ok && cache_ttl != 0 {
@@ -386,9 +388,10 @@ async fn fetch_one_url(
         let extraction_method_for_cache = extraction_method.clone();
         let key = cache_key.clone();
         let cache_clone = cache.clone();
+        let cache_metadata = metadata.clone();
         let _ = tokio::task::spawn_blocking(move || {
             let method = Some(extraction_method_for_cache.as_str());
-            if let Err(e) = cache_clone.set_cached_with_method(
+            if let Err(e) = cache_clone.set_cached_with_metadata(
                 &key,
                 &cache_body,
                 true,
@@ -396,6 +399,7 @@ async fn fetch_one_url(
                 &content_type_for_cache,
                 cache_ttl,
                 method,
+                Some(&cache_metadata),
             ) {
                 tracing::warn!(error = %e, "mf_fetch: failed to cache content");
             }
@@ -501,13 +505,18 @@ async fn pdf_tool_output(
         "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: pdf\nContent OK: {content_ok}\nFetcher: http\n\n{display_content}"
     );
 
+    let pdf_metadata = json!({
+        "title": title.clone(),
+        "page_type": "pdf",
+        "detected_language": detected_language.clone(),
+    });
     let metadata_json = json!({
         "url": url,
         "status": status,
         "content_ok": content_ok,
         "content_type": content_type,
-                "content_type": "application/pdf",
-                "page_type": "pdf",        "source_type": "unknown",
+        "page_type": "pdf",
+        "source_type": "unknown",
         "is_official": false,
         "content_age_days": -1,
         "is_stale": false,
@@ -521,6 +530,7 @@ async fn pdf_tool_output(
         "duration_ms": duration_ms,
         "cached": false,
         "detected_language": detected_language,
+        "metadata": pdf_metadata,
         "version": MASTERFETCH_VERSION,
     });
 
@@ -588,6 +598,11 @@ async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &
         "mf_fetch: {url}\nStatus: {status}\nContent type: {content_type}\nPage type: youtube\nContent OK: {content_ok}\nFetcher: http\n\nTitle: {title}\n\n{transcript}"
     );
 
+    let yt_metadata = json!({
+        "title": title.clone(),
+        "page_type": "youtube",
+        "detected_language": detected_language.clone(),
+    });
     let metadata_json = json!({
         "url": url,
         "status": status,
@@ -598,7 +613,7 @@ async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &
         "content_age_days": -1,
         "is_stale": false,
         "next_action": if content_ok { "youtube transcript extracted" } else { "no captions available" },
-        "summary": title,
+        "summary": title.clone(),
         "fetcher_used": "http",
         "is_truncated": false,
         "next_offset": 0,
@@ -607,6 +622,7 @@ async fn youtube_tool_output(url: &str, status: u16, content_type: &str, html: &
         "duration_ms": duration_ms,
         "cached": false,
         "detected_language": detected_language,
+        "metadata": yt_metadata,
         "version": MASTERFETCH_VERSION,
     });
 
@@ -759,17 +775,53 @@ fn cached_output(
     duration_ms: u64,
     include_links: bool,
 ) -> ToolOutput {
+    // Restore structured page metadata from the cache entry. The nested
+    // `metadata` object carries author/title/date so research outputs
+    // keep those fields on cache hits.
+    let restored_metadata = entry
+        .metadata
+        .as_ref()
+        .map(|m| serde_json::to_value(m).unwrap_or(Value::Null))
+        .unwrap_or(Value::Null);
+    let restored_title = entry
+        .metadata
+        .as_ref()
+        .and_then(|m| m.title.as_deref())
+        .filter(|t| !t.is_empty());
+    let restored_page_type = entry
+        .metadata
+        .as_ref()
+        .and_then(|m| m.og_type.as_deref())
+        .or_else(|| {
+            // Best-guess page type from the stored content_type so PDF/YouTube
+            // cache hits still report the right media kind.
+            let ct = entry.content_type.to_ascii_lowercase();
+            if ct.contains("pdf") {
+                Some("pdf")
+            } else if url.contains("youtube.com") || url.contains("youtu.be") {
+                Some("youtube")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("unknown");
+    let restored_detected_language = entry
+        .metadata
+        .as_ref()
+        .and_then(|m| m.detected_language.as_deref())
+        .filter(|l| !l.is_empty());
+
     let mut metadata = json!({
         "url": url,
         "status": entry.status_code,
         "content_ok": entry.content_ok,
-        "page_type": "unknown",
+        "page_type": restored_page_type,
         "source_type": "unknown",
         "is_official": false,
         "content_age_days": -1,
         "is_stale": false,
         "next_action": "served from cache",
-        "summary": "served from masterfetch content cache",
+        "summary": restored_title.unwrap_or("served from masterfetch content cache"),
         "fetcher_used": "cache",
         // The extraction method is recorded at insert time; entries cached
         // before this signal existed report `"readability"` so downstream
@@ -782,6 +834,8 @@ fn cached_output(
         "total_extracted_chars": entry.content.chars().count(),
         "duration_ms": duration_ms,
         "cached": true,
+        "detected_language": restored_detected_language,
+        "metadata": restored_metadata,
         "version": MASTERFETCH_VERSION,
     });
 

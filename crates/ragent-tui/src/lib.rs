@@ -185,6 +185,13 @@ pub async fn run_tui(
     // the default panic handler prints the backtrace
     let default_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A panic raised inside a deliberate contained-panic container
+        // (ragent_types::panic_guard) is caught by its caller: leave the
+        // terminal alone — tearing it down here would destroy the UI even
+        // though the application keeps running.
+        if ragent_types::panic_guard::is_active() {
+            return;
+        }
         // Restore terminal state before printing panic message
         // This is best-effort; ignore errors
         let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);

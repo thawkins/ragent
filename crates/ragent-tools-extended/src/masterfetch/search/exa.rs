@@ -422,12 +422,20 @@ pub fn parse_response_json(value: &serde_json::Value) -> Vec<RawResult> {
                 .and_then(|s| s.as_f64())
                 .map(|s| s.clamp(0.0, 1.0));
 
+            let author = item
+                .get("author")
+                .and_then(|a| a.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
             RawResult {
                 title,
                 url,
                 snippet,
                 source: ENGINE_NAME.to_string(),
                 score,
+                author,
             }
         })
         .filter(|r| !r.url.is_empty())

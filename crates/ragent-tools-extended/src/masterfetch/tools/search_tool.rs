@@ -544,6 +544,7 @@ fn build_search_metadata(output: &super::super::search::SearchOutput) -> Option<
                                     "source": r.source,
                                     "search_tool": "mf_search",
                                     "search_engine": r.source,
+                                    "author": r.author,
                                     "position": r.position,
                   "relevance_score": r.relevance_score,
                 "fetch_relevance": r.fetch_relevance,

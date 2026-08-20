@@ -6,7 +6,7 @@
 //! directly to the `RESEARCH.md` structure:
 //!
 //! - Executive Summary
-//! - Top 5 Implications
+//! - Top 10 Implications
 //! - Findings
 //! - In-Project Cross-References
 //! - Open Questions
@@ -56,6 +56,12 @@ pub struct SourceBody {
     /// the synthesis prompt (T-003) so the model can produce the
     /// **Sources Cited / Date Spread** paragraph.
     pub published_at: Option<DateTime<Utc>>,
+    /// Author name extracted from the source's embedded metadata, when
+    /// available. Populated by [`build_source_bodies`] from
+    /// [`Source::author`]. `None` for local/spec sources and for web sources
+    /// that did not expose parseable author information. Surfaced in the
+    /// synthesis prompt so the model can credit authors in citations.
+    pub author: Option<String>,
 }
 
 /// Structured result returned by an analysis engine.
@@ -558,6 +564,7 @@ pub fn build_source_bodies<S: AsRef<str>>(
                 .map(|s| s.as_ref().to_string())
                 .unwrap_or_default(),
             published_at: src.published_at(),
+            author: src.author().map(str::to_string),
         })
         .collect()
 }
@@ -795,7 +802,7 @@ mod tests {
 
     #[test]
     fn parse_analysis_response_extracts_all_sections() {
-        let text = "## Executive Summary\n\nThis is the executive summary.\n\n## Findings\n\n1. First finding.\n2. Second finding.\n\n## Top 5 Implications\n\n1. Implication A.\n2. Implication B.\n\n## In-Project Cross-References\n\n* `src/lib.rs` — main entry\n* `src/foo.rs` — helper\n\n## Open Questions\n\n* What about X?\n* How does Y work?\n";
+        let text = "## Executive Summary\n\nThis is the executive summary.\n\n## Findings\n\n1. First finding.\n2. Second finding.\n\n## Top 10 Implications\n\n1. Implication A.\n2. Implication B.\n\n## In-Project Cross-References\n\n* `src/lib.rs` — main entry\n* `src/foo.rs` — helper\n\n## Open Questions\n\n* What about X?\n* How does Y work?\n";
         let result = parse_analysis_response(text);
         assert_eq!(result.summary, "This is the executive summary.");
         assert_eq!(result.findings, vec!["First finding.", "Second finding."]);
@@ -964,6 +971,7 @@ mod tests {
             relevance: String::new(),
             body: format!("Body of source {index}"),
             published_at,
+            author: None,
         }
     }
 
@@ -1006,11 +1014,11 @@ mod tests {
         let builder = SynthesisPromptBuilder::new("topic")
             .sources(&sources)
             .build();
-        // The default-config builder now asks for the Top 5 Implications
-        // section, so it is no longer byte-identical to the legacy four-section
+        // The default-config builder now asks for the Top 10 Implications
+        // section, so it is no longer byte-identical to the legacy six-section
         // prompt. Both the legacy wrapper and the builder must include it.
-        assert!(legacy.contains("## Top 5 Implications"));
-        assert!(builder.contains("## Top 5 Implications"));
+        assert!(legacy.contains("## Top 10 Implications"));
+        assert!(builder.contains("## Top 10 Implications"));
         assert!(legacy.contains("## In-Project Cross-References"));
         assert!(builder.contains("## Open Questions"));
     }
@@ -1034,8 +1042,8 @@ mod tests {
         let prompt = SynthesisPromptBuilder::new("topic")
             .sources(&sources)
             .build();
-        assert!(prompt.contains("## Top 5 Implications"));
-        assert!(prompt.contains("rank the top 5 implications"));
+        assert!(prompt.contains("## Top 10 Implications"));
+        assert!(prompt.contains("rank the top 10 implications"));
     }
 
     #[test]
@@ -1361,7 +1369,7 @@ mod tests {
              **Analysis:** a.\n\n\
              **Cross-reference / Dependencies:** No direct dependencies.\n\n\
              **Implication:** i.\n\n\
-             ## Top 5 Implications\n\n1. \x04Implication.\n";
+             ## Top 10 Implications\n\n1. \x04Implication.\n";
         let sources = vec![src_body(1, None)];
         let (result, outcome) = parse_analysis_response_with_outcome(text, &sources);
         assert_eq!(outcome, AnalysisOutcome::Llm);
@@ -1449,6 +1457,7 @@ mod tests {
             relevance: "High".to_string(),
             body: "a".repeat(500),
             published_at: None,
+            author: None,
         }];
         let summarizer = HeuristicSummarizer;
         let summarized = summarize_source_bodies(&bodies, &summarizer, 100);
@@ -1472,6 +1481,7 @@ mod tests {
                 relevance: String::new(),
                 body: "hello".to_string(),
                 published_at: None,
+                author: None,
             },
             SourceBody {
                 index: 2,
@@ -1481,6 +1491,7 @@ mod tests {
                 relevance: String::new(),
                 body: "world!".to_string(),
                 published_at: None,
+                author: None,
             },
         ];
         assert_eq!(total_body_chars(&bodies), 11);
@@ -1496,6 +1507,7 @@ mod tests {
             relevance: String::new(),
             body: body.to_string(),
             published_at: None,
+            author: None,
         };
         let bodies = vec![
             make(1, &"a".repeat(40)),
@@ -1520,6 +1532,7 @@ mod tests {
             relevance: String::new(),
             body: body.to_string(),
             published_at: None,
+            author: None,
         };
         let bodies = vec![make(1, "small1"), make(2, "small2"), make(3, "small3")];
         let chunks = chunk_source_bodies(&bodies, 100);

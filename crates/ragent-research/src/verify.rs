@@ -175,6 +175,7 @@ mod tests {
             media_type: "page".into(),
             language: None,
             oa_recovery: None,
+            author: None,
         }
     }
 
