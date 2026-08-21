@@ -711,7 +711,15 @@ impl App {
                         "autopilot stopped: task complete".to_string(),
                     );
                 }
-                self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
+                // Render the summary as markdown so headers, bullet points,
+                // and bold text create visual structure instead of a wall of
+                // plain text.  Normal LLM streaming text bypasses markdown
+                // rendering (it arrives in fragments), but the agent_complete
+                // summary is a complete, self-contained message.
+                let rendered = self
+                    .render_markdown_unconditionally(&format!("✅ **Task Complete**\n\n{summary}"));
+                self.force_new_message = true;
+                self.append_assistant_text(&rendered);
             }
             Event::AgentNotice {
                 ref session_id,

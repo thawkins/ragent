@@ -1179,8 +1179,16 @@ Type `/` in the input to open an autocomplete menu:
 | `/bench cancel` | Cancel the active benchmark run |
 | `/codeindex on` | Enable codebase indexing |
 | `/codeindex off` | Disable codebase indexing |
-| `/codeindex show` | Show index status and statistics |
+| `/codeindex show` | Show index status and statistics (incl. graph) |
 | `/codeindex reindex` | Trigger a full re-index |
+| `/codeindex lang <language>` | Filter code index by language |
+| `/codeindex graph build` | Build the semantic edge graph from indexed symbols |
+| `/codeindex graph lang <language>` | Build graph for a single language |
+| `/codeindex graph export` | Export the graph in DOT/JSON format |
+| `/codeindex explain <symbol>` | Show symbol node metadata and connections |
+| `/codeindex path <A> <B>` | Find shortest path between two symbols |
+| `/codeindex communities` | Run community detection and list communities |
+| `/codeindex godnodes [n]` | Show top-N most-connected symbols |
 | `/codeindex help` | Show code index help |
 | `/cron add \|remove\|enable\|disable\|list\|detail\|log\|help` | Schedule and manage recurring agent runs |
 | `/spec create <name> <title> [--from-research <name>]` | Create a new spec (SPEC.md + PLAN.md + TESTPLAN.md) |

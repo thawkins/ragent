@@ -306,6 +306,57 @@ impl fmt::Display for IndexStats {
     }
 }
 
+// ── Graph Status ─────────────────────────────────────────────────────────────
+
+/// Summary statistics for the semantic edge graph.
+///
+/// Aggregated by [`CodeIndex::graph_status`](crate::CodeIndex::graph_status)
+/// from the `graph_edges` and `communities` SQLite tables.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GraphStatus {
+    /// Total number of edges in the `graph_edges` table.
+    pub total_edges: u64,
+    /// Number of edges tagged `EXTRACTED` (read directly from source).
+    pub edges_extracted: u64,
+    /// Number of edges tagged `INFERRED` (resolved by cross-file matching).
+    pub edges_inferred: u64,
+    /// Number of distinct symbols that appear as the source or target of at
+    /// least one edge (i.e. the number of nodes in the graph).
+    pub nodes: u64,
+    /// Number of `calls` edges.
+    pub edges_calls: u64,
+    /// Number of `imports` edges.
+    pub edges_imports: u64,
+    /// Number of `inherits` edges.
+    pub edges_inherits: u64,
+    /// Number of `references` edges.
+    pub edges_references: u64,
+    /// Number of `mixes_in` edges.
+    pub edges_mixes_in: u64,
+    /// Number of `implements` edges.
+    pub edges_implements: u64,
+    /// Number of distinct communities detected.
+    pub communities: u64,
+}
+
+impl fmt::Display for GraphStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Total edges:   {}", self.total_edges)?;
+        writeln!(f, "  EXTRACTED:   {}", self.edges_extracted)?;
+        writeln!(f, "  INFERRED:    {}", self.edges_inferred)?;
+        writeln!(f, "Nodes:         {}", self.nodes)?;
+        writeln!(f, "Communities:   {}", self.communities)?;
+        writeln!(f, "By kind:")?;
+        writeln!(f, "  calls:       {}", self.edges_calls)?;
+        writeln!(f, "  imports:     {}", self.edges_imports)?;
+        writeln!(f, "  inherits:    {}", self.edges_inherits)?;
+        writeln!(f, "  references:  {}", self.edges_references)?;
+        writeln!(f, "  mixes_in:    {}", self.edges_mixes_in)?;
+        writeln!(f, "  implements:  {}", self.edges_implements)?;
+        Ok(())
+    }
+}
+
 // ── Symbol Filter ───────────────────────────────────────────────────────────
 
 /// Filter criteria for querying symbols from the index.
@@ -439,6 +490,12 @@ pub struct IndexResult {
     pub symbols_extracted: usize,
     /// Total elapsed time in milliseconds.
     pub elapsed_ms: u64,
+    /// Number of graph edges tagged `EXTRACTED` (same-file).
+    #[serde(default)]
+    pub edges_extracted: usize,
+    /// Number of graph edges tagged `INFERRED` (cross-file resolved).
+    #[serde(default)]
+    pub edges_inferred: usize,
 }
 
 impl fmt::Display for IndexResult {
@@ -451,7 +508,17 @@ impl fmt::Display for IndexResult {
             self.files_removed,
             self.symbols_extracted,
             self.elapsed_ms,
-        )
+        )?;
+        if self.edges_extracted > 0 || self.edges_inferred > 0 {
+            write!(
+                f,
+                "; graph: {} edges ({} EXTRACTED, {} INFERRED)",
+                self.edges_extracted + self.edges_inferred,
+                self.edges_extracted,
+                self.edges_inferred,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -464,6 +531,121 @@ pub enum DepDirection {
     Imports,
     /// Files that depend on / import this file.
     Dependents,
+}
+
+// ── Graph Edge Kind ──────────────────────────────────────────────────────────
+
+/// The semantic kind of a typed edge between two symbols in the code graph.
+///
+/// Edges are derived deterministically from the existing tree-sitter parse
+/// output (symbols, imports, references) — no LLM or embeddings are used.
+/// Each edge is tagged with a [`Confidence`] indicating whether it was
+/// read directly from the source (`EXTRACTED`) or resolved by cross-file
+/// name matching (`INFERRED`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum EdgeKind {
+    /// `A` calls `B` (function/method call).
+    Calls,
+    /// `A` imports `B` (use / import statement).
+    Imports,
+    /// `A` inherits from `B` (extends / superclass).
+    Inherits,
+    /// `A` references `B` (type reference, field access).
+    References,
+    /// `A` mixes in `B` (mixin / trait inclusion).
+    MixesIn,
+    /// `A` implements `B` (interface implementation).
+    Implements,
+}
+
+impl fmt::Display for EdgeKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Calls => "calls",
+            Self::Imports => "imports",
+            Self::Inherits => "inherits",
+            Self::References => "references",
+            Self::MixesIn => "mixes_in",
+            Self::Implements => "implements",
+        };
+        write!(f, "{label}")
+    }
+}
+
+impl FromStr for EdgeKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "calls" => Ok(Self::Calls),
+            "imports" => Ok(Self::Imports),
+            "inherits" => Ok(Self::Inherits),
+            "references" => Ok(Self::References),
+            "mixes_in" => Ok(Self::MixesIn),
+            "implements" => Ok(Self::Implements),
+            other => anyhow::bail!("unknown EdgeKind: {other}"),
+        }
+    }
+}
+
+// ── Confidence ───────────────────────────────────────────────────────────────
+
+/// How an edge was derived: read directly from the source or inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Confidence {
+    /// The edge was explicitly present in the source (same-file resolution).
+    Extracted,
+    /// The edge was resolved by cross-file name matching.
+    Inferred,
+}
+
+impl fmt::Display for Confidence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            Self::Extracted => "EXTRACTED",
+            Self::Inferred => "INFERRED",
+        };
+        write!(f, "{label}")
+    }
+}
+
+impl FromStr for Confidence {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "EXTRACTED" => Ok(Self::Extracted),
+            "INFERRED" => Ok(Self::Inferred),
+            other => anyhow::bail!("unknown Confidence: {other}"),
+        }
+    }
+}
+
+// ── Graph Edge ───────────────────────────────────────────────────────────────
+
+/// A typed semantic edge between two indexed symbols.
+///
+/// Edges are stored in the `graph_edges` SQLite table (see [`crate::store`]).
+/// The `source_sym` and `target_sym` fields are foreign keys into the
+/// `symbols` table.  The `kind` field identifies the semantic relationship
+/// (calls, imports, inherits, references, mixes_in, implements) and the
+/// `confidence` field indicates whether the edge was explicitly present in
+/// the source (`EXTRACTED`) or resolved by cross-file name matching
+/// (`INFERRED`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct GraphEdge {
+    /// The ID of the source symbol (the caller, importer, etc.).
+    pub source_sym: i64,
+    /// The ID of the target symbol (the callee, imported symbol, etc.).
+    pub target_sym: i64,
+    /// The semantic kind of the edge.
+    pub kind: EdgeKind,
+    /// How the edge was derived.
+    pub confidence: Confidence,
+    /// The file ID where the edge originates, if known.
+    pub source_file: Option<i64>,
+    /// The line number where the edge originates, if known.
+    pub line: Option<u32>,
 }
 
 // ── Code Index Config ───────────────────────────────────────────────────────

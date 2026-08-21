@@ -110,9 +110,19 @@ fn test_full_reindex() {
     assert!(result.symbols_extracted > 0, "should extract symbols");
     assert!(result.elapsed_ms < 30_000, "should complete quickly");
 
+    // FR-007: full_reindex should build the semantic edge graph.
+    assert!(
+        result.edges_extracted + result.edges_inferred > 0,
+        "should have graph edges after reindex"
+    );
+
     // Display formatting should work.
     let display = format!("{result}");
     assert!(display.contains("+2"));
+    assert!(
+        display.contains("graph:"),
+        "display should include graph edge counts"
+    );
 }
 
 #[test]

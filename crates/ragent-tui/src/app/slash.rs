@@ -7864,6 +7864,57 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                         "**Index size:** {:.1} KB\n",
                                         stats.index_size_bytes as f64 / 1024.0
                                     ));
+
+                                    // Graph data set status (FR-015). The graph
+                                    // is built separately via `/codeindex graph
+                                    // build`, so it may be empty even when the
+                                    // index is populated.
+                                    output.push_str("\n## Graph Dataset\n\n");
+                                    match idx.graph_status() {
+                                        Ok(gs) => {
+                                            if gs.total_edges == 0 {
+                                                output.push_str(
+                                                    "**Graph:** not built (0 edges).\n\n\
+                                                     Run `/codeindex graph build` to derive \
+                                                     the semantic edge graph from the \
+                                                     indexed symbols.\n",
+                                                );
+                                            } else {
+                                                output.push_str(&format!(
+                                                    "**Total edges:** {}\n",
+                                                    gs.total_edges
+                                                ));
+                                                output.push_str(&format!(
+                                                    "**Nodes:** {}\n",
+                                                    gs.nodes
+                                                ));
+                                                output.push_str(&format!(
+                                                    "**Edges by confidence:** {} EXTRACTED, {} INFERRED\n",
+                                                    gs.edges_extracted, gs.edges_inferred
+                                                ));
+                                                output.push_str(&format!(
+                                                    "**Communities:** {}\n",
+                                                    gs.communities
+                                                ));
+                                                output.push_str("**Edges by kind:**\n");
+                                                output.push_str(&format!(
+                                                    "- calls: {}\n- imports: {}\n- inherits: {}\n- references: {}\n- mixes_in: {}\n- implements: {}\n",
+                                                    gs.edges_calls,
+                                                    gs.edges_imports,
+                                                    gs.edges_inherits,
+                                                    gs.edges_references,
+                                                    gs.edges_mixes_in,
+                                                    gs.edges_implements,
+                                                ));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            output.push_str(&format!(
+                                                "\u{26a0}\u{fe0f} Error reading graph stats: {e}\n"
+                                            ));
+                                        }
+                                    }
+
                                     self.append_assistant_text(&output);
                                     self.status = format!(
                                         "codeindex: {} files, {} symbols, {} FTS docs",
@@ -7943,6 +7994,375 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.append_assistant_text(&output);
                         self.status = format!("codeindex: {} languages supported", languages.len());
                     }
+                    "graph" => {
+                        // Parse the second word: build | export | lang
+                        let graph_sub = args.split_whitespace().nth(1).unwrap_or("");
+                        match graph_sub {
+                            "build" => {
+                                if let Some(idx) = self.code_index.clone() {
+                                    self.append_assistant_text(
+                                        "\u{1f517} **Building semantic edge graph...** deriving typed edges from indexed symbols.",
+                                    );
+                                    match idx.build_graph() {
+                                        Ok(result) => {
+                                            self.append_assistant_text(&format!(
+                                                "\u{2705} Graph built: {} edges ({} EXTRACTED, {} INFERRED) in {}ms.",
+                                                result.edges_total,
+                                                result.edges_extracted,
+                                                result.edges_inferred,
+                                                result.elapsed_ms,
+                                            ));
+                                            self.status = format!(
+                                                "codeindex: graph built ({} edges)",
+                                                result.edges_total
+                                            );
+                                        }
+                                        Err(e) => {
+                                            self.append_assistant_text(&format!(
+                                                "\u{274c} Graph build failed: {e}"
+                                            ));
+                                            self.status =
+                                                "codeindex: graph build failed".to_string();
+                                        }
+                                    }
+                                } else {
+                                    self.append_assistant_text(
+                                        "\u{26a0}\u{fe0f} Code index is not active. Enable it first with `/codeindex on`.",
+                                    );
+                                    self.status = "codeindex: not active".to_string();
+                                }
+                            }
+                            "lang" => {
+                                // FR-018: optional per-language graph filter.
+                                let lang = args.split_whitespace().nth(2).unwrap_or("");
+                                if lang.is_empty() {
+                                    self.append_assistant_text(
+                                        "Usage: `/codeindex graph lang <language>`\n\n\
+                                         Example: `/codeindex graph lang rust`\n\n\
+                                         Rebuilds the semantic edge graph using only \
+                                         files detected as the given language, allowing \
+                                         per-language subgraph analysis.",
+                                    );
+                                    self.status = "codeindex: graph lang (usage)".to_string();
+                                } else if let Some(idx) = self.code_index.clone() {
+                                    self.append_assistant_text(&format!(
+                                        "\u{1f517} **Building graph for language `{lang}`...**"
+                                    ));
+                                    match idx.build_graph_for_language(lang) {
+                                        Ok(result) => {
+                                            if result.edges_total == 0 {
+                                                self.append_assistant_text(&format!(
+                                                    "\u{26a0}\u{fe0f} No edges found for \
+                                                     language `{lang}`. Ensure files of that \
+                                                     language are indexed (run \
+                                                     `/codeindex reindex`)."
+                                                ));
+                                                self.status = format!(
+                                                    "codeindex: graph lang {lang} (no edges)"
+                                                );
+                                            } else {
+                                                self.append_assistant_text(&format!(
+                                                    "\u{2705} Graph built for `{lang}`: {} \
+                                                     edges ({} EXTRACTED, {} INFERRED) in \
+                                                     {}ms.",
+                                                    result.edges_total,
+                                                    result.edges_extracted,
+                                                    result.edges_inferred,
+                                                    result.elapsed_ms,
+                                                ));
+                                                self.status = format!(
+                                                    "codeindex: graph lang {lang} ({} edges)",
+                                                    result.edges_total
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            self.append_assistant_text(&format!(
+                                                "\u{274c} Graph lang build failed: {e}"
+                                            ));
+                                            self.status =
+                                                "codeindex: graph lang failed".to_string();
+                                        }
+                                    }
+                                } else {
+                                    self.append_assistant_text(
+                                        "\u{26a0}\u{fe0f} Code index is not active. Enable it first with `/codeindex on`.",
+                                    );
+                                    self.status = "codeindex: not active".to_string();
+                                }
+                            }
+                            _ => {
+                                self.append_assistant_text(
+                                    "Usage: `/codeindex graph <build|export|lang <lang>>`",
+                                );
+                            }
+                        }
+                    }
+                    "godnodes" => {
+                        // Parse optional N (default 10, max 100).
+                        let n = args
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .map(|v| v.clamp(1, 100))
+                            .unwrap_or(10);
+
+                        if let Some(idx) = self.code_index.clone() {
+                            // FR-015: empty-graph guard.
+                            if idx.graph_edge_count().unwrap_or(0) == 0 {
+                                self.append_assistant_text(
+                                    "⚠️ No graph data available. \
+                                     Run `/codeindex graph build` first to build \
+                                     the semantic edge graph.",
+                                );
+                                self.status = "codeindex: godnodes (empty graph)".to_string();
+                            } else {
+                                match idx.godnodes(n) {
+                                    Ok(nodes) => {
+                                        let mut output = String::from(
+                                            "## God Nodes (Top Most-Connected Symbols)\n\n",
+                                        );
+                                        output.push_str("| # | Symbol | Source File | Degree |\n");
+                                        output.push_str("|---|--------|-------------|--------|\n");
+                                        for (i, node) in nodes.iter().enumerate() {
+                                            output.push_str(&format!(
+                                                "| {} | `{}` | `{}` | {} |\n",
+                                                i + 1,
+                                                node.name,
+                                                node.source_file,
+                                                node.degree,
+                                            ));
+                                        }
+                                        self.append_assistant_text(&output);
+                                        self.status = format!(
+                                            "codeindex: godnodes ({} symbols)",
+                                            nodes.len()
+                                        );
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "❌ God nodes query failed: {e}"
+                                        ));
+                                        self.status = "codeindex: godnodes failed".to_string();
+                                    }
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                            self.status = "codeindex: not active".to_string();
+                        }
+                    }
+                    "explain" => {
+                        // Parse the symbol name (everything after "explain").
+                        let symbol = args.split_whitespace().nth(1).unwrap_or("").trim();
+
+                        if symbol.is_empty() {
+                            self.append_assistant_text("Usage: `/codeindex explain <symbol>`");
+                            self.status = "codeindex: explain (usage)".to_string();
+                        } else if let Some(idx) = self.code_index.clone() {
+                            // FR-015: empty-graph guard.
+                            if idx.graph_edge_count().unwrap_or(0) == 0 {
+                                self.append_assistant_text(
+                                    "⚠️ No graph data available. \
+                                     Run `/codeindex graph build` first to build \
+                                     the semantic edge graph.",
+                                );
+                                self.status = "codeindex: explain (empty graph)".to_string();
+                            } else {
+                                match idx.explain(symbol) {
+                                    Ok(Some(result)) => {
+                                        let mut output = format!(
+                                            "## {} `{}` (line {}, degree {})\n\n",
+                                            result.name,
+                                            result.source_file,
+                                            result.line,
+                                            result.degree,
+                                        );
+                                        output.push_str("### Incoming\n\n");
+                                        if result.incoming.is_empty() {
+                                            output.push_str("_(none)_\n\n");
+                                        } else {
+                                            output.push_str(
+                                                "| Symbol | File | Kind | Confidence |\n",
+                                            );
+                                            output.push_str(
+                                                "|--------|------|------|------------|\n",
+                                            );
+                                            for conn in &result.incoming {
+                                                output.push_str(&format!(
+                                                    "| `{}` | `{}` | {} | {} |\n",
+                                                    conn.symbol,
+                                                    conn.source_file,
+                                                    conn.kind,
+                                                    conn.confidence,
+                                                ));
+                                            }
+                                        }
+                                        output.push_str("\n### Outgoing\n\n");
+                                        if result.outgoing.is_empty() {
+                                            output.push_str("_(none)_\n");
+                                        } else {
+                                            output.push_str(
+                                                "| Symbol | File | Kind | Confidence |\n",
+                                            );
+                                            output.push_str(
+                                                "|--------|------|------|------------|\n",
+                                            );
+                                            for conn in &result.outgoing {
+                                                output.push_str(&format!(
+                                                    "| `{}` | `{}` | {} | {} |\n",
+                                                    conn.symbol,
+                                                    conn.source_file,
+                                                    conn.kind,
+                                                    conn.confidence,
+                                                ));
+                                            }
+                                        }
+                                        self.append_assistant_text(&output);
+                                        self.status = "codeindex: explain".to_string();
+                                    }
+                                    Ok(None) => {
+                                        self.append_assistant_text(&format!(
+                                            "⚠️ Symbol `{symbol}` not found in the index."
+                                        ));
+                                        self.status = "codeindex: explain (not found)".to_string();
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "❌ Explain query failed: {e}"
+                                        ));
+                                        self.status = "codeindex: explain failed".to_string();
+                                    }
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                            self.status = "codeindex: not active".to_string();
+                        }
+                    }
+                    "path" => {
+                        // Parse two symbol names: path <A> <B>.
+                        let parts: Vec<&str> = args.split_whitespace().collect();
+                        let from = parts.get(1).copied().unwrap_or("");
+                        let to = parts.get(2).copied().unwrap_or("");
+
+                        if from.is_empty() || to.is_empty() {
+                            self.append_assistant_text(
+                                "Usage: `/codeindex path <symbolA> <symbolB>`",
+                            );
+                            self.status = "codeindex: path (usage)".to_string();
+                        } else if let Some(idx) = self.code_index.clone() {
+                            // FR-015: empty-graph guard.
+                            if idx.graph_edge_count().unwrap_or(0) == 0 {
+                                self.append_assistant_text(
+                                    "⚠️ No graph data available. \
+                                     Run `/codeindex graph build` first to build \
+                                     the semantic edge graph.",
+                                );
+                                self.status = "codeindex: path (empty graph)".to_string();
+                            } else {
+                                match idx.path(from, to) {
+                                    Ok(Some(result)) => {
+                                        let mut output = format!(
+                                            "## Shortest Path: {} → {} ({} hops)\n\n",
+                                            from, to, result.hops,
+                                        );
+                                        if result.steps.is_empty() {
+                                            output.push_str("(empty path)\n");
+                                        } else {
+                                            for (i, (sym, kind)) in result.steps.iter().enumerate()
+                                            {
+                                                if i == 0 {
+                                                    output.push_str(&format!("`{sym}`"));
+                                                } else if let Some(k) = kind {
+                                                    output.push_str(&format!(" --{k}--> `{sym}`"));
+                                                } else {
+                                                    output.push_str(&format!(" --> `{sym}`"));
+                                                }
+                                            }
+                                            output.push('\n');
+                                        }
+                                        self.append_assistant_text(&output);
+                                        self.status = "codeindex: path".to_string();
+                                    }
+                                    Ok(None) => {
+                                        self.append_assistant_text(&format!(
+                                            "⚠️ No path found between `{from}` and `{to}`."
+                                        ));
+                                        self.status = "codeindex: path (no path)".to_string();
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "❌ Path query failed: {e}"
+                                        ));
+                                        self.status = "codeindex: path failed".to_string();
+                                    }
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                            self.status = "codeindex: not active".to_string();
+                        }
+                    }
+                    "communities" => {
+                        if let Some(idx) = self.code_index.clone() {
+                            // FR-015: empty-graph guard.
+                            if idx.graph_edge_count().unwrap_or(0) == 0 {
+                                self.append_assistant_text(
+                                    "⚠️ No graph data available. \
+                                     Run `/codeindex graph build` first to build \
+                                     the semantic edge graph.",
+                                );
+                                self.status = "codeindex: communities (empty graph)".to_string();
+                            } else {
+                                match idx.communities() {
+                                    Ok(communities) => {
+                                        if communities.is_empty() {
+                                            self.append_assistant_text(
+                                                "⚠️ No communities detected. \
+                                                 Run `/codeindex graph build` first.",
+                                            );
+                                            self.status =
+                                                "codeindex: communities (none)".to_string();
+                                        } else {
+                                            let mut output = String::from("## Communities\n\n");
+                                            output.push_str("| Community | Label | Members |\n");
+                                            output.push_str("|-----------|-------|--------|\n");
+                                            for comm in &communities {
+                                                let label = comm.label.as_deref().unwrap_or("—");
+                                                output.push_str(&format!(
+                                                    "| {} | {} | {} |\n",
+                                                    comm.id, label, comm.member_count,
+                                                ));
+                                            }
+                                            self.append_assistant_text(&output);
+                                            self.status = format!(
+                                                "codeindex: communities ({} found)",
+                                                communities.len()
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "❌ Community detection failed: {e}"
+                                        ));
+                                        self.status = "codeindex: communities failed".to_string();
+                                    }
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                            self.status = "codeindex: not active".to_string();
+                        }
+                    }
                     "rebuild" => {
                         if let Some(idx) = self.code_index.clone() {
                             self.append_assistant_text(
@@ -7972,31 +8392,73 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             );
                         }
                     }
+                    "skillgen" => {
+                        self.append_assistant_text(
+                            "\u{1f9e9} **Generating graphify skill...** writing SKILL.md and references to `~/.ragent/skills/graphify/`.",
+                        );
+                        match super::skillgen::generate_graphify_skill() {
+                            Ok(result) => {
+                                let action = if result.already_existed {
+                                    "Updated"
+                                } else {
+                                    "Installed"
+                                };
+                                self.append_assistant_text(&format!(
+                                    "\u{2705} {action} graphify skill: {} files written to `{}`.\n\n\
+                                     The skill is now available via `/skill` or `skill_manage`. \
+                                     It provides a `/graphify` command that turns any folder of \
+                                     files into a navigable knowledge graph with community \
+                                     detection, god nodes, and query/path/explain tools.",
+                                    result.files_written,
+                                    result.dest.display(),
+                                ));
+                                self.status =
+                                    format!("codeindex: skillgen ({} files)", result.files_written);
+                            }
+                            Err(e) => {
+                                self.append_assistant_text(&format!(
+                                    "\u{274c} Failed to generate graphify skill: {e}",
+                                ));
+                                self.status = "codeindex: skillgen failed".to_string();
+                            }
+                        }
+                    }
                     "help" => {
                         self.append_assistant_text(
                                                   "## /codeindex \u{2014} Codebase Index Management\n\n\
-                                                   | Sub-command | Description |\n\
-                                                   |-------------|-------------|\n\
-                                                   | `/codeindex on` | Enable codebase indexing |\n\
-                                                   | `/codeindex off` | Disable codebase indexing |\n\
-                                                   | `/codeindex show` | Show index status and statistics |\n\
-                                                   | `/codeindex lang` | List supported languages |\n\
-                                                   | `/codeindex reindex` | Trigger a full re-index |\n\
-                                                   | `/codeindex rebuild` | Rebuild FTS index from SQLite |\n\
-                                                   | `/codeindex help` | Show this help |\n\n\
+                                                   **Sub-commands:**\n\n\
+                                                   `/codeindex on` \u{2014} Enable codebase indexing\n\
+                                                   `/codeindex off` \u{2014} Disable codebase indexing\n\
+                                                   `/codeindex show` \u{2014} Show index and graph status & statistics\n\
+                                                   `/codeindex lang` \u{2014} List supported languages\n\
+                                                   `/codeindex reindex` \u{2014} Trigger a full re-index\n\
+                                                   `/codeindex rebuild` \u{2014} Rebuild FTS index from SQLite\n\
+                                                   `/codeindex graph build` \u{2014} Build the semantic edge graph\n\
+                                                   `/codeindex graph export` \u{2014} Export graph.json and GRAPH_REPORT.md\n\
+                                                   `/codeindex graph lang <lang>` \u{2014} Restrict graph to one language\n\
+                                                   `/codeindex explain <symbol>` \u{2014} Show a symbol's connections\n\
+                                                   `/codeindex path <A> <B>` \u{2014} Shortest path between two symbols\n\
+                                                   `/codeindex communities` \u{2014} List detected communities\n\
+                                                   `/codeindex godnodes` \u{2014} Top-N highest-degree symbols\n\
+                                                   `/codeindex skillgen` \u{2014} Install the graphify skill to `~/.ragent/skills/`\n\
+                                                   `/codeindex help` \u{2014} Show this help\n\n\
                                                    When enabled, the agent has access to these tools:\n\
                                                    - `codeindex_search` \u{2014} Full-text search for symbols and docs\n\
                                                    - `codeindex_symbols` \u{2014} Structured symbol query\n\
                                                    - `codeindex_references` \u{2014} Find all references to a symbol\n\
                                                    - `codeindex_dependencies` \u{2014} File dependency graph\n\
-                                                   - `codeindex_status` \u{2014} Index statistics\n\
-                                                   - `codeindex_reindex` \u{2014} Trigger full re-index",
+                                                   - `codeindex_status` \u{2014} Index and graph statistics\n\
+                                                   - `codeindex_reindex` \u{2014} Trigger full re-index\n\
+                                                   - `codeindex_explain` \u{2014} Explain a symbol's connections\n\
+                                                   - `codeindex_path` \u{2014} Shortest path between two symbols\n\
+                                                   - `codeindex_communities` \u{2014} List communities\n\
+                                                   - `codeindex_godnodes` \u{2014} List high-degree hub symbols",
                                               );
                         self.status = "codeindex: help".to_string();
                     }
                     _ => {
                         self.append_assistant_text(
-                            "Usage: `/codeindex on|off|show|lang|reindex|rebuild|help`",
+                            "Usage: `/codeindex on|off|show|status|lang|reindex|rebuild|graph <build|export|lang>|explain <symbol>|path <A> <B>|communities|godnodes|skillgen|help`",
                         );
                     }
                 }

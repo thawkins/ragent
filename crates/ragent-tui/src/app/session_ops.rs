@@ -28,6 +28,21 @@ use crate::app::helpers::{MentionSpan, short_session_id};
 use crate::theme::{StatusCategory, StatusMessage};
 
 impl App {
+    /// Clone the current agent info, apply the selected model/thinking settings,
+    /// and inject the role-mode system prompt addition when active.
+    fn prepare_agent_for_dispatch(&self) -> ragent_agent::agent::AgentInfo {
+        let mut agent = self.agent_info.clone();
+        self.apply_selected_model_and_thinking(&mut agent);
+        if let Some(ref mode) = self.role_mode {
+            let addition = mode.system_prompt_addition();
+            if !addition.is_empty() {
+                let existing = agent.prompt.clone().unwrap_or_default();
+                agent.prompt = Some(format!("{existing}\n\n{addition}"));
+            }
+        }
+        agent
+    }
+
     pub(crate) fn ollama_cloud_api_key(&self) -> Option<String> {
         self.storage
             .get_provider_auth("ollama_cloud")
@@ -118,17 +133,7 @@ impl App {
 
         self.push_log_no_agent(LogLevel::Info, format!("bang command: {command}"));
 
-        let mut agent = self.agent_info.clone();
-        self.apply_selected_model_and_thinking(&mut agent);
-
-        // Inject role-mode system prompt addition when a role mode is active.
-        if let Some(ref mode) = self.role_mode {
-            let addition = mode.system_prompt_addition();
-            if !addition.is_empty() {
-                let existing = agent.prompt.clone().unwrap_or_default();
-                agent.prompt = Some(format!("{existing}\n\n{addition}"));
-            }
-        }
+        let agent = self.prepare_agent_for_dispatch();
         let command_for_prompt = command.clone();
         let processor = self.session_processor.clone();
         let event_bus = self.event_bus.clone();
@@ -147,21 +152,7 @@ impl App {
 
             let combined = match output {
                 Ok(Ok(out)) => {
-                    let mut text = String::new();
-                    if !out.stdout.is_empty() {
-                        text.push_str(&String::from_utf8_lossy(&out.stdout));
-                    }
-                    if !out.stderr.is_empty() {
-                        if !text.is_empty() {
-                            text.push('\n');
-                        }
-                        text.push_str(&String::from_utf8_lossy(&out.stderr));
-                    }
-                    if text.is_empty() {
-                        "(no output)".to_string()
-                    } else {
-                        text
-                    }
+                    ragent_agent::bang_command::combine_command_output(&out.stdout, &out.stderr)
                 }
                 Ok(Err(e)) => format!("failed to execute command: {e}"),
                 Err(e) => format!("internal error: {e}"),
@@ -174,11 +165,9 @@ impl App {
                 message: format!("```\n{combined}\n```"),
             });
 
-            let prompt = format!(
-                "I ran the following shell command:\n\n\
-                 $ {command_for_prompt}\n\n\
-                 Output:\n```\n{combined}\n```\n\n\
-                 Please review the output for any errors and resolve them as required."
+            let prompt = ragent_agent::bang_command::build_bang_command_prompt(
+                &command_for_prompt,
+                &combined,
             );
 
             if let Err(e) = processor.process_message(&sid, &prompt, &agent, flag).await {
@@ -248,17 +237,7 @@ impl App {
             format!("prompt sent{}: {}", model_tag, truncated),
         );
 
-        let mut agent = self.agent_info.clone();
-        self.apply_selected_model_and_thinking(&mut agent);
-
-        // Inject role-mode system prompt addition when a role mode is active.
-        if let Some(ref mode) = self.role_mode {
-            let addition = mode.system_prompt_addition();
-            if !addition.is_empty() {
-                let existing = agent.prompt.clone().unwrap_or_default();
-                agent.prompt = Some(format!("{}\n\n{}", existing, addition));
-            }
-        }
+        let agent = self.prepare_agent_for_dispatch();
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));

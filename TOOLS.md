@@ -805,6 +805,76 @@ Query symbols (functions, structs, enums, traits) from the codebase index. Suppo
 ```
 **Output:** Human-readable result string (and optional structured metadata).
 
+### `codeindex_explain` (codeindex:read)
+Explain a symbol in the codebase graph: show its node metadata (source file, line, community, degree) and its incoming/outgoing edges with kind and confidence tags. Limited to the top 50 connections.
+
+**Input schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "The name of the symbol to explain"
+    }
+  },
+  "required": ["symbol"]
+}
+```
+**Output:** Human-readable explanation with edges, plus structured metadata.
+
+### `codeindex_path` (codeindex:read)
+Find the shortest path (by hop count) between two symbols in the codebase graph, displaying each hop as `A --kind--> B` with confidence tags.
+
+**Input schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "from": {
+      "type": "string",
+      "description": "The name of the source symbol"
+    },
+    "to": {
+      "type": "string",
+      "description": "The name of the target symbol"
+    }
+  },
+  "required": ["from", "to"]
+}
+```
+**Output:** Human-readable path rendering, plus structured metadata with hops and steps.
+
+### `codeindex_communities` (codeindex:read)
+Run community detection over the codebase graph and display each detected community with its auto-generated label and member count.
+
+**Input schema:**
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+**Output:** Human-readable community list, plus structured metadata.
+
+### `codeindex_godnodes` (codeindex:read)
+Display the top-N most-connected symbols (highest degree) in the codebase graph with their names, source files, and edge counts.
+
+**Input schema:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "n": {
+      "type": "integer",
+      "description": "Maximum number of god-nodes to return (default: 10, max: 100)",
+      "minimum": 1
+    }
+  }
+}
+```
+**Output:** Human-readable table of top symbols by degree, plus structured metadata.
+
 ### `http_request` (network:fetch)
 Perform an HTTP request (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Returns the response status code, selected response headers, and the response body (truncated at 1 MiB). For simple web page fetching prefer 'webfetch'; use this tool when you need full control over method/headers/body.
 

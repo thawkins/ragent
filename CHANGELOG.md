@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+## Version: 1.0.44
+
+### Added — Code Index Semantic Graph
+
+- **Graph tools** — four new LLM-callable tools for semantic code graph analysis:
+  - `codeindex_godnodes` — top-N most-connected symbols (highest degree)
+  - `codeindex_path` — shortest path (by hop count) between two symbols
+  - `codeindex_explain` — node metadata and incoming/outgoing edges for a symbol
+  - `codeindex_communities` — community detection via label propagation
+- All graph tools use non-blocking `try_*` variants with retry and return a
+  `codeindex_busy` response when the index is locked.
+- TUI `/codeindex` slash command extended with `graph <build|export|lang>`,
+  `explain <symbol>`, `path <A> <B>`, `communities`, and `godnodes` sub-commands.
+- New `ragent-codeindex::graph` module with `SymbolGraph`, typed `EdgeKind`,
+  `Confidence`, community detection, and graph export.
+- New `GraphStatus` type for graph-level statistics in `/codeindex show`.
+- 13 new test files for graph build, edges, communities, export, readonly,
+  resolve, status, store, symbol graph, traverse, and types.
+
+### Added — Skills generation
+
+- TUI skill generation module (`skillgen.rs`) and `graphify_skill_data`
+  helper for converting skill metadata into graph-friendly structures.
+
+### Changed — Code quality (simplify review)
+
+- Extracted `bypass_research_text()` helper in `ragent-tui` models.rs,
+  eliminating duplicated research-bypass guards between `render_markdown_to_ascii`
+  and `render_markdown_unconditionally`.
+- Extracted `prepare_agent_for_dispatch()` in `ragent-tui` session_ops.rs,
+  eliminating duplicated agent-setup boilerplate between `dispatch_bang_command`
+  and `dispatch_user_message`.
+- Eliminated unnecessary `html_buf.clone()` in `render_markdown_pipeline`
+  (move instead of clone).
+- Removed 121 `/*FR-010 export*/` noise comments from `slash.rs`.
+
+### Changed — Embedding deserialisation
+
+- Refactored embedding deserialisation into a shared
+  `ragent_types::embedding::deserialise_embedding` function.
+  `ragent-storage` now delegates to this shared implementation instead of
+  maintaining a copy.
+
+### Changed — PDF text decoding
+
+- Replaced `chunks_exact(2)` with `as_chunks::<2>().0` in UTF-16BE/LE text
+  string decoding in `masterfetch/pdf.rs`, eliminating bounds-check panics.
+
+### Fixed — Compaction runner
+
+- Fixed compaction getting stuck when all messages fit inside the keep budget.
+  `select()` now forces at least the oldest message into the head when there
+  are 2+ messages, preventing the "nothing to summarise" bail that left users
+  with an un-compactable context.
+- Single-message compaction bail now logs at debug level instead of showing
+  a confusing user-visible notice.
+
+### Changed
+
+- Bumped workspace version to 1.0.44.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.43
 
 ### Changed

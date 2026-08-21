@@ -5,8 +5,8 @@
 //! the symbols extracted from them.
 
 use crate::types::{
-    FileEntry, ImportEntry, ScannedFile, StaleDiff, Symbol, SymbolFilter, SymbolKind, SymbolRef,
-    Visibility,
+    Confidence, FileEntry, GraphEdge, ImportEntry, ScannedFile, StaleDiff, Symbol, SymbolFilter,
+    SymbolKind, SymbolRef, Visibility,
 };
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -16,11 +16,17 @@ use std::path::Path;
 use tracing::debug;
 
 /// Current schema version — bump when migrating.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Persistent store for the code index, backed by `SQLite`.
 pub struct IndexStore {
-    conn: Connection,
+    /// The SQLite connection.
+    ///
+    /// Exposed as `pub(crate)` so that the graph edge-derivation code in
+    /// [`crate::graph::edges`] can issue a `ROLLBACK` when a batch insert
+    /// fails mid-transaction (the `begin_transaction` / `commit_transaction`
+    /// methods only cover the happy path).
+    pub(crate) conn: Connection,
 }
 
 impl IndexStore {
@@ -136,18 +142,59 @@ impl IndexStore {
 
             CREATE INDEX IF NOT EXISTS idx_deps_source ON file_deps(source_file_id);
             CREATE INDEX IF NOT EXISTS idx_deps_target ON file_deps(target_path);
+
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_sym    INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+                target_sym    INTEGER NOT NULL REFERENCES symbols(id) ON DELETE CASCADE,
+                kind          TEXT NOT NULL,
+                confidence    TEXT NOT NULL,
+                source_file   INTEGER REFERENCES indexed_files(id) ON DELETE CASCADE,
+                line          INTEGER,
+                UNIQUE(source_sym, target_sym, kind)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON graph_edges(source_sym);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON graph_edges(target_sym);
+            CREATE INDEX IF NOT EXISTS idx_edges_kind ON graph_edges(kind);
+
+            CREATE TABLE IF NOT EXISTS communities (
+                sym_id        INTEGER PRIMARY KEY REFERENCES symbols(id) ON DELETE CASCADE,
+                community     INTEGER NOT NULL,
+                label         TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_communities_community ON communities(community);
             ",
         )?;
 
-        // Seed schema version if missing.
-        let count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0))?;
-        if count == 0 {
+        // Seed schema version if missing, or migrate if below current version.
+        let current_version: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM schema_version", [], |r| r.get(0))?;
+        if current_version == 0 {
             self.conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [SCHEMA_VERSION],
             )?;
+        } else {
+            // Update the schema version row if it is below the current version.
+            // New tables are created idempotently above via CREATE TABLE IF NOT EXISTS,
+            // so the migration is simply bumping the version number. Existing tables
+            // are not altered (FR-025).
+            let stored_version: i64 =
+                self.conn
+                    .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))?;
+            if stored_version < i64::from(SCHEMA_VERSION) {
+                self.conn.execute(
+                    "UPDATE schema_version SET version = ?1 WHERE version = ?2",
+                    params![SCHEMA_VERSION, stored_version],
+                )?;
+                debug!(
+                    "codeindex schema migrated: v{} -> v{}",
+                    stored_version, SCHEMA_VERSION
+                );
+            }
         }
 
         Ok(())
@@ -212,6 +259,31 @@ impl IndexStore {
         match row {
             Some(r) => Ok(Some(raw_to_file_entry(r)?)),
             None => Ok(None),
+        }
+    }
+
+    /// Get a file entry by its ID.
+    pub fn get_file_by_id(&self, file_id: i64) -> Result<Option<FileEntry>> {
+        let row = self.conn.query_row(
+            "SELECT path, content_hash, byte_size, language, last_indexed, mtime_ns, line_count
+             FROM indexed_files WHERE id = ?1",
+            [file_id],
+            |row| {
+                Ok(RawFileRow {
+                    path: row.get(0)?,
+                    content_hash: row.get(1)?,
+                    byte_size: row.get::<_, i64>(2)?,
+                    language: row.get(3)?,
+                    last_indexed: row.get::<_, String>(4)?,
+                    mtime_ns: row.get(5)?,
+                    line_count: row.get::<_, i64>(6)?,
+                })
+            },
+        );
+        match row {
+            Ok(r) => Ok(Some(raw_to_file_entry(r)?)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -748,6 +820,66 @@ impl IndexStore {
         Ok(out)
     }
 
+    /// Return all references across all files.
+    pub fn query_all_refs(&self) -> Result<Vec<SymbolRef>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
+                    COALESCE(f.path, '') as file_path
+             FROM symbol_refs r
+             LEFT JOIN indexed_files f ON f.id = r.file_id
+             ORDER BY f.path, r.line",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(SymbolRef {
+                symbol_name: row.get(0)?,
+                file_id: row.get(1)?,
+                file_path: row.get(5)?,
+                line: row.get::<_, i64>(2)? as u32,
+                col: row.get::<_, i64>(3)? as u32,
+                kind: row.get(4)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Return all references for a single file, filtered at the SQL level.
+    ///
+    /// This avoids loading the entire `symbol_refs` table when only one
+    /// file's refs are needed (the incremental `index_file` path).
+    pub fn get_file_refs(&self, file_id: i64) -> Result<Vec<SymbolRef>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
+                    COALESCE(f.path, '') as file_path
+             FROM symbol_refs r
+             LEFT JOIN indexed_files f ON f.id = r.file_id
+             WHERE r.file_id = ?1
+             ORDER BY r.line",
+        )?;
+
+        let rows = stmt.query_map([file_id], |row| {
+            Ok(SymbolRef {
+                symbol_name: row.get(0)?,
+                file_id: row.get(1)?,
+                file_path: row.get(5)?,
+                line: row.get::<_, i64>(2)? as u32,
+                col: row.get::<_, i64>(3)? as u32,
+                kind: row.get(4)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     // ── File Dependencies ───────────────────────────────────────────────────
 
     /// Set file dependencies for a source file, replacing existing ones.
@@ -784,6 +916,357 @@ impl IndexStore {
             ids.push(r?);
         }
         Ok(ids)
+    }
+
+    /// Get the dependencies of a source file as `(target_path, kind)` pairs.
+    ///
+    /// Read-only accessor for the `file_deps` table; used by the graph-layer
+    /// read-only verification (spec graphCI, T-030, FR-025).
+    pub fn get_file_deps(&self, source_file_id: i64) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT target_path, kind FROM file_deps WHERE source_file_id = ?1
+             ORDER BY target_path, kind",
+        )?;
+        let rows = stmt.query_map([source_file_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Return the current stored schema version.
+    ///
+    /// Read-only accessor for the `schema_version` table; used by the
+    /// graph-layer read-only verification (spec graphCI, T-030, FR-025).
+    pub fn schema_version(&self) -> Result<i64> {
+        let version: i64 =
+            self.conn
+                .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))?;
+        Ok(version)
+    }
+
+    // ── Graph Edges ─────────────────────────────────────────────────────────
+
+    /// Insert or replace a semantic edge between two symbols.
+    ///
+    /// The `kind` is a string label such as `"calls"`, `"imports"`,
+    /// `"inherits"`, `"references"`, `"mixes_in"`, or `"implements"`.
+    /// The `confidence` is `"EXTRACTED"` or `"INFERRED"`.
+    pub fn upsert_edge(
+        &self,
+        source_sym: i64,
+        target_sym: i64,
+        kind: &str,
+        confidence: &str,
+        source_file: Option<i64>,
+        line: Option<u32>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO graph_edges (source_sym, target_sym, kind, confidence, source_file, line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_sym, target_sym, kind) DO UPDATE SET
+                 confidence = excluded.confidence,
+                 source_file = excluded.source_file,
+                 line = excluded.line",
+            params![
+                source_sym,
+                target_sym,
+                kind,
+                confidence,
+                source_file,
+                line.map(i64::from),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Insert or replace a semantic edge using typed [`EdgeKind`] and
+    /// [`Confidence`] values.
+    pub fn upsert_edge_typed(&self, edge: &GraphEdge) -> Result<()> {
+        self.upsert_edge(
+            edge.source_sym,
+            edge.target_sym,
+            &edge.kind.to_string(),
+            &edge.confidence.to_string(),
+            edge.source_file,
+            edge.line,
+        )
+    }
+
+    /// Bulk-insert edges using a prepared statement inside an explicit
+    /// transaction.
+    ///
+    /// The caller must call [`begin_transaction`] before this method and
+    /// [`commit_transaction`] after it.  This avoids per-edge auto-commit
+    /// overhead, which is the dominant cost when persisting thousands of
+    /// edges during a full reindex.
+    ///
+    /// [`begin_transaction`]: IndexStore::begin_transaction
+    /// [`commit_transaction`]: IndexStore::commit_transaction
+    pub fn upsert_edges_batch(&self, edges: &[GraphEdge]) -> Result<()> {
+        let mut stmt = self.conn.prepare(
+            "INSERT INTO graph_edges (source_sym, target_sym, kind, confidence, source_file, line)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_sym, target_sym, kind) DO UPDATE SET
+                 confidence = excluded.confidence,
+                 source_file = excluded.source_file,
+                 line = excluded.line",
+        )?;
+        for edge in edges {
+            stmt.execute(params![
+                edge.source_sym,
+                edge.target_sym,
+                edge.kind.to_string(),
+                edge.confidence.to_string(),
+                edge.source_file,
+                edge.line.map(i64::from),
+            ])?;
+        }
+        Ok(())
+    }
+
+    /// Delete all edges whose source or target symbol belongs to the given
+    /// set of symbol IDs.  Used during incremental re-index to refresh edges
+    /// for a single file.
+    pub fn delete_edges_for_symbols(&self, symbol_ids: &[i64]) -> Result<()> {
+        if symbol_ids.is_empty() {
+            return Ok(());
+        }
+        // Build a parameterised IN-clause with unique positional placeholders.
+        // We need symbol_ids.len() placeholders for the source IN-clause and
+        // another symbol_ids.len() for the target IN-clause, so the total
+        // parameter count is 2 * symbol_ids.len().
+        let n = symbol_ids.len();
+        let source_placeholders: Vec<String> = (1..=n).map(|i| format!("?{i}")).collect();
+        let target_placeholders: Vec<String> = (n + 1..=2 * n).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "DELETE FROM graph_edges WHERE source_sym IN ({}) OR target_sym IN ({})",
+            source_placeholders.join(", "),
+            target_placeholders.join(", "),
+        );
+        let params: Vec<i64> = symbol_ids
+            .iter()
+            .chain(symbol_ids.iter())
+            .copied()
+            .collect();
+        let params_ref: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        self.conn.execute(&sql, params_ref.as_slice())?;
+        Ok(())
+    }
+
+    /// Delete all edges.  Used before re-deriving the full graph.
+    pub fn clear_edges(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM graph_edges", [])?;
+        Ok(())
+    }
+
+    /// Return the total number of edges in the `graph_edges` table.
+    pub fn edge_count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM graph_edges", [], |r| r.get(0))?;
+        Ok(count as u64)
+    }
+
+    /// Return the number of edges filtered by confidence tag.
+    pub fn edge_count_by_confidence(&self, confidence: &str) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM graph_edges WHERE confidence = ?1",
+            [confidence],
+            |r| r.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Return the number of edges filtered by typed [`Confidence`].
+    pub fn edge_count_by_confidence_typed(&self, confidence: Confidence) -> Result<u64> {
+        self.edge_count_by_confidence(&confidence.to_string())
+    }
+
+    /// Return the number of edges filtered by edge kind (e.g. "calls",
+    /// "imports").
+    pub fn edge_count_by_kind(&self, kind: &str) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM graph_edges WHERE kind = ?1",
+            [kind],
+            |r| r.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Return the number of distinct symbols that appear as either the source
+    /// or target of at least one edge (i.e. the number of nodes in the graph).
+    pub fn graph_node_count(&self) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM (
+                SELECT source_sym AS s FROM graph_edges
+                UNION
+                SELECT target_sym AS s FROM graph_edges
+            )",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Query all edges where the given symbol is either the source or the
+    /// target.  Returns typed [`GraphEdge`] values.
+    pub fn query_edges_for_symbol_typed(&self, symbol_id: i64) -> Result<Vec<GraphEdge>> {
+        let rows = self.query_edges_for_symbol(symbol_id)?;
+        let mut out = Vec::with_capacity(rows.len());
+        for (src, tgt, kind, conf, sf, line) in rows {
+            out.push(GraphEdge {
+                source_sym: src,
+                target_sym: tgt,
+                kind: kind.parse()?,
+                confidence: conf.parse()?,
+                source_file: sf,
+                line: line.map(|l| l as u32),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Query all edges in the graph.  Returns typed [`GraphEdge`] values.
+    pub fn query_all_edges_typed(&self) -> Result<Vec<GraphEdge>> {
+        let rows = self.query_all_edges()?;
+        let mut out = Vec::with_capacity(rows.len());
+        for (src, tgt, kind, conf, sf, line) in rows {
+            out.push(GraphEdge {
+                source_sym: src,
+                target_sym: tgt,
+                kind: kind.parse()?,
+                confidence: conf.parse()?,
+                source_file: sf,
+                line: line.map(|l| l as u32),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Query all edges where the given symbol is either the source or the
+    /// target.  Returns tuples of `(source_sym, target_sym, kind, confidence,
+    /// source_file, line)`.
+    pub fn query_edges_for_symbol(
+        &self,
+        symbol_id: i64,
+    ) -> Result<Vec<(i64, i64, String, String, Option<i64>, Option<i64>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source_sym, target_sym, kind, confidence, source_file, line
+             FROM graph_edges
+             WHERE source_sym = ?1 OR target_sym = ?1",
+        )?;
+        let rows = stmt.query_map([symbol_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Query all edges in the graph.  Returns tuples of `(source_sym,
+    /// target_sym, kind, confidence, source_file, line)`.
+    pub fn query_all_edges(
+        &self,
+    ) -> Result<Vec<(i64, i64, String, String, Option<i64>, Option<i64>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT source_sym, target_sym, kind, confidence, source_file, line
+             FROM graph_edges",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    // ── Communities ──────────────────────────────────────────────────────────
+
+    /// Insert or replace a community assignment for a symbol.
+    pub fn upsert_community(&self, sym_id: i64, community: i64, label: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO communities (sym_id, community, label)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(sym_id) DO UPDATE SET
+                 community = excluded.community,
+                 label = excluded.label",
+            params![sym_id, community, label],
+        )?;
+        Ok(())
+    }
+
+    /// Delete all community assignments.  Used before re-running community
+    /// detection.
+    pub fn clear_communities(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM communities", [])?;
+        Ok(())
+    }
+
+    /// Return the number of distinct communities.
+    pub fn community_count(&self) -> Result<u64> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT community) FROM communities",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    /// Return all community assignments as `(sym_id, community, label)`.
+    pub fn query_all_communities(&self) -> Result<Vec<(i64, i64, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT sym_id, community, label FROM communities")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Return all symbols in a given community as `(sym_id, label)`.
+    pub fn query_community_members(&self, community: i64) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT sym_id, label FROM communities WHERE community = ?1")?;
+        let rows = stmt.query_map([community], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     // ── Aggregate stats ─────────────────────────────────────────────────────

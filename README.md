@@ -20,7 +20,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
-- **Comprehensive tool system** — ~150 registered tools across 18 categories:
+- **Comprehensive tool system** — ~169 registered tools across 18 categories:
   - **File operations** — read, write, create, edit, multiedit, apply_patch, patch, rm, move, copy,
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
@@ -35,7 +35,8 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
         click, type, fill_form, select, wait, eval, scroll, upload, press,
         screenshot, status, setup)
       - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
-        codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
+        codeindex_dependencies, codeindex_status, codeindex_reindex, codeindex_explain,
+        codeindex_path, codeindex_communities, codeindex_godnodes (read-only,
         hardwired always-allowed)
       - **Memory** — memory_read, memory_write, memory_replace, memory_store,
         memory_recall, memory_forget, memory_search, memory_migrate,
@@ -87,10 +88,14 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, VARI, Q*, O1-STYLE, Meta Prompting) and
   platform adapters (OpenAI, Claude, Microsoft/Azure); also available via `POST /opt`
 - **Code index** — automatic codebase indexing with tree-sitter parsing (15+ languages),
-  full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
-  tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
-  Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
-  language filtering via `/codeindex lang <language>`
+    full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
+    tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
+    Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
+    language filtering via `/codeindex lang <language>`; **semantic code graph** with
+    `codeindex_godnodes` (top-N most-connected symbols), `codeindex_path` (shortest
+    path between symbols), `codeindex_explain` (node metadata and edges), and
+    `codeindex_communities` (community detection); graph built via
+    `/codeindex graph build`
 - **Memory system** — three-tier system with file blocks, structured SQLite store,
   and optional embedding-based semantic search; automatic extraction, decay,
   compression, and knowledge graph support
@@ -381,7 +386,18 @@ research system, and multi-layered security are functional and under active deve
 
 Recent highlights:
 
-- **CI fixes** — Resolved clippy `needless_raw_string_hashes`, `vec_init_then_push`, and `useless_borrows_in_formatting` warnings; documented all `#[allow(dead_code)]` suppressions in `CronEventExport`
+- **Code index semantic graph** — Four new graph analysis tools
+  (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
+  `codeindex_communities`) with community detection, shortest-path traversal,
+  and god-node identification; `/codeindex graph build` sub-command
+- **Bang commands** — Prefix any prompt with `!` to run a shell command and
+  have the model review its output (v1.0.42)
+- **Compaction fix** — Fixed compaction getting stuck when all messages fit
+  the keep budget; now forces at least one message into the head
+- **Code quality** — Extracted shared helpers for markdown rendering and
+  agent dispatch, eliminated unnecessary clones, cleaned up noise comments
+- **CI fixes** — Resolved clippy `needless_raw_string_hashes`, `vec_init_then_push`,
+  and `useless_borrows_in_formatting` warnings
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

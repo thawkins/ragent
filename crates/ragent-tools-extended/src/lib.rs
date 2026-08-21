@@ -5,7 +5,11 @@
 
 pub mod browser;
 pub mod channels;
+pub mod codeindex_communities;
 pub mod codeindex_dependencies;
+pub mod codeindex_explain;
+pub mod codeindex_godnodes;
+pub mod codeindex_path;
 pub mod codeindex_references;
 pub mod codeindex_reindex;
 pub mod codeindex_search;
@@ -443,6 +447,14 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
     registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
     registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
+    // graphCI T-015: codeindex_godnodes tool (FR-014, FR-017).
+    registry.register(Arc::new(codeindex_godnodes::CodeIndexGodnodesTool));
+    // graphCI T-013: codeindex_path tool (FR-012, FR-017).
+    registry.register(Arc::new(codeindex_path::CodeIndexPathTool));
+    // graphCI T-012: codeindex_explain tool (FR-011, FR-017).
+    registry.register(Arc::new(codeindex_explain::CodeIndexExplainTool));
+    // graphCI T-014: codeindex_communities tool (FR-013, FR-017).
+    registry.register(Arc::new(codeindex_communities::CodeIndexCommunitiesTool));
     registry.register(Arc::new(browser::BrowserTool));
     // JCODEPLAN M7 — external integrations.
     registry.register(Arc::new(gmail::GmailTool::new()));

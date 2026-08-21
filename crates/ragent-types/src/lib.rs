@@ -11,6 +11,7 @@
 //! - Cron scheduling types
 
 pub mod cron;
+pub mod embedding;
 pub mod error;
 pub mod event;
 pub mod html;

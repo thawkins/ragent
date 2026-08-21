@@ -135,30 +135,55 @@ impl App {
         out.join("\n")
     }
 
+    /// Return pre-rendered research text (code block or progress log) if the
+    /// input should bypass the markdown pipeline, otherwise `None`.
+    fn bypass_research_text(text: &str) -> Option<String> {
+        if let Some(research) = try_extract_research_code_block(text) {
+            return Some(research);
+        }
+        if text.starts_with("🔬 Research Progress") {
+            return Some(sanitize_for_display(text));
+        }
+        None
+    }
+
     /// Render a markdown string to ASCII for the chat log, preserving research
     /// slash-command preformatted blocks and passing through plain runtime text
     /// unchanged. Otherwise runs the markdown→HTML→text pipeline and normalizes
     /// ASCII tables.
     pub fn render_markdown_to_ascii(&mut self, text: &str) -> String {
-        // Research slash-command responses are already rendered as fixed-width
-        // plain text inside a fenced code block.  Passing them through the
-        // markdown→HTML→text pipeline and then `normalize_ascii_tables` re-wraps
-        // and misaligns columns.  Return the preformatted content directly.
-        if let Some(research) = try_extract_research_code_block(text) {
-            return research;
-        }
-        // Research progress messages are already formatted as plain-text log
-        // lists (icons, phase labels, continuation indents).  Sending them
-        // through `pulldown_cmark` + `html2text` replaces valid Unicode icons
-        // and line structures with garbage glyphs, so preserve them verbatim.
-        if text.starts_with("🔬 Research Progress") {
-            return sanitize_for_display(text);
+        if let Some(bypassed) = Self::bypass_research_text(text) {
+            return bypassed;
         }
         // Only convert markdown-like slash output; preserve plain runtime text.
         if !text.starts_with("From: /") {
             return sanitize_for_display(text);
         }
 
+        self.render_markdown_pipeline(text)
+    }
+
+    /// Render a markdown string unconditionally through the markdown→HTML→text
+    /// pipeline.
+    ///
+    /// Unlike [`render_markdown_to_ascii`], this does NOT require a `From: /`
+    /// prefix.  Use this for standalone messages that contain markdown formatting
+    /// (e.g. `agent_complete` summaries with headers, bullet points, bold text)
+    /// so they are rendered with proper visual structure instead of appearing
+    /// as a wall of plain text.
+    ///
+    /// Research code blocks and research progress lines are still bypassed.
+    pub fn render_markdown_unconditionally(&mut self, text: &str) -> String {
+        if let Some(bypassed) = Self::bypass_research_text(text) {
+            return bypassed;
+        }
+
+        self.render_markdown_pipeline(text)
+    }
+
+    /// Shared markdown→HTML→text rendering pipeline with caching and panic
+    /// isolation.
+    fn render_markdown_pipeline(&mut self, text: &str) -> String {
         // Check cache using FNV-1a hash of input.
         let hash = {
             let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -184,7 +209,7 @@ impl App {
         // overflow); run it on a dedicated thread so any panic unwinds only
         // that thread, never the UI thread (which installs the panic hook).
         let rendered = {
-            let html_owned = html_buf.clone();
+            let html_owned = html_buf;
             match std::thread::Builder::new()
                 .name("md-html2text".to_string())
                 .spawn(move || html2text::from_read(html_owned.as_bytes(), 120))

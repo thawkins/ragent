@@ -63,7 +63,6 @@ Use the `Bash` tool to run the following cargo commands:
   members = ["crates/*"]
   resolver = "2"
   ```
-
 - Define crate-specific metadata, dependencies, and targets in each crate's own `Cargo.toml`.
 - Prefer small, focused crates with a single responsibility.
 
@@ -79,3 +78,23 @@ Use the `Bash` tool to run the following cargo commands:
 - **Documentation**: Use `//!` for crate/module docs, `///` for public APIs, and `//` for internal comments.
 - **Linting**: No wildcard imports. Treat cognitive complexity ≤30 and missing docs warnings as review targets rather than guaranteed compiler-enforced limits.
 - **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply them to the project where relevant.
+
+Core Code Rules
+
+* **No `unsafe` Blocks:** Never use `unsafe` unless explicitly approved or required by FFI bounds; document all safety invariants clearly when used.
+* **Exhaustive Pattern Matching:** Always match enums and results exhaustively; avoid wildcard `_` fallbacks unless handling non-exhaustive external types.
+* **Explicit Cloning:** Call `.clone()` explicitly on non-`Copy` types; forbid hidden or cascading clones inside intensive iterators or closures.
+* **No Silent Error Swallowing:** Never use `.unwrap()` or `.expect()` in production code paths; always propagate or handle `Result` and `Option`
+
+Code Style & Formatting
+
+* **Naming Conventions:** Use `snake_case` for variables, functions, and modules; `PascalCase` for types, traits, and enums; `SCREAMING_SNAKE_CASE` for global constants.
+* **Idiomatic Constructs:** Prefer expressive iterator adapters (`map`, `filter`, `fold`) over explicit manual index-based loops.
+* **Formatting standard:** Adhere strictly to default `rustfmt` layouts and keep maximum line lengths under 100 characters.
+* **No Unicode/Emojis:** Exclude emojis or fancy unicode symbols from comments and output code.
+
+Workflow & Tool Enforcement
+
+* **Zero Warnings Policy:** Generated code must compile cleanly without warnings under standard compiler checks.
+* **Clippy Compliance:** Run and pass `cargo clippy` with standard lints on all proposed changes.
+* **Automated Formatting Check:** Ensure all code output is formatted via `cargo fmt` before final file writing.

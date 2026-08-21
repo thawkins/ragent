@@ -167,28 +167,19 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 /// Serialise a `Vec<f32>` embedding into a byte blob for `SQLite` BLOB storage.
 ///
-/// Each `f32` is stored in little-endian IEEE 754 format (4 bytes per value).
-///
-/// # Examples
-///
-/// ```
-/// use ragent_tools_extended::memory::embedding::{deserialise_embedding, serialise_embedding};
-///
-/// let vec = vec![1.0_f32, -2.5, 3.14];
-/// let blob = serialise_embedding(&vec);
-/// let recovered = deserialise_embedding(&blob, 3).unwrap();
-/// assert_eq!(vec, recovered);
-/// ```
+/// This is a re-export of [`ragent_types::embedding::serialise_embedding`].
+/// The canonical implementation lives in `ragent-types` so that
+/// `ragent-storage` can decode blobs without depending on `ragent-tools-extended`.
 #[must_use]
 pub fn serialise_embedding(vec: &[f32]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(vec.len() * 4);
-    for &val in vec {
-        bytes.extend_from_slice(&val.to_le_bytes());
-    }
-    bytes
+    ragent_types::embedding::serialise_embedding(vec)
 }
 
 /// Deserialise a byte blob back into a `Vec<f32>`.
+///
+/// This is a re-export of [`ragent_types::embedding::deserialise_embedding`].
+/// The canonical implementation lives in `ragent-types` so that
+/// `ragent-storage` can decode blobs without depending on `ragent-tools-extended`.
 ///
 /// # Errors
 ///
@@ -206,20 +197,7 @@ pub fn serialise_embedding(vec: &[f32]) -> Vec<u8> {
 /// assert!(deserialise_embedding(&blob, 4).is_err()); // wrong dimensions
 /// ```
 pub fn deserialise_embedding(blob: &[u8], dimensions: usize) -> Result<Vec<f32>> {
-    if blob.len() != dimensions * 4 {
-        anyhow::bail!(
-            "Embedding blob length {} does not match expected {} bytes ({} dims × 4)",
-            blob.len(),
-            dimensions * 4,
-            dimensions
-        );
-    }
-    let mut vec = Vec::with_capacity(dimensions);
-    for chunk in blob.as_chunks::<4>().0 {
-        let val = f32::from_le_bytes(*chunk);
-        vec.push(val);
-    }
-    Ok(vec)
+    ragent_types::embedding::deserialise_embedding(blob, dimensions)
 }
 
 /// A scored search result from semantic search.

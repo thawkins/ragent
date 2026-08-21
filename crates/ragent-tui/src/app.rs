@@ -19,6 +19,7 @@ mod input_handler;
 mod models;
 mod research;
 mod session_ops;
+pub mod skillgen;
 mod slash;
 mod swarm;
 

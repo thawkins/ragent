@@ -4,9 +4,9 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-    <strong>Version:</strong> 1.0.28-beta</p>
+    <strong>Version:</strong> 1.0.43</p>
   <p style="font-size: 1.1em;">
-    <strong>Date:</strong> 2026-08-13
+    <strong>Date:</strong> 2026-08-21
   </p>
   <p style="font-size: 1.1em;">
     <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
@@ -101,20 +101,31 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.23). The core architecture, tool system,
+Ragent is in **beta** (v1.0.43). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
-multi-agent coordination, security layer, telemetry, and release packaging are
+multi-agent coordination, security layer, telemetry, code index semantic graph,
+and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.17 → v1.0.23):**
-- **Spec-Driven Development back-fill** — New `/spec specify` (SPEC.md only with clarification markers), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md + quickstart.md), and `/spec feedback` (FEEDBACK.md notes) subcommands; consistency validation (ambiguity, contradiction, gap detection); `CONSTITUTION.md` with amendment process; `data-model.md` and `contracts/` artifacts gated by `sdd` config flags; production feedback loop surfacing in `/spec plan` (v1.0.28)
-- **Spec lifecycle** — `/spec update` regenerates `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md` (preserving unchanged task IDs); `/spec create` now emits a `TESTPLAN.md` manual test-plan artifact; `/spec add` regenerates `PLAN.md` + `TESTPLAN.md` after incremental additions; `/spec jtbd` performs Jobs-To-Be-Done analysis on existing specs (v1.0.23)
-- **Research system maturation** — Mandatory readability extraction in the web-gather phase; `mf_fetch` reports `extraction_method`; YouTube transcript capture fixed with a brace-balanced `ytInitialPlayerResponse` scanner; failed fetches abort with explicit errors (v1.0.23)
-- **Cron scheduling** — LLM-callable `cron_add`/`cron_remove`/`cron_list`/`cron_enable`/`cron_disable` tools; natural-language timestamps (`5pm`, `5:30pm`, `17:00`, `5am tomorrow`); `--force` and `--agent` flags for JTBD; per-run execution logging (v1.0.19–v1.0.20)
-- **Edit tools** — Optional `collapse_whitespace` matching for `edit`/`multi_edit`; persistent edit-log toggle (Alt+E) with status-bar indicator (v1.0.17)
-- **Context compaction** — Model-independent fraction-based thresholds; per-turn guard suppressing repeated "Context compression skipped" notices (v1.0.17)
-- **Search backends** — Perplexity Sonar backend added to `mf_search` (v1.0.18)
+**Current Release Highlights (v1.0.34 → v1.0.43):**
+- **Code index semantic graph** — New `codeindex_godnodes`, `codeindex_path`,
+  `codeindex_explain`, and `codeindex_communities` tools; typed edge graph with
+  `calls`, `imports`, `inherits`, `references`, `mixes_in`, `implements` edges;
+  community detection via label propagation; `/codeindex graph build` sub-command
+  (v1.0.43)
+- **Bang commands** — Prefix any prompt with `!` to run a shell command and
+  have the model review its output; works in TUI and `ragent run` (v1.0.42)
+- **Compaction fix** — `select()` now forces at least one message into the head
+  when there are 2+ messages, preventing the "nothing to summarise" stuck state
+  (v1.0.43)
+- **Research panic fixes** — Vendored `html2text` with `saturating_sub` patches;
+  `extract_pdf_text` now runs on a dedicated OS thread with `panic_guard` (v1.0.40)
+- **Stocks & currency tools** — `stock_quote`, `stock_history`,
+  `stock_fundamentals`, `stock_search`, `stock_options`, `stock_recommendations`,
+  `currency_rate`, `currency_history` (v1.0.36)
+- **Start-of-turn compaction** — Uses persisted provider-reported input token
+  count so it aligns with the TUI usage percentage (v1.0.34)
 
 ---
 
@@ -587,6 +598,7 @@ has a JSON schema, a permission category, and an async `execute` method.
 | Web / MasterFetch | `webfetch`, `websearch`, `http_request`, `browser`, `mf_fetch`, `mf_crawl`, `mf_search`, `mf_screenshot`, `mf_cache_clear`, `mf_version` | 10 |
 | Memory | `memory_read`, `memory_write`, `memory_replace`, `memory_store`, `memory_recall`, `memory_forget`, `memory_search`, `memory_migrate`, `conversation_search`, `session_search` | 10 |
 | Code index | `codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`, `codeindex_status`, `codeindex_reindex` | 6 |
+| Code graph | `codeindex_explain`, `codeindex_path`, `codeindex_communities`, `codeindex_godnodes` | 4 |
 | Teams | 19 team lifecycle/task/message tools | 19 |
 | Sub-agents | `new_agent`, `cancel_agent`, `list_agents`, `wait_agents`, `agent_complete` | 5 |
 | VCS | 48 Git local, GitHub, and GitLab issue/PR/MR/pipeline tools | 48 |
@@ -1280,7 +1292,36 @@ graph LR
 All code index tools are **hardwired always-allowed** because they are read-only
 and local-only.
 
-### 8.5 Incremental Updates
+### 8.5 Semantic Code Graph
+
+The code index also maintains a **semantic code graph** — a typed edge graph
+over indexed symbols that captures relationships such as `calls`, `imports`,
+`inherits`, `references`, `mixes_in`, and `implements`. Edges are either
+`EXTRACTED` (from tree-sitter parse data) or `INFERRED` (heuristic).
+
+The graph is built on demand via `/codeindex graph build` (or
+`/codeindex graph lang <language>` for a per-language subgraph) and persisted
+in the `graph_edges` SQLite table.
+
+#### Graph Tools
+
+| Tool | Purpose |
+|------|---------|
+| `codeindex_godnodes` | Top-N most-connected symbols (highest degree) |
+| `codeindex_path` | Shortest path (by hop count) between two symbols |
+| `codeindex_explain` | Node metadata and incoming/outgoing edges for a symbol |
+| `codeindex_communities` | Community detection via label propagation |
+
+All graph tools use non-blocking `try_*` variants with retry and return a
+`codeindex_busy` response when the index is locked (e.g. during a reindex).
+
+#### Graph Status
+
+`/codeindex show` reports graph-level statistics alongside index stats:
+edge count (total, extracted, inferred), node count, per-kind edge counts,
+and community count.
+
+### 8.6 Incremental Updates
 
 A file watcher detects changes and incrementally updates the index. Language
 filtering is available via `/codeindex lang <language>`.

@@ -163,6 +163,18 @@ pub fn select(
         split_idx = idx;
     }
 
+    // If every message fit inside the keep budget, `split_idx` is 0 and the
+    // head would be empty. When there are two or more messages, force at least
+    // the oldest one into the head so the LLM has something to summarise.
+    // Without this, compaction fires (token count exceeded threshold) but
+    // immediately bails with "nothing to summarise", leaving the user stuck
+    // with an un-compactable context that will keep re-triggering.
+    if split_idx == 0 && conv.len() > 1 {
+        split_idx = 1;
+        // Recalculate the recent-token total for the reduced tail.
+        total = conv[split_idx..].iter().map(|(_, _, c)| *c).sum();
+    }
+
     let recent_messages: Vec<Message> = conv[split_idx..]
         .iter()
         .map(|(i, _, _)| messages[*i].clone())
@@ -362,14 +374,23 @@ pub async fn compact(
     // 2. Nothing-to-summarise guard (OpenCode:
     //    `if (!selected || (selected.head.length === 0 && previousSummary?.
     //    type !== "compaction")) return false`).
+    //
+    //    After the `select` fix that forces at least one message into the head
+    //    when there are 2+ messages, this guard now only fires when there is
+    //    literally a single non-compaction message — the entire conversation is
+    //    one turn. In that case compaction cannot help, so we skip silently
+    //    (debug log only) rather than showing a confusing user-visible notice.
     if split.head_messages.is_empty() && previous_summary.is_none() {
-        let msg = "compaction has nothing to summarise: empty head and no previous summary";
-        warn!(session_id, reason, "compaction bail: {msg}");
-        event_bus.publish(Event::AgentNotice {
-            session_id: session_id.to_string(),
-            message: format!("Context compression skipped: {msg}"),
-        });
-        bail!("{msg}");
+        tracing::debug!(
+            session_id,
+            reason,
+            non_compaction_msgs = messages
+                .iter()
+                .filter(|m| m.role != Role::Compaction)
+                .count(),
+            "compaction skipped: nothing to summarise (single-message context)"
+        );
+        bail!("compaction has nothing to summarise: single-message context");
     }
 
     // 3. Build the summarisation prompt. The head transcript was already

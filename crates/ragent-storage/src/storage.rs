@@ -2787,26 +2787,11 @@ impl Storage {
     /// Decode an embedding blob into a `Vec<f32>` of the expected dimensionality.
     ///
     /// Embeddings are stored as little-endian `f32` arrays (4 bytes per
-    /// dimension).  Returns an error if the blob length does not match
-    /// `dimensions * 4`.  This is the storage-local equivalent of
-    /// `ragent_tools_extended::memory::embedding::deserialise_embedding`;
-    /// it lives here so `search_memories_by_embedding` can decode blobs
-    /// without depending on the tools-extended embedding helpers.
+    /// dimension). Returns an error if the blob length does not match
+    /// `dimensions * 4`. Delegates to the shared implementation in
+    /// [`ragent_types::embedding::deserialise_embedding`].
     fn deserialise_embedding_owned(blob: &[u8], dimensions: usize) -> Result<Vec<f32>> {
-        if blob.len() != dimensions * 4 {
-            anyhow::bail!(
-                "Embedding blob length {} does not match expected {} bytes ({} dims × 4)",
-                blob.len(),
-                dimensions * 4,
-                dimensions
-            );
-        }
-        let mut vec = Vec::with_capacity(dimensions);
-        for chunk in blob.as_chunks::<4>().0 {
-            let val = f32::from_le_bytes(*chunk);
-            vec.push(val);
-        }
-        Ok(vec)
+        ragent_types::embedding::deserialise_embedding(blob, dimensions)
     }
 
     /// Search structured memories by cosine similarity against a query embedding.

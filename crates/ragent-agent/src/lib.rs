@@ -47,6 +47,9 @@ pub mod tool;
 pub mod trigger;
 pub mod updater;
 
+/// Shared helpers for the `!`-prefixed bang-command feature (CLI + TUI).
+pub mod bang_command;
+
 /// Background shell task service (M3).
 pub mod background;
 

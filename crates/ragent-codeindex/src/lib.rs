@@ -60,6 +60,9 @@ pub mod worker;
 /// LRU tree cache for incremental tree-sitter parsing.
 pub mod tree_cache;
 
+/// Semantic code graph: typed edges, community detection, and traversal.
+pub mod graph;
+
 use anyhow::{Context, Result};
 use parser::ParserRegistry;
 use search::{FtsIndex, FtsSymbol, SearchResult};
@@ -71,10 +74,9 @@ use store::IndexStore;
 use tracing::{debug, warn};
 use tree_cache::TreeCache;
 use types::{
-    CodeIndexConfig, DepDirection, FileEntry, IndexResult, IndexStats, ScannedFile, SearchQuery,
-    Symbol, SymbolFilter, SymbolRef,
+    CodeIndexConfig, DepDirection, FileEntry, GraphStatus, IndexResult, IndexStats, ScannedFile,
+    SearchQuery, Symbol, SymbolFilter, SymbolRef,
 };
-
 /// The main entry point for the code index system.
 ///
 /// Owns the `SQLite` store, tantivy FTS index, tree cache, and parser registry.
@@ -410,6 +412,165 @@ impl CodeIndex {
         Some(stats)
     }
 
+    /// List the top-N highest-degree (most-connected) symbols in the graph
+    /// (FR-014).
+    ///
+    /// Computes the degree of each symbol from the `graph_edges` table and
+    /// returns the top `n` sorted by degree (descending).  Blocks until the
+    /// store lock is acquired.
+    pub fn godnodes(&self, n: usize) -> Result<Vec<graph::GodNode>> {
+        let store = self.store.lock().unwrap();
+        let graph = graph::SymbolGraph::new(&store);
+        graph.godnodes(n)
+    }
+
+    /// Non-blocking variant of [`godnodes()`] (FR-017).
+    ///
+    /// Returns `None` if the `SQLite` store lock is currently held (e.g. by
+    /// a background reindex).  Callers should retry briefly or return a
+    /// `codeindex_busy` response rather than stalling the agent loop.
+    pub fn try_godnodes(&self, n: usize) -> Result<Option<Vec<graph::GodNode>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let graph = graph::SymbolGraph::new(&store);
+        Ok(Some(graph.godnodes(n)?))
+    }
+
+    /// Compute the shortest path (by hop count) between two symbols in the
+    /// semantic code graph (FR-012).
+    ///
+    /// Returns `Ok(None)` if either symbol is not found or no path exists.
+    /// Blocks until the store lock is acquired.
+    pub fn path(&self, from: &str, to: &str) -> Result<Option<graph::PathResult>> {
+        let store = self.store.lock().unwrap();
+        let graph = graph::SymbolGraph::new(&store);
+        graph.path(from, to)
+    }
+
+    /// Non-blocking variant of [`path()`] (FR-017).
+    ///
+    /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
+    /// a background reindex).  Returns `Ok(Some(None))` if the lock was
+    /// acquired but no path exists between the two symbols.  Returns
+    /// `Ok(Some(Some(result)))` when a path is found.  Callers should retry
+    /// briefly on `Ok(None)` or return a `codeindex_busy` response rather than
+    /// stalling the agent loop.
+    pub fn try_path(&self, from: &str, to: &str) -> Result<Option<Option<graph::PathResult>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let graph = graph::SymbolGraph::new(&store);
+        Ok(Some(graph.path(from, to)?))
+    }
+
+    /// Explain a symbol: show its node metadata and connections (FR-011).
+    ///
+    /// Returns `Ok(None)` if the symbol is not found.  Blocks until the store
+    /// lock is acquired.
+    pub fn explain(&self, name: &str) -> Result<Option<graph::ExplainResult>> {
+        let store = self.store.lock().unwrap();
+        let graph = graph::SymbolGraph::new(&store);
+        graph.explain(name)
+    }
+
+    /// Non-blocking variant of [`explain()`] (FR-017).
+    ///
+    /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
+    /// a background reindex).  Returns `Ok(Some(None))` if the lock was acquired
+    /// but the symbol was not found.  Returns `Ok(Some(Some(result)))` when
+    /// the symbol is found.
+    pub fn try_explain(&self, name: &str) -> Result<Option<Option<graph::ExplainResult>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let graph = graph::SymbolGraph::new(&store);
+        Ok(Some(graph.explain(name)?))
+    }
+
+    /// Run community detection over the symbol graph (FR-013).
+    ///
+    /// Runs label propagation over the `graph_edges` table, persists the
+    /// community assignments to the `communities` table, and returns a
+    /// summary of detected communities with auto-generated labels and member
+    /// counts.  Blocks until the store lock is acquired.
+    pub fn communities(&self) -> Result<Vec<graph::CommunityInfo>> {
+        let store = self.store.lock().unwrap();
+        let graph = graph::SymbolGraph::new(&store);
+        graph.communities()
+    }
+
+    /// Non-blocking variant of [`communities()`] (FR-017).
+    ///
+    /// Returns `Ok(None)` if the `SQLite` store lock is currently held (e.g. by
+    /// a background reindex).  Returns `Ok(Some(vec))` when the lock was
+    /// acquired and community detection completed (the vec may be empty if
+    /// the graph has no edges).
+    pub fn try_communities(&self) -> Result<Option<Vec<graph::CommunityInfo>>> {
+        let store = match self.store.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(None),
+        };
+        let graph = graph::SymbolGraph::new(&store);
+        Ok(Some(graph.communities()?))
+    }
+
+    /// Build (or rebuild) the semantic edge graph from the currently indexed
+    /// symbols (FR-009).
+    ///
+    /// Derives typed edges from the indexed symbols, imports, and references,
+    /// then persists them in the `graph_edges` table.  Returns a
+    /// [`graph::BuildResult`] with edge counts distinguishing `EXTRACTED` from
+    /// `INFERRED`.  Blocks until the store lock is acquired.
+    pub fn build_graph(&self) -> Result<graph::BuildResult> {
+        let store = self.store.lock().unwrap();
+        graph::SymbolGraph::new(&store).build()
+    }
+
+    /// Build (or rebuild) the semantic edge graph restricted to symbols from a
+    /// single language (FR-018).
+    ///
+    /// Like [`build_graph()`] but only derives edges for files whose detected
+    /// language matches `language`.  Useful for per-language subgraph analysis.
+    pub fn build_graph_for_language(&self, language: &str) -> Result<graph::BuildResult> {
+        let store = self.store.lock().unwrap();
+        graph::SymbolGraph::new(&store).build_for_language(language)
+    }
+
+    /// Return the total number of edges in the `graph_edges` table.
+    ///
+    /// Used by the TUI empty-graph guard (FR-015) to check whether the graph
+    /// has been built before running graph query sub-commands.
+    pub fn graph_edge_count(&self) -> Result<u64> {
+        let store = self.store.lock().unwrap();
+        store.edge_count()
+    }
+
+    /// Return summary statistics for the semantic edge graph.
+    ///
+    /// Aggregates edge/node/community counts so the TUI `/codeindex status`
+    /// command can report on the graph data set alongside the index stats.
+    /// Blocks until the store lock is acquired.
+    pub fn graph_status(&self) -> Result<GraphStatus> {
+        let store = self.store.lock().unwrap();
+        Ok(GraphStatus {
+            total_edges: store.edge_count()?,
+            edges_extracted: store.edge_count_by_confidence_typed(types::Confidence::Extracted)?,
+            edges_inferred: store.edge_count_by_confidence_typed(types::Confidence::Inferred)?,
+            nodes: store.graph_node_count()?,
+            edges_calls: store.edge_count_by_kind("calls")?,
+            edges_imports: store.edge_count_by_kind("imports")?,
+            edges_inherits: store.edge_count_by_kind("inherits")?,
+            edges_references: store.edge_count_by_kind("references")?,
+            edges_mixes_in: store.edge_count_by_kind("mixes_in")?,
+            edges_implements: store.edge_count_by_kind("implements")?,
+            communities: store.community_count()?,
+        })
+    }
+
     /// Returns `(done, total)` for the current reindex operation.
     ///
     /// Both are 0 when no reindex is running.  Lock-free (atomic reads).
@@ -472,15 +633,29 @@ impl CodeIndex {
     /// Index a single file: scan, parse, and store.
     ///
     /// Uses the tree cache for incremental re-parsing when possible.
+    ///
+    /// Re-parses the file, updates its symbols/imports/refs in the store,
+    /// and updates the semantic edge graph for symbols in this file (FR-008).
     pub fn index_file(&self, path: &Path) -> Result<()> {
-        let abs_path = self.project_root.join(path);
+        let start = Instant::now();
+        let rel_path = path
+            .strip_prefix(&self.project_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+
+        // Resolve the on-disk path.  `path` may be project-relative or
+        // absolute; join against the project root only when it is relative.
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.project_root.join(path)
+        };
+
+        // ── Read and hash the file ────────────────────────────────────────
         let content = std::fs::read(&abs_path)
-            .with_context(|| format!("cannot read {}", abs_path.display()))?;
-
-        let rel_path = path.to_str().with_context(|| "non-UTF-8 path")?.to_string();
-
+            .with_context(|| format!("cannot read file: {}", abs_path.display()))?;
         let hash = scanner::hash_content(&content);
-        let language = scanner::detect_language(path);
         #[allow(clippy::naive_bytecount)]
         let line_count = content.iter().filter(|&&b| b == b'\n').count() as u64;
         let mtime_ns = std::fs::metadata(&abs_path)
@@ -489,52 +664,100 @@ impl CodeIndex {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos() as i64);
 
-        let entry = FileEntry {
-            path: rel_path.clone(),
-            content_hash: hash,
-            byte_size: content.len() as u64,
-            language: language.clone(),
-            last_indexed: chrono::Utc::now(),
-            mtime_ns,
-            line_count,
+        // Determine the language from the file extension.
+        let language = scanner::detect_language(path);
+        if language.is_none() {
+            debug!("index_file: skipping non-code file: {}", path.display());
+            return Ok(());
+        }
+
+        // ── Store the file entry ──────────────────────────────────────────
+        let file_id = {
+            let store = self.store.lock().unwrap();
+            let entry = FileEntry {
+                path: rel_path.clone(),
+                content_hash: hash,
+                byte_size: content.len() as u64,
+                language: language.clone(),
+                last_indexed: chrono::Utc::now(),
+                mtime_ns,
+                line_count,
+            };
+            store.upsert_file(&entry)?
         };
 
-        let store = self.store.lock().unwrap();
-        let file_id = store.upsert_file(&entry)?;
+        // ── Collect old symbol IDs before upsert (for edge cleanup) ────
+        let old_symbol_ids: Vec<i64> = {
+            let store = self.store.lock().unwrap();
+            store
+                .get_file_symbols(file_id)?
+                .iter()
+                .map(|s| s.id)
+                .collect()
+        };
 
-        // Parse if we have a parser for this language.
+        // ── Parse and store symbols/imports/refs ─────────────────────────
         if let Some(ref lang) = language
-            && let Some(parsed) = self.parsers.parse(lang, &content)
+            && let Some(parser) = self.parsers.get(lang)
         {
-            match parsed {
+            match parser.parse(&content) {
                 Ok(parsed) => {
-                    let sym_count = store.upsert_symbols(file_id, &parsed.symbols)?;
+                    let store = self.store.lock().unwrap();
+                    store.upsert_symbols(file_id, &parsed.symbols)?;
                     store.upsert_imports(file_id, &parsed.imports)?;
                     store.upsert_refs(file_id, &parsed.references)?;
-                    debug!("indexed {rel_path}: {sym_count} symbols");
+                    let deps: Vec<(String, String)> = parsed
+                        .imports
+                        .iter()
+                        .map(|imp| (imp.source_module.clone(), imp.kind.clone()))
+                        .collect();
+                    store.set_file_deps(file_id, &deps)?;
+                    drop(store);
 
                     // Update FTS.
                     let fts = self.fts.lock().unwrap();
-                    fts.remove_file(&rel_path)?;
                     let fts_syms: Vec<FtsSymbol<'_>> = parsed
                         .symbols
                         .iter()
                         .map(|s| symbol_to_fts(s, &rel_path))
                         .collect();
-                    fts.add_symbols(&fts_syms)?;
-                    drop(fts);
-
-                    // Update tree cache with the new parse tree.
-                    if let Some(tree) = parsed.tree {
-                        let mut tc = self.tree_cache.lock().unwrap();
-                        tc.put(path.to_path_buf(), tree);
-                    }
+                    fts.batch_update(&[rel_path.as_str()], &fts_syms)?;
                 }
                 Err(e) => {
-                    warn!("parse error for {rel_path}: {e}");
+                    warn!("index_file: parse error in {}: {e}", path.display());
                 }
             }
         }
+
+        // ── Update graph edges for this file (FR-008) ──────────────────
+        // Delete edges involving this file's symbols, then re-derive
+        // edges for those symbols.
+        {
+            let store = self.store.lock().unwrap();
+
+            let file_symbols = store.get_file_symbols(file_id)?;
+            let mut symbol_ids: Vec<i64> = file_symbols.iter().map(|s| s.id).collect();
+            for old_id in &old_symbol_ids {
+                if !symbol_ids.contains(old_id) {
+                    symbol_ids.push(*old_id);
+                }
+            }
+            if !symbol_ids.is_empty() {
+                store.delete_edges_for_symbols(&symbol_ids)?;
+            }
+            if let Err(e) = graph::edges::derive_edges_for_file(&store, file_id) {
+                warn!(
+                    "index_file: graph edge update failed for {}: {e}",
+                    path.display()
+                );
+            }
+        }
+
+        debug!(
+            "index_file: {} in {}ms",
+            path.display(),
+            start.elapsed().as_millis()
+        );
 
         Ok(())
     }
@@ -721,10 +944,35 @@ impl CodeIndex {
         }
         let fts_sync_ms = fts_sync_start.elapsed().as_millis();
 
+        // ── Build semantic edge graph (FR-007) ──────────────────────────
+        let graph_start = Instant::now();
+        let (edges_extracted, edges_inferred) = {
+            let store = self.store.lock().unwrap();
+            match graph::edges::derive_and_store(&store) {
+                Ok(build_result) => {
+                    debug!(
+                        "full_reindex: graph built: {} edges ({} EXTRACTED, {} INFERRED) in {}ms",
+                        build_result.edges_total,
+                        build_result.edges_extracted,
+                        build_result.edges_inferred,
+                        build_result.elapsed_ms
+                    );
+                    (build_result.edges_extracted, build_result.edges_inferred)
+                }
+                Err(e) => {
+                    warn!("full_reindex: graph build failed: {e}");
+                    (0, 0)
+                }
+            }
+        };
+        result.edges_extracted = edges_extracted;
+        result.edges_inferred = edges_inferred;
+        let graph_ms = graph_start.elapsed().as_millis();
+
         result.elapsed_ms = start.elapsed().as_millis() as u64;
         debug!(
-            "full_reindex: scan={}ms, diff={}ms, apply={}ms, fts_sync={}ms, total={}ms",
-            scan_ms, diff_ms, apply_ms, fts_sync_ms, result.elapsed_ms
+            "full_reindex: scan={}ms, diff={}ms, apply={}ms, fts_sync={}ms, graph={}ms, total={}ms",
+            scan_ms, diff_ms, apply_ms, fts_sync_ms, graph_ms, result.elapsed_ms
         );
 
         // Clear progress counters.

@@ -28,8 +28,9 @@ fn assistant_msg(text: &str) -> Message {
 #[test]
 fn test_select_keeps_recent_tail_within_budget() {
     // keep.tokens default = 0.20; on a 100k window that is 20k tokens. Each
-    // short message is ~1-3 tokens, so all five messages fit in the recent tail
-    // and the head is empty.
+    // short message is ~1-3 tokens, so all five messages fit in the recent tail.
+    // With the head-never-empty fix, the oldest message is forced into the
+    // head so compaction has something to summarise.
     let messages = vec![
         user_msg("aaaa"),
         assistant_msg("bbbb"),
@@ -39,8 +40,10 @@ fn test_select_keeps_recent_tail_within_budget() {
     ];
     let config = CompactionConfig::default();
     let split = select(&messages, &config, 100_000);
-    assert!(split.head_messages.is_empty());
-    assert_eq!(split.recent_messages.len(), 5);
+    // The oldest message is forced into the head.
+    assert_eq!(split.head_messages.len(), 1);
+    assert_eq!(split.head_messages[0].text_content(), "aaaa");
+    assert_eq!(split.recent_messages.len(), 4);
     assert!(split.recent_tokens > 0);
 }
 
@@ -79,6 +82,9 @@ fn test_select_drops_compaction_messages() {
             .iter()
             .all(|m| m.role != Role::Compaction)
     );
+    // With 3 non-compaction messages, the oldest is forced into the head.
+    assert!(!split.head_messages.is_empty());
+    assert!(!split.recent_messages.is_empty());
 }
 
 #[test]
@@ -243,8 +249,9 @@ async fn test_compact_replaces_history_with_summary_and_recent() {
 
 #[tokio::test]
 async fn test_compact_bails_when_nothing_to_summarise() {
-    // A single small message with a zero keep budget: head is empty, no
-    // previous summary -> nothing to summarise.
+    // A single message: even with the head-never-empty fix, there is only one
+    // non-compaction message so `select` cannot split it into head + recent.
+    // The guard fires and bails (silently, without a user-visible notice).
     let messages = vec![user_msg("only message")];
     let config = CompactionConfig {
         keep: ragent_config::compaction::KeepConfig { tokens: Some(0.0) },

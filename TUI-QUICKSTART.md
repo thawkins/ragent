@@ -4,12 +4,27 @@ A hands-on guide to using **ragent** through its full-screen terminal UI.
 
 ---
 
-## Highlights (1.0.28-beta)
+## Highlights (1.0.43)
 
-- **Spec-Driven Development (SDD) back-fill** — New `/spec specify` (SPEC.md only), `/spec plan` (PLAN.md from tech context), `/spec tasks` (TASKS.md), and `/spec feedback` (FEEDBACK.md) subcommands; clarification marker detection; quality checklists in templates; `CONSTITUTION.md` support; ambiguity/consistency validation; opt-in via `sdd` config flags
-- **Exa Search API backend** — Added Exa Search API-backed engine to `mf_search` with `exa_api_key` configuration; `engine` parameter accepts `"exa"` to restrict searches to Exa only
-- **OpenAlex and Wikipedia backends** — OpenAlex (scholarly works) and Wikipedia (encyclopedia summaries) keyless search backends added to `mf_search`, running in parallel with DuckDuckGo and Brave
-- **Research document format** — Updated `Search Engine Summary` section in RESEARCH.md outputs to show per-engine result counts and relevance scores
+- **Code index semantic graph** — Four new graph analysis tools
+  (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
+  `codeindex_communities`) with community detection via label propagation,
+  shortest-path traversal, and god-node identification; `/codeindex graph
+  build` sub-command; `/codeindex show` now reports graph-level statistics
+- **Bang commands** — Prefix any prompt with `!` (e.g. `! ls -la`,
+  `! cargo test --lib`) to run a shell command directly; the output is sent
+  to the model for review and error resolution (v1.0.42)
+- **Compaction fix** — Fixed compaction getting stuck when all messages fit
+  inside the keep budget; `select()` now forces at least one message into the
+  head when there are 2+ messages
+- **Research panic isolation** — Vendored `html2text` with `saturating_sub`
+  patches; `extract_pdf_text` runs on a dedicated OS thread with `panic_guard`
+  (v1.0.40)
+- **Stocks & currency tools** — `stock_quote`, `stock_history`,
+  `stock_fundamentals`, `stock_search`, `stock_options`,
+  `stock_recommendations`, `currency_rate`, `currency_history` (v1.0.36)
+- **Start-of-turn compaction** — Uses persisted provider-reported input token
+  count so it aligns with the TUI usage percentage (v1.0.34)
 
 ---
 

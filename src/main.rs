@@ -730,32 +730,7 @@ async fn main() -> Result<()> {
                     prompt.clone()
                 } else {
                     let output = std::process::Command::new("sh").arg("-c").arg(cmd).output();
-                    let combined = match output {
-                        Ok(out) => {
-                            let mut text = String::new();
-                            if !out.stdout.is_empty() {
-                                text.push_str(&String::from_utf8_lossy(&out.stdout));
-                            }
-                            if !out.stderr.is_empty() {
-                                if !text.is_empty() {
-                                    text.push('\n');
-                                }
-                                text.push_str(&String::from_utf8_lossy(&out.stderr));
-                            }
-                            if text.is_empty() {
-                                "(no output)".to_string()
-                            } else {
-                                text
-                            }
-                        }
-                        Err(e) => format!("failed to execute command: {e}"),
-                    };
-                    format!(
-                        "I ran the following shell command:\n\n\
-                           $ {cmd}\n\n\
-                           Output:\n```\n{combined}\n```\n\n\
-                           Please review the output for any errors and resolve them as required."
-                    )
+                    ragent_agent::bang_command::bang_command_prompt_from_output(cmd, &output)
                 }
             } else {
                 prompt.clone()

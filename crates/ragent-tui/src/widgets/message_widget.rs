@@ -1306,7 +1306,59 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let id = get_str(&["id"]).unwrap_or_default();
             format!("⏰ disable `{}`", trunc120(&id))
         }
+
         // ═══════════════════════════════════════════════════════════════════
+        // 💰 FINANCE / STOCKS / CURRENCY
+        // ═══════════════════════════════════════════════════════════════════
+        "stock_quote" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("💰 {}", trunc120(&symbol))
+        }
+        "stock_history" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            let period = get_str(&["period"]).unwrap_or_default();
+            if period.is_empty() {
+                format!("💰 {} history", trunc120(&symbol))
+            } else {
+                format!("💰 {} ({})", trunc120(&symbol), period)
+            }
+        }
+        "stock_fundamentals" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("💰 {} fundamentals", trunc120(&symbol))
+        }
+        "stock_options" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("💰 {} options", trunc120(&symbol))
+        }
+        "stock_recommendations" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("💰 {} recommendations", trunc120(&symbol))
+        }
+        "stock_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("💰 search \"{}\"", trunc120(&query))
+        }
+        "currency_rate" => {
+            let base = get_str(&["base"]).unwrap_or_default();
+            let quote = get_str(&["quote"]).unwrap_or_default();
+            format!("💰 {} → {}", base, quote)
+        }
+        "currency_history" => {
+            let base = get_str(&["base"]).unwrap_or_default();
+            let quote = get_str(&["quote"]).unwrap_or_default();
+            format!("💰 {} → {} history", base, quote)
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🏁 AGENT COMPLETE
+        // ═══════════════════════════════════════════════════════════════════
+        "agent_complete" => {
+            let summary = get_str(&["summary"]).unwrap_or_default();
+            format!("🏁 {}", trunc120(&summary))
+        }
+
+        // ���══════════════════════════════════════════════════════════════════
         // DEFAULT: Unknown tools
         // ═══════════════════════════════════════════════════════════════════
         _ => {
@@ -1649,9 +1701,13 @@ pub fn tool_result_summary(
         "mf_search" => {
             let count = out
                 .get("total_results")
+                .or_else(|| out.get("count"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(count, "result", "results")))
+            Some(format!(
+                "🌐 {} found",
+                pluralize(count, "result", "results")
+            ))
         }
         "http_request" | "web_request" => {
             let status = out.get("http_status").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2517,6 +2573,112 @@ pub fn tool_result_summary(
             } else {
                 format!("⏰ `{}` disabled", trunc120(id))
             })
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 💰 FINANCE / STOCKS / CURRENCY
+        // ═══════════════════════════════════════════════════════════════════
+        "stock_quote" => {
+            let cached = out.get("cached").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if cached {
+                "quote (cached)".to_string()
+            } else {
+                "quote fetched".to_string()
+            })
+        }
+        "stock_history" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} fetched", pluralize(count, "bar", "bars")))
+        }
+        "stock_fundamentals" => Some("fundamentals retrieved".to_string()),
+        "stock_options" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(count, "contract", "contracts")
+            ))
+        }
+        "stock_recommendations" => Some("recommendations retrieved".to_string()),
+        "stock_search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "result", "results")))
+        }
+        "currency_rate" => {
+            let rate = out.get("rate").and_then(|v| v.as_f64());
+            match rate {
+                Some(r) => Some(format!("rate: {:.4}", r)),
+                None => Some("rate retrieved".to_string()),
+            }
+        }
+        "currency_history" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} fetched", pluralize(count, "bar", "bars")))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🌐 MASTERFETCH
+        // ��══════════════════════════════════════════════════════════════════
+        "mf_fetch" => {
+            let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            let cached = out.get("cached").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if cached {
+                format!("🌐 cached {}", trunc120(url))
+            } else if status > 0 {
+                format!("🌐 {} ({})", trunc120(url), status)
+            } else {
+                format!("🌐 {}", trunc120(url))
+            })
+        }
+        "mf_crawl" => {
+            let pages = out
+                .get("pages_fetched")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!("🌐 {} crawled", pluralize(pages, "page", "pages")))
+        }
+        "mf_cache_clear" => {
+            let purged = out.get("purged").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "🌐 {} purged",
+                pluralize(purged, "entry", "entries")
+            ))
+        }
+        "mf_screenshot" => Some("🌐 screenshot captured".to_string()),
+        "mf_version" => Some("🌐 version info".to_string()),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔧 APPLY PATCH / SKILLS / SEARCH
+        // ═══════════════════════════════════════════════════════════════════
+        "apply_patch" => {
+            let ops = out.get("operations").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let added = out.get("added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let removed = out.get("removed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "📄 {} applied (+{} -{})",
+                pluralize(ops, "op", "ops"),
+                added,
+                removed
+            ))
+        }
+        "conversation_search" => {
+            let count = out
+                .get("result_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "match", "matches")))
+        }
+        "session_search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "match", "matches")))
+        }
+        "initiative" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
+            Some(action.to_string())
+        }
+        "skill_manage" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("done");
+            Some(action.to_string())
         }
 
         // ═══════════════════════════════════════════════════════════════════
