@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+## Version: 1.0.42
+
+### Added — Bang commands
+
+- Prefix any prompt with `!` (e.g. `! ls -la`, `! cargo test --lib`) to run a
+  shell command directly. The command output is sent to the model for review
+  and error resolution.
+- Works in both the interactive TUI and headless `ragent run` mode
+  (`ragent run "! cargo check"`).
+- In the TUI, the command is executed via `sh -c` on a spawned blocking thread
+  so the UI stays responsive; the combined stdout/stderr is rendered in the
+  chat panel before the model reviews it.
+- `InputAction::BangCommand` variant added to `ragent-tui` input handling.
+- Documented in `README.md` (features list) and `QUICKSTART.md` (new
+  "Bang Commands" section).
+
+### Changed — Code quality
+
+- Replaced `chunks_exact(4)` / `chunks_exact(2)` with `as_chunks::<N>().0` in
+  embedding deserialisation (`ragent-storage`, `ragent-tools-extended/memory`)
+  and PDF text-string UTF-16 decoding (`ragent-tools-extended/masterfetch/pdf`),
+  eliminating bounds-check panics and redundant slicing.
+- `ragent-tui` input handler: `drain(..).collect()` → `std::mem::take` for
+  `pending_attachments`, avoiding an intermediate allocation.
+- Merged two separate throttle tests into a single `throttle_behaviour` test
+  in `ragent-tools-extended/finance/throttle.rs` to reduce shared-state flakiness.
+- Added `unused_async_trait_impl` to the workspace clippy allow list.
+
+### Changed
+
+- Bumped workspace version to 1.0.42.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.41
 
 ### Changed

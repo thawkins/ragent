@@ -1135,6 +1135,23 @@ behave the same way: carriage returns are stripped and any active selection is
 replaced by the pasted text. Press **`Alt+V`** to paste an image from the
 clipboard as an attachment.
 
+### Bang Commands
+
+Prefix a prompt with `!` to run a shell command directly. The command output
+is sent to the model for review and error resolution.
+
+```
+! ls -la
+! cargo test --lib
+! git status
+```
+
+This also works in headless `ragent run` mode:
+
+```bash
+ragent run "! cargo check"
+```
+
 ### Slash Commands
 
 Type `/` in the input to open an autocomplete menu:

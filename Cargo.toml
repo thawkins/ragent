@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.41"
+version = "1.0.42"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -95,6 +95,7 @@ no_effect_underscore_binding = "allow"
 double_must_use = "allow"
 unwrap_used = "allow"
 unused_async = "allow"
+unused_async_trait_impl = "allow"
 # Additional lints from second auto-fix pass
 bool_to_int_with_if = "allow"
 cast_lossless = "allow"

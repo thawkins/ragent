@@ -77,9 +77,114 @@ impl App {
             self.status = "⚠ No messages to compact".to_string();
             return false;
         }
-
         let sid = self.session_id.clone().unwrap_or_default();
         self.start_provider_compaction_for_session(&sid, auto_triggered)
+    }
+
+    /// Run a shell command (input started with `!`) and render its output in
+    /// the chat panel, then dispatch the output to the model for review.
+    ///
+    /// The command is executed via `sh -c` in a spawned tokio task so the UI
+    /// stays responsive. The command and its combined stdout/stderr are shown
+    /// in the chat — first as a user message showing the command, then the
+    /// output is published as an agent notice so the user can see what the
+    /// command produced — and the model is asked to review the output for
+    /// errors and resolve them as required.
+    pub(crate) fn dispatch_bang_command(&mut self, raw: String) {
+        // Strip the leading `!` and trim surrounding whitespace.
+        let command = raw.strip_prefix('!').unwrap_or(&raw).trim().to_string();
+        if command.is_empty() {
+            self.status = "⚠ Empty shell command".to_string();
+            return;
+        }
+
+        self.auto_compact_failed = false;
+        let Some(sid) = self.session_id.clone() else {
+            self.status = "⚠ No active session".to_string();
+            return;
+        };
+
+        // Show the command in the chat as a user message.
+        let display_text = format!("$ {command}");
+        let msg = Message::user_text(&sid, &display_text);
+        self.messages.push(msg);
+        self.add_to_history(raw.clone());
+        self.input.clear();
+        self.input_cursor = 0;
+        self.file_menu = None;
+        self.set_status_working("running command");
+        self.stream_in_bytes = 0;
+        self.stream_out_bytes = 0;
+
+        self.push_log_no_agent(LogLevel::Info, format!("bang command: {command}"));
+
+        let mut agent = self.agent_info.clone();
+        self.apply_selected_model_and_thinking(&mut agent);
+
+        // Inject role-mode system prompt addition when a role mode is active.
+        if let Some(ref mode) = self.role_mode {
+            let addition = mode.system_prompt_addition();
+            if !addition.is_empty() {
+                let existing = agent.prompt.clone().unwrap_or_default();
+                agent.prompt = Some(format!("{existing}\n\n{addition}"));
+            }
+        }
+        let command_for_prompt = command.clone();
+        let processor = self.session_processor.clone();
+        let event_bus = self.event_bus.clone();
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        tokio::spawn(async move {
+            // Run the command on a blocking thread to avoid stalling the
+            // async runtime.
+            let output = tokio::task::spawn_blocking(move || {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .output()
+            })
+            .await;
+
+            let combined = match output {
+                Ok(Ok(out)) => {
+                    let mut text = String::new();
+                    if !out.stdout.is_empty() {
+                        text.push_str(&String::from_utf8_lossy(&out.stdout));
+                    }
+                    if !out.stderr.is_empty() {
+                        if !text.is_empty() {
+                            text.push('\n');
+                        }
+                        text.push_str(&String::from_utf8_lossy(&out.stderr));
+                    }
+                    if text.is_empty() {
+                        "(no output)".to_string()
+                    } else {
+                        text
+                    }
+                }
+                Ok(Err(e)) => format!("failed to execute command: {e}"),
+                Err(e) => format!("internal error: {e}"),
+            };
+
+            // Render the shell command output in the chat panel so the user
+            // can see what the command produced before the model reviews it.
+            event_bus.publish(Event::AgentNotice {
+                session_id: sid.clone(),
+                message: format!("```\n{combined}\n```"),
+            });
+
+            let prompt = format!(
+                "I ran the following shell command:\n\n\
+                 $ {command_for_prompt}\n\n\
+                 Output:\n```\n{combined}\n```\n\n\
+                 Please review the output for any errors and resolve them as required."
+            );
+
+            if let Err(e) = processor.process_message(&sid, &prompt, &agent, flag).await {
+                tracing::debug!(error = %e, "Failed to process bang command output");
+            }
+        });
     }
 
     pub(crate) fn dispatch_user_message(

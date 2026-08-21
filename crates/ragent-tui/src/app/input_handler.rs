@@ -810,13 +810,32 @@ impl App {
                             }
                         });
                     }
+                    return;
                 }
-                return;
             }
         }
 
         if let Some(action) = input::handle_key(self, key) {
             match action {
+                InputAction::BangCommand(text) => {
+                    // Create session if needed, then run the command.
+                    if self.session_id.is_none() {
+                        let dir = std::env::current_dir().unwrap_or_default();
+                        match self.session_processor.session_manager.create_session(dir) {
+                            Ok(session) => {
+                                self.session_id = Some(session.id.clone());
+                                let short_sid = short_session_id(&session.id);
+                                self.sid_to_display_name
+                                    .insert(short_sid, self.agent_name.clone());
+                            }
+                            Err(e) => {
+                                self.status = format!("error: {e}");
+                                return;
+                            }
+                        }
+                    }
+                    self.dispatch_bang_command(text);
+                }
                 InputAction::SendMessage(text) => {
                     // When a teammate is focused, route the message to their
                     // mailbox instead of the lead session.
@@ -875,10 +894,10 @@ impl App {
                         }
                     }
 
-                    // Drain image attachments once; either queue for auto-compaction
+                    // Take image attachments once; either queue for auto-compaction
                     // or send immediately.
                     let image_paths: Vec<std::path::PathBuf> =
-                        self.pending_attachments.drain(..).collect();
+                        std::mem::take(&mut self.pending_attachments);
                     if self.should_auto_compact_before_send() {
                         self.pending_send_after_compact = Some((text, image_paths));
                         if !self.start_compaction(true) {

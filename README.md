@@ -25,7 +25,11 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
     mkdir, append, file_info, diff, glob, list
   - **Shell** — bash, bash_reset, open (7-layer security with safe-command whitelist,
     banned commands, denied patterns, directory escape prevention, syntax validation,
-    obfuscation detection, and user allowlist/denylist)    - **Search** — grep
+    obfuscation detection, and user allowlist/denylist)
+    - **Bang commands** — prefix any prompt with `!` (e.g. `! ls -la`) to run a
+      shell command directly; the output is sent to the model for review and
+      error resolution
+    - **Search** — grep
     - **Web** — webfetch, websearch, http_request
       - **Browser automation** — browser (Chrome DevTools Protocol: open, snapshot,
         click, type, fill_form, select, wait, eval, scroll, upload, press,

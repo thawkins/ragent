@@ -31,6 +31,9 @@ fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
 pub enum InputAction {
     /// Submit the input buffer as a user message.
     SendMessage(String),
+    /// Run a shell command (input started with `!`) and ask the model to
+    /// review the output for errors.
+    BangCommand(String),
     /// Exit the application.
     Quit,
     /// Confirm guarded keyboard quit (Ctrl+D after Ctrl+C).
@@ -654,6 +657,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             if text.starts_with('/') {
                 return Some(InputAction::SlashCommand(text));
+            }
+            if text.starts_with('!') {
+                return Some(InputAction::BangCommand(text));
             }
             Some(InputAction::SendMessage(text))
         }

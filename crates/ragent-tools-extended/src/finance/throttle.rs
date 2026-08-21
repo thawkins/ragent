@@ -68,29 +68,25 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn sequential_calls_are_throttled() {
+    async fn throttle_behaviour() {
+        // ── sequential calls are spaced by the configured interval ──────────
         reset_throttle_state();
         let config = ragent_config::finance::FinanceProviderConfig {
             min_call_interval_seconds: 1,
             ..Default::default()
         };
 
-        // Two sequential calls should be spaced by at least the configured interval.
         let start = Instant::now();
         wait_for_min_interval(Some(&config)).await;
         wait_for_min_interval(Some(&config)).await;
         let elapsed = start.elapsed();
         assert!(
             elapsed >= Duration::from_millis(900),
-            "expected two 1s-interval calls to span at least ~1s, got {:?}",
-            elapsed
+            "expected two 1s-interval calls to span at least ~1s, got {elapsed:?}",
         );
         reset_throttle_state();
-    }
 
-    #[tokio::test]
-    async fn default_interval_uses_five_seconds() {
-        reset_throttle_state();
+        // ── default interval uses five seconds ──────────────────────────────
         // With no config the default interval is 5 seconds. We only verify that
         // the call completes and reserves a slot; asserting exact timing is flaky
         // because the global state is shared across concurrent tests.

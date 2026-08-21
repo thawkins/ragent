@@ -721,10 +721,50 @@ async fn main() -> Result<()> {
             );
             let dir = std::fs::canonicalize(".")?;
             let session = session_manager.create_session(dir)?;
+
+            // If the prompt starts with `!`, run it as a shell command first
+            // and ask the model to review the output.
+            let final_prompt = if let Some(cmd) = prompt.strip_prefix('!') {
+                let cmd = cmd.trim();
+                if cmd.is_empty() {
+                    prompt.clone()
+                } else {
+                    let output = std::process::Command::new("sh").arg("-c").arg(cmd).output();
+                    let combined = match output {
+                        Ok(out) => {
+                            let mut text = String::new();
+                            if !out.stdout.is_empty() {
+                                text.push_str(&String::from_utf8_lossy(&out.stdout));
+                            }
+                            if !out.stderr.is_empty() {
+                                if !text.is_empty() {
+                                    text.push('\n');
+                                }
+                                text.push_str(&String::from_utf8_lossy(&out.stderr));
+                            }
+                            if text.is_empty() {
+                                "(no output)".to_string()
+                            } else {
+                                text
+                            }
+                        }
+                        Err(e) => format!("failed to execute command: {e}"),
+                    };
+                    format!(
+                        "I ran the following shell command:\n\n\
+                           $ {cmd}\n\n\
+                           Output:\n```\n{combined}\n```\n\n\
+                           Please review the output for any errors and resolve them as required."
+                    )
+                }
+            } else {
+                prompt.clone()
+            };
+
             match session_processor
                 .process_message(
                     &session.id,
-                    &prompt,
+                    &final_prompt,
                     &resolved_agent,
                     Arc::new(AtomicBool::new(false)),
                 )
