@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## Version: 1.0.43
+
+### Changed
+
+- Bumped workspace version to 1.0.43.
+- Verified clean `cargo clippy --all-targets` run (zero warnings).
+- Verified full test suite: 6707 tests across 353 test binaries, 0 failures.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.42
 
 ### Added — Bang commands
