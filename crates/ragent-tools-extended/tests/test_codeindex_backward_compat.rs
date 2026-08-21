@@ -84,7 +84,7 @@ fn test_existing_tool_permission_categories_unchanged() {
         ("codeindex_symbols", "codeindex:read"),
         ("codeindex_references", "codeindex:read"),
         ("codeindex_dependencies", "codeindex:read"),
-        ("codeindex_status", "none"),
+        ("codeindex_status", "codeindex:read"),
         ("codeindex_reindex", "codeindex:write"),
     ];
     for (name, expected_cat) in expected_cats {

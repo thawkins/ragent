@@ -1,3 +1,7 @@
+// Vendored crate: suppress unreachable_pub since internal `pub` items
+// are not all re-exported from the crate root.
+#![allow(unreachable_pub)]
+
 //! Convert HTML to text formats.
 //!
 //! This crate renders HTML into a text format, wrapped to a specified width.

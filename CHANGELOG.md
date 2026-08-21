@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+## Version: 1.0.45
+
+### Fixed — CI
+
+- **Dead-code lint**: Added `#![allow(unreachable_pub)]` to vendored
+  `html2text` crate root (`vendor/html2text/src/lib.rs`). The CI
+  `dead-code-lint` job runs with `-D unreachable_pub`, which flagged 26
+  internal `pub` items in the vendored crate that are not re-exported from
+  the crate root. As a vendored third-party crate, these internal `pub`
+  items are intentional and should not be subject to our workspace lint
+  rules.
+- **Codeindex permission categories**: Changed `codeindex_status` tool
+  `permission_category()` from `"none"` to `"codeindex:read"`, matching
+  all other read-only codeindex tools. Updated the backward-compatibility
+  test (`test_codeindex_backward_compat.rs`) and the registry test
+  (`test_codeindex_registry.rs`) to reflect the corrected category.
+  The registry test also now correctly separates `codeindex_reindex`
+  (`codeindex:write`) from the read-only tools assertion.
+
+### Changed
+
+- Bumped workspace version to 1.0.45.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+
 ## Version: 1.0.44
 
 ### Added — Code Index Semantic Graph

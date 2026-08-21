@@ -32,7 +32,7 @@ impl Tool for CodeIndexStatusTool {
     }
 
     fn permission_category(&self) -> &'static str {
-        "none"
+        "codeindex:read"
     }
 
     async fn execute(&self, _input: Value, ctx: &ToolContext) -> Result<ToolOutput> {

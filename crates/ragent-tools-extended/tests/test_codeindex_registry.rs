@@ -71,13 +71,13 @@ fn test_existing_codeindex_tools_remain_registered() {
 #[test]
 fn test_all_codeindex_tools_have_codeindex_read_permission() {
     let registry = create_extended_registry();
+    // Read-only tools that must have the "codeindex:read" permission category.
     for name in &[
         "codeindex_search",
         "codeindex_symbols",
         "codeindex_references",
         "codeindex_dependencies",
         "codeindex_status",
-        "codeindex_reindex",
         "codeindex_explain",
         "codeindex_path",
         "codeindex_communities",
@@ -92,6 +92,15 @@ fn test_all_codeindex_tools_have_codeindex_read_permission() {
             "Tool {name} should have permission category 'codeindex:read'"
         );
     }
+    // codeindex_reindex is a write operation and has its own category.
+    let reindex = registry
+        .get("codeindex_reindex")
+        .expect("codeindex_reindex should be registered");
+    assert_eq!(
+        reindex.permission_category(),
+        "codeindex:write",
+        "codeindex_reindex should have permission category 'codeindex:write'"
+    );
 }
 
 // ── Total codeindex tool count ──────────────────────────────────────────
