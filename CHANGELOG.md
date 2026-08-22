@@ -1,5 +1,19 @@
 # Changelog
 
+## Version: 1.0.48
+
+### Fixed — CI Flaky Test
+
+- **`test_worker_manual_full_reindex` flaky on loaded CI runners**
+  (`crates/ragent-codeindex/tests/test_m4_integration.rs`) — the test used a
+  fixed 600ms sleep before asserting that the background worker had processed
+  the full reindex batch. On slow/loaded CI machines thread scheduling latency
+  could exceed that window, causing the assertion `batches_processed >= 1` to
+  fail spuriously. Replaced the fixed sleep with a polling loop (up to 5s,
+  50ms interval) that checks `stats.batches_processed` on each iteration. The
+  assertion message now includes `batches_processed` and `files_indexed` for
+  better diagnostics if the deadline is reached.
+
 ## Version: 1.0.47
 
 ### Added — GitLab Support for `/reverse`

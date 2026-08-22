@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -281,20 +281,31 @@ fn test_worker_manual_full_reindex() {
     // Request a full reindex.
     handle.queue_full_reindex();
 
-    std::thread::sleep(Duration::from_millis(600));
-
-    let stats = handle.stats();
-    assert!(
-        stats.batches_processed >= 1,
-        "full reindex should count as a batch"
-    );
+    // Poll for the worker to process the full reindex. A fixed sleep is
+    // flaky on loaded CI runners where thread scheduling latency can exceed
+    // the window. Allow up to 5 seconds for slow runners.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let stats = handle.stats();
+        if stats.batches_processed >= 1 {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let stats = handle.stats();
+            assert!(
+                stats.batches_processed >= 1,
+                "full reindex should count as a batch (batches_processed={}, files_indexed={})",
+                stats.batches_processed,
+                stats.files_indexed
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
     // Verify the index has data.
-    let idx = &*index;
-    let st = idx.status().unwrap();
+    let st = index.status().unwrap();
     assert!(st.files_indexed > 0, "should have indexed files");
 
-    let _ = idx;
     handle.stop();
 }
 
