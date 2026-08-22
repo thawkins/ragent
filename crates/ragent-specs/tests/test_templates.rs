@@ -72,7 +72,9 @@ fn test_plan_template_contains_sections() {
 fn test_plan_template_has_task_table() {
     let id = SpecId::new("test").unwrap();
     let md = PlanTemplate::generate(&id, "Test Plan");
-    assert!(md.contains("| ID | Title | Requirement | Effort | Priority | Dependencies |"));
+    assert!(
+        md.contains("| ID | Title | Requirement | Effort | Priority | Status | Dependencies |")
+    );
     assert!(md.contains("| T-001 |"));
 }
 // ── Quality checklist tests (T-010, FR-006) ──────────────────────────────────

@@ -160,23 +160,26 @@ impl App {
                 } else if self.show_profile
                     && self.profile_area.contains((event.column, event.row).into())
                 {
-                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
-                } else if self.show_log && self.log_area.contains((event.column, event.row).into())
-                {
-                    self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
-                              } else if self.show_memory
-                                  && self.memory_area.contains((event.column, event.row).into())
-                              {
-                                  self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
-                              } else if self.show_telemetry
-                                  && self.telemetry_area.contains((event.column, event.row).into())
-                              {
-                                  self.telemetry_scroll_offset = self.telemetry_scroll_offset.saturating_add(3);
-                              } else if self.message_area.contains((event.column, event.row).into()) {
-                                  self.scroll_offset = self.scroll_offset.saturating_add(3);
-                              }
-                          }
-                          MouseEventKind::ScrollDown => {                if self.research_view.is_some()
+                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);                  } else if self.show_log && self.log_area.contains((event.column, event.row).into())
+                  {
+                      self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                  } else if self.show_tasks_panel
+                      && self.tasks_area.contains((event.column, event.row).into())
+                  {
+                      self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_add(3);
+                  } else if self.show_memory
+                      && self.memory_area.contains((event.column, event.row).into())
+                  {
+                      self.memory_scroll_offset = self.memory_scroll_offset.saturating_add(3);
+                  } else if self.show_telemetry
+                      && self.telemetry_area.contains((event.column, event.row).into())
+                  {
+                      self.telemetry_scroll_offset = self.telemetry_scroll_offset.saturating_add(3);
+                  } else if self.message_area.contains((event.column, event.row).into()) {
+                      self.scroll_offset = self.scroll_offset.saturating_add(3);
+                  }
+              }
+              MouseEventKind::ScrollDown => {                if self.research_view.is_some()
                     && self
                         .research_view_area
                         .contains((event.column, event.row).into())
@@ -191,22 +194,25 @@ impl App {
                 } else if self.show_profile
                     && self.profile_area.contains((event.column, event.row).into())
                 {
-                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
-                } else if self.show_log && self.log_area.contains((event.column, event.row).into())
-                {
-                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
-                              } else if self.show_memory
-                                  && self.memory_area.contains((event.column, event.row).into())
-                              {
-                                  self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
-                              } else if self.show_telemetry
-                                  && self.telemetry_area.contains((event.column, event.row).into())
-                              {
-                                  self.telemetry_scroll_offset = self.telemetry_scroll_offset.saturating_sub(3);
-                              } else if self.message_area.contains((event.column, event.row).into()) {
-                                  self.scroll_offset = self.scroll_offset.saturating_sub(3);
-                              }
-                          }
+                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);                  } else if self.show_log && self.log_area.contains((event.column, event.row).into())
+                  {
+                      self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                  } else if self.show_tasks_panel
+                      && self.tasks_area.contains((event.column, event.row).into())
+                  {
+                      self.tasks_scroll_offset = self.tasks_scroll_offset.saturating_sub(3);
+                  } else if self.show_memory
+                      && self.memory_area.contains((event.column, event.row).into())
+                  {
+                      self.memory_scroll_offset = self.memory_scroll_offset.saturating_sub(3);
+                  } else if self.show_telemetry
+                      && self.telemetry_area.contains((event.column, event.row).into())
+                  {
+                      self.telemetry_scroll_offset = self.telemetry_scroll_offset.saturating_sub(3);
+                  } else if self.message_area.contains((event.column, event.row).into()) {
+                      self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                  }
+              }
             MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
                 if self.agents_button_area.contains(pos.into()) {

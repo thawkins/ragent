@@ -251,6 +251,7 @@ impl App {
             force_new_message: false,
             agent_stack: Vec::new(),
             pending_plan_task: None,
+            pending_reverse_create: None,
             pending_plan_restore: None,
             pending_forcecleanup: None,
             is_processing: false,

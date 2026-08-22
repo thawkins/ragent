@@ -226,9 +226,9 @@ spec_id: {id}
 
 ## Tasks
 
-| ID | Title | Requirement | Effort | Priority | Dependencies |
-|----|-------|-------------|--------|----------|--------------|
-| T-001 | [Title] | FR-001 | S | Critical | pending | — |
+| ID | Title | Requirement | Effort | Priority | Status | Dependencies |
+|----|-------|-------------|--------|----------|--------|--------------|
+| T-001 | [Title] | FR-001 | S | Critical | Pending | — |
 ---
 
 ## File Creation Order

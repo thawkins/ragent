@@ -534,15 +534,14 @@ impl SpecCommand {
                             - Use at least one of each EARS template: ubiquitous, event-driven, state-driven, optional, unwanted
                             - Number requirements as FR-001, FR-002, etc.
                             - Include a '## Requirements' section
-                            - Start with YAML frontmatter containing `status: draft`{research_frontmatter}{research_section}
-          
-                         2. `specs/{specname}/PLAN.md` — An implementation plan with:
-                            - A '## Tasks' section with a markdown table
-                            - Columns: ID, Title, Requirement, Effort, Priority, Dependencies
-                            - Task IDs as T-001, T-002, etc.
-                            - Link each task to relevant requirements
-                            - Effort values: S, M, L
-                            - Priority values: Critical, High, Medium, Low
+                            - Start with YAML frontmatter containing `status: draft`{research_frontmatter}{research_section}                          2. `specs/{specname}/PLAN.md` — An implementation plan with:
+                              - A '## Tasks' section with a markdown table
+                              - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies
+                              - Task IDs as T-001, T-002, etc.
+                              - Link each task to relevant requirements
+                              - Effort values: S, M, L
+                              - Priority values: Critical, High, Medium, Low
+                              - Status values: Pending (set all new tasks to Pending)
           
                          3. `specs/{specname}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
                             - Start with YAML frontmatter containing `status: draft`
@@ -869,12 +868,13 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
 Write `specs/{spec_id}/PLAN.md` with:
 
 1. A `## Tasks` section with a markdown table.
-2. Columns: ID, Title, Requirement, Effort, Priority, Dependencies.
+2. Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies.
 3. {task_id_rule}
 4. Link each task to relevant FR-NNN / NFR-NNN requirement IDs from the SPEC.md.
 5. Effort values: S, M, L.
 6. Priority values: Critical, High, Medium, Low.
-7. A `## Technology Choices` section documenting the key technology decisions informed by the technology context above, with rationale.
+7. Set the Status column to `Pending` for every new task.
+8. A `## Technology Choices` section documenting the key technology decisions informed by the technology context above, with rationale.
 
 Do NOT modify `SPEC.md` or any other file. Only write `specs/{spec_id}/PLAN.md`.{data_model_instruction}{contracts_instruction}{feedback_instruction}
 
@@ -1240,7 +1240,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
     
     ---NEW TASKS---
     
-    (Insert new task table rows here, one per line, in the same markdown table format as the existing PLAN.md. Columns: | ID | Title | Requirement | Effort | Priority | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low.)
+    (Insert new task table rows here, one per line, in the same markdown table format as the existing PLAN.md. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.)
     
     ---NEW TASK DETAILS---
     
@@ -1421,13 +1421,14 @@ Read `specs/{spec_id}/SPEC.md` using the `read` tool first. If the file is large
 Then write the following files using the `write` tool:
 
 1. `specs/{spec_id}/PLAN.md` — An implementation plan with:
-   - A `## Tasks` section with a markdown table.
-   - Columns: ID, Title, Requirement, Effort, Priority, Dependencies.
-   - Task IDs as T-001, T-002, etc.
-   - Link each task to relevant requirements from `SPEC.md`.
-   - Effort values: S, M, L.
-   - Priority values: Critical, High, Medium, Low.
-   - Preserve the status of any existing task IDs that remain unchanged.
+     - A `## Tasks` section with a markdown table.
+     - Columns: ID, Title, Requirement, Effort, Priority, Status, Dependencies.
+     - Task IDs as T-001, T-002, etc.
+     - Link each task to relevant requirements from `SPEC.md`.
+     - Effort values: S, M, L.
+     - Priority values: Critical, High, Medium, Low.
+     - Status values: Pending for all new tasks.
+     - Preserve the status of any existing task IDs that remain unchanged.
 
 2. `specs/{spec_id}/TESTPLAN.md` — A **manual** test plan (human-readable, not automated test code):
    - YAML frontmatter with `status: draft`.

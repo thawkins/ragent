@@ -728,6 +728,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Research system: /research create|list|open|search|show|delete|archive",
     },
     SlashCommandDef {
+        trigger: "reverse",
+        description: "Reverse-engineer a GitHub repo: /reverse <owner/repo | URL> [--tech <stack>] [--create <name>]",
+    },
+    SlashCommandDef {
         trigger: "autopilot",
         description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
     },
@@ -1346,6 +1350,11 @@ pub struct App {
     /// Pending plan delegation: `(task, context)` set by `AgentSwitchRequested`,
     /// consumed by `MessageEnd` to auto-send the task to the plan agent.
     pub pending_plan_task: Option<(String, String)>,
+    /// Pending `/reverse --create <name>` chaining: the spec name is stored
+    /// here before the LLM generation task spawns, and consumed by `MessageEnd`
+    /// to invoke `/spec create <name> <generated-prompt>` once the LLM
+    /// finishes (FR-012).
+    pub pending_reverse_create: Option<String>,
     /// Pending agent restore: summary from `AgentRestoreRequested`,
     /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
     pub pending_plan_restore: Option<String>,

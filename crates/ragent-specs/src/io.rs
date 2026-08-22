@@ -255,7 +255,7 @@ impl SpecIo {
     /// Parse tasks from PLAN.md content.
     ///
     /// Extracts task table rows with columns:
-    /// ID, Title, Requirement, Effort, Priority, Dependencies.
+    /// ID, Title, Requirement, Effort, Priority, Status, Dependencies.
     fn parse_tasks(plan_md: &str) -> Vec<crate::spec::Task> {
         let mut tasks = Vec::new();
         let mut in_task_section = false;

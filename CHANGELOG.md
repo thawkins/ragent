@@ -1,6 +1,67 @@
 # Changelog
 
-## Unreleased
+## Version: 1.0.46
+
+### Added — GitHub Repository Reverse-Engineering (`/reverse`)
+
+- **New `/reverse` slash command** — takes a public GitHub repository URL (or
+  `owner/repo` shorthand), fetches the repo's metadata, root file tree, and
+  README via the GitHub API, then passes the assembled context to the
+  currently selected LLM model to generate a synthetic creation prompt.
+  - Accepts full URLs (`https://github.com/owner/repo`), SSH URLs
+    (`git@github.com:owner/repo.git`), and `owner/repo` shorthand.
+  - Optional `--tech <stack>` flag constrains the generated prompt to a
+    specified technology stack.
+  - Optional `--create <name>` flag chains into `/spec create <name>
+    <generated-prompt>` after the LLM finishes, automatically creating a spec
+    from the reverse-engineered prompt.
+  - `--help` subcommand displays a usage message.
+  - GitHub API error handling for 404, 403/429 rate-limit (with reset time),
+    and other non-success status codes with human-readable messages.
+  - Invalid-input rejection for empty, single-word, and three-segment
+    identifiers.
+  - Autocomplete suggestions for `reverse` subcommands and flags.
+  - New GitHub client helpers: `parse_repo_url`, `validate_repo_input`,
+    `fetch_repo_metadata`, `fetch_root_tree`, `fetch_readme`,
+    `build_reverse_prompt`.
+  - 13 new test files covering URL parsing, repo metadata, root tree, README
+    extraction, API error handling, invalid-input rejection, and
+    `build_reverse_prompt` context assembly.
+
+### Added — Howto Documentation
+
+- **New `docs/howtos/research.md`** — extensive documentation for the `/research`
+  command system covering purpose, capabilities, all slash subcommands, tiers,
+  depth/iterations, output formats, seed sources, gathering tuning, the
+  Hyperresearch pipeline, source vault, templates, HTTP API, CLI equivalents,
+  and end-to-end examples (42,895 bytes).
+- **New `docs/howtos/spec.md`** — extensive documentation for the `/spec`
+  command system covering EARS notation, all 19 subcommands, lifecycle status
+  transitions, task management, SDD workflow, SDD configuration, validation
+  details, implementation orchestration, JTBD analysis, production feedback,
+  and end-to-end examples (36,577 bytes).
+- **New `docs/howtos/reverse.md`** — extensive documentation for the `/reverse`
+  command system covering purpose, capabilities, command syntax, GitHub API
+  interaction, synthetic prompt generation, `--tech` and `--create` flags,
+  CLI equivalents, and end-to-end examples (20,767 bytes).
+
+### Changed — Spec Task Table Status Column
+
+- **PLAN.md and TASKS.md task tables now include a Status column** initialised
+  to `Pending`. Updated all four LLM prompt builders (`build_create_prompt`,
+  `build_plan_prompt`, `build_update_prompt`, `build_add_prompt`) to instruct
+  the agent to include the Status column with `Pending` for all new tasks.
+  Updated the `PlanTemplate` programmatic template, the `build_tasks_md`
+  generator, and the doc comment for `parse_tasks` to reflect the 7-column
+  format. The runtime parser already handled both 6-column and 7-column
+  formats; the `rewrite_plan_tasks` function already wrote the Status column
+  when rewriting tasks after `/spec impl` updates.
+
+### Changed
+
+- Bumped workspace version to 1.0.46.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
 
 ## Version: 1.0.45
 

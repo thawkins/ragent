@@ -477,6 +477,26 @@ impl App {
                     self.execute_plan_delegation(session_id, task, context);
                 }
 
+                // FR-012: /reverse --create <name> chaining — after the LLM
+                // finishes generating the synthetic prompt, invoke
+                // `/spec create <name> <generated-prompt>` using the last
+                // assistant message as the prompt text.
+                if let Some(spec_name) = self.pending_reverse_create.take() {
+                    if *reason != FinishReason::Cancelled {
+                        let prompt = self
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| m.role == Role::Assistant)
+                            .map(|m| m.text_content())
+                            .unwrap_or_default();
+                        if !prompt.is_empty() {
+                            let cmd = format!("/spec create {spec_name} {prompt}");
+                            self.execute_slash_command(&cmd);
+                        }
+                    }
+                }
+
                 // /spec impl sequential driver: after each agent turn ends,
                 // check the just-run task's status and dispatch the next task
                 // (or finish the run). Skip when the turn was cancelled so the

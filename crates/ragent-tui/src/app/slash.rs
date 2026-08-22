@@ -118,6 +118,13 @@ impl App {
                     "task".to_string(),
                 ]
             }
+            "reverse" => {
+                vec![
+                    "help".to_string(),
+                    "--tech".to_string(),
+                    "--create".to_string(),
+                ]
+            }
             "router" => {
                 vec![
                     "on".to_string(),
@@ -4867,11 +4874,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
                 }
-            }
-
-            // ── /research ────────────────────────────────────────────────
+            } // ── /research ────────────────────────────────────────────────
             "research" => {
                 self.handle_research_command(args);
+            }
+
+            // ── /reverse ────────────────────────────────────────────────
+            "reverse" => {
+                self.handle_reverse_command(args);
             }
 
             // ── /spec ────────────────────────────────────────────────────────

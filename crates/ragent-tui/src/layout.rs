@@ -3310,13 +3310,14 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let max_scroll = total_lines.saturating_sub(visible_height);
     app.tasks_max_scroll = max_scroll;
     let scroll = app.tasks_scroll_offset.min(max_scroll);
-    let paragraph = paragraph.scroll((scroll, 0));
+    let render_scroll = max_scroll.saturating_sub(scroll);
+    let paragraph = paragraph.scroll((render_scroll, 0));
     frame.render_widget(paragraph, inner);
 
     // Render scrollbar when content overflows.
     if total_lines > visible_height {
         let mut scrollbar_state =
-            ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+            ScrollbarState::new(max_scroll as usize).position(render_scroll as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
         // Render in the full panel area so the scrollbar gutter aligns with

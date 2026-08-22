@@ -104,6 +104,12 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
   Jobs-To-Be-Done analysis on existing specs; `/spec update` regenerates
   `PLAN.md` and `TESTPLAN.md` from an edited `SPEC.md`; `/spec create` now
   also emits a manual `TESTPLAN.md` test-plan artifact
+- **GitHub repo reverse-engineering** — `/reverse <owner/repo | URL>` fetches
+  a public repo's metadata, root file tree, and README via the GitHub API,
+  then asks the currently selected LLM model to generate a synthetic creation
+  prompt; optional `--tech <stack>` constrains the technology stack and
+  `--create <name>` chains into `/spec create` to auto-generate a spec from
+  the reverse-engineered prompt
 - **Research system** — `/research` slash command family and `ragent research` CLI for
   structured information gathering (web search + local file cross-referencing) with
   self-contained `RESEARCH.md` outputs and `GET/POST/DELETE /research` HTTP endpoints

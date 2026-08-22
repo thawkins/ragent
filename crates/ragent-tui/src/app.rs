@@ -18,6 +18,7 @@ mod init;
 mod input_handler;
 mod models;
 mod research;
+mod reverse;
 mod session_ops;
 pub mod skillgen;
 mod slash;
