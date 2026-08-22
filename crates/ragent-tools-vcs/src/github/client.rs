@@ -19,7 +19,7 @@ const GITHUB_CLIENT_ID_DEFAULT: &str = "Iv1.b507a08c87ecfe98";
 /// All string fields default to an empty string when the API response omits
 /// them, so callers can rely on non-`None` values. `topics` defaults to an
 /// empty vector. `stargazers_count` defaults to `0`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RepoMetadata {
     /// Repository description (may be empty if the repo has none).
     pub description: String,
@@ -78,10 +78,15 @@ impl RepoMetadata {
 }
 
 /// Lightweight authenticated GitHub API client.
+///
+/// The `base_url` defaults to `https://api.github.com` but can be overridden
+/// via [`GitHubClient::with_base_url`] (primarily for tests that point the
+/// client at a local mock server).
 #[derive(Clone)]
 pub struct GitHubClient {
     token: String,
     client: reqwest::Client,
+    base_url: String,
 }
 
 impl GitHubClient {
@@ -92,15 +97,29 @@ impl GitHubClient {
         Ok(Self {
             token,
             client: reqwest::Client::new(),
+            base_url: "https://api.github.com".to_string(),
         })
     }
 
-    /// Create from an explicit token.
+    /// Create from an explicit token, using the default GitHub API base URL.
     #[must_use]
     pub fn with_token(token: String) -> Self {
         Self {
             token,
             client: reqwest::Client::new(),
+            base_url: "https://api.github.com".to_string(),
+        }
+    }
+
+    /// Create from an explicit base URL and token. The `base_url` should not
+    /// have a trailing slash (it is trimmed if present). Used by tests to
+    /// point the client at a local mock server.
+    #[must_use]
+    pub fn with_base_url(base_url: String, token: String) -> Self {
+        Self {
+            token,
+            client: reqwest::Client::new(),
+            base_url: base_url.trim_end_matches('/').to_string(),
         }
     }
 
@@ -117,7 +136,7 @@ impl GitHubClient {
         let url = if path.starts_with("https://") {
             path.to_string()
         } else {
-            format!("https://api.github.com{path}")
+            format!("{}{path}", self.base_url)
         };
 
         let resp = self
@@ -422,6 +441,89 @@ impl GitHubClient {
         Ok(parse_root_tree(&value))
     }
 
+    /// Fetch the repository file tree recursively up to the specified depth
+    /// (FR-027, FR-028).
+    ///
+    /// At depth 1, only the root-level entries are returned (equivalent to
+    /// [`fetch_root_tree`]). At depth N > 1, directories are recursively
+    /// expanded by calling `GET /repos/{owner}/{repo}/contents/{path}` for
+    /// each subdirectory discovered, stopping when the requested depth is
+    /// reached or no more directories exist.
+    ///
+    /// Directory entries are formatted with a trailing `/` to distinguish them
+    /// from files (FR-028). The returned paths use `/` separators so the LLM
+    /// can infer the full directory structure (e.g. `src/`, `src/main.rs`,
+    /// `src/models/`, `src/models/user.rs`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any API call fails. Individual directory fetch
+    /// failures are tolerated — the directory entry is still listed (with a
+    /// trailing slash) but its children are omitted.
+    pub async fn fetch_tree_recursive(
+        &self,
+        owner: &str,
+        repo: &str,
+        depth: u32,
+    ) -> Result<Vec<String>> {
+        let mut entries = Vec::new();
+        self.fetch_tree_recursive_inner(owner, repo, "", depth, &mut entries)
+            .await?;
+        Ok(entries)
+    }
+
+    /// Internal recursive helper for [`fetch_tree_recursive`].
+    ///
+    /// `prefix` is the directory path to fetch contents for (empty string for
+    /// root). `remaining` is the number of levels left to fetch (1 = this
+    /// level only, no recursion).
+    async fn fetch_tree_recursive_inner(
+        &self,
+        owner: &str,
+        repo: &str,
+        prefix: &str,
+        remaining: u32,
+        entries: &mut Vec<String>,
+    ) -> Result<()> {
+        let path = if prefix.is_empty() {
+            format!("/repos/{owner}/{repo}/contents")
+        } else {
+            format!("/repos/{owner}/{repo}/contents/{prefix}")
+        };
+        let value = self.get(&path).await?;
+        let items = parse_contents_entries(&value);
+
+        for item in &items {
+            let full_path = if prefix.is_empty() {
+                item.name.clone()
+            } else {
+                format!("{prefix}/{}", item.name)
+            };
+            if item.is_dir {
+                // FR-028: directories get a trailing slash.
+                entries.push(format!("{full_path}/"));
+                // FR-027: recurse if there are more depth levels. Box::pin is
+                // required because async fns cannot be directly recursive
+                // (the future size would be infinite).
+                if remaining > 1 {
+                    // Tolerate failure — keep the dir entry but skip children.
+                    let _ = Box::pin(self.fetch_tree_recursive_inner(
+                        owner,
+                        repo,
+                        &full_path,
+                        remaining - 1,
+                        entries,
+                    ))
+                    .await;
+                }
+            } else {
+                entries.push(full_path);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Fetch the README content for a repository (FR-007).
     ///
     /// Calls `GET /repos/{owner}/{repo}/readme` to obtain the README metadata
@@ -493,6 +595,37 @@ pub fn parse_root_tree(value: &Value) -> Vec<String> {
     };
     arr.iter()
         .filter_map(|entry| entry.get("name").and_then(Value::as_str).map(String::from))
+        .collect()
+}
+
+/// A parsed entry from a GitHub contents API response.
+struct ContentsEntry {
+    name: String,
+    is_dir: bool,
+}
+
+/// Parse a GitHub contents API JSON response into typed entries with name
+/// and type information (FR-027, FR-028).
+///
+/// Each entry in the JSON array has a `name` and a `type` field (`"file"` or
+/// `"dir"`). A non-array response yields an empty vector.
+fn parse_contents_entries(value: &Value) -> Vec<ContentsEntry> {
+    let arr = match value.as_array() {
+        Some(arr) => arr,
+        None => return Vec::new(),
+    };
+    arr.iter()
+        .filter_map(|entry| {
+            let name = entry.get("name").and_then(Value::as_str)?;
+            let is_dir = entry
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| t == "dir");
+            Some(ContentsEntry {
+                name: name.to_string(),
+                is_dir,
+            })
+        })
         .collect()
 }
 
@@ -614,12 +747,20 @@ pub fn classify_api_error(
 pub const README_MAX_CHARS: usize = 8000;
 
 /// Assemble the reverse-engineering context block from repo metadata, root
-/// file tree, README content, and an optional technology-stack constraint
-/// (FR-008, NFR-003).
+/// file tree, README content, an optional technology-stack constraint, and
+/// an optional provider label (FR-008, FR-016, NFR-003).
 ///
 /// The returned string is a single context block suitable for passing to the
 /// LLM as part of the prompt that instructs the model to generate a synthetic
 /// creation prompt for the repository.
+///
+/// # Provider label (FR-016)
+///
+/// When `provider_label` is `Some(label)`, a `## Repository Source` section is
+/// emitted **before** the `## Repository Metadata` section, containing the
+/// label (e.g. `"GitHub"` or `"GitLab (gitlab.example.com)"`). When `None`,
+/// the section is omitted entirely, preserving backward compatibility with
+/// callers that do not supply a provider label.
 ///
 /// # README truncation
 ///
@@ -635,14 +776,22 @@ pub const README_MAX_CHARS: usize = 8000;
 /// - `tree` — root-level file and directory names.
 /// - `readme` — optional raw README text (`None` means no README was found).
 /// - `tech` — optional technology-stack constraint to include in the context.
+/// - `provider_label` — optional VCS provider label for the `## Repository
+///   Source` section (FR-016). Pass `None` to omit the section.
 #[must_use]
 pub fn build_reverse_prompt(
     metadata: &RepoMetadata,
     tree: &[String],
     readme: Option<&str>,
     tech: Option<&str>,
+    provider_label: Option<&str>,
 ) -> String {
     let mut sections: Vec<String> = Vec::new();
+
+    // --- Optional provider source (FR-016) ---
+    if let Some(label) = provider_label {
+        sections.push(format!("## Repository Source\n{label}"));
+    }
 
     // --- Repo metadata ---
     let mut meta_lines = Vec::new();

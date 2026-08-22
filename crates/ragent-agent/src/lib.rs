@@ -66,6 +66,7 @@ pub use ragent_config::{
     ToolVisibilityConfig, bash_lists, dir_lists, tool_family_names,
 };
 pub use ragent_llm::{llm, provider};
+pub use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 pub use ragent_tools_vcs::{github, gitlab};
 
 pub use ragent_llm::{

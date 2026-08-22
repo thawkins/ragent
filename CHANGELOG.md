@@ -1,5 +1,72 @@
 # Changelog
 
+## Version: 1.0.47
+
+### Added — GitLab Support for `/reverse`
+
+- **Provider-agnostic repository parsing** — new `VcsProvider` enum and
+  `parse_reverse_repo` function (`crates/ragent-tools-vcs/src/vcs_provider.rs`)
+  accept any supported repository identifier format and route to the correct
+  VCS API client:
+  - Provider-prefixed: `github:owner/repo`, `gitlab:namespace/project`,
+    `gitlab:host/namespace/project` (self-hosted)
+  - Bare shorthand: `owner/repo` (defaults to GitHub, backward compatible)
+  - GitHub URLs: `https://github.com/owner/repo`, `git@github.com:owner/repo.git`
+  - GitLab URLs: `https://gitlab.com/namespace/project`,
+    `https://gitlab.example.com/group/project` (self-hosted),
+    `git@gitlab.com:namespace/project.git` (SSH)
+  - Nested GitLab namespaces: `group/subgroup/project`
+  - Re-exported from `ragent-agent` as `VcsProvider` and `parse_reverse_repo`
+- **GitLab API client methods** (`crates/ragent-tools-vcs/src/gitlab/client.rs`):
+  - `fetch_project_metadata` — `GET /projects/:id` with language resolution
+    via `GET /projects/:id/languages`
+  - `fetch_repository_tree` — `GET /projects/:id/repository/tree` (root level)
+  - `fetch_repository_tree_recursive` — recursive tree fetch up to N levels
+    with trailing-slash directory markers
+  - `fetch_readme` — `GET /projects/:id/readme` with `readme_url` raw fetch
+    and `repository/files` fallback; 404 yields `Ok(None)`
+  - Pure parsing helpers: `gitlab_project_to_metadata`, `top_language`,
+    `parse_gitlab_tree`, `parse_gitlab_tree_entries`, `extract_readme_url`
+- **Recursive tree fetch for GitHub** — `GitHubClient::fetch_tree_recursive`
+  expands directories up to a configurable depth via
+  `GET /repos/{owner}/{repo}/contents/{path}`, with trailing-slash directory
+  markers and tolerated per-directory failures
+- **`--depth <N>` flag for `/reverse`** — controls tree-fetch depth (1–10,
+  default 1). Validated by `validate_depth`; invalid values produce a
+  human-readable error
+- **Provider label in reverse-engineering context** — `build_reverse_prompt`
+  now accepts an optional `provider_label` (e.g. `"GitHub"` or
+  `"GitLab (gitlab.example.com)"`), emitted as a `## Repository Source`
+  section before metadata
+- **`GitHubClient::with_base_url`** — constructor for pointing the client at
+  a custom base URL (primarily for mock-server tests)
+- **GitLab token resolution** for `/reverse` — priority chain:
+  `GITLAB_TOKEN` env → `ragent.json` → encrypted database via `/gitlab setup`
+- **`--depth` and GitLab formats in `/reverse` help message** — updated
+  `reverse_help_message` to list `--depth`, `gitlab:`, `/gitlab setup`, and all
+  accepted URL formats
+- 4 new test files: `test_backward_compat.rs`, `test_gitlab_fetch_methods.rs`,
+  `test_parse_reverse_repo_formats.rs`, `test_recursive_tree_fetch.rs`; plus
+  expanded `test_build_reverse_prompt.rs` and inline tests in
+  `vcs_provider.rs`, `gitlab/client.rs`, and `reverse.rs`
+
+### Fixed — Yahoo Finance Provider Cache
+
+- **Race condition in `get_or_create_yahoo_provider`**
+  (`crates/ragent-tools-extended/src/finance/providers/paid.rs`) — the cache
+  lookup and insertion are now performed atomically under a single lock
+  acquisition, preventing two concurrent calls with the same key from both
+  missing the cache and creating distinct providers (which would break
+  `Arc::ptr_eq` guarantees relied on by callers).
+
+### Changed
+
+- Bumped workspace version to 1.0.47.
+- `cargo audit` reports 9 pre-existing allowed warnings (unmaintained/unsound
+  crates); no new security issues introduced.
+- Added `wiremock = "0.6"` dev-dependency to `ragent-tools-vcs` for
+  mock-server HTTP tests.
+
 ## Version: 1.0.46
 
 ### Added — GitHub Repository Reverse-Engineering (`/reverse`)

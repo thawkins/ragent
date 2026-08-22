@@ -39,20 +39,22 @@ fn yahoo_provider_key(config: Option<&FinanceProviderConfig>) -> String {
 }
 
 /// Return a cached or newly created Yahoo provider for the given configuration.
+///
+/// The cache lookup and insertion are performed atomically under a single
+/// lock acquisition so that two concurrent calls with the same key cannot both
+/// miss the cache and create distinct providers (which would break
+/// `Arc::ptr_eq` guarantees relied on by callers).
 fn get_or_create_yahoo_provider(
     config: Option<&FinanceProviderConfig>,
 ) -> Arc<dyn FinanceProvider> {
     let key = yahoo_provider_key(config);
 
-    {
-        let guard = YAHOO_PROVIDERS
-            .lock()
-            .expect("yahoo provider cache poisoned");
-        if let Some(map) = guard.as_ref()
-            && let Some(provider) = map.get(&key)
-        {
-            return provider.clone();
-        }
+    let mut guard = YAHOO_PROVIDERS
+        .lock()
+        .expect("yahoo provider cache poisoned");
+    let map = guard.get_or_insert_with(HashMap::new);
+    if let Some(provider) = map.get(&key) {
+        return provider.clone();
     }
 
     let provider: Arc<YahooFinanceProvider> = if let Some(cfg) = config {
@@ -63,15 +65,7 @@ fn get_or_create_yahoo_provider(
     } else {
         Arc::new(YahooFinanceProvider::default_client())
     };
-
-    {
-        let mut guard = YAHOO_PROVIDERS
-            .lock()
-            .expect("yahoo provider cache poisoned");
-        let map = guard.get_or_insert_with(HashMap::new);
-        map.insert(key, provider.clone());
-    }
-
+    map.insert(key, provider.clone());
     provider
 }
 

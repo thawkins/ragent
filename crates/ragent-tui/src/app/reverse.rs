@@ -1,8 +1,8 @@
 //! `/reverse` slash command handling for the TUI.
 //!
-//! Takes a public GitHub repository URL (or `owner/repo` shorthand), fetches
-//! the repo metadata, root file tree, and README via the GitHub API, then
-//! dispatches a prompt to the currently selected LLM model to generate a
+//! Takes a public repository URL (or `owner/repo` shorthand), fetches
+//! the repo metadata, root file tree, and README via the GitHub or GitLab API,
+//! then dispatches a prompt to the currently selected LLM model to generate a
 //! synthetic creation prompt.
 
 use std::sync::Arc;
@@ -10,7 +10,9 @@ use std::sync::atomic::AtomicBool;
 
 use ragent_agent::event::Event;
 use ragent_agent::github::{GitHubClient, build_reverse_prompt};
+use ragent_agent::gitlab::GitLabClient;
 use ragent_agent::message::Message;
+use ragent_tools_vcs::vcs_provider::{VcsProvider, parse_reverse_repo};
 
 use crate::app::state::{App, LogLevel};
 
@@ -22,6 +24,9 @@ struct ReverseArgs {
     tech: Option<String>,
     /// Optional spec-create flag (`--create <name>`).
     create: Option<String>,
+    /// Optional tree-fetch depth (`--depth <N>`), raw string. Validated to
+    /// `u32` in the range 1–10 by `handle_reverse_command` (FR-025, FR-029).
+    depth: Option<String>,
 }
 
 /// Parse `/reverse` arguments.
@@ -30,6 +35,7 @@ struct ReverseArgs {
 /// - `/reverse <repo>` — basic form
 /// - `/reverse <repo> --tech <stack>` — with tech constraint
 /// - `/reverse <repo> --create <name>` — chain into `/spec create`
+/// - `/reverse <repo> --depth <N>` — tree-fetch depth (FR-025)
 /// - `/reverse help` — usage message
 ///
 /// Flags may appear in any order after the positional repo argument.
@@ -42,6 +48,7 @@ fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
     let mut repo_input: Option<String> = None;
     let mut tech: Option<String> = None;
     let mut create: Option<String> = None;
+    let mut depth: Option<String> = None;
 
     let mut tokens = args.split_whitespace().peekable();
     while let Some(tok) = tokens.next() {
@@ -53,6 +60,10 @@ fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
             "--create" => {
                 let val = tokens.next()?;
                 create = Some(val.to_string());
+            }
+            "--depth" => {
+                let val = tokens.next()?;
+                depth = Some(val.to_string());
             }
             _ => {
                 // First non-flag token is the repo identifier.
@@ -68,7 +79,80 @@ fn parse_reverse_args(args: &str) -> Option<ReverseArgs> {
         repo_input,
         tech,
         create,
+        depth,
     })
+}
+
+/// Build a human-readable provider label and a short repo identifier from
+/// the resolved [`VcsProvider`] (FR-016, FR-017).
+///
+/// Returns `(repo_id, provider_label)`:
+/// - GitHub → `("owner/repo", "GitHub")`
+/// - GitLab with explicit host → `("namespace/project", "GitLab (host)")`
+/// - GitLab with configured instance → `("namespace/project", "GitLab")`
+fn provider_label_and_id(provider: &VcsProvider) -> (String, String) {
+    match provider {
+        VcsProvider::GitHub { owner, repo } => (format!("{owner}/{repo}"), "GitHub".to_string()),
+        VcsProvider::GitLab { host, project_path } => {
+            let label = match host {
+                Some(url) => {
+                    let host_part = url
+                        .strip_prefix("https://")
+                        .or_else(|| url.strip_prefix("http://"))
+                        .unwrap_or(url);
+                    format!("GitLab ({host_part})")
+                }
+                None => "GitLab".to_string(),
+            };
+            (project_path.clone(), label)
+        }
+    }
+}
+
+/// Resolve the GitLab Personal Access Token from the `GITLAB_TOKEN`
+/// environment variable (FR-007). The App method
+/// [`App::resolve_gitlab_token_for_reverse`] layers ragent.json and the
+/// encrypted database on top of this.
+fn resolve_gitlab_token() -> Option<String> {
+    std::env::var("GITLAB_TOKEN").ok().filter(|t| !t.is_empty())
+}
+
+/// Resolve the GitLab instance base URL (FR-002).
+///
+/// Priority: explicit `host` from the identifier → `GITLAB_URL` env var →
+/// default `https://gitlab.com`.
+fn resolve_gitlab_host(host: Option<&str>) -> String {
+    if let Some(h) = host {
+        return h.to_string();
+    }
+    std::env::var("GITLAB_URL")
+        .ok()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "https://gitlab.com".to_string())
+}
+
+/// Validate the `--depth <N>` flag value (FR-025, FR-029).
+///
+/// Returns the validated depth on success:
+/// - `None` → `1` (the default, FR-025)
+/// - `Some(val)` where `val` parses as a `u32` in `1..=10` → that value
+///
+/// Returns an error message on failure (FR-029):
+/// - `Some(val)` that doesn't parse as `u32` (e.g. `"abc"`, `"-1"`)
+/// - `Some(val)` that parses but is outside `1..=10` (e.g. `"0"`, `"11"`)
+fn validate_depth(depth_raw: Option<&str>) -> Result<u32, String> {
+    match depth_raw {
+        None => Ok(1),
+        Some(val) => match val.parse::<u32>() {
+            Ok(n) if (1..=10).contains(&n) => Ok(n),
+            Ok(n) => Err(format!(
+                "Invalid --depth value: {n}. The depth must be an integer between 1 and 10."
+            )),
+            Err(_) => Err(format!(
+                "Invalid --depth value: {val}. The depth must be an integer between 1 and 10."
+            )),
+        },
+    }
 }
 
 /// Build the LLM instruction prompt that wraps the context block.
@@ -77,7 +161,7 @@ fn build_llm_task(context: &str, tech: Option<&str>) -> String {
         .map(|t| format!("\nThe generated prompt should target this technology stack: {t}\n"))
         .unwrap_or_default();
     format!(
-        "You are analysing a public GitHub repository to reverse-engineer the \
+        "You are analysing a public repository to reverse-engineer the \
          prompt that was likely used to create it with an AI coding assistant.\n\
          Below is the repository's metadata, root file tree, and README content.\n\
          Generate a single synthetic prompt that someone could have used to \
@@ -89,17 +173,39 @@ fn build_llm_task(context: &str, tech: Option<&str>) -> String {
 }
 
 impl App {
+    /// Resolve the GitLab Personal Access Token for the `/reverse` command
+    /// (FR-007).
+    ///
+    /// Priority: `GITLAB_TOKEN` env → `ragent.json` → encrypted database via
+    /// `/gitlab setup`. Uses the App's `storage` handle to access the
+    /// encrypted database.
+    fn resolve_gitlab_token_for_reverse(&self) -> Option<String> {
+        // 1. Environment variable.
+        if let Some(token) = resolve_gitlab_token() {
+            return Some(token);
+        }
+
+        // 2. ragent.json config file.
+        if let Ok(cfg) = ragent_config::Config::load()
+            && let Some(ref t) = cfg.gitlab.token
+            && !t.is_empty()
+        {
+            return Some(t.clone());
+        }
+
+        // 3. Encrypted database via `/gitlab setup`.
+        ragent_agent::gitlab::auth::load_token(self.storage.as_ref())
+    }
+
     /// Handle the `/reverse` slash command (FR-001, FR-004, FR-009, FR-010,
     /// FR-018).
     ///
-    /// Parses the repo identifier, validates GitHub auth, shows a `⏳`-prefixed
+    /// Parses the repo identifier, validates auth, shows a `⏳`-prefixed
     /// status, then spawns an async task that fetches repo metadata + tree +
     /// README, builds a context block, and dispatches it to the LLM via
     /// `process_message`.
     pub(crate) fn handle_reverse_command(&mut self, args: &str) {
         // FR-013: parse args via the shared `parse_reverse_args` helper.
-        // Empty input or the literal `help` subcommand yields `None`, which
-        // we surface as the usage/help message.
         let parsed = match parse_reverse_args(args) {
             Some(p) => p,
             None => {
@@ -109,9 +215,10 @@ impl App {
             }
         };
 
-        // FR-003 + FR-016: validate the repo identifier into (owner, repo).
-        let (owner, repo) = match GitHubClient::validate_repo_input(&parsed.repo_input) {
-            Ok(pair) => pair,
+        // FR-024: delegate repo validation to `parse_reverse_repo` so that
+        // provider dispatch happens in one place (FR-014).
+        let provider = match parse_reverse_repo(&parsed.repo_input) {
+            Ok(p) => p,
             Err(msg) => {
                 self.append_assistant_text(&format!("From: /reverse\n\n{msg}"));
                 self.status = "reverse: invalid repo".to_string();
@@ -119,14 +226,48 @@ impl App {
             }
         };
 
-        // FR-004: validate GitHub token
-        if ragent_agent::github::auth::load_token().is_none() {
-            self.append_assistant_text(
-                "From: /reverse\n\n❌ **No GitHub token configured.**\n\n\
-                 Run `/github login` to authenticate, then re-run `/reverse`.",
-            );
-            self.status = "reverse: no token".to_string();
-            return;
+        // FR-014: dispatch to the GitHub or GitLab fetch path based on the
+        // resolved VcsProvider.
+        let (repo_id, provider_label) = provider_label_and_id(&provider);
+
+        // FR-025 / FR-029: validate the --depth flag. Default is 1; valid
+        // range is 1–10. An invalid value surfaces a human-readable error
+        // without making any API calls.
+        let depth: u32 = match validate_depth(parsed.depth.as_deref()) {
+            Ok(n) => n,
+            Err(msg) => {
+                self.append_assistant_text(&format!("From: /reverse\n\n❌ **{msg}**"));
+                self.status = "reverse: invalid depth".to_string();
+                return;
+            }
+        };
+
+        match &provider {
+            VcsProvider::GitHub { .. } => {
+                if ragent_agent::github::auth::load_token().is_none() {
+                    self.append_assistant_text(
+                        "From: /reverse\n\n❌ **No GitHub token configured.**\n\n\
+                         Run `/github login` to authenticate, then re-run `/reverse`.",
+                    );
+                    self.status = "reverse: no token".to_string();
+                    return;
+                }
+            }
+            VcsProvider::GitLab { host, .. } => {
+                // FR-007: validate GitLab token.
+                let token = self.resolve_gitlab_token_for_reverse();
+                if token.is_none() {
+                    self.append_assistant_text(
+                        "From: /reverse\n\n❌ **No GitLab token configured.**\n\n\
+                         Run `/gitlab setup` to configure your GitLab instance and \
+                         Personal Access Token, or set the `GITLAB_TOKEN` environment \
+                         variable.",
+                    );
+                    self.status = "reverse: no gitlab token".to_string();
+                    return;
+                }
+                let _ = resolve_gitlab_host(host.as_deref());
+            }
         }
 
         // Ensure we have a session
@@ -134,11 +275,12 @@ impl App {
             return;
         }
 
-        let repo_id = format!("{owner}/{repo}");
-
-        // FR-018: ⏳-prefixed status so the auto-expiry timer is NOT armed
-        self.status = format!("⏳ reverse: {repo_id}…");
-        self.push_log_no_agent(LogLevel::Info, format!("reverse: fetching {repo_id}"));
+        // FR-017: status messages and log entries include the provider label.
+        self.status = format!("⏳ reverse: {provider_label}: {repo_id}…");
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!("reverse: fetching {repo_id} via {provider_label}"),
+        );
 
         // FR-009: resolve the currently selected model
         let explore_agent = self
@@ -150,9 +292,11 @@ impl App {
         self.apply_selected_model_and_thinking(&mut agent);
         agent.permission = ragent_agent::agent::default_permissions();
 
-        // Build the LLM instruction + context in the spawned task (after fetch)
         let sid = self.session_id.clone().unwrap_or_default();
-        let context_msg = Message::user_text(&sid, format!("⏳ Reverse-engineering {repo_id}…"));
+        let context_msg = Message::user_text(
+            &sid,
+            format!("⏳ Reverse-engineering {provider_label}: {repo_id}…"),
+        );
         self.messages.push(context_msg);
 
         let processor = self.session_processor.clone();
@@ -161,11 +305,17 @@ impl App {
         self.is_processing = true;
 
         let event_bus = self.event_bus.clone();
-        let owner_for_spawn = owner.clone();
-        let repo_for_spawn = repo.clone();
-        let repo_id_for_spawn = repo_id.clone();
+        let provider_for_spawn = provider.clone();
+        let provider_label_for_spawn = provider_label.clone();
         let tech_for_spawn = parsed.tech.clone();
         let create_for_spawn = parsed.create.clone();
+        let repo_id_for_spawn = repo_id.clone();
+        let depth_for_spawn = depth;
+        let gitlab_token = self.resolve_gitlab_token_for_reverse();
+        let gitlab_host = match &provider {
+            VcsProvider::GitLab { host, .. } => Some(resolve_gitlab_host(host.as_deref())),
+            _ => None,
+        };
 
         // FR-012: store the spec name so MessageEnd can chain into
         // `/spec create <name> <generated-prompt>` after the LLM finishes.
@@ -173,68 +323,125 @@ impl App {
             self.pending_reverse_create = Some(name.clone());
         }
 
-        // FR-010: show immediate user feedback
+        // FR-017: user feedback includes the provider label.
         self.append_assistant_text(&format!(
-            "From: /reverse\n\n⏳ **Fetching {repo_id}…**\n\n\
+            "From: /reverse\n\n⏳ **Fetching {repo_id} via {provider_label}…**\n\n\
              Gathering repository metadata, file tree, and README, then generating \
              a synthetic creation prompt."
         ));
 
+        let sid_clone = sid.clone();
+
         tokio::spawn(async move {
-            // Create the GitHub client (token already validated above, but
-            // new() re-resolves it — if it vanished between validation and here,
-            // surface the error).
-            let client = match GitHubClient::new() {
-                Ok(c) => c,
-                Err(e) => {
-                    event_bus.publish(Event::AgentError {
-                        session_id: sid.clone(),
-                        error: format!("reverse: GitHub auth failed: {e}"),
-                    });
-                    return;
+            // FR-014: dispatch fetch based on the VcsProvider.
+            let (metadata, tree, readme) = match &provider_for_spawn {
+                VcsProvider::GitHub { owner, repo } => {
+                    let client = match GitHubClient::new() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "reverse: GitHub client failed");
+                            event_bus.publish(Event::AgentError {
+                                session_id: sid_clone.clone(),
+                                error: format!("reverse: GitHub client failed: {e}"),
+                            });
+                            return;
+                        }
+                    };
+
+                    let metadata = client
+                        .fetch_repo_metadata(owner, repo)
+                        .await
+                        .unwrap_or_default();
+
+                    // FR-025/FR-026/FR-027: use recursive fetch when depth > 1.
+                    let tree = if depth_for_spawn > 1 {
+                        client
+                            .fetch_tree_recursive(owner, repo, depth_for_spawn)
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        client
+                            .fetch_root_tree(owner, repo)
+                            .await
+                            .unwrap_or_default()
+                    };
+
+                    let readme = client.fetch_readme(owner, repo).await.ok().flatten();
+
+                    (metadata, tree, readme)
+                }
+                VcsProvider::GitLab { host, project_path } => {
+                    let token = match &gitlab_token {
+                        Some(t) => t.clone(),
+                        None => {
+                            event_bus.publish(Event::AgentError {
+                                session_id: sid_clone.clone(),
+                                error: "reverse: No GitLab token configured. Run /gitlab setup."
+                                    .to_string(),
+                            });
+                            return;
+                        }
+                    };
+                    let base_url = gitlab_host
+                        .clone()
+                        .unwrap_or_else(|| resolve_gitlab_host(host.as_deref()));
+                    let client = GitLabClient::with_credentials(base_url, token);
+
+                    // FR-020 / FR-021: surface specific errors for 401 and 404.
+                    let metadata = match client.fetch_project_metadata(project_path).await {
+                        Ok(m) => m,
+                        Err(e) => {
+                            let msg = if e.to_string().contains("401") {
+                                format!(
+                                    "reverse: GitLab authentication failed for \
+                                         {repo_id_for_spawn}. Run /gitlab setup to update \
+                                         your Personal Access Token."
+                                )
+                            } else if e.to_string().contains("404") {
+                                format!(
+                                    "reverse: GitLab project '{repo_id_for_spawn}' was not \
+                                         found on the target instance. Verify the namespace and \
+                                         project path."
+                                )
+                            } else {
+                                format!("reverse: {repo_id_for_spawn}: {e}")
+                            };
+                            event_bus.publish(Event::AgentError {
+                                session_id: sid_clone.clone(),
+                                error: msg,
+                            });
+                            return;
+                        }
+                    };
+
+                    // FR-025/FR-026/FR-027: use recursive fetch when depth > 1.
+                    let tree = if depth_for_spawn > 1 {
+                        client
+                            .fetch_repository_tree_recursive(project_path, depth_for_spawn)
+                            .await
+                            .unwrap_or_default()
+                    } else {
+                        client
+                            .fetch_repository_tree(project_path)
+                            .await
+                            .unwrap_or_default()
+                    };
+                    let readme = client.fetch_readme(project_path).await.ok().flatten();
+
+                    (metadata, tree, readme)
                 }
             };
 
-            // FR-005: fetch repo metadata
-            let metadata = match client
-                .fetch_repo_metadata(&owner_for_spawn, &repo_for_spawn)
-                .await
-            {
-                Ok(m) => m,
-                Err(e) => {
-                    event_bus.publish(Event::AgentError {
-                        session_id: sid.clone(),
-                        error: format!("reverse: {repo_id_for_spawn}: {e}"),
-                    });
-                    return;
-                }
-            };
-
-            // FR-006: fetch root tree (tolerate failure — proceed with empty)
-            let tree = client
-                .fetch_root_tree(&owner_for_spawn, &repo_for_spawn)
-                .await
-                .unwrap_or_default();
-
-            // FR-007: fetch README (404 → None, proceed with empty)
-            let readme = client
-                .fetch_readme(&owner_for_spawn, &repo_for_spawn)
-                .await
-                .ok()
-                .flatten();
-
-            // FR-008: assemble context block
+            // FR-008/FR-016: assemble context block with the provider label.
             let context = build_reverse_prompt(
                 &metadata,
                 &tree,
                 readme.as_deref(),
                 tech_for_spawn.as_deref(),
+                Some(&provider_label_for_spawn),
             );
             let task = build_llm_task(&context, tech_for_spawn.as_deref());
 
-            // FR-009 + FR-010: dispatch to LLM via process_message — the
-            // generated prompt will appear in the chat panel as an assistant
-            // message.
             if let Err(e) = processor.process_message(&sid, &task, &agent, flag).await {
                 tracing::warn!(error = %e, "reverse: LLM generation failed");
                 event_bus.publish(Event::AgentError {
@@ -244,16 +451,11 @@ impl App {
                 return;
             }
 
-            // FR-012: if --create <name> was provided, the actual
-            // `/spec create` chaining is handled by the `MessageEnd`
-            // event handler in `event_handler.rs` (it reads
-            // `pending_reverse_create` and the last assistant message
-            // text). Here we just publish a notice so the user sees
-            // that chaining is about to happen.
+            // FR-017: notices include the provider label.
             if let Some(name) = &create_for_spawn {
                 let notice = format!(
-                    "reverse: generated prompt for {repo_id_for_spawn}. \
-                       Chaining into /spec create {name}…"
+                    "reverse: generated prompt for {repo_id_for_spawn} via \
+                     {provider_label_for_spawn}. Chaining into /spec create {name}…"
                 );
                 event_bus.publish(Event::AgentNotice {
                     session_id: sid.clone(),
@@ -262,7 +464,9 @@ impl App {
             } else {
                 event_bus.publish(Event::AgentNotice {
                     session_id: sid,
-                    message: format!("reverse: completed {repo_id_for_spawn}"),
+                    message: format!(
+                        "reverse: completed {repo_id_for_spawn} via {provider_label_for_spawn}"
+                    ),
                 });
             }
         });
@@ -272,23 +476,24 @@ impl App {
 /// Build the help message for `/reverse help` (FR-013).
 fn reverse_help_message() -> String {
     "From: /reverse\n\n\
-     **Reverse-engineer a GitHub repository into a synthetic creation prompt.**\n\n\
+     **Reverse-engineer a repository into a synthetic creation prompt.**\n\n\
      **Usage:**\n\
-     `/reverse <owner/repo | URL> [--tech <stack>] [--create <name>]`\n\n\
+     `/reverse <repo> [--tech <stack>] [--create <name>] [--depth <N>]`\n\n\
      **Arguments:**\n\
-     - `<repo>` — GitHub repository identifier. Accepts:\n\
-       - Shorthand: `owner/repo`\n\
-       - HTTPS URL: `https://github.com/owner/repo`\n\
-       - SSH URL: `git@github.com:owner/repo.git`\n\n\
+     - `<repo>` — repository identifier. Accepts:\n\
+       - Shorthand: `owner/repo` (defaults to GitHub)\n\
+       - `github:owner/repo` or `github:<github-url>`\n\
+       - `gitlab:namespace/project` (uses configured GitLab instance)\n\
+       - `gitlab:host/namespace/project` (self-hosted GitLab)\n\
+       - HTTPS URL: `https://github.com/owner/repo` or `https://gitlab.com/ns/proj`\n\
+       - SSH URL: `git@github.com:owner/repo.git` or `git@gitlab.com:ns/proj.git`\n\n\
      **Optional flags:**\n\
      - `--tech <stack>` — constrain the generated prompt to a technology stack\n\
-     - `--create <name>` — after generation, chain into `/spec create <name>`\n\n\
-     **Examples:**\n\
-     `/reverse octocat/Hello-World`\n\
-     `/reverse https://github.com/octocat/Hello-World --tech \"Rust + Tokio\"`\n\
-     `/reverse octocat/Hello-World --create my-spec`\n\n\
+     - `--create <name>` — after generation, chain into `/spec create <name>`\n\
+     - `--depth <N>` — directory levels to fetch (1–10, default 1)\n\n\
      **Prerequisites:**\n\
-     Run `/github login` first to configure a GitHub token."
+     - GitHub: run `/github login` first to configure a GitHub token.\n\
+     - GitLab: run `/gitlab setup` first (or set GITLAB_TOKEN + GITLAB_URL env vars)."
         .to_string()
 }
 
@@ -328,14 +533,26 @@ mod tests {
     fn test_parse_reverse_args_with_both_flags() {
         let args = parse_reverse_args("octocat/Hello-World --tech \"Rust + Tokio\" --create spec1")
             .unwrap();
-        // Note: split_whitespace doesn't handle quoted args — the quotes are
-        // part of the token. This is a known TUI limitation; the user types
-        // tokens without quotes or the flag parser keeps the whole remaining
-        // value. For now, we accept the raw token.
         assert_eq!(args.repo_input, "octocat/Hello-World");
-        // The tech value will include the quotes as part of the token.
         assert!(args.tech.is_some());
         assert_eq!(args.create.as_deref(), Some("spec1"));
+    }
+
+    #[test]
+    fn test_parse_reverse_args_with_depth() {
+        let args = parse_reverse_args("octocat/Hello-World --depth 3").unwrap();
+        assert_eq!(args.repo_input, "octocat/Hello-World");
+        assert_eq!(args.depth.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn test_parse_reverse_args_with_all_flags() {
+        let args =
+            parse_reverse_args("octocat/Hello-World --tech Rust --create spec1 --depth 5").unwrap();
+        assert_eq!(args.repo_input, "octocat/Hello-World");
+        assert_eq!(args.tech.as_deref(), Some("Rust"));
+        assert_eq!(args.create.as_deref(), Some("spec1"));
+        assert_eq!(args.depth.as_deref(), Some("5"));
     }
 
     #[test]
@@ -356,19 +573,21 @@ mod tests {
 
     #[test]
     fn test_parse_reverse_args_missing_repo() {
-        // Only flags, no positional repo.
         assert!(parse_reverse_args("--tech Rust").is_none());
     }
 
     #[test]
     fn test_parse_reverse_args_missing_flag_value() {
-        // --tech with no following token.
         assert!(parse_reverse_args("octocat/Hello-World --tech").is_none());
     }
 
     #[test]
+    fn test_parse_reverse_args_missing_depth_value() {
+        assert!(parse_reverse_args("octocat/Hello-World --depth").is_none());
+    }
+
+    #[test]
     fn test_parse_reverse_args_flags_before_repo() {
-        // Flags can appear before the repo too.
         let args = parse_reverse_args("--tech Rust octocat/Hello-World").unwrap();
         assert_eq!(args.repo_input, "octocat/Hello-World");
         assert_eq!(args.tech.as_deref(), Some("Rust"));
@@ -398,11 +617,59 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_label_and_id_github() {
+        let provider = VcsProvider::GitHub {
+            owner: "octocat".to_string(),
+            repo: "Hello-World".to_string(),
+        };
+        let (repo_id, label) = provider_label_and_id(&provider);
+        assert_eq!(repo_id, "octocat/Hello-World");
+        assert_eq!(label, "GitHub");
+    }
+
+    #[test]
+    fn test_provider_label_and_id_gitlab_default() {
+        let provider = VcsProvider::GitLab {
+            host: None,
+            project_path: "group/project".to_string(),
+        };
+        let (repo_id, label) = provider_label_and_id(&provider);
+        assert_eq!(repo_id, "group/project");
+        assert_eq!(label, "GitLab");
+    }
+
+    #[test]
+    fn test_provider_label_and_id_gitlab_self_hosted() {
+        let provider = VcsProvider::GitLab {
+            host: Some("https://gitlab.example.com".to_string()),
+            project_path: "group/project".to_string(),
+        };
+        let (repo_id, label) = provider_label_and_id(&provider);
+        assert_eq!(repo_id, "group/project");
+        assert_eq!(label, "GitLab (gitlab.example.com)");
+    }
+
+    #[test]
     fn test_reverse_help_message_content() {
         let msg = reverse_help_message();
         assert!(msg.contains("Usage:"));
         assert!(msg.contains("--tech"));
         assert!(msg.contains("--create"));
+        assert!(msg.contains("--depth"));
         assert!(msg.contains("/github login"));
+        assert!(msg.contains("/gitlab setup"));
+        assert!(msg.contains("gitlab:"));
+    }
+
+    #[test]
+    fn test_reverse_help_message_lists_all_formats() {
+        let msg = reverse_help_message();
+        assert!(msg.contains("owner/repo"));
+        assert!(msg.contains("github:"));
+        assert!(msg.contains("gitlab:"));
+        assert!(msg.contains("https://github.com"));
+        assert!(msg.contains("https://gitlab.com"));
+        assert!(msg.contains("git@github.com"));
+        assert!(msg.contains("git@gitlab.com"));
     }
 }

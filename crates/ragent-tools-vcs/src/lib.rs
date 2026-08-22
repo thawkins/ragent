@@ -7,6 +7,7 @@ pub mod git;
 pub mod github;
 pub mod gitlab;
 pub mod registry;
+pub mod vcs_provider;
 
 use anyhow::Result;
 use ragent_types::llm::ToolDefinition;
