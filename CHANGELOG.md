@@ -1,5 +1,19 @@
 # Changelog
 
+## Version: 1.0.49
+
+### Changed — Documentation Updates
+
+- Updated and consolidated how-to documentation across `docs/howtos/`:
+  - Renamed `commshowto.md` to `communications.md` and refreshed content.
+  - Added `finance.md` how-to covering stock/currency tools.
+  - Refreshed `custom-agents.md`, `howto_teams.md`, `reverse.md`,
+    `tool-visibility.md`, and `vcs-tool-implementation-pattern.md`.
+  - Added PDF renderings of the communications and finance how-tos.
+- Removed stale scratch files (`editplan.md`, `reddit.html`, `reddit.md`,
+  `v1rocket.md`) from the repository root.
+- Minor fixes throughout.
+
 ## Version: 1.0.48
 
 ### Fixed — CI Flaky Test

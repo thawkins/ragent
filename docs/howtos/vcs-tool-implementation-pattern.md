@@ -245,6 +245,7 @@ pub mod auth;
 pub mod client;
 pub mod github_issues;
 pub mod github_prs;
+pub mod github_actions;
 
 pub use auth::{delete_token, device_flow_login, load_token, save_token};
 pub use client::GitHubClient;
@@ -256,9 +257,77 @@ pub use github_prs::{
     GithubCreatePrTool, GithubGetPrTool, GithubListPrsTool,
     GithubMergePrTool, GithubReviewPrTool,
 };
+pub use github_actions::GithubGetActionsTool;
 
 pub use crate::{Tool, ToolContext, ToolOutput};
 ```
+
+### Complete VCS tool inventory
+
+All registered tools in `ragent-tools-vcs`:
+
+**Git tools** (18 tools):
+
+| Tool name | File |
+|-----------|------|
+| `git_add` | `git/git_add.rs` |
+| `git_branch` | `git/git_branch.rs` |
+| `git_checkout` | `git/git_checkout.rs` |
+| `git_cherry_pick` | `git/git_cherry_pick.rs` |
+| `git_clone` | `git/git_clone.rs` |
+| `git_commit` | `git/git_commit.rs` |
+| `git_diff` | `git/git_diff.rs` |
+| `git_fetch` | `git/git_fetch.rs` |
+| `git_log` | `git/git_log.rs` |
+| `git_merge` | `git/git_merge.rs` |
+| `git_pull` | `git/git_pull.rs` |
+| `git_push` | `git/git_push.rs` |
+| `git_remote` | `git/git_remote.rs` |
+| `git_reset` | `git/git_reset.rs` |
+| `git_show` | `git/git_show.rs` |
+| `git_stash` | `git/git_stash.rs` |
+| `git_status` | `git/git_status.rs` |
+| `git_tag` | `git/git_tag.rs` |
+
+**GitHub tools** (11 tools):
+
+| Tool name | File |
+|-----------|------|
+| `github_list_issues` | `github/github_issues.rs` |
+| `github_get_issue` | `github/github_issues.rs` |
+| `github_create_issue` | `github/github_issues.rs` |
+| `github_comment_issue` | `github/github_issues.rs` |
+| `github_close_issue` | `github/github_issues.rs` |
+| `github_list_prs` | `github/github_prs.rs` |
+| `github_get_pr` | `github/github_prs.rs` |
+| `github_create_pr` | `github/github_prs.rs` |
+| `github_merge_pr` | `github/github_prs.rs` |
+| `github_review_pr` | `github/github_prs.rs` |
+| `github_get_actions` | `github/github_actions.rs` |
+
+**GitLab tools** (18 tools):
+
+| Tool name | File |
+|-----------|------|
+| `gitlab_list_issues` | `gitlab/gitlab_issues.rs` |
+| `gitlab_get_issue` | `gitlab/gitlab_issues.rs` |
+| `gitlab_create_issue` | `gitlab/gitlab_issues.rs` |
+| `gitlab_comment_issue` | `gitlab/gitlab_issues.rs` |
+| `gitlab_close_issue` | `gitlab/gitlab_issues.rs` |
+| `gitlab_list_mrs` | `gitlab/gitlab_mrs.rs` |
+| `gitlab_get_mr` | `gitlab/gitlab_mrs.rs` |
+| `gitlab_create_mr` | `gitlab/gitlab_mrs.rs` |
+| `gitlab_merge_mr` | `gitlab/gitlab_mrs.rs` |
+| `gitlab_approve_mr` | `gitlab/gitlab_mrs.rs` |
+| `gitlab_list_pipelines` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_get_pipeline` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_list_jobs` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_get_job` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_get_job_log` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_retry_job` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_cancel_job` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_retry_pipeline` | `gitlab/gitlab_pipelines.rs` |
+| `gitlab_cancel_pipeline` | `gitlab/gitlab_pipelines.rs` |
 
 ---
 

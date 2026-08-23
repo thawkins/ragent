@@ -352,9 +352,9 @@ implement the spec (see `docs/howtos/spec.md` for details).
 
 ---
 
-## 8. GitHub API interaction
+## 8. API interaction
 
-### Authentication
+### GitHub authentication
 
 The `/reverse` command uses the GitHub REST API. Without authentication,
 the API allows 60 requests per hour per IP address. To increase this to
@@ -367,11 +367,31 @@ export GITHUB_TOKEN="ghp_your_token_here"
 The token does not need any special scopes for reading public repositories.
 A fine-grained token with read access to public repositories is sufficient.
 
+### GitLab authentication
+
+GitLab API calls require a personal access token. The token is resolved in
+priority order:
+
+1. `GITLAB_TOKEN` environment variable
+2. `ragent.json` configuration
+3. Encrypted credential database (configured via `/gitlab setup`)
+
+For self-hosted GitLab instances, the host is extracted from the repository
+URL or the `gitlab:host/namespace/project` format.
+
+```bash
+export GITLAB_TOKEN="glpat-your_token_here"
+```
+
 ### Rate limiting
 
 If the API rate limit is exceeded, the command will report an error. Wait
 for the rate limit window to reset (typically 1 hour) or set `GITHUB_TOKEN`
 for higher limits.
+
+When using `--depth` for recursive tree fetch, each subdirectory level adds
+additional API calls (one per subdirectory). Use a token for deeper trees to
+avoid hitting the rate limit.
 
 ### Error handling
 
@@ -381,6 +401,8 @@ for higher limits.
 | `rate limit exceeded` | Too many API requests | Wait for reset or set `GITHUB_TOKEN` |
 | `README not found` | Repository has no README | The command continues with metadata and tree only |
 | `network error` | Connection issue | Check network connectivity and retry |
+| `gitlab token missing` | No GitLab token configured | Set `GITLAB_TOKEN` env var or run `/gitlab setup` |
+| `invalid depth` | `--depth` value out of range | Use a value between 1 and 10 |
 
 ---
 
@@ -418,7 +440,40 @@ ragent reverse thrivethrough/omitme --tech rust 2>&1 | tee omitme-rust.md
 
 ---
 
-## 10. End-to-end examples
+## 10. The `--depth` flag
+
+By default, `/reverse` fetches only the root-level file tree (depth 1). The
+`--depth <N>` flag controls how many levels of subdirectories are expanded.
+
+| Depth | What you get |
+|-------|-------------|
+| 1 (default) | Root-level files and directories only |
+| 2 | Root + one level of subdirectories |
+| 3 | Root + two levels of subdirectories |
+| N (max 10) | Root + N-1 levels of subdirectories |
+
+Deeper trees give the LLM more context about the project's module structure,
+which improves the quality of the generated creation prompt — especially for
+large repositories with deep nesting. However, each additional level requires
+more API calls (one per subdirectory), so use a token for higher rate limits
+when fetching deep trees.
+
+### Examples
+
+```text
+# Default depth (root only)
+/reverse thrivethrough/omitme
+
+# Two levels deep
+/reverse thrivethrough/omitme --depth 2
+
+# Maximum depth for a large project
+/reverse torvalds/linux --depth 5 --tech rust
+```
+
+---
+
+## 11. End-to-end examples
 
 ### Example 1: Understand an unfamiliar project
 
@@ -510,6 +565,19 @@ between the two projects.
 
 ### Example 8: Generate a prompt for a specific use case
 
+### Example 9: Reverse-engineer a GitLab repository
+
+```text
+# Self-hosted GitLab with nested namespace
+/reverse gitlab:gitlab.example.com/group/subgroup/project --depth 3
+
+# GitLab.com with spec creation
+/reverse gitlab:my-namespace/my-project --create my-project-clone
+
+# Full GitLab URL
+/reverse https://gitlab.com/my-namespace/my-project --tech python --create my-py-port
+```
+
 You want a creation prompt focused on the testing infrastructure of a
 project:
 
@@ -522,7 +590,7 @@ approach using the specified testing tools.
 
 ---
 
-## 11. Tips for good results
+## 12. Tips for good results
 
 - **Use specific tech stacks.** `--tech rust` is good, but
   `--tech "Rust with axum and SQLx"` gives the LLM more guidance and
@@ -550,7 +618,7 @@ approach using the specified testing tools.
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Likely cause | What to do |
 |---------|--------------|------------|
@@ -565,7 +633,7 @@ approach using the specified testing tools.
 
 ---
 
-## 13. Workflow integration
+## 14. Workflow integration
 
 The `/reverse` command integrates with ragent's spec management system to
 provide a complete reverse-engineering-to-implementation pipeline:

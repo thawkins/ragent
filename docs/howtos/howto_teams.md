@@ -186,6 +186,7 @@ In the Teams panel, click the `[T]` button next to a teammate to open their outp
 | `/team status` | none | Show the currently active team in this session. |
 | `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
 | `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
+| `/team open <name>` | required `name` | Re-open an existing team from disk and set it as the active team. |
 | `/team close` | none | Close the active team in this session (does not delete on disk). |
 | `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
 | `/team blueprint [name]` | optional `name` | List all installed blueprints, or show details of a specific blueprint. |
@@ -193,6 +194,7 @@ In the Teams panel, click the `[T]` button next to a teammate to open their outp
 | `/team tasks` | none | Show the task table for the active team. |
 | `/team clear` | none | Clear/remove the active team task list file. |
 | `/team cleanup` | none | Clean up the active team (requires no working teammates). |
+| `/team forcecleanup` | none | Force-clean the active team: deactivate and remove all teammates even if still active, then clear team state. Prompts for confirmation. |
 
 Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams blueprint`).
 
@@ -593,6 +595,22 @@ Fix:
 
 - Request teammate shutdown (`team_shutdown_teammate` + `team_shutdown_ack`)
 - Retry cleanup/delete after teammates are idle/stopped
+- Alternatively, use `/team forcecleanup` to forcibly deactivate and remove
+  all teammates (prompts for confirmation before proceeding)
+
+### "teammate(s) still active" with `/team forcecleanup`
+
+Cause: `/team cleanup` failed because teammates are still working, and you
+need to force them offline.
+
+Fix:
+
+```text
+/team forcecleanup
+```
+
+This will prompt for confirmation, then deactivate all active teammates and
+clear the team state. Use with caution — any in-progress work will be lost.
 
 ### "parse tasks.json: EOF while parsing"
 
@@ -627,7 +645,57 @@ Fix: Ensure you are running the latest version. Tool metadata is now merged into
 
 ---
 
-## 15) Related docs and examples
+## 15) Swarm decomposition (`/swarm`)
+
+The `/swarm` command provides fleet-style auto-decomposition. It analyses
+your prompt, breaks it into independent subtasks with dependency edges,
+creates an ephemeral team, and orchestrates parallel execution.
+
+### Swarm commands
+
+| Command | Description |
+|---|---|
+| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
+| `/swarm --agent <type> <prompt>` | Same as above, but sets a default agent type for all subtasks |
+| `/swarm status` | Show live progress of the active swarm |
+| `/swarm cancel` | Cancel the active swarm and clean up |
+| `/swarm help` | Show the swarm help message |
+
+### How it works
+
+1. The swarm analyses your prompt using the selected LLM model.
+2. It breaks the goal into independent subtasks with dependency edges.
+3. It creates an ephemeral team and spawns teammates for each subtask.
+4. Teammates work in parallel, claiming tasks as they become available
+   (respecting dependency ordering).
+5. The lead monitors progress via `/swarm status` and can cancel with
+   `/swarm cancel`.
+
+### Example
+
+```text
+/swarm Review the crates/ragent-server directory for security vulnerabilities, test coverage gaps, and performance issues. Write findings to docs/reviews/server-review.md
+```
+
+With a default agent type:
+
+```text
+/swarm --agent code-review Review the authentication module for OWASP Top 10 vulnerabilities
+```
+
+### Swarm vs. manual teams
+
+| Feature | `/team create` | `/swarm` |
+|---------|---------------|----------|
+| Task decomposition | Manual (blueprint seed tasks) | Automatic (LLM decomposes prompt) |
+| Team creation | Requires a blueprint | Ephemeral, auto-created |
+| Teammate spawning | Blueprint-driven or manual | Automatic per subtask |
+| Dependency management | Manual in task-seed.json | Automatic from decomposition |
+| Best for | Structured, repeatable reviews | Ad-hoc, goal-driven parallel work |
+
+---
+
+## 16) Related docs and examples
 
 - Team guide: `docs/teams.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
