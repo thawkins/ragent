@@ -110,7 +110,7 @@ impl Tool for GrepTool {
         );
 
         // C-002: grep must stay inside the working root even when `path` is provided.
-        super::check_path_within_root(&search_path, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&search_path, &ctx.working_dir, &ctx.canonical_cache)?;
 
         let include_glob = input["include"].as_str().map(str::to_owned);
         let exclude_glob = input["exclude"].as_str().map(str::to_owned);

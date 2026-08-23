@@ -1,10 +1,10 @@
-//! Panic hook that writes full panic logs to the `log/` directory.
+//! Panic hook that writes full panic logs to the `log/panics/` directory.
 //!
 //! When installed via [`install`], this module replaces the default Rust panic
 //! hook with one that captures the panic message, location, and a full
-//! backtrace, then writes them to a timestamped file under `log/panic-*.log`
-//! in the current working directory. The default hook output is still printed
-//! to stderr so existing behaviour is preserved.
+//! backtrace, then writes them to a timestamped file under
+//! `log/panics/panic-*.log` in the current working directory. The default hook
+//! output is still printed to stderr so existing behaviour is preserved.
 //!
 //! The backtrace is captured with [`Backtrace::force_capture`], which always
 //! produces a trace regardless of the `RUST_BACKTRACE` environment variable.
@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use chrono::Utc;
 
-/// Install the panic hook that writes full panic logs to `log/`.
+/// Install the panic hook that writes full panic logs to `log/panics/`.
 ///
 /// Should be called as early as possible in `main` so that panics during
 /// initialisation are also captured. The hook chains to the previous (default)
@@ -40,36 +40,37 @@ pub fn install() {
     }));
 }
 
-/// Build the path to the log directory (`<working_dir>/log`).
-fn log_dir() -> PathBuf {
+/// Build the path to the panics directory (`<working_dir>/log/panics`).
+fn panics_dir() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("log")
+        .join("panics")
 }
 
 /// Build a unique panic log file path from the current UTC timestamp.
-fn panic_log_path(log_dir: &PathBuf) -> PathBuf {
+fn panic_log_path(panics_dir: &PathBuf) -> PathBuf {
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S-%6f").to_string();
-    log_dir.join(format!("panic-{timestamp}.log"))
+    panics_dir.join(format!("panic-{timestamp}.log"))
 }
 
-/// Write a full panic log to the `log/` directory.
+/// Write a full panic log to the `log/panics/` directory.
 ///
 /// This is a best-effort operation: any I/O failure is silently ignored so
 /// that the panic path itself never causes a secondary failure.
 fn write_panic_log(info: &std::panic::PanicHookInfo<'_>) {
-    let log_dir = log_dir();
+    let panics_dir = panics_dir();
 
-    // Create the log directory if it doesn't exist.
-    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+    // Create the panics directory if it doesn't exist.
+    if let Err(e) = std::fs::create_dir_all(&panics_dir) {
         eprintln!(
-            "panic_hook: failed to create log directory {}: {e}",
-            log_dir.display()
+            "panic_hook: failed to create panics directory {}: {e}",
+            panics_dir.display()
         );
         return;
     }
 
-    let path = panic_log_path(&log_dir);
+    let path = panic_log_path(&panics_dir);
 
     // Capture the backtrace immediately — it is only valid on this thread
     // at this point in the unwinding process.
@@ -172,8 +173,8 @@ mod tests {
     }
 
     #[test]
-    fn test_log_dir_under_cwd() {
-        let dir = log_dir();
-        assert!(dir.ends_with("log"));
+    fn test_panics_dir_under_cwd() {
+        let dir = panics_dir();
+        assert!(dir.ends_with("panics"));
     }
 }

@@ -4,6 +4,7 @@
 //! [`ResolvedRef`] structs ready for injection into the prompt.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 
@@ -14,6 +15,27 @@ use super::parse::{FileRef, ParsedRef, parse_refs};
 // for removal (see DCREMOVALPLAN.md M2.1 / M4).
 use ragent_tools_extended::office_read;
 use ragent_tools_extended::pdf_read;
+
+/// Shared HTTP client for URL reference resolution.
+///
+/// Constructed once on first use and reused for every `@https://...` or
+/// `@http://...` reference, avoiding the cost of per-request `reqwest::Client`
+/// creation and connection-pool setup.
+static SHARED_HTTP_CLIENT: OnceLock<Result<reqwest::Client, reqwest::Error>> = OnceLock::new();
+
+/// Return a reference to the shared `reqwest::Client`.
+fn shared_http_client() -> Result<&'static reqwest::Client> {
+    let client = SHARED_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .user_agent("ragent/0.1")
+            .build()
+    });
+    client
+        .as_ref()
+        .with_context(|| "Failed to initialize shared HTTP client for URL references")
+}
 
 /// Maximum content size per resolved reference (50 KB).
 const MAX_CONTENT_SIZE: usize = 50 * 1024;
@@ -43,7 +65,7 @@ pub async fn resolve_ref(parsed: &ParsedRef, working_dir: &Path) -> Result<Resol
     match &parsed.kind {
         FileRef::File(path) => resolve_file(path, &parsed.raw, working_dir).await,
         FileRef::Directory(path) => resolve_directory(path, &parsed.raw, working_dir),
-        FileRef::Url(url) => resolve_url(url, &parsed.raw).await,
+        FileRef::Url(url) => resolve_url(shared_http_client()?, url, &parsed.raw).await,
         FileRef::Fuzzy(name) => resolve_fuzzy(name, &parsed.raw, working_dir).await,
     }
 }
@@ -122,14 +144,7 @@ fn resolve_directory(path: &Path, raw: &str, working_dir: &Path) -> Result<Resol
 }
 
 /// Resolve a URL reference by fetching its content.
-async fn resolve_url(url: &str, raw: &str) -> Result<ResolvedRef> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .user_agent("ragent/0.1")
-        .build()
-        .context("Failed to build HTTP client")?;
-
+async fn resolve_url(client: &reqwest::Client, url: &str, raw: &str) -> Result<ResolvedRef> {
     let response = client
         .get(url)
         .send()
@@ -499,6 +514,37 @@ mod tests {
         assert!(resolve_ref(&parsed, &tmp).await.is_err());
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_url_uses_shared_client() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().unwrap().port();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = socket.read(&mut buf).await;
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 11\r\n\r\nhello world";
+            socket.write_all(response.as_bytes()).await.expect("write");
+        });
+
+        let url = format!("http://127.0.0.1:{port}/");
+        let parsed = ParsedRef {
+            raw: url.clone(),
+            kind: FileRef::Url(url),
+            span: 0..10,
+        };
+
+        let tmp = std::env::temp_dir();
+        let resolved = resolve_ref(&parsed, &tmp).await.expect("resolve url");
+        assert!(resolved.content.contains("hello world"));
+        assert!(!resolved.truncated);
+
+        server.await.expect("server task");
     }
 
     #[tokio::test]

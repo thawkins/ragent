@@ -42,6 +42,7 @@ fn make_app() -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
+        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -74,7 +75,7 @@ fn make_app() -> App {
         storage,
         provider_registry,
         session_processor,
-        agent_info,
+        Arc::unwrap_or_clone(agent_info),
         true,
         std::path::PathBuf::new(),
     )
@@ -222,6 +223,8 @@ fn test_clicking_active_agents_row_opens_output_view() {
         completed_at: None,
         reported: false,
         waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
     });
     app.handle_mouse_event(mouse_down(2, 12));
     assert!(app.output_view.is_some());
@@ -278,6 +281,8 @@ fn test_clicking_agents_button_toggles_agents_window() {
         completed_at: None,
         reported: false,
         waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
     });
     app.agents_button_area = Rect::new(2, 30, 9, 3);
 

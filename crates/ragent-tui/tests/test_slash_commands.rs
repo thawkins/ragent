@@ -44,6 +44,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
+        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -77,7 +78,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         storage,
         provider_registry,
         session_processor,
-        agent_info,
+        Arc::unwrap_or_clone(agent_info),
         false,
         std::path::PathBuf::new(),
     )
@@ -565,6 +566,225 @@ fn test_slash_log_toggles_panel() {
     app.execute_slash_command("/log");
     assert!(!app.show_log, "log should be hidden after second toggle");
     assert_eq!(app.status, "log panel hidden");
+}
+
+#[test]
+fn test_slash_log_clear_subagents() {
+    let _guard = enter_with_cwd();
+    let subagents_dir = std::env::current_dir()
+        .unwrap()
+        .join("log")
+        .join("subagents");
+
+    // Seed log/subagents with a few files.
+    std::fs::create_dir_all(&subagents_dir).expect("create subagents dir");
+    std::fs::write(subagents_dir.join("explore-aaa.md"), "report a").expect("write a");
+    std::fs::write(subagents_dir.join("explore-bbb.md"), "report b").expect("write b");
+    assert_eq!(std::fs::read_dir(&subagents_dir).unwrap().count(), 2);
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear subagents");
+
+    assert_eq!(app.status, "log: subagents cleared");
+    // Directory is kept but emptied.
+    assert!(subagents_dir.exists(), "subagents dir should still exist");
+    assert_eq!(
+        std::fs::read_dir(&subagents_dir).unwrap().count(),
+        0,
+        "subagents dir should be empty"
+    );
+}
+
+#[test]
+fn test_slash_log_clear_panics() {
+    let _guard = enter_with_cwd();
+    let panics_dir = std::env::current_dir().unwrap().join("log").join("panics");
+
+    // Seed log/panics with a few files.
+    std::fs::create_dir_all(&panics_dir).expect("create panics dir");
+    std::fs::write(panics_dir.join("panic-1.log"), "panic a").expect("write a");
+    std::fs::write(panics_dir.join("panic-2.log"), "panic b").expect("write b");
+    std::fs::write(panics_dir.join("panic-3.log"), "panic c").expect("write c");
+    assert_eq!(std::fs::read_dir(&panics_dir).unwrap().count(), 3);
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear panics");
+
+    assert_eq!(app.status, "log: panics cleared");
+    assert!(panics_dir.exists(), "panics dir should still exist");
+    assert_eq!(
+        std::fs::read_dir(&panics_dir).unwrap().count(),
+        0,
+        "panics dir should be empty"
+    );
+}
+
+#[test]
+fn test_slash_log_clear_missing_dir_reports_zero() {
+    let _guard = enter_with_cwd();
+
+    // No log/subagents directory exists yet.
+    assert!(
+        !std::env::current_dir()
+            .unwrap()
+            .join("log")
+            .join("subagents")
+            .exists()
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear subagents");
+    assert_eq!(app.status, "log: subagents cleared");
+}
+
+#[test]
+fn test_slash_log_clear_no_target_shows_usage() {
+    let mut app = make_app();
+    app.execute_slash_command("/log clear");
+    assert_eq!(app.status, "log: clear usage");
+}
+
+#[test]
+fn test_slash_log_clear_research() {
+    let _guard = enter_with_cwd();
+    let research_dir = std::env::current_dir()
+        .unwrap()
+        .join("logs")
+        .join("research");
+
+    // Seed logs/research with a few files.
+    std::fs::create_dir_all(&research_dir).expect("create research dir");
+    std::fs::write(research_dir.join("research-aaa-web.jsonl"), "line a\n").expect("write a");
+    std::fs::write(research_dir.join("research-bbb-web.jsonl"), "line b\n").expect("write b");
+    assert_eq!(std::fs::read_dir(&research_dir).unwrap().count(), 2);
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear research");
+
+    assert_eq!(app.status, "log: research cleared");
+    assert!(research_dir.exists(), "research dir should still exist");
+    assert_eq!(
+        std::fs::read_dir(&research_dir).unwrap().count(),
+        0,
+        "research dir should be empty"
+    );
+}
+
+#[test]
+fn test_slash_log_clear_research_missing_dir_reports_zero() {
+    let _guard = enter_with_cwd();
+
+    // No logs/research directory exists yet.
+    assert!(
+        !std::env::current_dir()
+            .unwrap()
+            .join("logs")
+            .join("research")
+            .exists()
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear research");
+    assert_eq!(app.status, "log: research cleared");
+}
+
+#[test]
+fn test_slash_log_help_shows_help_text() {
+    let mut app = make_app();
+    app.execute_slash_command("/log help");
+    assert_eq!(app.status, "log: help");
+}
+
+#[test]
+fn test_slash_log_clear_editlog() {
+    let _guard = enter_with_cwd();
+    let editlog_dir = std::env::current_dir().unwrap().join("log").join("editlog");
+
+    // Seed log/editlog with a few files.
+    std::fs::create_dir_all(&editlog_dir).expect("create editlog dir");
+    std::fs::write(editlog_dir.join("edits-aaa.jsonl"), "line a\n").expect("write a");
+    std::fs::write(editlog_dir.join("edits-bbb.jsonl"), "line b\n").expect("write b");
+    assert_eq!(std::fs::read_dir(&editlog_dir).unwrap().count(), 2);
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear editlog");
+
+    assert_eq!(app.status, "log: editlog cleared");
+    assert!(editlog_dir.exists(), "editlog dir should still exist");
+    assert_eq!(
+        std::fs::read_dir(&editlog_dir).unwrap().count(),
+        0,
+        "editlog dir should be empty"
+    );
+}
+
+#[test]
+fn test_slash_log_clear_editlog_missing_dir_reports_zero() {
+    let _guard = enter_with_cwd();
+
+    // No log/editlog directory exists yet.
+    assert!(
+        !std::env::current_dir()
+            .unwrap()
+            .join("log")
+            .join("editlog")
+            .exists()
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear editlog");
+    assert_eq!(app.status, "log: editlog cleared");
+}
+
+#[test]
+fn test_slash_log_clear_logwindow() {
+    let _guard = enter_with_cwd();
+    let logwindow_dir = std::env::current_dir()
+        .unwrap()
+        .join("log")
+        .join("logwindow");
+
+    // Seed log/logwindow with a few files.
+    std::fs::create_dir_all(&logwindow_dir).expect("create logwindow dir");
+    std::fs::write(logwindow_dir.join("logwindow-aaa.log"), "line a\n").expect("write a");
+    std::fs::write(logwindow_dir.join("logwindow-bbb.log"), "line b\n").expect("write b");
+    assert_eq!(std::fs::read_dir(&logwindow_dir).unwrap().count(), 2);
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear logwindow");
+
+    assert_eq!(app.status, "log: logwindow cleared");
+    assert!(logwindow_dir.exists(), "logwindow dir should still exist");
+    assert_eq!(
+        std::fs::read_dir(&logwindow_dir).unwrap().count(),
+        0,
+        "logwindow dir should be empty"
+    );
+}
+
+#[test]
+fn test_slash_log_clear_logwindow_missing_dir_reports_zero() {
+    let _guard = enter_with_cwd();
+
+    // No log/logwindow directory exists yet.
+    assert!(
+        !std::env::current_dir()
+            .unwrap()
+            .join("log")
+            .join("logwindow")
+            .exists()
+    );
+
+    let mut app = make_app();
+    app.execute_slash_command("/log clear logwindow");
+    assert_eq!(app.status, "log: logwindow cleared");
+}
+
+#[test]
+fn test_slash_log_unknown_sub_shows_usage() {
+    let mut app = make_app();
+    app.execute_slash_command("/log frobnicate");
+    assert_eq!(app.status, "log: usage");
 }
 
 // ── /profile ────────────────────────────────────────────────────────

@@ -29,6 +29,7 @@ fn base_ctx() -> ToolContext {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 

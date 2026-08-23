@@ -26,6 +26,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
         config: None,
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 
@@ -595,6 +596,7 @@ async fn test_initiative_missing_storage_graceful() {
         config: None,
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     };
     let err = InitiativeTool
         .execute(json!({"action": "list"}), &ctx)

@@ -258,11 +258,26 @@ Evaluate whether the goal has been satisfied. Be conservative - only mark as sat
 ///
 /// This function extracts the most relevant information from the conversation
 /// history to help the evaluator understand what has been accomplished.
+///
+/// # Performance (FR-012)
+///
+/// The context string is built in a **single pass**:
+/// - The output buffer is pre-sized to `max_chars` (capped at 8 KiB) to
+///   avoid repeated reallocations.
+/// - Text parts are written directly into the buffer with `push_str`,
+///   avoiding the intermediate `Vec<&str>` + `join` that the previous
+///   implementation allocated for every message.
+/// - The `"[role] text\n"` framing is written with individual `push`
+///   calls instead of `format!`, eliminating a per-message `String`
+///   allocation.
 pub fn build_evaluation_context(messages: &[Message], max_chars: usize) -> String {
-    let mut context = String::new();
-    let mut char_count = 0;
+    // FR-012: pre-size the buffer to avoid repeated reallocations.
+    let cap = max_chars.min(8 * 1024);
+    let mut context = String::with_capacity(cap);
+    let mut char_count = 0usize;
 
-    // Start from the most recent messages and work backwards
+    // Start from the most recent messages and work backwards so the
+    // evaluator sees the latest context first.
     for msg in messages.iter().rev() {
         if char_count >= max_chars {
             break;
@@ -274,25 +289,56 @@ pub fn build_evaluation_context(messages: &[Message], max_chars: usize) -> Strin
             Role::Compaction => "System",
         };
 
-        let text = msg
-            .parts
-            .iter()
-            .filter_map(|p| match p {
-                MessagePart::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
+        // FR-012: write text parts directly into the output buffer,
+        // avoiding an intermediate Vec and a per-message format! call.
+        let mut wrote_any = false;
 
-        if !text.is_empty() {
-            let truncated = if char_count + text.len() > max_chars {
-                &text[..(max_chars - char_count).min(text.len())]
-            } else {
-                &text
+        for part in &msg.parts {
+            let MessagePart::Text { text } = part else {
+                continue;
             };
+            if text.is_empty() {
+                continue;
+            }
 
-            context.push_str(&format!("[{}] {}\n", role_str, truncated));
-            char_count += text.len() + 20; // rough estimate
+            if !wrote_any {
+                // First text part for this message — write the role prefix.
+                context.push('[');
+                context.push_str(role_str);
+                context.push_str("] ");
+                char_count += role_str.len() + 4; // "[]" + " " + "\n"
+                wrote_any = true;
+            } else {
+                // Separator between concatenated text parts.
+                context.push(' ');
+                char_count += 1;
+            }
+
+            // Truncate to the remaining budget, ending at a char boundary.
+            let remaining = max_chars.saturating_sub(char_count);
+            if remaining == 0 {
+                break;
+            }
+            let chunk = if text.len() <= remaining {
+                text.as_str()
+            } else {
+                // Walk back to the nearest UTF-8 char boundary.
+                let mut end = remaining;
+                while end > 0 && !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &text[..end]
+            };
+            context.push_str(chunk);
+            char_count += chunk.len();
+
+            if char_count >= max_chars {
+                break;
+            }
+        }
+
+        if wrote_any {
+            context.push('\n');
         }
     }
 

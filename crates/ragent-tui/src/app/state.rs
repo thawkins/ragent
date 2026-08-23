@@ -613,7 +613,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "log",
-        description: "Toggle the log panel on/off",
+        description: "Log panel: /log [clear subagents|panics|research|editlog|help]",
     },
     SlashCommandDef {
         trigger: "profile",

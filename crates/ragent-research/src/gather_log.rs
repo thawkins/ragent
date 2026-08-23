@@ -1,14 +1,16 @@
 //! Per-gather web-URL instrumentation log.
 //!
 //! Every web-gathering pass appends one JSON object per line to
-//! `<log_dir>/research-<name>-<timestamp>-<rand>-web.jsonl`. Each search hit
-//! is first recorded with `"status": "considered"` and then, as the
-//! fetch/filter pipeline resolves it, with `"status": "captured"` or
-//! `"status": "rejected"` plus the rejection `reason`. The file also contains
-//! `gather_start`, `queries_decomposed`, and `gather_summary` marker events
-//! so a run can be reconstructed end to end. The file name matches the
-//! research directory naming (`research-<name>-<ts>-<rand>`) with a `-web`
-//! suffix.
+//! `<log_dir>/research-<name>-<timestamp>-<rand>-web.jsonl`. The caller
+//! decides `log_dir`; the agent layer passes `logs/research/` so files
+//! land at `logs/research/research-<name>-<ts>-<rand>-web.jsonl`. Each
+//! search hit is first recorded with `"status": "considered"` and then,
+//! as the fetch/filter pipeline resolves it, with `"status": "captured"`
+//! or `"status": "rejected"` plus the rejection `reason`. The file also
+//! contains `gather_start`, `queries_decomposed`, and `gather_summary`
+//! marker events so a run can be reconstructed end to end. The file name
+//! matches the research directory naming (`research-<name>-<ts>-<rand>`)
+//! with a `-web` suffix.
 //!
 //! Writing is best-effort: every record is appended and flushed immediately,
 //! so a killed run never silently loses its log entries; failures are

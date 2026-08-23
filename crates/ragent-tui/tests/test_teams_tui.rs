@@ -1238,6 +1238,8 @@ fn test_buttons_render_with_active_blue_state() {
         completed_at: None,
         reported: false,
         waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
     });
     app.show_agents_window = true;
 
@@ -1292,6 +1294,8 @@ fn test_agents_popup_renders_tidy_table_columns() {
         completed_at: None,
         reported: false,
         waiter_count: 0,
+        output_file: None,
+        report_status: ragent_agent::task::ReportStatus::default(),
     });
 
     let backend = TestBackend::new(160, 44);

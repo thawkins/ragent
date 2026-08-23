@@ -65,6 +65,7 @@ impl App {
     ) -> bool {
         let compaction_agent =
             ragent_agent::agent::resolve_agent("compaction", &Default::default())
+                .map(|a| (*a).clone())
                 .unwrap_or_else(|_| self.agent_info.clone());
 
         let mut agent = compaction_agent;

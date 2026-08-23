@@ -231,6 +231,7 @@ mod tests {
             config: None,
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         }
     }
     #[tokio::test]

@@ -4,6 +4,7 @@ use ragent_agent::agent::{AgentInfo, ModelRef, resolve_agent};
 use ragent_agent::skill::invoke::{
     SkillInvocation, parse_model_ref, resolve_forked_skill_agent, resolve_inline_skill_agent,
 };
+use std::sync::Arc;
 
 #[test]
 fn test_parse_model_ref_accepts_slash_and_colon_formats() {
@@ -18,11 +19,13 @@ fn test_parse_model_ref_accepts_slash_and_colon_formats() {
 
 #[test]
 fn test_resolve_inline_skill_agent_inherits_active_model_for_unpinned_agent() {
-    let base_agent = resolve_agent("general", &Default::default()).expect("resolve general agent");
+    let base_agent: Arc<AgentInfo> =
+        resolve_agent("general", &Default::default()).expect("resolve general agent");
 
     let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None);
     let model = resolved
         .model
+        .as_ref()
         .expect("resolved inline agent should have a model");
 
     assert_eq!(model.provider_id, "copilot");
@@ -31,16 +34,20 @@ fn test_resolve_inline_skill_agent_inherits_active_model_for_unpinned_agent() {
 
 #[test]
 fn test_resolve_inline_skill_agent_preserves_pinned_model() {
-    let mut base_agent = AgentInfo::new("custom", "Pinned model agent");
-    base_agent.model = Some(ModelRef {
-        provider_id: "openai".to_string(),
-        model_id: "gpt-4.1".to_string(),
-    });
-    base_agent.model_pinned = true;
+    let base_agent = {
+        let mut a = AgentInfo::new("custom", "Pinned model agent");
+        a.model = Some(ModelRef {
+            provider_id: "openai".to_string(),
+            model_id: "gpt-4.1".to_string(),
+        });
+        a.model_pinned = true;
+        Arc::new(a)
+    };
 
     let resolved = resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), None);
     let model = resolved
         .model
+        .as_ref()
         .expect("pinned agent should retain its model");
 
     assert_eq!(model.provider_id, "openai");
@@ -49,12 +56,14 @@ fn test_resolve_inline_skill_agent_preserves_pinned_model() {
 
 #[test]
 fn test_resolve_inline_skill_agent_prefers_explicit_skill_model() {
-    let base_agent = resolve_agent("general", &Default::default()).expect("resolve general agent");
+    let base_agent: Arc<AgentInfo> =
+        resolve_agent("general", &Default::default()).expect("resolve general agent");
 
     let resolved =
         resolve_inline_skill_agent(&base_agent, Some("copilot/gpt-5.4"), Some("openai:gpt-4o"));
     let model = resolved
         .model
+        .as_ref()
         .expect("explicit skill model should set the inline agent model");
 
     assert_eq!(model.provider_id, "openai");
@@ -82,6 +91,7 @@ fn test_resolve_forked_skill_agent_inherits_active_model() {
     .expect("forked skill agent should resolve");
     let model = resolved
         .model
+        .as_ref()
         .expect("forked agent should inherit the active model");
 
     assert_eq!(model.provider_id, "copilot");
@@ -109,6 +119,7 @@ fn test_resolve_forked_skill_agent_prefers_explicit_skill_model() {
     .expect("forked skill agent should resolve");
     let model = resolved
         .model
+        .as_ref()
         .expect("explicit skill model should override inherited model");
 
     assert_eq!(model.provider_id, "openai");

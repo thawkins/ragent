@@ -31,6 +31,7 @@ fn ctx(dir: &Path) -> ToolContext {
         working_dir: dir.to_path_buf(),
         event_bus: Arc::new(EventBus::new(64)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 

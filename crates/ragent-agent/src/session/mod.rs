@@ -14,6 +14,23 @@ pub mod profiler;
 pub mod prompt_builders;
 pub mod stream_buffer;
 
+use crate::event::FinishReason;
+
+/// Stable, serialisable label for a [`FinishReason`]. Sub-agent completion
+/// events and the [`crate::task::TaskEntry`] struct cannot carry the raw
+/// enum because they cross a serde boundary; this helper maps to a fixed
+/// string instead.
+pub fn finish_reason_label(reason: &FinishReason) -> &'static str {
+    match reason {
+        FinishReason::Stop => "stop",
+        FinishReason::ToolUse => "tool_use",
+        FinishReason::Length => "length",
+        FinishReason::ContentFilter => "content_filter",
+        FinishReason::Cancelled => "cancelled",
+        FinishReason::Truncation => "truncation",
+    }
+}
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

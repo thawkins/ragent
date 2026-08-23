@@ -76,19 +76,32 @@ impl CompletionSink {
     }
 }
 
+/// FR-015: Consolidated in-memory state for [`BackgroundTaskService`].
+///
+/// Previously `tasks`, `sessions`, and `drained_ids` were three separate
+/// `Mutex`-protected maps. Every read-heavy path (`drain_completed`,
+/// `has_done_in_memory`, `cleanup`) had to acquire all three locks in
+/// sequence, creating a multi-lock acquisition convoy under concurrent
+/// access. Consolidating them under a single [`Mutex`] eliminates the
+/// convoy — each operation acquires exactly one lock.
+struct BgState {
+    /// In-memory command handles keyed by task id.
+    tasks: HashMap<String, BackgroundCommand>,
+    /// Session id associated with each spawned task (for drain filtering).
+    sessions: HashMap<String, String>,
+    /// Task ids that have already been surfaced via `drain_completed`, so
+    /// the in-memory done-scan does not re-surface them on the next drain.
+    drained_ids: HashSet<String>,
+}
+
 /// Shared background task manager.
 pub struct BackgroundTaskService {
     storage: Arc<Storage>,
     event_bus: Arc<EventBus>,
-    /// In-memory handles keyed by task id.
-    tasks: Mutex<HashMap<String, BackgroundCommand>>,
-    /// Session id associated with each spawned task (for drain filtering).
-    sessions: Mutex<HashMap<String, String>>,
+    /// FR-015: consolidated state behind a single lock.
+    state: Mutex<BgState>,
     /// Shared completion queue + notify, also handed to `flush_task`.
     completion_sink: Arc<CompletionSink>,
-    /// Task ids that have already been surfaced via `drain_completed`, so the
-    /// in-memory done-scan does not re-surface them on the next drain.
-    drained_ids: Mutex<HashSet<String>>,
 }
 
 impl BackgroundTaskService {
@@ -98,14 +111,16 @@ impl BackgroundTaskService {
         Self {
             storage,
             event_bus,
-            tasks: Mutex::new(HashMap::new()),
-            sessions: Mutex::new(HashMap::new()),
+            state: Mutex::new(BgState {
+                tasks: HashMap::new(),
+                sessions: HashMap::new(),
+                drained_ids: HashSet::new(),
+            }),
             completion_sink: Arc::new(CompletionSink {
                 queue: Mutex::new(VecDeque::new()),
                 notify,
                 has_pending: AtomicBool::new(false),
             }),
-            drained_ids: Mutex::new(HashSet::new()),
         }
     }
 
@@ -164,14 +179,14 @@ impl BackgroundTaskService {
         )
         .await?;
 
-        self.tasks
-            .lock()
-            .expect("background task map poisoned")
-            .insert(task_id.clone(), cmd.clone());
-        self.sessions
-            .lock()
-            .expect("background session map poisoned")
-            .insert(task_id.clone(), session_id.to_string());
+        // FR-015: single lock acquisition for both maps.
+        {
+            let mut state = self.state.lock().expect("background state poisoned");
+            state.tasks.insert(task_id.clone(), cmd.clone());
+            state
+                .sessions
+                .insert(task_id.clone(), session_id.to_string());
+        }
 
         self.event_bus.publish(Event::BackgroundTaskSpawned {
             session_id: session_id.to_string(),
@@ -217,12 +232,15 @@ impl BackgroundTaskService {
             .await?
             .with_context(|| format!("Background task not found: {task_id}"))?;
 
-        if let Some(cmd) = self
-            .tasks
+        // FR-015: single lock for the in-memory overlay.
+        let cmd_opt = self
+            .state
             .lock()
-            .expect("background task map poisoned")
+            .expect("background state poisoned")
+            .tasks
             .get(task_id)
-        {
+            .cloned();
+        if let Some(cmd) = cmd_opt {
             row.status = cmd.status();
             row.exit_code = cmd.exit_code().map(i64::from);
             let (stdout, stderr) = cmd.output();
@@ -242,12 +260,16 @@ impl BackgroundTaskService {
     /// Return the last `n` lines of output for a task.
     pub async fn tail(&self, task_id: &str, n: usize) -> Result<String> {
         let row = self.status(task_id).await?;
-        if let Some(cmd) = self
-            .tasks
-            .lock()
-            .expect("background task map poisoned")
-            .get(task_id)
-        {
+        // FR-015: single lock for the in-memory tail lookup.
+        let cmd = {
+            self.state
+                .lock()
+                .expect("background state poisoned")
+                .tasks
+                .get(task_id)
+                .cloned()
+        };
+        if let Some(cmd) = cmd {
             Ok(cmd.tail(n))
         } else {
             let combined = format!("{}{}", row.stdout, row.stderr);
@@ -260,8 +282,12 @@ impl BackgroundTaskService {
     /// Cancel a running background task.
     pub async fn cancel(&self, task_id: &str) -> Result<()> {
         let cmd = {
-            let tasks = self.tasks.lock().expect("background task map poisoned");
-            tasks.get(task_id).cloned()
+            self.state
+                .lock()
+                .expect("background state poisoned")
+                .tasks
+                .get(task_id)
+                .cloned()
         };
         let Some(cmd) = cmd else {
             bail!("Background task is not running: {task_id}");
@@ -287,8 +313,12 @@ impl BackgroundTaskService {
     /// Wait for a task to finish, up to `timeout_secs`.
     pub async fn wait(&self, task_id: &str, timeout_secs: u64) -> Result<BackgroundTaskRow> {
         let cmd = {
-            let tasks = self.tasks.lock().expect("background task map poisoned");
-            tasks.get(task_id).cloned()
+            self.state
+                .lock()
+                .expect("background state poisoned")
+                .tasks
+                .get(task_id)
+                .cloned()
         };
         if let Some(cmd) = cmd {
             cmd.wait(timeout_secs).await?;
@@ -310,23 +340,23 @@ impl BackgroundTaskService {
         })
         .await?;
 
-        // Drop in-memory handles and session mappings for finished tasks.
+        // FR-015: single lock to drop in-memory handles and session mappings
+        // for finished tasks.
         let done_ids: Vec<String> = {
-            let tasks = self.tasks.lock().expect("background task map poisoned");
-            tasks
+            let state = self.state.lock().expect("background state poisoned");
+            state
+                .tasks
                 .iter()
                 .filter(|(_, cmd)| cmd.is_done())
                 .map(|(id, _)| id.clone())
                 .collect()
         };
-        let mut tasks = self.tasks.lock().expect("background task map poisoned");
-        let mut sessions = self
-            .sessions
-            .lock()
-            .expect("background session map poisoned");
-        for id in &done_ids {
-            tasks.remove(id);
-            sessions.remove(id);
+        {
+            let mut state = self.state.lock().expect("background state poisoned");
+            for id in &done_ids {
+                state.tasks.remove(id);
+                state.sessions.remove(id);
+            }
         }
 
         Ok(count)
@@ -367,21 +397,14 @@ impl BackgroundTaskService {
         // Also scan in-memory handles for done tasks belonging to this session
         // that are not already candidates and have not already been drained.
         // This closes the flush_task race.
+        // FR-015: single lock for tasks + sessions + drained_ids (was 3 locks).
         {
-            let tasks = self.tasks.lock().expect("background task map poisoned");
-            let sessions = self
-                .sessions
-                .lock()
-                .expect("background session map poisoned");
-            let drained = self
-                .drained_ids
-                .lock()
-                .expect("background drained set poisoned");
-            for (id, cmd) in tasks.iter() {
+            let state = self.state.lock().expect("background state poisoned");
+            for (id, cmd) in state.tasks.iter() {
                 if cmd.is_done()
-                    && sessions.get(id).map(String::as_str) == Some(session_id)
+                    && state.sessions.get(id).map(String::as_str) == Some(session_id)
                     && !candidate_ids.iter().any(|c| c == id)
-                    && !drained.contains(id)
+                    && !state.drained_ids.contains(id)
                 {
                     candidate_ids.push(id.clone());
                 }
@@ -392,11 +415,8 @@ impl BackgroundTaskService {
         for id in &candidate_ids {
             // Only surface tasks belonging to this session.
             let belongs = {
-                let sessions = self
-                    .sessions
-                    .lock()
-                    .expect("background session map poisoned");
-                sessions.get(id).map(String::as_str) == Some(session_id)
+                let state = self.state.lock().expect("background state poisoned");
+                state.sessions.get(id).map(String::as_str) == Some(session_id)
             };
             if !belongs {
                 // Re-queue for the correct session's next drain.
@@ -409,8 +429,9 @@ impl BackgroundTaskService {
             }
             if let Ok(row) = self.status(id).await {
                 let tail = {
-                    let tasks = self.tasks.lock().expect("background task map poisoned");
-                    tasks
+                    let state = self.state.lock().expect("background state poisoned");
+                    state
+                        .tasks
                         .get(id)
                         .map(|cmd| cmd.tail(COMPLETION_TAIL_LINES))
                         .unwrap_or_else(|| {
@@ -429,10 +450,10 @@ impl BackgroundTaskService {
                     tail,
                 });
                 // Mark as drained so the next drain does not re-surface it.
-                self.drained_ids
-                    .lock()
-                    .expect("background drained set poisoned")
-                    .insert(row.id);
+                {
+                    let mut state = self.state.lock().expect("background state poisoned");
+                    state.drained_ids.insert(row.id);
+                }
             }
         }
 
@@ -454,43 +475,67 @@ impl BackgroundTaskService {
     /// Returns `true` if any in-memory command handle for `session_id` is done
     /// and has not already been drained.
     fn has_done_in_memory(&self, session_id: &str) -> bool {
-        let tasks = self.tasks.lock().expect("background task map poisoned");
-        let sessions = self
-            .sessions
-            .lock()
-            .expect("background session map poisoned");
-        let drained = self
-            .drained_ids
-            .lock()
-            .expect("background drained set poisoned");
-        tasks.iter().any(|(id, cmd)| {
+        // FR-015: single lock for all three maps (was 3 separate locks).
+        let state = self.state.lock().expect("background state poisoned");
+        state.tasks.iter().any(|(id, cmd)| {
             cmd.is_done()
-                && sessions.get(id).map(String::as_str) == Some(session_id)
-                && !drained.contains(id)
+                && state.sessions.get(id).map(String::as_str) == Some(session_id)
+                && !state.drained_ids.contains(id)
         })
     }
 
     /// Flush the current stdout/stderr/progress of a running task to storage.
+    ///
+    /// T-010 / FR-008: output and status are batched into a single storage
+    /// write, and periodic flushes are skipped when stdout/stderr/progress have
+    /// not changed since the last flush. The final completion flush therefore
+    /// performs exactly one storage transaction instead of the previous two.
     async fn flush_task(cmd: BackgroundCommand, storage: Arc<Storage>, sink: Arc<CompletionSink>) {
         let task_id = cmd.id().to_string();
+        let mut last_stdout = String::new();
+        let mut last_stderr = String::new();
+        let mut last_progress_json = "{}".to_string();
         while !cmd.is_done() {
             tokio::time::sleep(tokio::time::Duration::from_secs(FLUSH_INTERVAL_SECS)).await;
             let (stdout, stderr) = cmd.output();
-            let progress = cmd.progress();
-            let progress_json = progress.to_string();
+            let progress_json = cmd.progress().to_string();
+            if stdout == last_stdout && stderr == last_stderr && progress_json == last_progress_json
+            {
+                debug!(
+                    task_id = %task_id,
+                    "Skipping background-task flush: stdout/stderr/progress unchanged"
+                );
+                continue;
+            }
             let task_id_flush = task_id.clone();
+            let stdout_flush = stdout.clone();
+            let stderr_flush = stderr.clone();
+            let progress_json_flush = progress_json.clone();
             if let Err(e) = Storage::write_async(Arc::clone(&storage), move |s| {
-                s.set_background_task_output(&task_id_flush, &stdout, &stderr, &progress_json)
+                s.set_background_task_output_and_status(
+                    &task_id_flush,
+                    &stdout_flush,
+                    &stderr_flush,
+                    &progress_json_flush,
+                    "running",
+                    None,
+                    None,
+                )
             })
             .await
             {
                 warn!(task_id = %task_id, error = %e, "Failed to flush background task output");
+                continue;
             }
+            last_stdout = stdout;
+            last_stderr = stderr;
+            last_progress_json = progress_json;
         }
 
-        // Final flush once the task finishes.
+        // Final flush once the task finishes: a single batched write updates
+        // output, status, exit code, and completion timestamp together.
         let (stdout, stderr) = cmd.output();
-        let progress = cmd.progress();
+        let progress_json = cmd.progress().to_string();
         let status = cmd.status();
         let exit_code = cmd.exit_code().map(i64::from);
         let completed_at = if cmd.is_done() {
@@ -499,18 +544,12 @@ impl BackgroundTaskService {
             None
         };
         let task_id_final = task_id.clone();
-        let progress_json = progress.to_string();
         if let Err(e) = Storage::write_async(Arc::clone(&storage), move |s| {
-            s.set_background_task_output(&task_id_final, &stdout, &stderr, &progress_json)
-        })
-        .await
-        {
-            warn!(task_id = %task_id, error = %e, "Failed to flush final background task output");
-        }
-        let task_id_status = task_id.clone();
-        if let Err(e) = Storage::write_async(Arc::clone(&storage), move |s| {
-            s.update_background_task_status(
-                &task_id_status,
+            s.set_background_task_output_and_status(
+                &task_id_final,
+                &stdout,
+                &stderr,
+                &progress_json,
                 &status,
                 exit_code,
                 completed_at.as_deref(),
@@ -518,7 +557,7 @@ impl BackgroundTaskService {
         })
         .await
         {
-            warn!(task_id = %task_id, error = %e, "Failed to update final background task status");
+            warn!(task_id = %task_id, error = %e, "Failed to flush final background task output/status");
         }
 
         // T-023: record the completion so the session processor (and any

@@ -20,6 +20,7 @@ fn test_ctx(working_dir: PathBuf) -> ToolContext {
         session_id: "test-session".to_string(),
         working_dir,
         read_timestamps: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 
@@ -280,7 +281,7 @@ async fn test_apply_patch_log_success_writes_jsonl() {
     let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    let log_dir = root.join("log");
+    let log_dir = root.join("log").join("editlog");
     set_edit_log_enabled(true);
     assert!(is_edit_log_enabled());
 
@@ -322,7 +323,7 @@ async fn test_apply_patch_log_failure_writes_jsonl() {
     let _guard = APPLY_PATCH_LOG_MUTEX.lock().unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    let log_dir = root.join("log");
+    let log_dir = root.join("log").join("editlog");
     set_edit_log_enabled(true);
 
     std::fs::write(root.join("x.rs"), "fn x() {}\n").unwrap();

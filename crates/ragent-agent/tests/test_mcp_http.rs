@@ -304,3 +304,57 @@ async fn test_http_mcp_client_reconnects_after_503() {
         "hello world"
     );
 }
+
+#[tokio::test]
+async fn test_http_mcp_client_reuses_shared_reqwest_client() {
+    let shared_client = reqwest::Client::new();
+
+    let body_a = r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"echo","description":"Echoes input","inputSchema":{"type":"object"}}]}}"#;
+    let addr_a = mock_server_once(body_a.to_string()).await;
+    let client_a = HttpMcpClient::new(format!("http://{addr_a}"), HashMap::new())
+        .with_client(shared_client.clone());
+
+    let body_b = r#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"hello world"}],"isError":false}}"#;
+    let addr_b = mock_server_once(body_b.to_string()).await;
+    let client_b =
+        HttpMcpClient::new(format!("http://{addr_b}"), HashMap::new()).with_client(shared_client);
+
+    let tools = client_a.list_tools().await;
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "echo");
+
+    let result = client_b
+        .call_tool("srv", "echo", json!({}))
+        .await
+        .expect("tool call should succeed");
+    let content = result.get("content").unwrap().as_array().unwrap();
+    assert_eq!(
+        content[0].get("text").unwrap().as_str().unwrap(),
+        "hello world"
+    );
+}
+
+#[tokio::test]
+async fn test_http_mcp_client_with_custom_client_sends_headers() {
+    let body = r#"{"jsonrpc":"2.0","id":1,"result":{"tools":[]}}"#;
+    let (addr, rx) = mock_server_once_capture(body.to_string()).await;
+
+    let shared_client = reqwest::Client::builder()
+        .default_headers({
+            let mut h = reqwest::header::HeaderMap::new();
+            h.insert(
+                "x-shared-token",
+                reqwest::header::HeaderValue::from_static("shared"),
+            );
+            h
+        })
+        .build()
+        .expect("build client");
+
+    let client =
+        HttpMcpClient::new(format!("http://{addr}"), HashMap::new()).with_client(shared_client);
+    let _ = client.list_tools().await;
+
+    let request = rx.await.unwrap();
+    assert!(request.to_lowercase().contains("x-shared-token: shared"));
+}

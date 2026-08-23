@@ -390,10 +390,9 @@ fn provider_section(config: &Config, inputs: &DryRunInputs) -> ReadinessSection 
             };
         }
     };
-
     if let Some(model_str) = &inputs.model_override {
         if let Some((provider, model)) = model_str.split_once('/') {
-            agent.model = Some(agent::ModelRef {
+            Arc::make_mut(&mut agent).model = Some(agent::ModelRef {
                 provider_id: provider.to_string(),
                 model_id: model.to_string(),
             });
@@ -406,12 +405,12 @@ fn provider_section(config: &Config, inputs: &DryRunInputs) -> ReadinessSection 
         }
     }
 
-    let Some(model) = agent.model else {
+    let Some(ref model) = agent.model else {
         return ReadinessSection {
             name: "provider".to_string(),
             status: ReadinessStatus::Blocked,
             items: vec![ReadinessItem {
-                name: agent.name,
+                name: agent.name.clone(),
                 status: ReadinessStatus::Blocked,
                 message: "No provider/model could be resolved".to_string(),
             }],

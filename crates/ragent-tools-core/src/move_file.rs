@@ -55,8 +55,8 @@ impl Tool for MoveFileTool {
         let src = resolve_path(&ctx.working_dir, src_str);
         let dst = resolve_path(&ctx.working_dir, dst_str);
 
-        super::check_path_within_root(&src, &ctx.working_dir)?;
-        super::check_path_within_root(&dst, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&src, &ctx.working_dir, &ctx.canonical_cache)?;
+        super::check_path_within_root_cached(&dst, &ctx.working_dir, &ctx.canonical_cache)?;
 
         // Create destination parent directory if needed
         if let Some(parent) = dst.parent() {

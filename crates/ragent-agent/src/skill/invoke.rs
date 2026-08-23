@@ -32,25 +32,34 @@ pub fn parse_model_ref(model_str: &str) -> Option<crate::agent::ModelRef> {
 /// takes highest priority over both.
 #[must_use]
 pub fn resolve_inline_skill_agent(
-    base_agent: &crate::agent::AgentInfo,
+    base_agent: &Arc<crate::agent::AgentInfo>,
     active_model: Option<&str>,
     skill_model: Option<&str>,
-) -> crate::agent::AgentInfo {
-    let mut agent = base_agent.clone();
+) -> Arc<crate::agent::AgentInfo> {
+    let mut changed = false;
+    let mut new_model = None;
 
-    if (!agent.model_pinned || agent.model.is_none())
+    if (!base_agent.model_pinned || base_agent.model.is_none())
         && let Some(model_str) = active_model
         && let Some(model_ref) = parse_model_ref(model_str)
     {
-        agent.model = Some(model_ref);
+        new_model = Some(model_ref);
+        changed = true;
     }
 
     if let Some(model_str) = skill_model
         && let Some(model_ref) = parse_model_ref(model_str)
     {
-        agent.model = Some(model_ref);
+        new_model = Some(model_ref);
+        changed = true;
     }
 
+    if !changed {
+        return Arc::clone(base_agent);
+    }
+
+    let mut agent = Arc::clone(base_agent);
+    Arc::make_mut(&mut agent).model = new_model;
     agent
 }
 
@@ -271,22 +280,22 @@ pub async fn invoke_forked_skill(
 pub fn resolve_forked_skill_agent(
     invocation: &SkillInvocation,
     active_model: Option<&crate::agent::ModelRef>,
-) -> anyhow::Result<crate::agent::AgentInfo> {
+) -> anyhow::Result<Arc<crate::agent::AgentInfo>> {
     let agent_name = invocation.fork_agent.as_deref().unwrap_or("general");
     let config = crate::Config::default();
     let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
-    agent.mode = crate::agent::AgentMode::Subagent;
+    Arc::make_mut(&mut agent).mode = crate::agent::AgentMode::Subagent;
 
     if (!agent.model_pinned || agent.model.is_none())
         && let Some(model_ref) = active_model
     {
-        agent.model = Some(model_ref.clone());
+        Arc::make_mut(&mut agent).model = Some(model_ref.clone());
     }
 
     if let Some(model_str) = invocation.model_override.as_deref()
         && let Some(model_ref) = parse_model_ref(model_str)
     {
-        agent.model = Some(model_ref);
+        Arc::make_mut(&mut agent).model = Some(model_ref);
     }
 
     Ok(agent)

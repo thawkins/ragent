@@ -18,6 +18,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         working_dir: working_dir.to_path_buf(),
         event_bus: Arc::new(ragent_types::event::EventBus::new(64)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 
@@ -636,7 +637,7 @@ async fn test_multiedit_log_success_writes_jsonl() {
     let _guard = EDIT_LOG_MUTEX.lock().unwrap();
     clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
 
     write_file(tmp.path(), "a.rs", "alpha\nbeta\n");
@@ -681,7 +682,7 @@ async fn test_multiedit_log_failure_writes_jsonl() {
     let _guard = EDIT_LOG_MUTEX.lock().unwrap();
     clear_edit_logs(std::env::temp_dir().as_path());
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
 
     write_file(tmp.path(), "a.rs", "alpha\n");

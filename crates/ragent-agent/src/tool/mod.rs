@@ -295,6 +295,9 @@ pub struct ToolContext {
     /// have been read by this session. Used by edit tools to detect stale-file
     /// edits (editrenewal FR-003).
     pub read_timestamps: Arc<std::sync::RwLock<std::collections::HashMap<PathBuf, u64>>>,
+    /// Per-step canonical-path cache (FR-017). Avoids redundant
+    /// `canonicalize()` syscalls within a single tool dispatch step.
+    pub canonical_cache: Arc<ragent_tools_core::CanonicalPathCache>,
     /// PERF-019: cache for the most recently resolved team directory.
     ///
     /// Team tools call [`find_team_dir`] on every `execute()`, and that
@@ -522,6 +525,7 @@ impl Tool for ExtractedCoreToolAdapter {
             working_dir: ctx.working_dir.clone(),
             event_bus: tool_bus,
             read_timestamps: ctx.read_timestamps.clone(),
+            canonical_cache: ctx.canonical_cache.clone(),
         };
 
         let result = self
@@ -1203,10 +1207,12 @@ pub struct ToolRegistry {
     version: std::sync::atomic::AtomicU64,
     /// PERF-012: cached sorted [`ToolDefinition`] list. `None` means the cache
     /// is stale and must be rebuilt by [`definitions`](Self::definitions);
-    /// `Some(vec)` is reused until the next `register()` / `set_hidden()`
+    /// `Some(arc)` is reused until the next `register()` / `set_hidden()`
     /// invalidation. This converts the per-call O(n log n) sort into a
     /// one-time cost amortised across every step of the agent loop.
-    definitions_cache: RwLock<Option<Vec<ToolDefinition>>>,
+    /// T-008 (FR-014): storing the list behind `Arc` lets callers share the
+    /// definitions rather than cloning the whole `Vec` on every request.
+    definitions_cache: RwLock<Option<Arc<Vec<ToolDefinition>>>>,
 }
 
 impl ToolRegistry {
@@ -1227,6 +1233,7 @@ impl ToolRegistry {
             hidden: RwLock::new(HashSet::new()),
             version: std::sync::atomic::AtomicU64::new(0),
             definitions_cache: RwLock::new(None),
+            // T-008: `Arc` wrapper is created lazily in `definitions()`.
         }
     }
 
@@ -1322,7 +1329,11 @@ impl ToolRegistry {
         names
     }
 
-    /// Returns [`ToolDefinition`] descriptors for all registered tools, sorted by name.
+    /// Returns shared [`ToolDefinition`] descriptors for all registered tools,
+    /// sorted by name.
+    ///
+    /// The returned `Arc<Vec<ToolDefinition>>` shares the cached list with all
+    /// callers, avoiding the cost of cloning the entire `Vec` on every request.
     ///
     /// # Examples
     ///
@@ -1334,11 +1345,11 @@ impl ToolRegistry {
     /// assert!(!defs.is_empty());
     /// assert!(defs.windows(2).all(|w| w[0].name <= w[1].name));
     /// ```
-    pub fn definitions(&self) -> Vec<ToolDefinition> {
-        // PERF-012: serve the sorted-definition cache when it is valid.
+    pub fn definitions(&self) -> Arc<Vec<ToolDefinition>> {
+        // PERF-012 / T-008: serve the sorted-definition cache when it is valid.
         // The cache is invalidated (set to `None`) by `register()` and
         // `set_hidden()`, so a steady-state agent loop reuses the same
-        // sorted `Vec` across every step instead of paying an O(n log n)
+        // sorted `Arc<Vec>` across every step instead of paying an O(n log n)
         // sort on every uncached call.
         {
             let guard = self
@@ -1361,7 +1372,8 @@ impl ToolRegistry {
             })
             .collect();
         defs.sort_by(|a, b| a.name.cmp(&b.name));
-        // Populate the cache so subsequent calls skip the sort.
+        let defs = Arc::new(defs);
+        // Populate the cache so subsequent calls share the same `Arc`.
         {
             let mut guard = self
                 .definitions_cache

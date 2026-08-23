@@ -1131,6 +1131,8 @@ impl App {
                     completed_at: None,
                     reported: false,
                     waiter_count: 0,
+                    output_file: None,
+                    report_status: ragent_agent::task::ReportStatus::default(),
                 };
                 self.active_tasks.push(entry);
                 let (icon, kind) = if background {
@@ -1153,20 +1155,37 @@ impl App {
                 ref session_id,
                 ref task_id,
                 ref summary,
+                ref finish_reason,
                 success,
                 ..
             } if self.is_current_or_descendant_session(session_id) => {
                 telemetry_counters::add_agents_active(-1);
                 telemetry_counters::increment_agents_completed(1);
                 if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                    if let Some(t) = self.active_tasks.get_mut(idx) {
+                        // Propagate the finish signature so the Agents popup
+                        // shows truncation / continuation on the completed
+                        // row instead of leaving it at the spawn default.
+                        t.report_status = match finish_reason.as_str() {
+                            "continued" => ragent_agent::task::ReportStatus::Continued,
+                            "truncated" => ragent_agent::task::ReportStatus::Truncated,
+                            _ => ragent_agent::task::ReportStatus::Complete,
+                        };
+                    }
                     self.active_tasks.remove(idx);
                 }
                 let icon = if success { "✅" } else { "❌" };
+                let suffix = match finish_reason.as_str() {
+                    "continued" => " (truncated; continuation retry recovered the tail)",
+                    "truncated" => " (TRUNCATED by provider; report is incomplete)",
+                    _ => "",
+                };
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
-                        "{} Task completed ({}): {}",
+                        "{} Task completed{} ({}): {}",
                         icon,
+                        suffix,
                         &task_id[..8.min(task_id.len())],
                         summary
                     ),

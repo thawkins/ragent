@@ -77,7 +77,7 @@ impl Tool for GlobTool {
         );
 
         // C-002: glob must stay inside the working root even when `path` is provided.
-        super::check_path_within_root(&base_dir, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&base_dir, &ctx.working_dir, &ctx.canonical_cache)?;
 
         let glob = globset::GlobBuilder::new(pattern)
             .case_insensitive(false)

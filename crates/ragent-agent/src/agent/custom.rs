@@ -26,6 +26,7 @@ use crate::agent::oasf::{OasfAgentRecord, RAGENT_MODULE_TYPE, RagentAgentPayload
 use crate::agent::{AgentInfo, AgentMode, ModelRef};
 use crate::permission::{Permission, PermissionAction, PermissionRule};
 use ragent_types::ThinkingConfig;
+use std::sync::Arc;
 
 /// A successfully loaded and validated custom agent definition.
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ pub struct CustomAgentDef {
     /// Absolute path of the file this record was loaded from.
     pub source_path: PathBuf,
     /// The resolved [`AgentInfo`] ready for use by the session processor.
-    pub agent_info: AgentInfo,
+    pub agent_info: Arc<AgentInfo>,
     /// Scope: `true` = project-local, `false` = user-global.
     pub is_project_local: bool,
 }
@@ -317,7 +318,7 @@ fn parse_json_frontmatter(text: &str) -> Option<(&str, &str)> {
 pub fn record_to_agent_info(
     record: &OasfAgentRecord,
     source_path: &Path,
-) -> Result<AgentInfo, String> {
+) -> Result<Arc<AgentInfo>, String> {
     // ── Validate core fields ───────────────────────────────────────────────
     if record.name.is_empty() || record.name.contains(' ') {
         return Err("agent name must be non-empty and contain no spaces".to_string());
@@ -459,7 +460,7 @@ pub fn record_to_agent_info(
         temperature: payload.temperature,
         top_p: payload.top_p,
         model,
-        prompt: Some(payload.system_prompt.clone()),
+        prompt: Some(Arc::from(payload.system_prompt.clone())),
         permission,
         max_steps: Some(payload.max_steps.unwrap_or(1024)),
         skills: payload.skills,
@@ -470,5 +471,5 @@ pub fn record_to_agent_info(
         stall_timeout_secs: None,
     };
 
-    Ok(agent_info)
+    Ok(Arc::new(agent_info))
 }

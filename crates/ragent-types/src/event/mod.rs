@@ -25,6 +25,16 @@ pub enum FinishReason {
     ContentFilter,
     /// The user cancelled the agent loop (e.g. pressed ESC).
     Cancelled,
+    /// The provider ended the response stream without emitting an explicit
+    /// finish signal: no `Finish` event and no terminal `Error`, leaving the
+    /// message to stop mid-sentence. Some providers (observed with Ollama and
+    /// some GitHub Copilot models) silently truncate long completions this
+    /// way. For sub-agents this is fatal to the deliverable — the final
+    /// message usually gets cut off mid-thought and the task result is a
+    /// fragment. The session loop emits this when it detects a silent
+    /// end-of-stream so callers can either retry (sub-agents do) or surface
+    /// it (interactive turns show a notice instead of accepting silently).
+    Truncation,
 }
 
 /// P-15: one tool call's lifecycle summary inside a [`Event::ToolCallBatch`].
@@ -529,6 +539,11 @@ pub enum Event {
         success: bool,
         /// Wall-clock duration in milliseconds.
         duration_ms: u64,
+        /// Why the sub-agent's final message ended, as observed by the
+        /// session loop: `"stop"` (natural end), `"length"` (provider token
+        /// limit), `"truncation"` (silent end-of-stream), `"cancelled"`, or
+        /// `"error"`. Consumers can flag results that are likely incomplete.
+        finish_reason: String,
     },
     /// A sub-agent task was suspended by the user.
     SubagentSuspended {
@@ -1163,6 +1178,7 @@ impl fmt::Display for FinishReason {
             Self::Length => write!(f, "length"),
             Self::ContentFilter => write!(f, "content_filter"),
             Self::Cancelled => write!(f, "cancelled"),
+            Self::Truncation => write!(f, "truncation"),
         }
     }
 }

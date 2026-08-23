@@ -18,14 +18,14 @@
 //!       └─ SubagentComplete event published
 //! ```
 
-use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::RwLock;
 
 use crate::agent::{AgentMode, ModelRef};
 use crate::event::{Event, EventBus};
@@ -107,6 +107,39 @@ impl std::fmt::Display for TaskStatus {
     }
 }
 
+/// How a completed sub-agent run actually ended, from the perspective of
+/// the parent that collects the result. Serialised onto [`TaskEntry`] so
+/// wait/list tools can flag results that may be incomplete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportStatus {
+    /// The provider finished the reply naturally (normal case).
+    #[default]
+    Complete,
+    /// The reply was cut but the task layer successfully asked the model to
+    /// continue and recovered the remainder.
+    Continued,
+    /// The reply was cut and no continuation attempt recovered it.
+    Truncated,
+}
+
+impl ReportStatus {
+    /// Stable label for serialisation into tool outputs / event payloads.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Complete => "complete",
+            Self::Continued => "continued",
+            Self::Truncated => "truncated",
+        }
+    }
+}
+
+impl std::fmt::Display for ReportStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A tracked sub-agent task entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskEntry {
@@ -125,9 +158,15 @@ pub struct TaskEntry {
     /// Current status.
     pub status: TaskStatus,
     /// Result summary (populated on completion).
-    pub result: Option<String>,
+    ///
+    /// Stored as `Arc<str>` so that cloning a `TaskEntry` (e.g. in
+    /// `list_agents`, `drain_completed`) is a cheap pointer bump rather
+    /// than a full string copy (FR-006, FR-016).
+    pub result: Option<Arc<str>>,
     /// Error message (populated on failure).
-    pub error: Option<String>,
+    ///
+    /// Stored as `Arc<str>` for the same reason as `result`.
+    pub error: Option<Arc<str>>,
     /// When the task was created.
     pub created_at: DateTime<Utc>,
     /// When the task completed (if finished).
@@ -140,6 +179,22 @@ pub struct TaskEntry {
     /// because a waiter is already handling it.
     #[serde(default)]
     pub waiter_count: u32,
+    /// Path to the durable on-disk copy of this agent's FULL untruncated
+    /// output (`log/subagents/<id>.md` under the working directory).
+    ///
+    /// In-memory copies (`result`, `SubagentComplete::summary`) and the
+    /// `wait_agents` tool output are all subject to truncation before they
+    /// reach the parent model's context; this file is the recovery path —
+    /// a sub-agent finding can never be silently lost because it is always
+    /// readable from disk via the `read` tool.
+    #[serde(default)]
+    pub output_file: Option<PathBuf>,
+    /// Whether the final reply was delivered intact (`Complete`), was
+    /// salvaged by the truncation-continuation retry (`Continued`), or
+    /// could not be finished because the provider kept cutting it
+    /// (`Truncated`).
+    #[serde(default)]
+    pub report_status: ReportStatus,
 }
 
 /// Result of a completed sub-agent task.
@@ -153,13 +208,22 @@ pub struct TaskResult {
 
 /// Manages sub-agent task lifecycle, tracking, and background execution.
 ///
-/// Thread-safe via interior mutability (`RwLock`). Designed to be shared
+/// Thread-safe via interior mutability (`DashMap`). Designed to be shared
 /// as `Arc<AgentManager>` across the session processor and tool invocations.
 pub struct AgentManager {
     /// Active and completed tasks indexed by task ID.
-    tasks: Arc<RwLock<HashMap<String, TaskEntry>>>,
+    ///
+    /// PERF (FR-016): `DashMap` replaces `RwLock<HashMap>` to eliminate
+    /// reader-writer lock contention on read-heavy paths (`list_agents`,
+    /// `running_background_count`, `drain_completed`). Shard-based
+    /// concurrent access means readers on one task never block readers on
+    /// another.
+    tasks: Arc<DashMap<String, TaskEntry>>,
     /// Cancel flags for running tasks.
-    cancel_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    ///
+    /// PERF (FR-016): `DashMap` replaces `RwLock<HashMap>` for the same
+    /// lock-contention reason as `tasks`.
+    cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
     /// Event bus for publishing sub-agent lifecycle events.
     event_bus: Arc<EventBus>,
     /// Session processor for running sub-agent loops.
@@ -186,8 +250,8 @@ impl AgentManager {
         background_timeout_secs: u64,
     ) -> Self {
         Self {
-            tasks: Arc::new(RwLock::new(HashMap::new())),
-            cancel_flags: Arc::new(RwLock::new(HashMap::new())),
+            tasks: Arc::new(DashMap::new()),
+            cancel_flags: Arc::new(DashMap::new()),
             event_bus,
             processor,
             max_background,
@@ -242,16 +306,16 @@ impl AgentManager {
             completed_at: None,
             reported: false,
             waiter_count: 0,
+            output_file: None,
+            report_status: ReportStatus::Complete,
         };
-        self.tasks.write().await.insert(task_id.clone(), entry);
+        self.tasks.insert(task_id.clone(), entry);
         // P-11: spawn_sync tasks are not background (they block the caller),
         // so they are never drained by `drain_completed`. We do not set the
         // flag here — only `spawn_background` sets it.
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
-            .write()
-            .await
             .insert(task_id.clone(), cancel_flag.clone());
 
         // Publish start event
@@ -283,15 +347,13 @@ impl AgentManager {
             Ok(response) => {
                 let summary = truncate_str(&response, 2000);
                 {
-                    let mut tasks = self.tasks.write().await;
-                    if let Some(entry) = tasks.get_mut(&task_id) {
+                    if let Some(mut entry) = self.tasks.get_mut(&task_id) {
                         entry.status = TaskStatus::Completed;
-                        entry.result = Some(response.clone());
+                        entry.result = Some(Arc::from(response.as_str()));
                         entry.completed_at = Some(Utc::now());
                     }
                 }
-                self.cancel_flags.write().await.remove(&task_id);
-
+                self.cancel_flags.remove(&task_id);
                 self.event_bus.publish(Event::SubagentComplete {
                     session_id: parent_session_id.to_string(),
                     task_id: task_id.clone(),
@@ -299,23 +361,22 @@ impl AgentManager {
                     summary,
                     success: true,
                     duration_ms,
+                    finish_reason: "stop".to_string(),
                 });
 
-                let entry = self.tasks.read().await.get(&task_id).cloned().unwrap();
+                let entry = self.tasks.get(&task_id).map(|r| r.value().clone()).unwrap();
                 Ok(TaskResult { entry, response })
             }
             Err(e) => {
                 let error_msg = e.to_string();
                 {
-                    let mut tasks = self.tasks.write().await;
-                    if let Some(entry) = tasks.get_mut(&task_id) {
+                    if let Some(mut entry) = self.tasks.get_mut(&task_id) {
                         entry.status = TaskStatus::Failed;
-                        entry.error = Some(error_msg.clone());
+                        entry.error = Some(Arc::from(error_msg.as_str()));
                         entry.completed_at = Some(Utc::now());
                     }
                 }
-                self.cancel_flags.write().await.remove(&task_id);
-
+                self.cancel_flags.remove(&task_id);
                 self.event_bus.publish(Event::SubagentComplete {
                     session_id: parent_session_id.to_string(),
                     task_id: task_id.clone(),
@@ -323,6 +384,7 @@ impl AgentManager {
                     summary: format!("Error: {error_msg}"),
                     success: false,
                     duration_ms,
+                    finish_reason: "error".to_string(),
                 });
 
                 Err(e)
@@ -347,10 +409,8 @@ impl AgentManager {
         // Check concurrency limit
         let running_count = self
             .tasks
-            .read()
-            .await
-            .values()
-            .filter(|t| t.status == TaskStatus::Running && t.background)
+            .iter()
+            .filter(|r| r.status == TaskStatus::Running && r.background)
             .count();
 
         if running_count >= self.max_background {
@@ -395,19 +455,16 @@ impl AgentManager {
             completed_at: None,
             reported: false,
             waiter_count: 0,
+            output_file: None,
+            report_status: ReportStatus::Complete,
         };
-        self.tasks
-            .write()
-            .await
-            .insert(task_id.clone(), entry.clone());
+        self.tasks.insert(task_id.clone(), entry.clone());
         // P-11: mark that there is at least one pending background task so
         // the agent loop's `drain_completed` call is not skipped.
         self.has_pending_background.store(true, Ordering::Relaxed);
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
-            .write()
-            .await
             .insert(task_id.clone(), cancel_flag.clone());
 
         // Publish start event
@@ -444,18 +501,17 @@ impl AgentManager {
                 &working_dir_buf,
                 &processor.provider_registry,
             ) {
-                Ok(a) => a,
+                Ok(a) => Arc::unwrap_or_clone(a),
                 Err(e) => {
                     let error_msg = e.to_string();
                     {
-                        let mut t = tasks.write().await;
-                        if let Some(entry) = t.get_mut(&tid) {
+                        if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Failed;
-                            entry.error = Some(error_msg.clone());
+                            entry.error = Some(Arc::from(error_msg.as_str()));
                             entry.completed_at = Some(Utc::now());
                         }
                     }
-                    cancel_flags.write().await.remove(&tid);
+                    cancel_flags.remove(&tid);
                     event_bus.publish(Event::SubagentComplete {
                         session_id: parent_sid,
                         task_id: tid,
@@ -463,6 +519,7 @@ impl AgentManager {
                         summary: format!("Error: {error_msg}"),
                         success: false,
                         duration_ms: start.elapsed().as_millis() as u64,
+                        finish_reason: "error".to_string(),
                     });
                     return;
                 }
@@ -526,14 +583,13 @@ impl AgentManager {
                     let response = response_msg.text_content();
                     let summary = truncate_str(&response, 2000);
                     {
-                        let mut t = tasks.write().await;
-                        if let Some(entry) = t.get_mut(&tid) {
+                        if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
-                            entry.result = Some(response.clone());
+                            entry.result = Some(Arc::from(response.as_str()));
                             entry.completed_at = Some(Utc::now());
                         }
                     }
-                    cancel_flags.write().await.remove(&tid);
+                    cancel_flags.remove(&tid);
                     event_bus.publish(Event::SubagentComplete {
                         session_id: parent_sid,
                         task_id: tid,
@@ -541,6 +597,7 @@ impl AgentManager {
                         summary,
                         success: true,
                         duration_ms,
+                        finish_reason: "stop".to_string(),
                     });
                 }
                 Err(e) => {
@@ -552,18 +609,17 @@ impl AgentManager {
                     let is_cancelled = is_cancel_error(&e);
                     let error_msg = e.to_string();
                     {
-                        let mut t = tasks.write().await;
-                        if let Some(entry) = t.get_mut(&tid) {
+                        if let Some(mut entry) = tasks.get_mut(&tid) {
                             if is_cancelled {
                                 entry.status = TaskStatus::Cancelled;
                             } else {
                                 entry.status = TaskStatus::Failed;
-                                entry.error = Some(error_msg.clone());
+                                entry.error = Some(Arc::from(error_msg.as_str()));
                             }
                             entry.completed_at = Some(Utc::now());
                         }
                     }
-                    cancel_flags.write().await.remove(&tid);
+                    cancel_flags.remove(&tid);
 
                     if is_cancelled {
                         event_bus.publish(Event::SubagentCancelled {
@@ -578,6 +634,7 @@ impl AgentManager {
                             summary: format!("Error: {error_msg}"),
                             success: false,
                             duration_ms,
+                            finish_reason: "error".to_string(),
                         });
                     }
                 }
@@ -589,8 +646,8 @@ impl AgentManager {
 
     /// Cancels a running task by setting its cancel flag.
     pub async fn cancel_agent(&self, task_id: &str) -> anyhow::Result<()> {
-        let flags = self.cancel_flags.read().await;
-        if let Some(flag) = flags.get(task_id) {
+        // PERF (FR-016): DashMap — get returns a short-lived shard guard.
+        if let Some(flag) = self.cancel_flags.get(task_id) {
             flag.store(true, Ordering::Relaxed);
             tracing::info!(task_id, "Cancel requested for sub-agent task");
             Ok(())
@@ -640,8 +697,9 @@ impl AgentManager {
     /// sufficient; the 10-second force-kill escalation path remains for
     /// tasks that don't observe the flag in time.
     pub async fn kill_task(&self, task_id: &str) -> anyhow::Result<()> {
-        let mut tasks = self.tasks.write().await;
-        let entry = tasks
+        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        let mut entry = self
+            .tasks
             .get_mut(task_id)
             .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
         if matches!(
@@ -653,15 +711,12 @@ impl AgentManager {
         entry.status = TaskStatus::Terminating;
         let parent = entry.parent_session_id.clone();
         let child = entry.child_session_id.clone();
-        drop(tasks);
+        drop(entry);
 
-        // M7-T2: Use a blocking write() so the cancel signal cannot be
-        // lost due to lock contention. The previous try_write() could
-        // silently fail if another task held the write lock, leaving the
-        // task running until the 10s force-kill.
+        // PERF (FR-016): DashMap — no async write guard needed; the cancel
+        // flag is set atomically regardless of shard contention.
         {
-            let flags = self.cancel_flags.write().await;
-            if let Some(cf) = flags.get(task_id) {
+            if let Some(cf) = self.cancel_flags.get(task_id) {
                 cf.store(true, Ordering::Relaxed);
             }
         }
@@ -680,15 +735,15 @@ impl AgentManager {
         let tid = task_id.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-            let mut t = tasks2.write().await;
-            if let Some(entry) = t.get_mut(&tid) {
+            // PERF (FR-016): DashMap — get_mut returns a short-lived guard.
+            if let Some(mut entry) = tasks2.get_mut(&tid) {
                 if entry.status == TaskStatus::Terminating {
                     entry.status = TaskStatus::Failed;
-                    entry.error = Some("Force-killed after timeout".to_string());
+                    entry.error = Some(Arc::from("Force-killed after timeout"));
                     entry.completed_at = Some(Utc::now());
                 }
             }
-            flags2.write().await.remove(&tid);
+            flags2.remove(&tid);
             eb2.publish(Event::SubagentKilled {
                 session_id: parent,
                 task_id: tid,
@@ -701,41 +756,41 @@ impl AgentManager {
 
     /// Returns a snapshot of a specific task.
     pub async fn get_task(&self, task_id: &str) -> Option<TaskEntry> {
-        self.tasks.read().await.get(task_id).cloned()
+        self.tasks.get(task_id).map(|r| r.value().clone())
     }
 
     /// Returns all tasks for a given parent session.
     pub async fn list_agents(&self, parent_session_id: &str) -> Vec<TaskEntry> {
         self.tasks
-            .read()
-            .await
-            .values()
-            .filter(|t| t.parent_session_id == parent_session_id)
-            .cloned()
+            .iter()
+            .filter(|r| r.parent_session_id == parent_session_id)
+            .map(|r| r.value().clone())
             .collect()
     }
 
     /// Returns the count of currently running background tasks.
     pub async fn running_background_count(&self) -> usize {
         self.tasks
-            .read()
-            .await
-            .values()
-            .filter(|t| t.status == TaskStatus::Running && t.background)
+            .iter()
+            .filter(|r| r.status == TaskStatus::Running && r.background)
             .count()
     }
 
     /// Cancels all running tasks for a given parent session.
     pub async fn cancel_all(&self, parent_session_id: &str) {
-        let flags = self.cancel_flags.read().await;
-        let tasks = self.tasks.read().await;
-        for (tid, entry) in tasks.iter() {
+        // PERF (FR-016): DashMap — iterate tasks; for each running task,
+        // look up its cancel flag by task ID. No global read lock held
+        // across both maps.
+        for entry in self.tasks.iter() {
             if entry.parent_session_id == parent_session_id
                 && entry.status == TaskStatus::Running
-                && let Some(flag) = flags.get(tid)
+                && let Some(flag) = self.cancel_flags.get(entry.key())
             {
                 flag.store(true, Ordering::Relaxed);
-                tracing::info!(task_id = tid, "Cancelling sub-agent task (session cleanup)");
+                tracing::info!(
+                    task_id = entry.key(),
+                    "Cancelling sub-agent task (session cleanup)"
+                );
             }
         }
     }
@@ -755,9 +810,11 @@ impl AgentManager {
         if !self.has_pending_background.load(Ordering::Relaxed) {
             return Vec::new();
         }
-        let mut tasks = self.tasks.write().await;
+        // PERF (FR-016): DashMap — iter_mut yields short-lived RefMut
+        // guards one shard at a time. No global write lock held across
+        // the entire scan.
         let mut completed = Vec::new();
-        for entry in tasks.values_mut() {
+        for mut entry in self.tasks.iter_mut() {
             if entry.parent_session_id == parent_session_id
                 && entry.background
                 && !entry.reported
@@ -770,7 +827,7 @@ impl AgentManager {
         }
         // P-11: clear the flag when no unreported background tasks remain
         // for this parent, so subsequent loop steps skip the lock+scan.
-        let still_pending = tasks.values().any(|e| {
+        let still_pending = self.tasks.iter().any(|e| {
             e.parent_session_id == parent_session_id
                 && e.background
                 && !e.reported
@@ -805,8 +862,8 @@ impl AgentManager {
     /// was still waiting.
     #[must_use]
     pub async fn increment_waiter(&self, task_id: &str) -> bool {
-        let mut tasks = self.tasks.write().await;
-        if let Some(entry) = tasks.get_mut(task_id) {
+        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        if let Some(mut entry) = self.tasks.get_mut(task_id) {
             if entry.status == TaskStatus::Running {
                 entry.waiter_count = entry.waiter_count.saturating_add(1);
                 tracing::debug!(
@@ -837,8 +894,8 @@ impl AgentManager {
     /// was still waiting. Now, `decrement_waiter` is a no-op if the task
     /// doesn't exist or if `waiter_count == 0`.
     pub async fn decrement_waiter(&self, task_id: &str) {
-        let mut tasks = self.tasks.write().await;
-        if let Some(entry) = tasks.get_mut(task_id) {
+        // PERF (FR-016): DashMap — get_mut returns a short-lived shard guard.
+        if let Some(mut entry) = self.tasks.get_mut(task_id) {
             if entry.waiter_count > 0 {
                 entry.waiter_count = entry.waiter_count.saturating_sub(1);
                 tracing::debug!(
@@ -867,12 +924,13 @@ impl AgentManager {
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String> {
         let config = self.processor.load_config_cached();
-        let mut agent = crate::agent::resolve_agent_with_customs_and_model(
+        let agent = crate::agent::resolve_agent_with_customs_and_model(
             agent_name,
             &config,
             working_dir,
             &self.processor.provider_registry,
         )?;
+        let mut agent = Arc::unwrap_or_clone(agent);
         agent.mode = AgentMode::Subagent;
 
         // Apply model override
@@ -918,6 +976,13 @@ impl AgentManager {
             .await?;
 
         Ok(response_msg.text_content())
+    }
+
+    /// Test-only helper: insert an already-completed task entry directly into
+    /// the task map without spawning a real sub-agent.
+    #[doc(hidden)]
+    pub async fn seed_completed_for_test(&self, entry: TaskEntry) {
+        self.tasks.insert(entry.id.clone(), entry);
     }
 }
 
@@ -1022,6 +1087,8 @@ mod tests {
             completed_at: None,
             reported: false,
             waiter_count: 0,
+            output_file: None,
+            report_status: ReportStatus::Complete,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("\"explore\""));

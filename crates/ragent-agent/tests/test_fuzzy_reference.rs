@@ -112,3 +112,58 @@ fn test_score_ordering() {
     let results = fuzzy_match("main.rs", &candidates);
     assert_eq!(results[0].path, PathBuf::from("src/main.rs"));
 }
+
+#[test]
+fn test_collect_project_files_cache_shares_full_list() {
+    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_cache_share");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("src")).unwrap();
+    std::fs::write(tmp.join("Cargo.toml"), "[package]").unwrap();
+    std::fs::write(tmp.join("src/main.rs"), "").unwrap();
+    std::fs::write(tmp.join("src/lib.rs"), "").unwrap();
+
+    // First call with a small max should still cache the full tree.
+    let small = collect_project_files(&tmp, 1);
+    assert_eq!(small.len(), 1);
+
+    // Second call with a larger max should see the full cached tree.
+    let full = collect_project_files(&tmp, 100);
+    assert!(full.len() > 1);
+    let names: Vec<_> = full
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    assert!(names.iter().any(|n| n.contains("src/main.rs")));
+    assert!(names.iter().any(|n| n == "Cargo.toml"));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn test_collect_project_files_cache_invalidates_on_mtime_change() {
+    let tmp = std::env::temp_dir().join("ragent_test_fuzzy_cache_mtime");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("first.rs"), "").unwrap();
+
+    let first = collect_project_files(&tmp, 100);
+    assert!(
+        first
+            .iter()
+            .any(|p| p.to_string_lossy().contains("first.rs"))
+    );
+
+    // Adding a file updates the directory mtime on most filesystems, which
+    // should invalidate the cached list on the next call.
+    std::fs::write(tmp.join("second.rs"), "").unwrap();
+
+    let second = collect_project_files(&tmp, 100);
+    assert!(
+        second
+            .iter()
+            .any(|p| p.to_string_lossy().contains("second.rs")),
+        "cache should be invalidated after directory mtime change"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}

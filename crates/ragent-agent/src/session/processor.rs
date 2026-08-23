@@ -56,6 +56,18 @@ pub use crate::session::prompt_builders::build_detailed_tool_reference_section;
 /// aborts it and terminates the agent run (1000 seconds).
 const TOOL_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(1000); // ≈ 16m 40s
 
+/// Nudge injected when a sub-agent's loop terminates with a short text-only
+/// response after prior tool-use steps. The model often produces narration
+/// ("Now let me check …") as a text-only message without a tool call, causing
+/// the loop to treat it as the final answer — even though no findings report
+/// was ever produced. This nudge asks the model to emit its complete findings
+/// immediately so the deliverable is not lost.
+const SUBAGENT_SUMMARY_NUDGE: &str = "System note: you stopped calling tools \
+     and produced a short narrative message instead of your findings report. \
+     Do NOT call any more tools. Produce your complete written findings report \
+     NOW — all issues, ranked by impact, with file, line numbers, and \
+     concrete fixes. This is the deliverable.";
+
 /// Error type for a spawned tool-execution task in the agent loop.
 ///
 /// Distinguishes a tokio join failure (panic or external abort) from a
@@ -134,6 +146,13 @@ pub struct SessionProcessor {
     /// step. Invalidated together with [`cached_tool_definitions`] by
     /// [`invalidate_tool_cache`].
     pub cached_tool_definition_bytes: parking_lot::RwLock<Option<u64>>,
+    /// Hand-off slot for the finish reason observed by the agent loop on its
+    /// last assistant message: `process_user_message` records it at finalise
+    /// time (keyed by session id) and the task layer (`AgentManager`) reads +
+    /// removes it right after `process_message` returns. This is how the
+    /// "silent truncation" signal reaches a sub-agent's parent without
+    /// changing the `process_message` return type.
+    pub last_message_finish_reason: tokio::sync::RwLock<std::collections::HashMap<String, String>>,
     /// H2: cache of warm LLM clients keyed by `provider/model`. Providers
     /// rebuild their `reqwest::Client` (and thus their connection pool / TLS /
     /// keep-alive state) inside `create_client`, which `prepare_client` used
@@ -288,7 +307,7 @@ impl SessionProcessor {
                 return defs.clone();
             }
         }
-        let defs = Arc::new(self.tool_registry.definitions());
+        let defs = self.tool_registry.definitions();
         // PERF-003: also cache the tool-name list used by the `ToolsSent`
         // event so we don't allocate ~111 Strings on every loop step.
         let names: Arc<[String]> = defs.iter().map(|t| t.name.clone()).collect();
@@ -470,6 +489,26 @@ impl SessionProcessor {
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
         let user_msg = Message::user_text(session_id, user_text);
+        self.process_user_message(session_id, user_msg, agent, cancel_flag)
+            .await
+    }
+
+    /// Process a message whose `MessagePart::Text` content should be persisted
+    /// as the user turn, but whose user-side history position should NOT be
+    /// duplicated into the visible transcript. Used by the truncation
+    /// continuation retry: the appended "keep going" prompt belongs in the
+    /// LLM history but not in user-visible session listings.
+    pub async fn process_internal_message(
+        &self,
+        session_id: &str,
+        user_text: &str,
+        agent: &AgentInfo,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<Message> {
+        let mut user_msg = Message::user_text(session_id, user_text);
+        user_msg.id = format!("{}-internal", user_msg.id);
+        // Marking via the message id keeps this transparent to storage — no
+        // schema changes, and the history loader can skip these on display.
         self.process_user_message(session_id, user_msg, agent, cancel_flag)
             .await
     }
@@ -679,12 +718,20 @@ impl SessionProcessor {
         // Set when a tool call stalls past `TOOL_WATCHDOG_TIMEOUT`; the run is
         // terminated after the tool phase.
         let mut watchdog_timed_out = false;
+        // Set to true after injecting the sub-agent summary nudge so we only
+        // nudge once per run. See [`SUBAGENT_SUMMARY_NUDGE`].
+        let mut subagent_summary_nudged = false;
         let mut last_interim_hash: Option<u64> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compressed_this_turn = compressed_this_turn;
         let mut compaction_attempted_this_turn = false;
         let mut last_reported_input_tokens = last_reported_input_tokens;
+        // Finish reason observed by the inner loop for the most recent
+        // assistant message this turn. Propagated into the
+        // `last_message_finish_reason` hand-off slot at finalise time so the
+        // task layer can flag truncated sub-agent reports.
+        let mut last_finish_reason: Option<FinishReason> = None;
         // P-17: reuse the per-step ContentPart buffers across loop iterations
         // to avoid reallocating two `Vec<ContentPart>`s on every step. They
         // are emptied via `std::mem::take` when pushed into `chat_messages`,
@@ -905,6 +952,7 @@ impl SessionProcessor {
                 compressed_this_turn,
                 compaction_attempted_this_turn,
                 last_reported_input_tokens,
+                last_finish_reason: last_finish_reason.clone(),
             };
             let llm_result = self
                 .call_llm_step(
@@ -924,6 +972,9 @@ impl SessionProcessor {
             compressed_this_turn = loop_state.compressed_this_turn;
             compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
             last_reported_input_tokens = loop_state.last_reported_input_tokens;
+            if let Some(reason) = loop_state.last_finish_reason.clone() {
+                last_finish_reason = Some(reason);
+            }
 
             if llm_result.last_input_tokens > 0 {
                 last_reported_input_tokens = llm_result.last_input_tokens;
@@ -975,6 +1026,54 @@ impl SessionProcessor {
             // No tool calls — the loop ends here. The agent's text response
             // is the final answer for this turn.
             if llm_result.tool_calls.is_empty() {
+                // Sub-agent premature-termination guard: when a sub-agent that
+                // was actively calling tools (step > 1 implies prior tool-use
+                // steps, otherwise the loop would have broken earlier) produces
+                // a SHORT text-only response, it is almost always narration
+                // ("Now let me check …") rather than the findings report. The
+                // model forgot to call a tool or emit findings, and the loop
+                // would silently accept the narration as the deliverable.
+                //
+                // Inject a one-shot nudge asking the model to produce its
+                // complete findings report now, then continue the loop. The
+                // next text-only response (the actual findings) terminates the
+                // loop normally.
+                if agent.mode == crate::agent::AgentMode::Subagent
+                    && step > 1
+                    && !subagent_summary_nudged
+                    && llm_result.text_buffer.len() < 2000
+                {
+                    subagent_summary_nudged = true;
+                    self.event_bus.publish(Event::AgentNotice {
+                        session_id: session_id.to_string(),
+                        message: "Sub-agent ended with a short text-only \
+                                   response after tool work — nudging it to \
+                                   produce its findings report."
+                            .to_string(),
+                    });
+                    tracing::info!(
+                        session_id = %session_id,
+                        step,
+                        text_len = llm_result.text_buffer.len(),
+                        "sub-agent premature termination detected; injecting \
+                         summary nudge"
+                    );
+                    // Push the assistant's narration into chat history so the
+                    // model sees its own last message, then push the nudge as
+                    // a user message.
+                    let narration = std::mem::take(&mut llm_result.text_buffer);
+                    if !narration.is_empty() {
+                        Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: ChatContent::Text(narration),
+                        });
+                    }
+                    Arc::make_mut(&mut chat_messages).push(ChatMessage {
+                        role: "user".to_string(),
+                        content: ChatContent::Text(SUBAGENT_SUMMARY_NUDGE.to_string()),
+                    });
+                    continue;
+                }
                 break;
             }
 
@@ -1021,6 +1120,7 @@ impl SessionProcessor {
                     config: Some(std::sync::Arc::clone(&turn.session_config)),
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
                     read_timestamps: self.read_timestamps.clone(),
+                    canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                 };
                 type ToolExecutionResult = Result<
                     (
@@ -1273,6 +1373,7 @@ impl SessionProcessor {
                                                         &cmd_name,
                                                         &tc_clone.name,
                                                         auto_approve,
+                                                        Some(&tool_ctx.canonical_cache),
                                                     )
                                                     .await;
                                                 match permission_action {
@@ -1314,6 +1415,7 @@ impl SessionProcessor {
                                             &resource,
                                             &tc_clone.name,
                                             auto_approve,
+                                            Some(&tool_ctx.canonical_cache),
                                         )
                                         .await;
                                         match permission_action {
@@ -1705,11 +1807,24 @@ impl SessionProcessor {
                                     .as_deref()
                                     .or(task.error.as_deref())
                                     .unwrap_or("(no output)");
-                                let text = format!(
+                                let mut text = format!(
                                     "[Background Task {status_label}: {} — {}]\n\n{body}",
                                     task.agent_name,
                                     &task.id[..8.min(task.id.len())]
                                 );
+                                // The injected body may later be cut by the
+                                // generic 12k tool-result truncation; point at
+                                // the durable on-disk report so the model can
+                                // recover any omitted content with the `read`
+                                // tool instead of re-running the sub-agent.
+                                if let Some(ref file) = task.output_file {
+                                    text.push_str(&format!(
+                                        "\n\n(Full untruncated report: {} — read this \
+                                         file with the `read` tool if the output above \
+                                         appears truncated.)",
+                                        file.display()
+                                    ));
+                                }
                                 bg_parts.push(ContentPart::Text { text });
                             }
                             Arc::make_mut(&mut chat_messages).push(ChatMessage {
@@ -1884,10 +1999,36 @@ impl SessionProcessor {
         session_recorder.record_session_end();
         session_recorder.record_agent_loop(total_elapsed_ms as f64, iterations);
         publish_run_cost_summary(total_elapsed_ms);
+        let end_reason = last_finish_reason.unwrap_or(FinishReason::Stop);
+        // Interactive sessions get a visible hint when the provider
+        // silently truncated the reply; sub-agent callers pick the signal
+        // up via `LAST_MESSAGE_FINISH_REASON` instead (no noise here, the
+        // completion event carries the flag to the parent).
+        if agent.mode != crate::agent::AgentMode::Subagent
+            && matches!(end_reason, FinishReason::Length | FinishReason::Truncation)
+        {
+            self.event_bus.publish(Event::AgentNotice {
+                session_id: session_id.to_string(),
+                message: format!(
+                    "The provider ended the response without completing it ({}). \
+                       The saved reply may be incomplete.",
+                    crate::session::finish_reason_label(&end_reason)
+                ),
+            });
+        }
+        // Stash the observed finish reason for the task layer. The task
+        // manager reads the slot right after `process_message` returns and
+        // clears it, so this is a pure hand-off — no state leaks across
+        // sequential runs on the same processor instance.
+        let label = crate::session::finish_reason_label(&end_reason).to_string();
+        {
+            let mut slot = self.last_message_finish_reason.write().await;
+            slot.insert(session_id.to_string(), label);
+        }
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
             message_id: msg_id_for_end,
-            reason: FinishReason::Stop,
+            reason: end_reason,
         });
         crate::hooks::fire_hooks(
             &turn.parsed_hook_configs,

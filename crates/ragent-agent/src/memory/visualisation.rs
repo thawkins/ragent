@@ -13,7 +13,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::storage::Storage;
+use crate::storage::{MemoryRow, Storage};
+
+// FR-010: The tag map type used by batch-fetched visualisation functions.
+// Inlined as `HashMap<i64, Vec<String>>` throughout — the `implicit_hasher`
+// lint is intentionally suppressed because `Storage::get_all_memory_tags`
+// returns exactly this concrete type and all callers are internal.
 
 // ── Data structures ───────────────────────────────────────────────────────────
 
@@ -121,10 +126,21 @@ pub struct VisualisationData {
 /// # Returns
 ///
 /// A `VisualisationData` struct containing all visualisation components.
+///
+/// # Performance (FR-010)
+///
+/// Tags for all memories are fetched in a single SQL query
+/// (`get_all_memory_tags`) rather than one query per memory row.
+/// The memory list is also fetched once and shared across all
+/// three sub-views (graph, tag cloud, heatmap).
 pub fn generate_visualisation(storage: &Storage) -> anyhow::Result<VisualisationData> {
-    let graph = generate_graph(storage)?;
-    let tag_cloud = generate_tag_cloud(storage)?;
-    let heatmap = generate_heatmap(storage)?;
+    // FR-010: fetch memories and tags once for all three sub-views.
+    let memories = storage.list_memories("", 10_000)?;
+    let all_tags = storage.get_all_memory_tags()?;
+
+    let graph = generate_graph(&memories, &all_tags);
+    let tag_cloud = generate_tag_cloud(&memories, &all_tags);
+    let heatmap = generate_heatmap(&memories);
 
     Ok(VisualisationData {
         graph,
@@ -138,8 +154,14 @@ pub fn generate_visualisation(storage: &Storage) -> anyhow::Result<Visualisation
 /// Creates nodes for each category, tags, and top memories. Creates edges
 /// connecting memories to their categories and tags, and categories to
 /// frequently co-occurring tags.
-pub fn generate_graph(storage: &Storage) -> anyhow::Result<MemoryGraph> {
-    let memories = storage.list_memories("", 10_000)?;
+///
+/// # Arguments
+///
+/// * `memories` - Pre-fetched memory rows.
+/// * `all_tags` - Pre-fetched tag map (memory_id → tags), obtained from a
+///   single `get_all_memory_tags` query (FR-010).
+#[allow(clippy::implicit_hasher)]
+pub fn generate_graph(memories: &[MemoryRow], all_tags: &HashMap<i64, Vec<String>>) -> MemoryGraph {
     let mut nodes: Vec<GraphNode> = Vec::new();
     let mut edges: Vec<GraphEdge> = Vec::new();
 
@@ -167,8 +189,8 @@ pub fn generate_graph(storage: &Storage) -> anyhow::Result<MemoryGraph> {
     let mut tag_counts: HashMap<String, usize> = HashMap::new();
     let mut tag_category_links: HashMap<(String, String), usize> = HashMap::new();
 
-    for mem in &memories {
-        let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+    for mem in memories {
+        let tags = all_tags.get(&mem.id).cloned().unwrap_or_default();
         for tag in &tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
             let key = (tag.clone(), mem.category.clone());
@@ -196,16 +218,24 @@ pub fn generate_graph(storage: &Storage) -> anyhow::Result<MemoryGraph> {
         });
     }
 
-    Ok(MemoryGraph { nodes, edges })
+    MemoryGraph { nodes, edges }
 }
 
 /// Generate a tag cloud from structured memories.
-pub fn generate_tag_cloud(storage: &Storage) -> anyhow::Result<TagCloud> {
-    let memories = storage.list_memories("", 10_000)?;
-
+///
+/// # Arguments
+///
+/// * `memories` - Pre-fetched memory rows.
+/// * `all_tags` - Pre-fetched tag map (memory_id → tags), obtained from a
+///   single `get_all_memory_tags` query (FR-010).
+#[allow(clippy::implicit_hasher)]
+pub fn generate_tag_cloud(
+    memories: &[MemoryRow],
+    all_tags: &HashMap<i64, Vec<String>>,
+) -> TagCloud {
     let mut tag_counts: HashMap<String, usize> = HashMap::new();
-    for mem in &memories {
-        let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+    for mem in memories {
+        let tags = all_tags.get(&mem.id).cloned().unwrap_or_default();
         for tag in &tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
         }
@@ -222,15 +252,17 @@ pub fn generate_tag_cloud(storage: &Storage) -> anyhow::Result<TagCloud> {
     // Sort by count descending.
     entries.sort_by(|a, b| b.count.cmp(&a.count));
 
-    Ok(TagCloud { tags: entries })
+    TagCloud { tags: entries }
 }
 
 /// Generate an access pattern heatmap from structured memories.
 ///
 /// Returns memories sorted by access count (descending) with recency info.
-pub fn generate_heatmap(storage: &Storage) -> anyhow::Result<AccessHeatmap> {
-    let memories = storage.list_memories("", 10_000)?;
-
+///
+/// # Arguments
+///
+/// * `memories` - Pre-fetched memory rows.
+pub fn generate_heatmap(memories: &[MemoryRow]) -> AccessHeatmap {
     let mut entries: Vec<AccessHeatmapEntry> = memories
         .iter()
         .map(|m| {
@@ -249,5 +281,5 @@ pub fn generate_heatmap(storage: &Storage) -> anyhow::Result<AccessHeatmap> {
     // Sort by access count descending.
     entries.sort_by(|a, b| b.access_count.cmp(&a.access_count));
 
-    Ok(AccessHeatmap { entries })
+    AccessHeatmap { entries }
 }

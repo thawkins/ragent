@@ -32,6 +32,7 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
+        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -65,7 +66,7 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         storage,
         provider_registry,
         session_processor,
-        agent_info,
+        Arc::unwrap_or_clone(agent_info),
         false,
         std::path::PathBuf::new(),
     )

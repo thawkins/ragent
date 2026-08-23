@@ -778,9 +778,9 @@ impl TeamManager {
         // Resolve agent and augment system prompt.
         let config = Config::default();
         let mut agent = resolve_agent_with_customs(agent_type, &config, working_dir)
-            .unwrap_or_else(|_| AgentInfo::new(agent_type, "Teammate agent"));
-        agent.mode = AgentMode::Subagent;
-        apply_teammate_model_override(&mut agent, teammate_model, lead_model);
+            .unwrap_or_else(|_| Arc::new(AgentInfo::new(agent_type, "Teammate agent")));
+        Arc::make_mut(&mut agent).mode = AgentMode::Subagent;
+        apply_teammate_model_override(Arc::make_mut(&mut agent), teammate_model, lead_model);
 
         // Ensure the agent has a model configured. Some custom agent names may
         // not resolve to a configured model; fall back to the built-in "general"
@@ -788,7 +788,7 @@ impl TeamManager {
         if agent.model.is_none()
             && let Ok(default_agent) = crate::agent::resolve_agent("general", &config)
         {
-            agent.model = default_agent.model;
+            Arc::make_mut(&mut agent).model = default_agent.model.clone();
             tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_type = %agent_type, "No model on agent; falling back to 'general' model");
         }
 
@@ -796,7 +796,7 @@ impl TeamManager {
             build_team_prompt_addition(&self.team_name, teammate_name, &agent_id, &teammate_roster);
         // Append the team context block to the agent's system prompt.
         let base = agent.prompt.as_deref().unwrap_or("");
-        agent.prompt = Some(format!("{base}\n{team_addition}"));
+        Arc::make_mut(&mut agent).prompt = Some(Arc::from(format!("{base}\n{team_addition}")));
 
         // ── Persistent memory injection ────────────────────────────────────
         // Resolve memory scope: member-level config (from blueprint) takes
@@ -814,7 +814,7 @@ impl TeamManager {
             let storage = self.processor.session_manager.storage();
             let memory_block = load_team_memory_block(storage, &self.team_name, teammate_name);
             let current = agent.prompt.as_deref().unwrap_or("");
-            agent.prompt = Some(format!("{current}{memory_block}"));
+            Arc::make_mut(&mut agent).prompt = Some(Arc::from(format!("{current}{memory_block}")));
         }
 
         let cancel = Arc::new(AtomicBool::new(false));

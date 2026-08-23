@@ -22,6 +22,7 @@ fn ctx(working_dir: &std::path::Path) -> ToolContext {
         working_dir: working_dir.to_path_buf(),
         event_bus: Arc::new(ragent_types::event::EventBus::new(64)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 
@@ -579,7 +580,7 @@ static LOG_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 async fn test_edit_log_success_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
     assert!(is_edit_log_enabled());
 
@@ -634,7 +635,7 @@ async fn test_edit_log_success_writes_jsonl() {
 async fn test_edit_log_dry_run_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
 
     let path = write_file(tmp.path(), "a.rs", "fn foo() {\n    bar\n}\n");
@@ -685,7 +686,7 @@ async fn test_edit_log_dry_run_writes_jsonl() {
 async fn test_edit_log_failure_writes_jsonl() {
     let _guard = LOG_TEST_MUTEX.lock().unwrap();
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     set_edit_log_enabled(true);
 
     write_file(tmp.path(), "a.rs", "fn foo() { 1 }\n");
@@ -737,7 +738,7 @@ async fn test_edit_log_disabled_does_not_write() {
     assert!(!is_edit_log_enabled());
 
     let tmp = TempDir::new().unwrap();
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
 
     assert_edit(
         tmp.path(),
@@ -924,7 +925,7 @@ async fn test_edit_log_captures_match_lane_for_flexible_fallback() {
         .await
         .expect("flexible fallback should succeed");
 
-    let log_dir = tmp.path().join("log");
+    let log_dir = tmp.path().join("log").join("editlog");
     let files: Vec<_> = std::fs::read_dir(&log_dir)
         .unwrap()
         .filter_map(|e| e.ok())

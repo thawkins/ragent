@@ -43,7 +43,7 @@ use ragent_research::{
 /// LLM-backed analysis engine is wired in so the final `RESEARCH.md` contains
 /// synthesized summary/findings/cross-references/open questions.
 /// * `research_name` — when `Some`, is sanitised and used in the JSONL
-///   gather-log file name (`log/research-<name>-<ts>-<rand>-web.jsonl`)
+///   gather-log file name (`logs/research/research-<name>-<ts>-<rand>-web.jsonl`)
 ///   recording every considered/captured/rejected URL.
 #[allow(clippy::too_many_arguments)]
 pub fn build_research_session(
@@ -144,9 +144,9 @@ pub fn build_research_session(
         Some(sum) => session.with_summarizer(sum),
         None => session,
     };
-    let session = match research_name
-        .map(|n| ragent_research::gather_log::GatherLog::new(&working_dir.join("log"), n))
-    {
+    let session = match research_name.map(|n| {
+        ragent_research::gather_log::GatherLog::new(&working_dir.join("logs").join("research"), n)
+    }) {
         Some(Ok(log)) => session.with_gather_log(log),
         Some(Err(e)) => {
             tracing::warn!(
@@ -230,6 +230,7 @@ fn build_tool_context(
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 
@@ -1370,6 +1371,7 @@ mod tests {
                         std::collections::HashMap::new(),
                     )),
                     cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                    canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
                 },
                 legacy_verifier: None,
             };
@@ -1590,6 +1592,7 @@ mod tests {
             config: None,
             read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
         }
     }
 

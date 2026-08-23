@@ -14,6 +14,7 @@ fn test_ctx(working_dir: PathBuf) -> ToolContext {
         session_id: "test-session".to_string(),
         working_dir,
         read_timestamps: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     }
 }
 

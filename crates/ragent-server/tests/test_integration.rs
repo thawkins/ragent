@@ -56,6 +56,7 @@ fn test_state(token: &str) -> AppState {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
+        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     });
     AppState {
         event_bus,

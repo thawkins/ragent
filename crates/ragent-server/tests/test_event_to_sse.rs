@@ -439,6 +439,7 @@ fn test_subagent_complete() {
         summary: "Found 3 usages".into(),
         success: true,
         duration_ms: 1500,
+        finish_reason: "complete".into(),
     });
     assert_eq!(name, "subagent_complete");
     assert_eq!(v["success"], true);

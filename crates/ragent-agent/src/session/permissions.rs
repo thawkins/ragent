@@ -200,6 +200,7 @@ pub async fn check_permission_with_prompt(
     resource: &str,
     tool_name: &str,
     auto_approve: bool,
+    canonical_cache: Option<&ragent_tools_core::CanonicalPathCache>,
 ) -> Result<PermissionAction> {
     // Short-circuit if --yes / --no-prompt flag is set
     if auto_approve {
@@ -217,20 +218,10 @@ pub async fn check_permission_with_prompt(
         return Ok(PermissionAction::Allow);
     }
 
-    // Auto-grant file:read for paths within the working directory
-    if permission == "file:read" || permission == "read" {
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Ok(resource_path) = std::path::Path::new(resource).canonicalize() {
-                if resource_path.starts_with(&cwd) {
-                    return Ok(PermissionAction::Allow);
-                }
-            } else if !resource.starts_with('/') && !resource.starts_with("..") {
-                // Relative path within project, not yet created
-                return Ok(PermissionAction::Allow);
-            }
-        }
-    }
-    // Check dir_lists allowlist/denylist for file operations (file:read, file:write, edit)
+    // FR-004/FR-017: Check in-memory rules (dir_lists + PermissionChecker)
+    // BEFORE any filesystem I/O.  When an explicit rule already grants or
+    // denies the request, the blocking `canonicalize()` in the file:read
+    // auto-grant below is never reached.
     if permission.starts_with("file:")
         || permission == "read"
         || permission == "edit"
@@ -252,7 +243,7 @@ pub async fn check_permission_with_prompt(
         }
     }
 
-    // 1. Check PermissionChecker first
+    // Check PermissionChecker (in-memory rule lookup — no I/O).
     let action = {
         let c = checker.read();
         c.check(permission, resource)
@@ -260,10 +251,37 @@ pub async fn check_permission_with_prompt(
 
     match action {
         PermissionAction::Allow | PermissionAction::Deny => {
-            // Policy decision — no prompt needed
+            // Explicit policy decision — no prompt needed, no I/O performed.
             Ok(action)
         }
         PermissionAction::Ask => {
+            // No explicit rule matched.  Try the file:read auto-grant
+            // before falling through to an interactive prompt.  This is
+            // the only path that may perform a blocking `canonicalize()`.
+            //
+            // FR-004/FR-017: because the in-memory checks above already
+            // short-circuited, the canonicalise syscall fires only when no
+            // rule exists for the resource — i.e. on the first access to a
+            // new file, not on every call.
+            if permission == "file:read" || permission == "read" {
+                if let Ok(cwd) = std::env::current_dir() {
+                    // FR-017: use the per-step canonical path cache when
+                    // available to avoid a blocking canonicalize syscall.
+                    let resource_canonical = match canonical_cache {
+                        Some(cache) => cache.get_or_canonicalize(std::path::Path::new(resource)),
+                        None => std::path::Path::new(resource).canonicalize().ok(),
+                    };
+                    if let Some(resource_path) = resource_canonical {
+                        if resource_path.starts_with(&cwd) {
+                            return Ok(PermissionAction::Allow);
+                        }
+                    } else if !resource.starts_with('/') && !resource.starts_with("..") {
+                        // Relative path within project, not yet created
+                        return Ok(PermissionAction::Allow);
+                    }
+                }
+            }
+
             // Need user interaction
             let request_id = Uuid::new_v4().to_string();
             let mut rx = event_bus.subscribe();

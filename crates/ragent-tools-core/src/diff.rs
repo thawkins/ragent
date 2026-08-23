@@ -56,7 +56,7 @@ impl Tool for DiffFilesTool {
         // Resolve left side
         let (label_a, text_a) = if let Some(p) = input["path_a"].as_str() {
             let path = resolve_path(&ctx.working_dir, p);
-            super::check_path_within_root(&path, &ctx.working_dir)?;
+            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .with_context(|| format!("Cannot read file: {}", path.display()))?;
@@ -70,7 +70,7 @@ impl Tool for DiffFilesTool {
         // Resolve right side
         let (label_b, text_b) = if let Some(p) = input["path_b"].as_str() {
             let path = resolve_path(&ctx.working_dir, p);
-            super::check_path_within_root(&path, &ctx.working_dir)?;
+            super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
             let content = tokio::fs::read_to_string(&path)
                 .await
                 .with_context(|| format!("Cannot read file: {}", path.display()))?;

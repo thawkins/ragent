@@ -96,7 +96,7 @@ pub(crate) fn build_tool_reference_section(registry: &crate::tool::ToolRegistry)
         "## Available Tools\n\nYou have access to the following tools. \
           Use ONLY these exact tool names — do not invent or guess tool names.\n\n",
     );
-    for def in &defs {
+    for def in defs.iter() {
         // Truncate long descriptions to keep the prompt compact.
         let desc = ragent_types::truncate_bytes(&def.description, 120);
         section.push_str(&format!("- `{}` — {}\n", def.name, desc));
@@ -126,7 +126,7 @@ pub fn build_detailed_tool_reference_section(registry: &crate::tool::ToolRegistr
         listed with their type and whether they are required (required).\n\n",
     );
 
-    for def in &defs {
+    for def in defs.iter() {
         let desc = def.description.replace('\n', " ").replace('\r', "");
         let desc = ragent_types::truncate_bytes(&desc, 400);
         section.push_str(&format!("### `{}`\n{}\n\n", def.name, desc));

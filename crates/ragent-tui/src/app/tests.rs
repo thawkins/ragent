@@ -27,6 +27,7 @@ mod app_tests {
             event_bus: event_bus.clone(),
             agent_manager: std::sync::OnceLock::new(),
             bg_service: std::sync::OnceLock::new(),
+            last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             team_manager: std::sync::OnceLock::new(),
             // M8-T1: team-context cache (unused in tests, but required by the
             // struct literal). Mirrors the wiring in `src/main.rs`.
@@ -62,7 +63,7 @@ mod app_tests {
             storage,
             provider_registry,
             session_processor,
-            agent_info,
+            Arc::unwrap_or_clone(agent_info),
             false,
             std::path::PathBuf::new(),
         )
@@ -653,6 +654,7 @@ mod app_tests {
             summary: "done".to_string(),
             success: true,
             duration_ms: 100,
+            finish_reason: "complete".to_string(),
         });
         assert_eq!(app.active_tasks.len(), 1);
 
@@ -663,6 +665,7 @@ mod app_tests {
             summary: "fixed".to_string(),
             success: true,
             duration_ms: 200,
+            finish_reason: "complete".to_string(),
         });
         assert!(app.active_tasks.is_empty());
     }

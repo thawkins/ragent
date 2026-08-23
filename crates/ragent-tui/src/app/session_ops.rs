@@ -37,7 +37,7 @@ impl App {
             let addition = mode.system_prompt_addition();
             if !addition.is_empty() {
                 let existing = agent.prompt.clone().unwrap_or_default();
-                agent.prompt = Some(format!("{existing}\n\n{addition}"));
+                agent.prompt = Some(Arc::from(format!("{existing}\n\n{addition}")));
             }
         }
         agent
@@ -461,6 +461,7 @@ impl App {
             "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
+            "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
             "help" => Some("[<command>]".to_string()),
             "quit" | "exit" => None,
             "clear" => None,

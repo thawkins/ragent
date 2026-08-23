@@ -3,10 +3,37 @@
 //! Walks the project tree to collect candidate files, then scores them
 //! against a query string using a simple multi-tier matching algorithm.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
 
 /// Maximum number of project files to index for autocomplete.
 const MAX_PROJECT_FILES: usize = 10_000;
+
+/// Time-to-live for the cached project file list. After this duration the
+/// cache is considered stale and the directory is re-scanned (FR-009).
+const CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// Cached file list for a project directory, with the directory mtime observed
+/// when the scan was performed.
+struct ProjectFileCacheEntry {
+    /// Relative file/directory paths collected from the project tree.
+    files: Vec<PathBuf>,
+    /// Directory modification time observed when `files` was built.
+    dir_mtime: Option<SystemTime>,
+    /// Wall-clock instant when `files` was built.
+    fetched_at: Instant,
+}
+
+/// Process-wide cache of project file lists keyed by canonical working directory.
+static PROJECT_FILE_CACHE: OnceLock<Mutex<HashMap<PathBuf, ProjectFileCacheEntry>>> =
+    OnceLock::new();
+
+/// Return the global project-file cache map.
+fn project_file_cache() -> &'static Mutex<HashMap<PathBuf, ProjectFileCacheEntry>> {
+    PROJECT_FILE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Directories to skip during project file collection.
 const SKIP_DIRS: &[&str] = &[
@@ -43,9 +70,50 @@ pub struct FuzzyMatch {
 #[must_use]
 pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     let limit = max.min(MAX_PROJECT_FILES);
+    let now = Instant::now();
+
+    // Canonicalize the key so that equivalent paths share a cache entry.
+    let cache_key = match std::fs::canonicalize(working_dir) {
+        Ok(path) => path,
+        Err(_) => working_dir.to_path_buf(),
+    };
+
+    // Current directory mtime; if unavailable we treat the cache as invalid.
+    let current_mtime = std::fs::metadata(working_dir)
+        .and_then(|m| m.modified())
+        .ok();
+
+    // Check for a fresh cache entry: TTL has not expired and the directory
+    // mtime has not changed.
+    if let Ok(cache) = project_file_cache().lock() {
+        if let Some(entry) = cache.get(&cache_key) {
+            let ttl_fresh = now.duration_since(entry.fetched_at) < CACHE_TTL;
+            let mtime_fresh = current_mtime.is_some() && entry.dir_mtime == current_mtime;
+            if ttl_fresh && mtime_fresh {
+                return entry.files.iter().take(limit).cloned().collect();
+            }
+        }
+    }
+
+    // Collect the full project tree (up to the global limit) so the cached
+    // value can satisfy later requests with different per-call `max` values.
     let mut files = Vec::new();
-    walk_dir(working_dir, working_dir, &mut files, limit);
-    files
+    walk_dir(working_dir, working_dir, &mut files, MAX_PROJECT_FILES);
+
+    // Store the un-truncated list in the cache. If the mutex is poisoned we
+    // gracefully skip caching and still return the collected paths.
+    if let Ok(mut cache) = project_file_cache().lock() {
+        cache.insert(
+            cache_key,
+            ProjectFileCacheEntry {
+                files: files.clone(),
+                dir_mtime: current_mtime,
+                fetched_at: now,
+            },
+        );
+    }
+
+    files.into_iter().take(limit).collect()
 }
 
 fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {
@@ -121,53 +189,55 @@ pub fn fuzzy_match(query: &str, candidates: &[PathBuf]) -> Vec<FuzzyMatch> {
             .collect();
     }
 
-    let query_lower = query.to_lowercase();
-    let mut matches: Vec<FuzzyMatch> = Vec::new();
+    // FR-009: use ASCII lowercasing for the query.  File names in practice
+    // are ASCII; `to_ascii_lowercase` avoids a heap allocation when the
+    // query contains only ASCII characters.
+    let query_lower = query.to_ascii_lowercase();
+    let mut matches: Vec<(FuzzyMatch, usize)> = Vec::new();
 
     for candidate in candidates {
-        let path_str = candidate.to_string_lossy().to_lowercase();
-        // For directories (trailing '/'), use the directory name for basename matching
-        let basename = if path_str.ends_with('/') {
-            let trimmed = path_str.trim_end_matches('/');
-            trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
+        // Allocate path_str once per candidate and reuse for all tier checks.
+        let path_str = candidate.to_string_lossy();
+        let path_lower = path_str.to_ascii_lowercase();
+
+        // For directories (trailing '/'), use the directory name for basename
+        // matching.  Borrow from path_lower to avoid a second allocation.
+        let basename_lower: &str = if path_lower.ends_with('/') {
+            let trimmed = path_lower.trim_end_matches('/');
+            trimmed.rsplit('/').next().unwrap_or(trimmed)
         } else {
-            candidate
-                .file_name()
-                .map(|n| n.to_string_lossy().to_lowercase())
-                .unwrap_or_default()
+            // Extract the last path component from the lowercase path.
+            path_lower.rsplit('/').next().unwrap_or(&path_lower)
         };
 
-        let score = if basename == query_lower {
-            // Exact basename match
+        let score = if basename_lower == query_lower {
             100
-        } else if basename.starts_with(&query_lower) {
-            // Basename prefix match
+        } else if basename_lower.starts_with(&query_lower) {
             75
-        } else if basename.contains(&query_lower) {
-            // Basename substring match
+        } else if basename_lower.contains(&query_lower) {
             50
-        } else if path_str.contains(&query_lower) {
-            // Path substring match
+        } else if path_lower.contains(&query_lower) {
             25
         } else {
             continue;
         };
 
-        matches.push(FuzzyMatch {
-            path: candidate.clone(),
-            score,
-        });
+        // FR-009: pre-compute the path string length for the sort comparator
+        // so the sort closure does not call `to_string_lossy()` (which
+        // allocates) on every comparison.
+        let path_len = path_str.len();
+        matches.push((
+            FuzzyMatch {
+                path: candidate.clone(),
+                score,
+            },
+            path_len,
+        ));
     }
 
-    // Sort by score descending, then by path length ascending (prefer shorter paths)
-    matches.sort_by(|a, b| {
-        b.score.cmp(&a.score).then_with(|| {
-            a.path
-                .to_string_lossy()
-                .len()
-                .cmp(&b.path.to_string_lossy().len())
-        })
-    });
+    // Sort by score descending, then by path length ascending (prefer shorter
+    // paths).  The pre-computed `path_len` avoids per-comparison allocation.
+    matches.sort_by(|a, b| b.0.score.cmp(&a.0.score).then_with(|| a.1.cmp(&b.1)));
 
-    matches
+    matches.into_iter().map(|(m, _)| m).collect()
 }

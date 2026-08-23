@@ -383,7 +383,7 @@ async fn send_message(
     tokio::spawn(async move {
         let cfg = config.read().await;
         let agent = agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
-            .unwrap_or_else(|_| AgentInfo::new("general", "General-purpose agent"));
+            .unwrap_or_else(|_| Arc::new(AgentInfo::new("general", "General-purpose agent")));
         drop(cfg);
         if let Err(e) = processor
             .process_message(
@@ -966,8 +966,8 @@ fn task_entry_to_response(entry: ragent_agent::task::TaskEntry, background: bool
         agent_name: entry.agent_name,
         task_prompt: entry.task_prompt,
         status: format!("{}", entry.status),
-        result: entry.result,
-        error: entry.error,
+        result: entry.result.map(|s| s.to_string()),
+        error: entry.error.map(|s| s.to_string()),
         created_at: entry.created_at.to_rfc3339(),
         completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
         background,

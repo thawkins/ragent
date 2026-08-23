@@ -96,6 +96,9 @@ pub(crate) struct LoopState {
     pub compaction_attempted_this_turn: bool,
     /// Last LLM-reported input token count (0 if provider omits usage).
     pub last_reported_input_tokens: u64,
+    /// Finish signal observed most recently this turn (the loop re-checks it
+    /// on every step since a single step can contain several retry attempts).
+    pub last_finish_reason: Option<FinishReason>,
 }
 
 /// Result of [`SessionProcessor::call_llm_step`].
@@ -817,6 +820,7 @@ impl SessionProcessor {
         let mut text_buffer = String::new();
         let mut reasoning_buffer = String::new();
         let mut tool_calls: Vec<PendingToolCall> = Vec::new();
+        let mut attempted_truncation_continuation = false;
         let mut last_input_tokens: u64 = 0;
         let mut last_output_tokens: u64 = 0;
 
@@ -824,7 +828,16 @@ impl SessionProcessor {
         let llm_recorder = crate::telemetry::LlmRecorder::from_subsystem(&self.telemetry);
         'retry: for attempt in 0..=max_retries {
             let mut saw_completed_tool_call = false;
-            if attempt > 0 {
+            // Truncation-continuation pass (background sub-agents only).
+            //
+            // The default sub-agent path keeps buffers from the previous
+            // attempt when retrying, so output is NOT cleared when this flag
+            // is set: the continuation response Appends to the text recorded
+            // so far rather than replacing it. The flag is cleared below as
+            // soon as the continuation attempt consumed it, so a following
+            // ordinary retry clears buffers as before.
+            let is_truncation_continuation = attempted_truncation_continuation;
+            if attempt > 0 && !is_truncation_continuation {
                 text_buffer.clear();
                 reasoning_buffer.clear();
                 tool_calls.clear();
@@ -852,7 +865,32 @@ impl SessionProcessor {
             // P-6: share the history by refcount bump instead of cloning
             // the entire `Vec<ChatMessage>` (including all tool-result
             // `ContentPart`s) on every retry attempt.
-            let attempt_messages: Arc<Vec<ChatMessage>> = Arc::clone(&loop_state.chat_messages);
+            let attempt_messages: Arc<Vec<ChatMessage>> = if is_truncation_continuation {
+                // Append an out-of-band user-side message to the request for
+                // this attempt, asking the model (invisible to the caller)
+                // to continue exactly from where it stopped. The shared
+                // history itself is only mutated inside the request copy,
+                // so the main loop's `chat_messages` stay unchanged.
+                let mut msgs = (*loop_state.chat_messages).clone();
+                msgs.push(ChatMessage {
+                    role: "assistant".to_string(),
+                    content: ChatContent::Text(text_buffer.clone()),
+                });
+                msgs.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text(
+                        "Your previous response was cut off mid-message. \
+                         Continue EXACTLY from where you stopped, outputting only the remaining \
+                         continuation text (no preamble, no recap, no repeating what you already \
+                         wrote, no formatting restarts). If your previous output cannot be \
+                         continued faithfully, restart the full answer from the beginning."
+                            .to_string(),
+                    ),
+                });
+                Arc::new(msgs)
+            } else {
+                Arc::clone(&loop_state.chat_messages)
+            };
             let attempt_request = ChatRequest {
                 model: turn.model_ref.model_id.clone(),
                 messages: attempt_messages,
@@ -1022,6 +1060,7 @@ impl SessionProcessor {
 
             let mut had_retryable_error = false;
             let mut first_stream_event_pending = true;
+            let mut saw_finish_reason: Option<FinishReason> = None;
             let mut fatal_stream_error: Option<String> = None;
             let mut stream_buffer = StreamBuffer::new();
             {
@@ -1300,13 +1339,84 @@ impl SessionProcessor {
                                 });
                             }
                         }
-                        StreamEvent::Finish { .. } => {}
+                        StreamEvent::Finish { reason } => {
+                            saw_finish_reason = Some(reason);
+                        }
                     }
                 }
             }
 
             if had_retryable_error {
+                // A retry loop due to a transient error; the truncation
+                // continuation flag is only consumed when we have real
+                // text output to append to, so leave it armed if the
+                // buffer is still empty.
+                if text_buffer.trim().is_empty() {
+                    attempted_truncation_continuation = false;
+                }
                 continue 'retry;
+            }
+
+            // Propagate the finish reason observed for this attempt into the
+            // shared loop state so the caller (processor / sub-agent runner)
+            // can flag truncated results.
+            if let Some(reason) = saw_finish_reason.clone() {
+                loop_state.last_finish_reason = Some(reason.clone());
+            } else if tool_calls.is_empty() {
+                // Stream ended silently — the provider never emitted an
+                // explicit `Finish` signal. This is the signature of an
+                // output-truncating provider: the response simply stops.
+                // Mark it so the task-layer can retry / flag the result.
+                loop_state.last_finish_reason = Some(FinishReason::Truncation);
+            } else {
+                loop_state.last_finish_reason = None;
+            }
+
+            // Truncation-continuation kick: for background sub-agents, the
+            // only way to recover from a provider-side silent cut is to ask
+            // the model to continue. We do it once per step (bounded by the
+            // existing retry budget) and only when there is something
+            // non-empty to continue from. This path only makes sense when
+            // the reply was text-only (no pending tool calls).
+            if matches!(
+                loop_state.last_finish_reason,
+                Some(FinishReason::Truncation)
+            ) && agent.mode == crate::agent::AgentMode::Subagent
+                && tool_calls.is_empty()
+                && !text_buffer.trim().is_empty()
+                && !attempted_truncation_continuation
+            {
+                attempted_truncation_continuation = true;
+                self.event_bus.publish(Event::AgentNotice {
+                    session_id: session_id.to_string(),
+                    message: "Provider truncated the reply without an explicit \
+                               finish signal — asking the model to continue from \
+                               where it stopped…"
+                        .to_string(),
+                });
+                tracing::warn!(
+                    session_id = %session_id,
+                    "silent end-of-stream detected for sub-agent; retrying with truncation continuation"
+                );
+                continue 'retry;
+            }
+
+            if matches!(
+                loop_state.last_finish_reason,
+                Some(FinishReason::Truncation)
+            ) && !tool_calls.is_empty()
+            {
+                // A truncation observed on a step that produced tool calls is
+                // most likely a pre-tool preamble cut — the tool phase will
+                // advance the conversation anyway, so no continuation is
+                // required. Log it for diagnostics, then normalise the
+                // recorded reason back to `ToolUse` so the final message is
+                // not mislabelled as truncated when the run ends.
+                tracing::info!(
+                    session_id = %session_id,
+                    "silent end-of-stream before tool calls; continuing via tool phase"
+                );
+                loop_state.last_finish_reason = Some(FinishReason::ToolUse);
             }
 
             if let Some(error) = fatal_stream_error {

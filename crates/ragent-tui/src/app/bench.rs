@@ -391,12 +391,14 @@ impl App {
             task_prompt: raw_command.to_string(),
             background: true,
             status: ragent_agent::task::TaskStatus::Running,
-            result: Some("benchmark run in progress".to_string()),
+            result: Some(Arc::from("benchmark run in progress")),
             error: None,
             created_at: chrono::Utc::now(),
             completed_at: None,
             reported: false,
             waiter_count: 0,
+            output_file: None,
+            report_status: ragent_agent::task::ReportStatus::default(),
         };
         self.active_tasks.push(entry);
 

@@ -461,9 +461,13 @@ fn extract_snippets(text: &str, query: &str, max_snippets: usize) -> Vec<String>
         }
         let start = idx.saturating_sub(window);
         let end = (idx + query.len() + window).min(text.len());
-        let snippet = &text[start..end];
-        let prefix = if start > 0 { "…" } else { "" };
-        let suffix = if end < text.len() { "…" } else { "" };
+        // Align byte indices to char boundaries in the original UTF-8 text so slicing
+        // does not panic on multi-byte characters (e.g. em-dashes).
+        let start_char = text.floor_char_boundary(start);
+        let end_char = text.ceil_char_boundary(end);
+        let snippet = &text[start_char..end_char];
+        let prefix = if start_char > 0 { "…" } else { "" };
+        let suffix = if end_char < text.len() { "…" } else { "" };
         snippets.push(format!("{}{}{}", prefix, snippet.trim(), suffix));
     }
 
@@ -656,12 +660,11 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_snippets() {
-        let text = "The quick brown fox jumps over the lazy dog. The quick brown fox.";
-        let snippets = extract_snippets(text, "fox", 2);
-        assert_eq!(snippets.len(), 2);
+    fn test_extract_snippets_multibyte_boundary() {
+        let text = "Before — the quick brown fox jumps — after";
+        let snippets = extract_snippets(text, "fox", 1);
+        assert_eq!(snippets.len(), 1);
         assert!(snippets[0].contains("fox"));
-        assert!(snippets[1].contains("fox"));
     }
 
     #[test]

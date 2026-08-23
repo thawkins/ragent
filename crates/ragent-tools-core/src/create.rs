@@ -72,7 +72,7 @@ impl Tool for CreateTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        super::check_path_within_root(&path, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
 
         let existed = path.exists();
 

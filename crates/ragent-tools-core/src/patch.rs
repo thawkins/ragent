@@ -97,7 +97,7 @@ impl Tool for PatchTool {
                 resolve_path(&ctx.working_dir, &fp.path)
             };
 
-            super::check_path_within_root(&target, &ctx.working_dir)?;
+            super::check_path_within_root_cached(&target, &ctx.working_dir, &ctx.canonical_cache)?;
 
             let content = tokio::fs::read_to_string(&target)
                 .await

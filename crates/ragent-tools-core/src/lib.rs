@@ -91,6 +91,44 @@ pub struct ToolOutput {
     pub metadata: Option<Value>,
 }
 
+/// Per-step cache for filesystem `canonicalize()` results (FR-017).
+///
+/// `canonicalize()` issues a blocking syscall.  Within a single agent-loop
+/// step the same paths (especially the working-directory root) are
+/// canonicalised repeatedly — once in the permission check and again in
+/// `check_path_within_root`.  This cache stores the result (or failure) of
+/// each canonicalize call so subsequent lookups for the same path are free.
+///
+/// The cache is intentionally cheap to create and lives only for one tool
+/// dispatch step (stored in [`ToolContext::canonical_cache`]); it is not
+/// shared across steps because filesystem state may change between them.
+#[derive(Debug, Default)]
+pub struct CanonicalPathCache {
+    inner: std::sync::Mutex<HashMap<PathBuf, Option<PathBuf>>>,
+}
+
+impl CanonicalPathCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return the canonical form of `path`, using a cached result when
+    /// available.  `None` indicates the path could not be canonicalised
+    /// (does not exist or IO error); the failure is also cached so we
+    /// don't repeat the syscall.
+    pub fn get_or_canonicalize(&self, path: &Path) -> Option<PathBuf> {
+        if let Some(cached) = self.inner.lock().ok()?.get(path).cloned() {
+            return cached;
+        }
+        let result = path.canonicalize().ok();
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.insert(path.to_path_buf(), result.clone());
+        }
+        result
+    }
+}
+
 /// Execution context passed to each tool invocation.
 #[derive(Clone)]
 pub struct ToolContext {
@@ -104,6 +142,9 @@ pub struct ToolContext {
     /// have been read by this session. Used by edit tools to detect stale-file
     /// edits (editrenewal FR-003).
     pub read_timestamps: Arc<RwLock<HashMap<PathBuf, u64>>>,
+    /// Per-step canonical-path cache (FR-017). Avoids redundant
+    /// `canonicalize()` syscalls within a single tool dispatch step.
+    pub canonical_cache: Arc<CanonicalPathCache>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -156,6 +197,59 @@ pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
         loop {
             if existing.exists() {
                 let mut base = existing.canonicalize()?;
+                for part in tail.iter().rev() {
+                    base = base.join(part);
+                }
+                break base;
+            }
+            if let Some(name) = existing.file_name() {
+                tail.push(name);
+            }
+            match existing.parent() {
+                Some(parent) => existing = parent,
+                None => break canonical_root.clone(),
+            }
+        }
+    };
+
+    if !is_path_within(&canonical, &canonical_root) {
+        anyhow::bail!(
+            "Path escape rejected: '{}' resolves outside project root '{}'",
+            path.display(),
+            canonical_root.display()
+        );
+    }
+    Ok(())
+}
+
+/// Cached variant of [`check_path_within_root`] (FR-017).
+///
+/// Uses the provided [`CanonicalPathCache`] to avoid redundant
+/// `canonicalize()` syscalls for the root and path within a single
+/// agent-loop step.
+///
+/// # Errors
+///
+/// Returns an error if the path escapes the given root.
+pub fn check_path_within_root_cached(
+    path: &Path,
+    root: &Path,
+    cache: &CanonicalPathCache,
+) -> anyhow::Result<()> {
+    let canonical_root = cache
+        .get_or_canonicalize(root)
+        .unwrap_or_else(|| root.to_path_buf().clean_path());
+
+    let canonical = if let Some(c) = cache.get_or_canonicalize(path) {
+        c
+    } else {
+        // Path does not exist — walk up to the longest existing prefix
+        // and reconstruct, caching the canonical base.
+        let mut existing: &Path = path;
+        let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+        loop {
+            if let Some(c) = cache.get_or_canonicalize(existing) {
+                let mut base = c;
                 for part in tail.iter().rev() {
                     base = base.join(part);
                 }

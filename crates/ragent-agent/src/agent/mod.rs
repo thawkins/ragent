@@ -439,7 +439,11 @@ pub struct AgentInfo {
     /// Model binding for this agent.
     pub model: Option<ModelRef>,
     /// System prompt injected at the start of conversations.
-    pub prompt: Option<String>,
+    ///
+    /// Held as `Option<Arc<str>>` so that shared built-in agent definitions
+    /// (constructed once via `OnceLock` and cloned via `Arc<AgentInfo>`) never
+    /// duplicate the prompt text (FR-013).
+    pub prompt: Option<Arc<str>>,
     /// Permission rules governing tool access.
     pub permission: PermissionRuleset,
     /// Maximum number of agentic loop iterations.
@@ -567,12 +571,12 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: None,
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "You are a helpful AI assistant. Answer the user's questions clearly and \
                  concisely. You do not have access to any tools — just respond with your \
                  best knowledge."
                     .to_string(),
-            ),
+            )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -590,7 +594,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: None,
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "You are a powerful AI coding assistant. You help users with software development \
                  tasks including writing code, debugging, reviewing, and explaining code. \
                  You have access to tools for reading, writing, and editing files, executing \
@@ -599,7 +603,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                  'list' to view directory contents, and 'read' to view file contents. \
                  Always prefer using tools to verify your assumptions rather than guessing."
                     .to_string(),
-            ),
+            )),
             permission: default_permissions(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -617,13 +621,13 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: None,
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "You are a build agent specializing in compiling, testing, and debugging \
                  software projects. Focus on running builds, fixing compilation errors, \
                  running tests, and ensuring code quality. Use bash commands to interact \
                  with build systems and test frameworks."
                     .to_string(),
-            ),
+            )),
             permission: default_permissions(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -641,13 +645,13 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: Some(0.7),
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "You are a planning agent. Your job is to analyze requirements and create \
                  detailed implementation plans. Read the codebase to understand existing patterns \
                  and architecture. Output a structured plan with clear steps. Do NOT make any \
                  changes yourself — only plan and document."
                     .to_string(),
-            ),
+            )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -665,13 +669,13 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: None,
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "You are an exploration agent specializing in understanding codebases. \
                  Use read, grep, glob, and list tools to navigate and understand code. \
                  Provide concise, accurate answers about code structure, patterns, and logic. \
                  Do NOT modify any files."
                     .to_string(),
-            ),
+            )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -689,11 +693,11 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             temperature: Some(0.3),
             top_p: None,
             model: None,
-            prompt: Some(
+            prompt: Some(Arc::from(
                 "Generate a short, descriptive title (3-6 words) for a coding session \
                  based on the conversation. Output ONLY the title, nothing else."
                     .to_string(),
-            ),
+            )),
             permission: Vec::new(),
             max_steps: Some(1024),
             skills: Vec::new(),
@@ -711,11 +715,11 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                                           temperature: Some(0.3),
                                           top_p: None,
                                           model: None,
-                                          prompt: Some(
+                                          prompt: Some(Arc::from(
                                               "Summarize the conversation so far into a concise paragraph that captures \
                                                the key topics discussed, decisions made, and work completed."
                                                   .to_string(),
-                                          ),
+                                          )),
                                           permission: Vec::new(),
                                           max_steps: Some(1024),
                                           skills: Vec::new(),
@@ -733,7 +737,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a Rust coding specialist. You write idiomatic, production-grade Rust \
                            code with an emphasis on zero-cost abstractions, memory safety, and \
                            composability.\n\n\
@@ -753,7 +757,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Minimize allocations; prefer iterators over loops\n\
                            - Document public APIs with `///` doc comments"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -771,7 +775,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a Python coding specialist. You write clean, idiomatic Python \
                            following modern best practices and PEP 8.\n\n\
                            Expertise:\n\
@@ -791,7 +795,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Use `isinstance()` checks, not `type()` comparisons\n\
                            - Keep functions small and testable (single responsibility)"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -809,7 +813,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a TypeScript and JavaScript coding specialist. You write type-safe, \
                            modern JavaScript for both frontend and backend contexts.\n\n\
                            Expertise:\n\
@@ -829,7 +833,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Keep components small and focused; extract hooks early\n\
                            - Use ESLint + Prettier for consistency"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -847,7 +851,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a FastAPI and Python web-backend specialist. You design and build \
                            high-performance REST and WebSocket APIs.\n\n\
                            Expertise:\n\
@@ -866,7 +870,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Implement rate limiting and input validation at the edge\n\
                            - Use structured logging (JSON) for observability"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -884,7 +888,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: Some(0.2),
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a security-focused code reviewer specialising in the OWASP Top 10.\n\n\
                            For every review:\n\
                            1. Identify injection flaws (SQL, command, LDAP, XPath, template)\n\
@@ -899,7 +903,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            Provide CWE identifiers and OWASP references for every finding. \
                            Suggest concrete mitigations with code examples."
                               .to_string(),
-                      ),
+                      )),
                       permission: read_only_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -917,7 +921,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: Some(0.3),
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a test-writing specialist. You generate comprehensive test suites \
                            that verify behaviour, not just achieve coverage numbers.\n\n\
                            Expertise:\n\
@@ -935,7 +939,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Keep tests fast (< 100ms per test ideally)\n\
                            - Add `#[should_panic]` / `pytest.raises` for expected failures"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -953,7 +957,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: Some(0.5),
                       top_p: None,
                       model: None,
-                                              prompt: Some(
+                                              prompt: Some(Arc::from(
                                                   "You are a technical documentation specialist. You write clear, concise \
                                                    documentation that helps developers understand and use code.\n\n\
                                                    Expertise:\n\
@@ -971,7 +975,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                                                    - Cross-reference related documents with relative links\n\
                                                    - Update tables of contents when adding new sections"
                                                       .to_string(),
-                                              ),                      permission: default_permissions(),
+                                              )),                      permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
                       memory: crate::team::config::MemoryScope::None,
@@ -988,7 +992,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a DevOps and infrastructure specialist. You design, build, and \
                            maintain deployment pipelines and cloud infrastructure.\n\n\
                            Expertise:\n\
@@ -1007,7 +1011,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Version-pin all base images and dependencies\n\
                            - Document runbooks and rollback procedures"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -1025,7 +1029,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a database specialist. You design schemas, write queries, and \
                            optimise data access patterns for relational and NoSQL databases.\n\n\
                            Expertise:\n\
@@ -1044,7 +1048,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Parameterise queries; never concatenate user input into SQL\n\
                            - Add database-level constraints as a safety net, not just application validation"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -1062,7 +1066,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       temperature: None,
                       top_p: None,
                       model: None,
-                      prompt: Some(
+                      prompt: Some(Arc::from(
                           "You are a frontend web development specialist. You build responsive, \
                            accessible, and performant user interfaces.\n\n\
                            Expertise:\n\
@@ -1082,7 +1086,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Keep bundle sizes small; tree-shake unused dependencies\n\
                            - Use `key` props correctly in lists; avoid index-as-key"
                               .to_string(),
-                      ),
+                      )),
                       permission: default_permissions(),
                       max_steps: Some(1024),
                       skills: Vec::new(),
@@ -1095,14 +1099,33 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ]
 }
 
-/// PERF-011: return a reference to the process-wide cached built-in
-/// agent roster. The first call builds the `Vec<AgentInfo>` (with its
-/// ~15 long-prompt entries) and stores it in a `OnceLock`; every
-/// subsequent `resolve_agent` / sub-agent spawn searches the cached
-/// slice instead of rebuilding it.
+/// PERF-011: process-wide cache of the built-in agent roster.
+///
+/// [`create_builtin_agents`] constructs ~15 [`AgentInfo`] structs, each with
+/// long `String` prompts, on every call. `resolve_agent` (and friends) call
+/// it on every agent resolution — every `process_user_message` and every
+/// sub-agent spawn — even though the built-in definitions are static for the
+/// lifetime of the process. This `OnceLock` caches the result of the first
+/// call so subsequent resolutions search the cached `Vec` instead of
+/// rebuilding it.
+///
+/// PERF-005/FR-013: shareable view of the built-in roster.
+///
+/// Wraps each cached [`AgentInfo`] in an [`Arc`] so that `resolve_agent` can
+/// return a pointer to the shared definition instead of cloning the whole
+/// struct (and its multi-kilobyte prompt) on every resolution. The first call
+/// pays one `AgentInfo::clone` per built-in to populate the `Arc`s; every
+/// subsequent caller gets a cheap `Arc::clone`.
 #[must_use]
-pub fn builtin_agents() -> &'static [AgentInfo] {
-    BUILTIN_AGENTS.get_or_init(create_builtin_agents)
+pub fn builtin_agents() -> &'static [Arc<AgentInfo>] {
+    static BUILTIN_ARCS: OnceLock<Vec<Arc<AgentInfo>>> = OnceLock::new();
+    BUILTIN_ARCS.get_or_init(|| {
+        BUILTIN_AGENTS
+            .get_or_init(create_builtin_agents)
+            .iter()
+            .map(|a| Arc::new(a.clone()))
+            .collect()
+    })
 }
 
 /// Helper to create a permission rule with the given parameters.
@@ -1266,7 +1289,7 @@ pub fn resolve_agent_with_model(
     name: &str,
     config: &crate::Config,
     provider_registry: &crate::provider::ProviderRegistry,
-) -> anyhow::Result<AgentInfo> {
+) -> anyhow::Result<Arc<AgentInfo>> {
     let mut agent = resolve_agent(name, config)?;
     if agent.model.is_none() {
         if let Some(model_ref) = resolve_default_model(&agent, provider_registry) {
@@ -1276,7 +1299,7 @@ pub fn resolve_agent_with_model(
                 model = %model_ref.model_id,
                 "Auto-assigned default model to agent"
             );
-            agent.model = Some(model_ref);
+            Arc::make_mut(&mut agent).model = Some(model_ref);
         }
     }
     Ok(agent)
@@ -1289,7 +1312,7 @@ pub fn resolve_agent_with_customs_and_model(
     config: &crate::Config,
     working_dir: &std::path::Path,
     provider_registry: &crate::provider::ProviderRegistry,
-) -> anyhow::Result<AgentInfo> {
+) -> anyhow::Result<Arc<AgentInfo>> {
     let mut agent = resolve_agent_with_customs(name, config, working_dir)?;
     if agent.model.is_none() {
         if let Some(model_ref) = resolve_default_model(&agent, provider_registry) {
@@ -1299,7 +1322,7 @@ pub fn resolve_agent_with_customs_and_model(
                 model = %model_ref.model_id,
                 "Auto-assigned default model to agent"
             );
-            agent.model = Some(model_ref);
+            Arc::make_mut(&mut agent).model = Some(model_ref);
         }
     }
     Ok(agent)
@@ -1321,22 +1344,24 @@ pub fn resolve_agent_with_customs_and_model(
 /// let agent = resolve_agent("general", &config).unwrap();
 /// assert_eq!(agent.name, "general");
 /// ```
-pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<AgentInfo> {
+pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<Arc<AgentInfo>> {
     // PERF-011: search the cached built-in roster instead of rebuilding ~15
     // AgentInfo entries (each with a multi-kilobyte prompt) on every
-    // resolution.  We clone the matching entry so downstream config
-    // overlays can mutate it in place without touching the shared cache.
+    // resolution.
     let builtins = builtin_agents();
-    let mut agent = builtins
+    let base = builtins
         .iter()
         .find(|a| a.name == name)
         .cloned()
-        .unwrap_or_else(|| AgentInfo::new(name, format!("Custom agent: {name}")));
+        .unwrap_or_else(|| Arc::new(AgentInfo::new(name, format!("Custom agent: {name}"))));
 
-    // Apply config overrides
+    // Apply config overrides only when present. If there are no overrides we
+    // can return the shared `Arc` directly, avoiding any clone of the prompt
+    // text (FR-005 / FR-013).
     if let Some(agent_config) = config.agent.get(name) {
+        let mut agent = Arc::unwrap_or_clone(base);
         if let Some(ref prompt) = agent_config.prompt {
-            agent.prompt = Some(prompt.clone());
+            agent.prompt = Some(Arc::from(prompt.clone()));
         }
         if let Some(temp) = agent_config.temperature {
             agent.temperature = Some(temp);
@@ -1366,8 +1391,10 @@ pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<Agent
         for (k, v) in &agent_config.options {
             Arc::make_mut(&mut agent.options).insert(k.clone(), v.clone());
         }
+        Ok(Arc::new(agent))
+    } else {
+        Ok(base)
     }
-    Ok(agent)
 }
 
 /// Like [`resolve_agent`] but also searches custom OASF agents loaded from
@@ -1393,7 +1420,7 @@ pub fn resolve_agent_with_customs(
     name: &str,
     config: &crate::Config,
     working_dir: &Path,
-) -> anyhow::Result<AgentInfo> {
+) -> anyhow::Result<Arc<AgentInfo>> {
     let (custom_defs, _) = custom::load_custom_agents(working_dir);
     if let Some(def) = custom_defs.into_iter().find(|d| d.agent_info.name == name) {
         return Ok(def.agent_info);
@@ -1422,12 +1449,12 @@ pub fn resolve_agent_with_customs(
 /// println!("{} agents loaded, {} warnings", agents.len(), warnings.len());
 /// ```
 #[must_use]
-pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
-    // PERF-011: clone the cached roster once instead of rebuilding ~15
+pub fn load_all_agents(working_dir: &Path) -> (Vec<Arc<AgentInfo>>, Vec<String>) {
+    // PERF-011: clone the cached Arc roster once instead of rebuilding ~15
     // AgentInfo entries. `load_all_agents` is called by `/agents` and the
     // agent picker, both of which run on user demand (not the hot path),
     // but the cache still avoids the repeated ~15-construction cost.
-    let builtins: Vec<AgentInfo> = builtin_agents().to_vec();
+    let builtins: Vec<Arc<AgentInfo>> = builtin_agents().to_vec();
     let builtin_names: std::collections::HashSet<String> =
         builtins.iter().map(|a| a.name.clone()).collect();
 
@@ -1442,7 +1469,7 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
                 "custom agent '{}' collides with a built-in — loaded as '{}'",
                 def.agent_info.name, new_name
             ));
-            def.agent_info.name = new_name;
+            Arc::make_mut(&mut def.agent_info).name = new_name;
         }
         all.push(def.agent_info);
     }
@@ -1472,7 +1499,7 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
 /// use ragent_agent::agent::{AgentInfo, build_system_prompt};
 ///
 /// let mut agent = AgentInfo::new("helper", "A helpful agent");
-/// agent.prompt = Some("You are a helpful assistant.".to_string());
+/// agent.prompt = Some(Arc::from("You are a helpful assistant."));
 /// agent.max_steps = Some(10);
 ///
 /// let prompt = build_system_prompt(&agent, Path::new("/tmp/project"), "src/\n  main.rs", None);
@@ -2490,6 +2517,7 @@ fn build_system_prompt_with_storage_inner(
         let spawnable: Vec<&AgentInfo> = builtins
             .iter()
             .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
+            .map(|a| a.as_ref())
             .collect();
         let max_background_agents = crate::Config::load()
             .map(|c| c.experimental.max_background_agents)
@@ -2497,7 +2525,7 @@ fn build_system_prompt_with_storage_inner(
 
         // Load custom agents and collect the spawnable ones
         let (custom_defs, _) = custom::load_custom_agents(working_dir);
-        let spawnable_custom: Vec<AgentInfo> = custom_defs
+        let spawnable_custom: Vec<Arc<AgentInfo>> = custom_defs
             .into_iter()
             .filter(|d| {
                 (d.agent_info.mode == AgentMode::Subagent || d.agent_info.mode == AgentMode::All)
@@ -2632,7 +2660,19 @@ fn build_system_prompt_with_storage_inner(
              {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
              ```\n\n\
               Use `wait_agents` to block until background tasks finish (preferred — no polling).\n\
-              Use `list_agents` to check status without blocking. Use `cancel_agent` to stop a task early.\n\n",
+              Use `list_agents` to check status without blocking. Use `cancel_agent` to stop a task early.\n\n\
+              **CRITICAL — `wait_agents` output may be truncated for long reports:**\n\
+              - Generic context truncation may cut the middle out of a multi-agent batch\n\
+                when the combined output exceeds ~12k chars; the truncated text is a\n\
+                SUMMARY ONLY, not the agents' actual findings.\n\
+              - Every completed agent's FULL untruncated report is written to a durable\n\
+                file at `log/subagents/<task-id>.md` — its path is surfaced in the\n\
+                `wait_agents` output, metadata results entries, and the `list_agents`\n\
+                table. If the printed text was cut, recover the report with the `read`\n\
+                tool against that file rather than re-running the agent or re-reading\n\
+                source files yourself.\n\
+              - The tool's metadata `\"results\"` array additionally mirrors every agent's\n\
+                complete `\"output\"` plus the `\"output_file\"` path.\n\n",
         );
         section = section.replace("MAX_BG_TASKS", &max_background_agents.to_string());
 

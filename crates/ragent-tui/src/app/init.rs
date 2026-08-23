@@ -86,7 +86,7 @@ impl App {
 
         let cwd_path = std::env::current_dir().unwrap_or_default();
         let log_window_path = {
-            let log_dir = cwd_path.join("log");
+            let log_dir = cwd_path.join("log").join("logwindow");
             let _ = std::fs::create_dir_all(&log_dir);
             let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
             Some(log_dir.join(format!("logwindow-{ts}.log")))
@@ -112,13 +112,13 @@ impl App {
                     .iter()
                     .filter(|d| !d.agent_info.hidden)
                     .map(|d| {
-                        let mut info = d.agent_info.clone();
+                        let mut info = d.agent_info.as_ref().clone();
                         if builtin_names.contains(&info.name) {
                             let new_name = format!("custom:{}", info.name);
                             all_diagnostics.push(format!(
-                        "custom agent '{}' collides with a built-in agent name — loaded as '{}'",
-                        info.name, new_name
-                    ));
+                          "custom agent '{}' collides with a built-in agent name — loaded as '{}'",
+                          info.name, new_name
+                      ));
                             info.name = new_name;
                         }
                         info

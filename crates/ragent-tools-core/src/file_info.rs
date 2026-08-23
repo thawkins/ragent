@@ -49,7 +49,7 @@ impl Tool for FileInfoTool {
             .context("Missing required 'path' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
-        super::check_path_within_root(&path, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
 
         if !path.exists() {
             return Ok(ToolOutput {

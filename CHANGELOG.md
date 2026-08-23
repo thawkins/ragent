@@ -1,5 +1,170 @@
 # Changelog
 
+## Version: 1.0.51
+
+### Changed — `ragent-agent` performance optimisations (spec `agentopt`)
+
+- **Shared `reqwest::Client`** for URL reference fetching (`@https://...`) and
+  HTTP MCP transport — a single `OnceLock`-backed client replaces per-request
+  construction (FR-007, T-001/T-002).
+- **Cached fuzzy reference file list** — `collect_project_files` results are
+  cached per working directory with mtime/TTL invalidation, avoiding a full
+  directory walk on every fuzzy `@filename` reference (FR-009, T-003).
+- **Reduced fuzzy matching allocations** — lowercased candidate strings are
+  reused across the match loop instead of re-materialised per comparison
+  (FR-009/FR-019, T-004).
+- **`Arc<AgentInfo>` from agent resolution** — `resolve_agent` and
+  `load_all_agents` return `Arc<AgentInfo>` so sub-agent/background spawning
+  shares the prompt instead of deep-cloning it (FR-005/FR-013, T-005/T-007).
+- **Reference-counted built-in prompt strings** — built-in agent system prompts
+  are stored as `Arc<str>` and reused across compositions (FR-013/FR-018,
+  T-006).
+- **Borrowed tool definitions** — the tool registry exposes
+  `definitions_slice()` returning `&[ToolDef]` so the LLM serialisation path
+  no longer clones a full `Vec<ToolDef>` per request (FR-014, T-008).
+- **Shared session `ToolContext`** — `ToolContext` and `PermissionChecker`
+  state constant for the session are built once and shared across tool calls
+  instead of reconstructed per dispatch (FR-004, T-009).
+- **Batched `BackgroundTaskService` storage writes** — output and status
+  updates are batched into a single storage transaction and skipped when
+  stdout/stderr/progress are unchanged (FR-008, T-010).
+- **Consolidated `BackgroundTaskService` state** — three separate
+  `Mutex`-protected maps (`tasks`, `sessions`, `drained_ids`) are merged into
+  a single `Mutex<BgState>`, eliminating the multi-lock acquisition convoy
+  (FR-015, T-011).
+- **`Arc<str>` for `TaskEntry` result/error strings** — `result` and `error`
+  fields are `Arc<str>` so cloning a `TaskEntry` (e.g. in `list_agents`,
+  `drain_completed`) is a cheap pointer bump rather than a full string copy
+  (FR-006/FR-016, T-012).
+- **`DashMap` in `AgentManager`** — `tasks` and `cancel_flags` maps replaced
+  `RwLock<HashMap>` with `DashMap`, eliminating reader-writer lock contention
+  on read-heavy paths (FR-016, T-013).
+- **Cached canonical paths in permission checker** — `canonicalize` results
+  are cached per step, avoiding a blocking syscall on every file-tool
+  permission check (FR-017, T-014).
+- **Hoisted hardwired tool approvals** — codeindex and other always-allowed
+  tools are checked before any I/O in `check_permission_with_prompt`
+  (FR-004/FR-017, T-015).
+- **Batched memory tag fetches** — memory visualisation fetches all tags in a
+  single SQL query instead of one per row (FR-010, T-016).
+- **Single-pass skill/template substitution** — `{{PLACEHOLDER}}` substitution
+  scans the template once and builds the result in a single pass (FR-011,
+  T-017).
+- **Single-pass goal-evaluation context builder** — the goal evaluator builds
+  its context string in one pass with pre-sized buffers instead of allocating
+  a formatted string per message plus an intermediate `Vec` (FR-012, T-018).
+- **Pre-sized snapshot diff buffers** — `similar` diff buffers are
+  pre-allocated to the input size to reduce reallocation during patch
+  generation (FR-004, T-019).
+- **Regression/criterion benchmarks** — benchmarks for hot paths
+  (`crates/ragent-agent/benches/hot_paths.rs`) provide a baseline for
+  detecting regressions (FR-002, T-020).
+- **Full test suite and clippy pass** — `cargo test -p ragent-agent`,
+  `cargo clippy -p ragent-agent`, and `cargo fmt -p ragent-agent` all pass
+  clean after all optimisations (FR-002, T-021).
+
+### Added — Tool-call log in sub-agent report files
+
+- **Sub-agent report files** (`log/subagents/<task-id>.md`) now include a
+  `## Tool Call Log` section between `## Task` and `## Output` that records
+  every tool the agent invoked during its run: tool name, status
+  (completed/error), input arguments, output (or error message), and
+  execution duration. The section is clearly separated from the agent's
+  output text with a blockquote warning ("The entries below are tool
+  invocations … NOT agent output text") so the log is never confused for
+  findings. Tool inputs are truncated to 500 chars and outputs to 500
+  chars to keep the log readable. Error/cancellation paths do not include
+  a tool log.
+
+### Fixed — Sub-agent premature-termination ("narration without findings")
+
+- **Root cause identified**: when a sub-agent (e.g. `explore`) that was
+  actively calling tools produces a SHORT text-only response — narration like
+  "Now let me check the remaining spots …" — without a tool call, the agent
+  loop treated that narration as the final answer and terminated. The agent
+  never produced its findings report, so the deliverable was a 100–400 char
+  fragment. This is a *third* truncation pattern distinct from the two fixed
+  in 1.0.50 (silent end-of-stream and generic 12k content cut): the provider
+  sends a normal `Finish { reason: Stop }`, so none of the existing truncation
+  guards fired.
+- **Fix**: the session loop (`crates/ragent-agent/src/session/processor.rs`)
+  now detects this pattern for sub-agents: when `tool_calls.is_empty()` on a
+  step > 1 (prior tool-use steps) and the text is under 2 000 chars, it
+  injects a one-shot `SUBAGENT_SUMMARY_NUDGE` user message asking the model
+  to produce its complete findings report now, then continues the loop. The
+  next text-only response (the actual findings) terminates the loop normally.
+  The nudge fires at most once per run. Primary agents are not affected.
+- **Regression tests**: `crates/ragent-agent/tests/test_subagent_summary_nudge.rs`
+  — verifies a sub-agent that does tool work then produces short narration is
+  nudged to produce findings (3 LLM calls: tool, narration, findings), and
+  that a primary agent producing the same pattern is NOT nudged (2 calls only).
+
+### Added — Durable full sub-agent reports on disk
+
+- **Every sub-agent output is now persisted to a unique file**
+  `log/subagents/<task-id>.md` under the working directory when the agent
+  completes (or fails) — foreground and background alike
+  (`crates/ragent-agent/src/task/mod.rs`: `write_subagent_output` /
+  `record_output_file`, stamped onto the new `TaskEntry::output_file`
+  field, `#[serde(default)]` for backward compatibility).  Written via a
+  temp-file + rename so a crash mid-write never leaves a truncated report
+  masquerading as complete.
+- **`wait_agents` surfaces the report path** in both its formatted content
+  (`📄 Full report: <path>` line) and its metadata `results[]` entries
+  (new `output_file` field).  If the combined batch output is cut by the
+  generic 12k context truncation, the parent agent can recover the omitted
+  findings by `read`-ing the file instead of re-running the sub-agent.
+- **`list_agents` surfaces the report path** under each finished task in
+  the table output, in the single-task detail view, and in its tool
+  description.
+- **Background task injection** (`session/processor.rs::drain_completed`
+  consumer) appends a `Full untruncated report: <path>` note to the
+  injected message when the body might be truncated for context.
+- **Tool-result truncation notice** (`session/history.rs`) now explicitly
+  names the `log/subagents/<task-id>.md` file as the recovery path.  The
+  system prompt's `wait_agents` guidance likewise points at the on-disk
+  file as the primary recovery mechanism.
+
+### Fixed — Reappearing "sub-agent output truncated" complaint
+
+- **`wait_agents` metadata now carries full per-agent reports**
+  (`crates/ragent-agent/src/tool/wait_agents.rs`) — the tool output
+  `content` already contained the full agent results (fixed in 1.0.50), but
+  once the combined batch exceeded the generic 12 000-char tool-result
+  budget in `history.rs::tool_result_content_for_llm`, the head+tail
+  truncation silently dropped one agent's report from the middle.  The tool
+  now mirrors every completed agent's full output into a metadata
+  `results` array (`{task_id, agent, success, output}`) so the data is
+  recoverable even when the printed content is cut.
+- **`wait_agents` now collects already-completed background-task results** —
+  previously `waiting_for` only seeded `Running` tasks, so a caller that
+  invoked `wait_agents` *after* its sub-agents had finished received
+  "No running background tasks to wait for." even though completed results
+  existed for the session.  The waiting set now also picks up completed /
+  failed / cancelled background tasks for the current session.
+
+### Changed — Tool-result truncation headroom and pointers
+
+- Raised the tool-result head budget for LLM context from 8 000 to 10 000
+  chars (`crates/ragent-agent/src/session/history.rs`) so a typical
+  3-agent `wait_agents` batch fits under the 12k threshold without
+  truncation.
+- The truncation marker now explicitly tells the model that full per-agent
+  reports are available in the `wait_agents` metadata `results` array
+  instead of only "request narrower output if more detail is needed".
+- The built-in system prompt now warns agents that `wait_agents` output may
+  be truncated and that the complete reports live in metadata `results`.
+
+### Added
+
+- `AgentManager::seed_completed_for_test` — hidden test-only helper that
+  inserts a completed `TaskEntry` directly into the in-memory task map so
+  integration tests can verify `wait_agents` behaviour without running a
+  real child LLM session.
+- Regression test `test_wait_agents_results_meta.rs` — asserts a 20 000-char
+  agent report arrives untruncated via both `ToolOutput.content` and
+  `metadata.results[0].output` for the completed-task path.
+
 ## Version: 1.0.50
 
 ### Fixed — Sub-agent result truncation

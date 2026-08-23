@@ -49,6 +49,9 @@ fn make_ctx(
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: std::sync::Arc::new(
+            ragent_tools_core::CanonicalPathCache::new(),
+        ),
     }; // Mark this session as the lead so tool permission checks pass.
     ctx.team_context = Some(Arc::new(ragent_agent::tool::TeamContext {
         team_name: String::new(),

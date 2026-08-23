@@ -17,14 +17,19 @@ fn def_for(tool_name: &str) -> ToolDefinition {
     let registry = create_default_registry();
     registry
         .definitions()
-        .into_iter()
+        .iter()
         .find(|d| d.name == tool_name)
+        .cloned()
         .unwrap_or_else(|| panic!("tool '{tool_name}' should be registered"))
 }
 
 fn names_sorted() -> Vec<String> {
     let registry = create_default_registry();
-    let mut names: Vec<String> = registry.definitions().into_iter().map(|d| d.name).collect();
+    let mut names: Vec<String> = registry
+        .definitions()
+        .iter()
+        .map(|d| d.name.clone())
+        .collect();
     names.sort();
     names
 }

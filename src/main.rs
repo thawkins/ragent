@@ -458,7 +458,7 @@ async fn main() -> Result<()> {
 
     // Apply CLI --maxsteps override if provided
     if let Some(max) = cli.maxsteps {
-        resolved_agent.max_steps = Some(max);
+        Arc::make_mut(&mut resolved_agent).max_steps = Some(max);
     }
 
     // Apply model selection with priority:
@@ -471,11 +471,11 @@ async fn main() -> Result<()> {
     let t0 = Instant::now();
     if let Some(ref model_str) = cli.model {
         if let Some((provider, model)) = model_str.split_once('/') {
-            resolved_agent.model = Some(agent::ModelRef {
+            Arc::make_mut(&mut resolved_agent).model = Some(agent::ModelRef {
                 provider_id: provider.to_string(),
                 model_id: model.to_string(),
             });
-            resolved_agent.model_pinned = true;
+            Arc::make_mut(&mut resolved_agent).model_pinned = true;
         } else {
             anyhow::bail!(
                 "Invalid --model format '{model_str}'. Expected 'provider/model' (e.g. 'copilot/claude-sonnet-4.5')"
@@ -486,7 +486,7 @@ async fn main() -> Result<()> {
         if let Ok(Some(model_str)) = storage.get_setting("selected_model")
             && let Some((provider, model)) = model_str.split_once('/')
         {
-            resolved_agent.model = Some(agent::ModelRef {
+            Arc::make_mut(&mut resolved_agent).model = Some(agent::ModelRef {
                 provider_id: provider.to_string(),
                 model_id: model.to_string(),
             });
@@ -543,6 +543,7 @@ async fn main() -> Result<()> {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
+        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -662,7 +663,7 @@ async fn main() -> Result<()> {
                 let mut resolved_agent = resolved_agent.clone();
                 let config_guard = config.read().await;
                 agent::apply_fallback_thinking(
-                    &mut resolved_agent,
+                    Arc::make_mut(&mut resolved_agent),
                     &config_guard,
                     provider_registry.as_ref(),
                 );
@@ -693,13 +694,12 @@ async fn main() -> Result<()> {
             } else {
                 // Print startup banner before entering TUI alternate screen
                 print_banner();
-
                 ragent_tui::run_tui(
                     event_bus,
                     storage,
                     provider_registry,
                     session_processor,
-                    resolved_agent.clone(),
+                    (*resolved_agent).clone(),
                     cli.log,
                     None,
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
@@ -715,7 +715,7 @@ async fn main() -> Result<()> {
             let mut resolved_agent = resolved_agent.clone();
             let config_guard = config.read().await;
             agent::apply_fallback_thinking(
-                &mut resolved_agent,
+                    Arc::make_mut(&mut resolved_agent),
                 &config_guard,
                 provider_registry.as_ref(),
             );
@@ -806,7 +806,7 @@ async fn main() -> Result<()> {
                     storage,
                     provider_registry,
                     session_processor,
-                    resolved_agent.clone(),
+                    (*resolved_agent).clone(),
                     cli.log,
                     Some(id),
                     tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),

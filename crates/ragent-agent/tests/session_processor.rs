@@ -34,6 +34,7 @@ async fn test_hardwired_team_tool_is_auto_approved() {
         "tool:team_status",
         "team_status",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -54,6 +55,7 @@ async fn test_hardwired_task_suffix_tool_is_auto_approved() {
         "tool:new_agent",
         "new_agent",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -74,6 +76,7 @@ async fn test_hardwired_ask_user_tool_is_auto_approved() {
         "Which provider?",
         "ask_user",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -94,6 +97,7 @@ async fn test_hardwired_wait_agents_is_auto_approved() {
         "waiting",
         "wait_agents",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -117,6 +121,7 @@ async fn test_hardwired_agent_complete_is_auto_approved() {
         "summary",
         "agent_complete",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -140,6 +145,7 @@ async fn test_hardwired_list_agents_is_auto_approved() {
         "list",
         "list_agents",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -162,6 +168,7 @@ async fn test_hardwired_task_create_is_auto_approved() {
         "create task",
         "task_create",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -184,6 +191,7 @@ async fn test_hardwired_task_update_is_auto_approved() {
         "update task",
         "task_update",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -206,6 +214,7 @@ async fn test_hardwired_task_get_is_auto_approved() {
         "get task",
         "task_get",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");
@@ -228,6 +237,7 @@ async fn test_hardwired_task_list_is_auto_approved() {
         "list tasks",
         "task_list",
         false,
+        None,
     )
     .await
     .expect("permission check should succeed");

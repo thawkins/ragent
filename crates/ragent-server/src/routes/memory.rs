@@ -338,34 +338,53 @@ pub async fn get_visualisation(
 pub async fn get_visualisation_graph(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_agent::memory::generate_graph(&state.storage) {
-        Ok(graph) => serialize_response(graph, "graph"),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate graph: {e}"),
-        ),
-    }
+    // FR-010: fetch memories and tags in batch queries rather than per-row.
+    let (memories, all_tags) = match (
+        state.storage.list_memories("", 10_000),
+        state.storage.get_all_memory_tags(),
+    ) {
+        (Ok(m), Ok(t)) => (m, t),
+        (Err(e), _) | (_, Err(e)) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load memories for graph: {e}"),
+            );
+        }
+    };
+    let graph = ragent_agent::memory::generate_graph(&memories, &all_tags);
+    serialize_response(graph, "graph")
 }
 
 /// GET /memory/visualisation/tags — Tag cloud.
 pub async fn get_visualisation_tags(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_agent::memory::generate_tag_cloud(&state.storage) {
-        Ok(cloud) => serialize_response(cloud, "tag_cloud"),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate tag cloud: {e}"),
-        ),
-    }
+    // FR-010: fetch memories and tags in batch queries rather than per-row.
+    let (memories, all_tags) = match (
+        state.storage.list_memories("", 10_000),
+        state.storage.get_all_memory_tags(),
+    ) {
+        (Ok(m), Ok(t)) => (m, t),
+        (Err(e), _) | (_, Err(e)) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load memories for tag cloud: {e}"),
+            );
+        }
+    };
+    let cloud = ragent_agent::memory::generate_tag_cloud(&memories, &all_tags);
+    serialize_response(cloud, "tag_cloud")
 }
 
 /// GET /memory/visualisation/heatmap — Access pattern heatmap.
 pub async fn get_visualisation_heatmap(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_agent::memory::generate_heatmap(&state.storage) {
-        Ok(heatmap) => serialize_response(heatmap, "heatmap"),
+    match state.storage.list_memories("", 10_000) {
+        Ok(memories) => {
+            let heatmap = ragent_agent::memory::generate_heatmap(&memories);
+            serialize_response(heatmap, "heatmap")
+        }
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to generate heatmap: {e}"),

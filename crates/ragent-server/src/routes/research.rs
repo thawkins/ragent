@@ -217,7 +217,7 @@ async fn create_research(
     let active_model =
         ragent_agent::agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
             .ok()
-            .and_then(|agent| agent.model);
+            .and_then(|agent| agent.model.clone());
     let session = build_research_session(
         &state.session_processor.tool_registry,
         manager.clone(),

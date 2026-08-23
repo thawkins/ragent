@@ -22,8 +22,9 @@ fn def_for(tool_name: &str) -> ragent_llm::llm::ToolDefinition {
     let registry = create_default_registry();
     registry
         .definitions()
-        .into_iter()
+        .iter()
         .find(|d| d.name == tool_name)
+        .cloned()
         .unwrap_or_else(|| panic!("tool {tool_name} should be registered"))
 }
 
@@ -226,6 +227,7 @@ async fn test_agent_complete_rejects_task_id_and_result_inputs() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(
@@ -273,6 +275,7 @@ async fn test_agent_complete_accepts_summary_input() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     };
     let result = tool.execute(input, &ctx).await;
     assert!(

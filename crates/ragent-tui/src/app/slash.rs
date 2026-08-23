@@ -2039,21 +2039,132 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.status = "inputdiag".to_string();
             }
             "log" => {
-                self.show_log = !self.show_log;
-                if self.show_log {
-                    // Entering log mode: dismiss the other side panels so only
-                    // one occupies the side column (FR-012).
-                    self.show_profile = false;
-                    self.show_tasks_panel = false;
-                    self.show_memory = false;
-                    self.show_telemetry = false;
-                    self.spool_log_window_history();
+                let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+                match sub.as_str() {
+                    "" => {
+                        // `/log` (no args) toggles the log panel (backwards compat).
+                        self.show_log = !self.show_log;
+                        if self.show_log {
+                            // Entering log mode: dismiss the other side panels so only
+                            // one occupies the side column (FR-012).
+                            self.show_profile = false;
+                            self.show_tasks_panel = false;
+                            self.show_memory = false;
+                            self.show_telemetry = false;
+                            self.spool_log_window_history();
+                        }
+                        self.status = if self.show_log {
+                            "log panel visible".to_string()
+                        } else {
+                            "log panel hidden".to_string()
+                        };
+                    }
+                    "help" => {
+                        self.append_assistant_text(
+                            r"From: /log help
+
+## /log — Log panel and log-file management
+
+| Subcommand | Description |
+|---|---|
+| `/log` | Toggle the log panel on/off |
+| `/log clear subagents` | Delete all files in `log/subagents/` |
+| `/log clear panics` | Delete all files in `log/panics/` |
+| `/log clear research` | Delete all files in `logs/research/` |
+| `/log clear editlog` | Delete all files in `log/editlog/` |
+| `/log clear logwindow` | Delete all files in `log/logwindow/` |
+| `/log help` | Show this help |
+",
+                        );
+                        self.status = "log: help".to_string();
+                    }
+                    "clear" => {
+                        let target = args.split_whitespace().nth(1).unwrap_or("").to_lowercase();
+                        match target.as_str() {
+                            "subagents" => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let dir = working_dir.join("log").join("subagents");
+                                let cleared = clear_dir_contents(&dir);
+                                self.append_assistant_text(&format!(
+                                    r"From: /log clear subagents
+
+Cleared {cleared} file{} from `{}`.",
+                                    if cleared == 1 { "" } else { "s" },
+                                    dir.display()
+                                ));
+                                self.status = "log: subagents cleared".to_string();
+                            }
+                            "panics" => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let dir = working_dir.join("log").join("panics");
+                                let cleared = clear_dir_contents(&dir);
+                                self.append_assistant_text(&format!(
+                                    r"From: /log clear panics
+
+Cleared {cleared} file{} from `{}`.",
+                                    if cleared == 1 { "" } else { "s" },
+                                    dir.display()
+                                ));
+                                self.status = "log: panics cleared".to_string();
+                            }
+                            "research" => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let dir = working_dir.join("logs").join("research");
+                                let cleared = clear_dir_contents(&dir);
+                                self.append_assistant_text(&format!(
+                                    r"From: /log clear research
+
+Cleared {cleared} file{} from `{}`.",
+                                    if cleared == 1 { "" } else { "s" },
+                                    dir.display()
+                                ));
+                                self.status = "log: research cleared".to_string();
+                            }
+                            "editlog" => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let dir = working_dir.join("log").join("editlog");
+                                let cleared = clear_dir_contents(&dir);
+                                self.append_assistant_text(&format!(
+                                    r"From: /log clear editlog
+
+Cleared {cleared} file{} from `{}`.",
+                                    if cleared == 1 { "" } else { "s" },
+                                    dir.display()
+                                ));
+                                self.status = "log: editlog cleared".to_string();
+                            }
+                            "logwindow" => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                let dir = working_dir.join("log").join("logwindow");
+                                let cleared = clear_dir_contents(&dir);
+                                self.append_assistant_text(&format!(
+                                    r"From: /log clear logwindow
+
+Cleared {cleared} file{} from `{}`.",
+                                    if cleared == 1 { "" } else { "s" },
+                                    dir.display()
+                                ));
+                                self.status = "log: logwindow cleared".to_string();
+                            }
+                            _ => {
+                                self.append_assistant_text(
+                                    r"From: /log clear
+
+Usage: `/log clear subagents|panics|research|editlog|logwindow`",
+                                );
+                                self.status = "log: clear usage".to_string();
+                            }
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            r"From: /log
+
+Usage: `/log [clear subagents|panics|research|editlog|logwindow|help]`",
+                        );
+                        self.status = "log: usage".to_string();
+                    }
                 }
-                self.status = if self.show_log {
-                    "log panel visible".to_string()
-                } else {
-                    "log panel hidden".to_string()
-                };
             }
             "task" => {
                 if args.is_empty() {
@@ -2456,7 +2567,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                     let mut new_cycleable: Vec<_> =
                         builtin_agents.into_iter().filter(|a| !a.hidden).collect();
                     for def in &new_defs {
-                        let mut info = def.agent_info.clone();
+                        let mut info = def.agent_info.as_ref().clone();
                         if builtin_names.contains(&info.name) {
                             let new_name = format!("custom:{}", info.name);
                             diags.push(format!(
@@ -2663,7 +2774,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                         self.status = "No system prompt set".to_string();
                     }
                 } else {
-                    self.agent_info.prompt = Some(args.to_string());
+                    self.agent_info.prompt = Some(Arc::from(args.to_string()));
                     self.status = "system prompt updated".to_string();
                     self.push_log_no_agent(
                         LogLevel::Info,
@@ -3113,10 +3224,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           bg_service: None,
                                                                                                                                                                                                                           spec_manager: session_processor.spec_manager.get().cloned(),
                                                                                                                                                                                                                           active_spec_id: session_processor.active_spec.read().await.clone(),
-                                                                                                                                                                                                                          config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
-                                                                                                                                                                                                                          cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-                                                                                                                                                                                                                          read_timestamps: session_processor.read_timestamps.clone(),
-                                                                                                                                                                                                                      };
+                                                                                                                                                                                                                          config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
+                                                                                            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+                                                                                        };
                                                                                                                                                                                                                       let _ = tool.execute(input, &ctx).await;                                                }
                                             });
                                     });
@@ -8820,9 +8931,8 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     let skill = skill.clone();
                     let args_owned = args.to_string();
                     let processor = self.session_processor.clone();
-
                     let agent = ragent_agent::skill::invoke::resolve_inline_skill_agent(
-                        &self.agent_info,
+                        &Arc::new(self.agent_info.clone()),
                         self.selected_model.as_deref(),
                         skill.model.as_deref(),
                     );
@@ -10628,4 +10738,26 @@ Use `/goal set <description>` to set a goal first.";
             app.status = format!("goal: unknown '{}'", subcmd);
         }
     }
+}
+
+/// Delete every file (and subdirectory) inside `dir`, returning the number of
+/// top-level entries removed. The directory itself is kept. Returns `0` when
+/// `dir` does not exist.
+fn clear_dir_contents(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut cleared = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path).is_ok()
+        } else {
+            std::fs::remove_file(&path).is_ok()
+        };
+        if removed {
+            cleared += 1;
+        }
+    }
+    cleared
 }

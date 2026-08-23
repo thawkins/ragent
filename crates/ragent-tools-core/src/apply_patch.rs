@@ -118,7 +118,7 @@ impl Tool for ApplyPatchTool {
         // Resolve all paths and validate root containment up-front.
         let mut ops = ops
             .into_iter()
-            .map(|op| op.resolve_paths(&base))
+            .map(|op| op.resolve_paths(&base, &ctx.canonical_cache))
             .collect::<Result<Vec<_>>>()
             .inspect_err(|e| {
                 log_edit_operation_ex(
@@ -354,16 +354,16 @@ enum HunkLine {
 }
 
 impl PatchOp {
-    fn resolve_paths(self, base: &Path) -> Result<Self> {
+    fn resolve_paths(self, base: &Path, cache: &super::CanonicalPathCache) -> Result<Self> {
         let path = resolve_path(base, &self.path.to_string_lossy());
         let move_to = self
             .move_to
             .map(|p| resolve_path(base, &p.to_string_lossy()));
         // Validate canonical containment after resolution to prevent escaping
         // via parent-directory traversal before any file operation runs.
-        super::check_path_within_root(&path, base)?;
+        super::check_path_within_root_cached(&path, base, cache)?;
         if let Some(ref mt) = move_to {
-            super::check_path_within_root(mt, base)?;
+            super::check_path_within_root_cached(mt, base, cache)?;
         }
         Ok(Self {
             kind: self.kind,

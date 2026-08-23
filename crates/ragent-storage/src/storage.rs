@@ -2275,6 +2275,31 @@ impl Storage {
         Ok(tags)
     }
 
+    /// Retrieves tags for all structured memories in a single query (FR-010).
+    ///
+    /// Returns a map of `memory_id → tags`.  This avoids issuing one SQLite
+    /// query per memory row during visualisation generation, replacing N
+    /// queries with one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_all_memory_tags(&self) -> Result<std::collections::HashMap<i64, Vec<String>>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT memory_id, tag FROM memory_tags ORDER BY memory_id, tag")?;
+        let mut map: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
+        let rows = stmt.query_map([], |row| {
+            let memory_id: i64 = row.get(0)?;
+            let tag: String = row.get(1)?;
+            Ok((memory_id, tag))
+        })?;
+        for (id, tag) in rows.flatten() {
+            map.entry(id).or_default().push(tag);
+        }
+        Ok(map)
+    }
+
     /// Searches structured memories using FTS5 full-text search, optionally
     /// filtered by categories, tags, and minimum confidence.
     ///
@@ -3401,6 +3426,50 @@ impl Storage {
              SET stdout = ?1, stderr = ?2, progress_json = ?3, updated_at = ?4
              WHERE id = ?5",
             params![stdout, stderr, progress_json, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Overwrites stdout/stderr/progress and updates status/exit-code/completed_at
+    /// in a single SQL statement.
+    ///
+    /// T-010 / FR-008: batching the output and status updates into one storage
+    /// transaction avoids the previous two-write pattern on every background
+    /// task completion, and avoids writes entirely when stdout/stderr/progress
+    /// have not changed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_background_task_output_and_status(
+        &self,
+        id: &str,
+        stdout: &str,
+        stderr: &str,
+        progress_json: &str,
+        status: &str,
+        exit_code: Option<i64>,
+        completed_at: Option<&str>,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE background_tasks
+             SET stdout = ?1,
+                 stderr = ?2,
+                 progress_json = ?3,
+                 status = ?4,
+                 exit_code = ?5,
+                 completed_at = ?6,
+                 updated_at = ?7
+             WHERE id = ?8",
+            params![
+                stdout,
+                stderr,
+                progress_json,
+                status,
+                exit_code,
+                completed_at,
+                now,
+                id
+            ],
         )?;
         Ok(())
     }

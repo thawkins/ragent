@@ -2177,7 +2177,7 @@ impl App {
                 "name",
                 "----"
             ));
-            for def in defs {
+            for def in defs.iter() {
                 let desc = ragent_types::truncate_bytes(&def.description, 60);
                 output.push_str(&format!("{:<24} {}\n", def.name, desc));
             }

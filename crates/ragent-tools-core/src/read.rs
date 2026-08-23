@@ -153,7 +153,7 @@ impl Tool for ReadTool {
         let path = resolve_path(&ctx.working_dir, path_str);
 
         // C-002: reads must stay inside the working root.
-        super::check_path_within_root(&path, &ctx.working_dir)?;
+        super::check_path_within_root_cached(&path, &ctx.working_dir, &ctx.canonical_cache)?;
 
         if path.is_dir() {
             anyhow::bail!(

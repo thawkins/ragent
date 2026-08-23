@@ -8,6 +8,7 @@ use ragent_agent::agent::{
 use ragent_config::permission::{Permission, PermissionAction};
 use ragent_types::ThinkingConfig;
 use std::path::Path;
+use std::sync::Arc;
 
 #[test]
 fn test_ask_agent_defaults_thinking_off() {
@@ -29,7 +30,7 @@ fn test_task_tool_family_guidance_is_injected_into_system_prompt() {
     // regressions where someone removes the append at the end of
     // `build_system_prompt_with_storage`.
     let mut agent = AgentInfo::new("general", "general agent");
-    agent.prompt = Some("You are a helpful assistant.".to_string());
+    agent.prompt = Some(Arc::from("You are a helpful assistant."));
     agent.max_steps = Some(10);
 
     let prompt = build_system_prompt_with_storage(

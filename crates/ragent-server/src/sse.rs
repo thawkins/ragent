@@ -217,6 +217,10 @@ struct SubagentCompleteP<'a> {
     summary: &'a str,
     success: bool,
     duration_ms: u64,
+    /// Termination signature (`"complete"`, `"continued"`, `"truncated"`,
+    /// `"error"`, …) so remote consumers can flag possibly-incomplete
+    /// reports.
+    finish_reason: &'a str,
 }
 
 #[derive(Serialize)]
@@ -654,6 +658,8 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             summary,
             success,
             duration_ms,
+            finish_reason,
+            ..
         } => to_data(&SubagentCompleteP {
             session_id,
             task_id,
@@ -661,6 +667,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             summary,
             success: *success,
             duration_ms: *duration_ms,
+            finish_reason,
         }),
 
         Event::SubagentCancelled {

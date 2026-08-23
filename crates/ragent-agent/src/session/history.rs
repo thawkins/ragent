@@ -22,8 +22,21 @@ use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, ToolDefinit
 use crate::message::{Message, MessagePart, Role};
 
 const MAX_TOOL_RESULT_CHARS_FOR_LLM: usize = 12_000;
-const TOOL_RESULT_HEAD_CHARS_FOR_LLM: usize = 8_000;
+const TOOL_RESULT_HEAD_CHARS_FOR_LLM: usize = 10_000;
 const TOOL_RESULT_TAIL_CHARS_FOR_LLM: usize = 4_000;
+
+/// Tools whose output may contain sub-agent reports that must never be
+/// silently cut by the generic 12 000-char budget. For these tools, the
+/// full `content` is written to disk when it exceeds the budget and only
+/// per-task summaries plus file paths are left inline, so no sub-agent
+/// finding is lost even when 8 background tasks finish in one batch.
+const TOOL_RESULT_EXEMPT_TOOLS: &[&str] = &["wait_agents", "list_agents"];
+
+/// Size above which exempt-tool results are diverted to a sidecar file.
+/// 32 000 chars comfortably holds ~4 full reports inline; beyond that the
+/// per-task preview form is more useful anyway (the model was never going
+/// to read eight raw 10 KB reports in one tool result).
+const EXEMPT_TOOL_INLINE_LIMIT: usize = 32_000;
 
 /// Byte-length threshold for the fast-path check in `tool_result_content_for_llm`.
 /// Using `content.len()` (bytes) avoids an expensive UTF-8 decode when the
@@ -296,6 +309,15 @@ pub fn tool_result_content_for_llm(
 ) -> std::sync::Arc<str> {
     use std::sync::Arc;
 
+    // Exempt-path: `wait_agents` / `list_agents` outputs hold sub-agent
+    // findings that the caller explicitly asked us never to cut. When the
+    // combined report grows past the inline budget we divert the full text
+    // to `log/subagents/wait-batch-<ts>.md` and hand the model a summary
+    // that names every task and the file to re-read, so nothing is lost.
+    if TOOL_RESULT_EXEMPT_TOOLS.contains(&tool) {
+        return exempt_tool_result_for_llm(tool, content, metadata);
+    }
+
     // Fast-path: use byte length for the threshold check (safe because we
     // truncate anyway — a few bytes off is fine). Only decode UTF-8 once
     // when we actually need to truncate.  We allocate a single `Arc<str>`
@@ -324,10 +346,122 @@ pub fn tool_result_content_for_llm(
 
     let s = format!(
         "[tool result truncated for context: tool={tool}, {total_chars} chars{line_info}. \
-         Showing start and end segments; request narrower output if more detail is needed.]\n\n\
+         For `wait_agents` the full per-agent reports are kept in the tool's metadata \
+         `\"results\"` array (one object per agent with its complete `\"output\"`) AND \
+         under `log/subagents/<task-id>.md` (path shown in the results entry as \
+         `\"output_file\"`) — read that file with the `read` tool if the middle \
+         segment below omitted findings you need.]\n\n\
          {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}"
     );
     Arc::from(s)
+}
+
+/// Exempt-tool variant of [`tool_result_content_for_llm`] used for
+/// `wait_agents` / `list_agents`. Up to [`EXEMPT_TOOL_INLINE_LIMIT`] the
+/// content passes through unchanged (these results are how the parent model
+/// actually reads sub-agent reports). Past that limit the full payload is
+/// persisted to `log/subagents/wait-batch-<unix millis>.md` and replaced by
+/// a per-task index: one line per task with id, agent, status and the
+/// `log/subagents/<task-id>.md` path for the full report, so every finding
+/// remains one `read` call away without a silent middle-cut.
+fn exempt_tool_result_for_llm(
+    tool: &str,
+    content: &str,
+    metadata: Option<&Value>,
+) -> std::sync::Arc<str> {
+    use std::sync::Arc;
+
+    if content.len() <= EXEMPT_TOOL_INLINE_LIMIT {
+        return Arc::from(content);
+    }
+
+    let batch_path = persist_exempt_batch(content);
+    let mut index = String::with_capacity(1024);
+    index.push_str(&format!(
+        "[{tool} output ({chars} chars) exceeded the inline budget; full text was written \
+         to {path}. Use `read` on that file (or on the per-agent `output_file` paths below) \
+         to recover any finding. The per-task summaries follow.]\n\n",
+        chars = content.len(),
+        path = batch_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "(unavailable — filesystem error)".to_string())
+    ));
+
+    if let Some(meta) = metadata
+        && let Some(entries) = meta.get("results").and_then(Value::as_array)
+    {
+        for entry in entries {
+            let task_id = entry.get("task_id").and_then(Value::as_str).unwrap_or("?");
+            let agent = entry.get("agent").and_then(Value::as_str).unwrap_or("?");
+            let success = entry
+                .get("success")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let status = entry
+                .get("report_status")
+                .and_then(Value::as_str)
+                .unwrap_or("complete");
+            let out_file = entry
+                .get("output_file")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let preview = entry
+                .get("output")
+                .and_then(Value::as_str)
+                .map(|s| {
+                    let head = truncate_at_char_boundary(s, 1_000);
+                    head.to_string()
+                })
+                .unwrap_or_default();
+            index.push_str(&format!(
+                "- {} `{}` — {} — report {} — full text: {}\n  preview: {}\n\n",
+                if success { "ok" } else { "ERR" },
+                task_id,
+                agent,
+                status,
+                if out_file.is_empty() {
+                    "(none)"
+                } else {
+                    out_file
+                },
+                preview
+            ));
+        }
+    } else {
+        // Not the shape we expected (should be unreachable — the tool always
+        // sends `results`) — fall back to head+tail rather than dropping
+        // everything.
+        let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
+        let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
+        index.push_str(head);
+        index.push_str("\n\n[... middle omitted ...]\n\n");
+        index.push_str(tail);
+    }
+
+    Arc::from(index)
+}
+
+/// Persist a diverted `wait_agents`/`list_agents` payload to
+/// `log/subagents/wait-batch-<millis>.md` under the crate working
+/// directory. Returns the path on success; on any I/O failure the caller
+/// falls back to the head+tail summary. Temp-file + rename so a crash
+/// mid-write never leaves a half-written batch file.
+fn persist_exempt_batch(content: &str) -> Option<std::path::PathBuf> {
+    let dir = std::path::Path::new("log").join("subagents");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return None;
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let file = dir.join(format!("wait-batch-{ts}.md"));
+    let tmp = dir.join(format!(".wait-batch-{ts}.md.tmp"));
+    std::fs::write(&tmp, content)
+        .and_then(|()| std::fs::rename(&tmp, &file))
+        .ok()
+        .map(|()| file)
 }
 
 /// Approximate the serialized JSON size of a [`ChatRequest`] without

@@ -1,7 +1,7 @@
 //! Edit-operation instrumentation for `edit`, `multi_edit`, and `apply_patch`.
 //!
 //! When enabled, every `edit`, `multi_edit`, and `apply_patch` invocation
-//! writes a single JSON line to a log file in `<working_dir>/log/edits-<timestamp>.jsonl`.
+//! writes a single JSON line to a log file in `<working_dir>/log/editlog/edits-<timestamp>.jsonl`.
 //! Each line records the timestamp, the target file path, the search/replacement text,
 //! and the outcome.
 //!
@@ -30,9 +30,9 @@ pub fn set_edit_log_enabled(enabled: bool) {
     ragent_config::edit_log::set_enabled(enabled);
 }
 
-/// Build the path to the log directory (`<working_dir>/log`).
+/// Build the path to the log directory (`<working_dir>/log/editlog`).
 fn log_dir(working_dir: &Path) -> PathBuf {
-    working_dir.join("log")
+    working_dir.join("log").join("editlog")
 }
 
 /// Build a unique log file path based on the current UTC timestamp.
@@ -717,7 +717,7 @@ mod tests {
     fn log_dir_resolves_under_working_dir() {
         assert_eq!(
             log_dir(Path::new("/project")),
-            PathBuf::from("/project/log")
+            PathBuf::from("/project/log/editlog")
         );
     }
 

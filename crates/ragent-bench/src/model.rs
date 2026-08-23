@@ -493,6 +493,7 @@ fn finish_reason_label(reason: LlmFinishReason) -> String {
         LlmFinishReason::Length => "length".to_string(),
         LlmFinishReason::ContentFilter => "content_filter".to_string(),
         LlmFinishReason::Cancelled => "cancelled".to_string(),
+        LlmFinishReason::Truncation => "truncation".to_string(),
     }
 }
 

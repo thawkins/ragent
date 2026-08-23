@@ -23,11 +23,14 @@ impl Tool for ListAgentsTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "List sub-agent tasks for the current session. Shows running and completed \
-             background tasks with their status, agent, and result summary. No required \
-             parameters. Optional: 'status' (string enum running/completed/failed/cancelled) \
-             to filter, or 'task_id' (string) to retrieve details for a single task. Common \
-             gotcha: this tool lists tasks created via new_agent with background: true; it does \
-             not list team tasks (use team_task_list for those)."
+               background tasks with their status, agent, result summary, and — for \
+               finished tasks — the `output_file` path to the FULL untruncated report \
+               written under `log/subagents/<task-id>.md` (recover truncated output with \
+               the `read` tool against that file). No required parameters. Optional: \
+               'status' (string enum running/completed/failed/cancelled) to filter, or \
+               'task_id' (string) to retrieve details for a single task. Common gotcha: \
+               this tool lists tasks created via new_agent with background: true; it does \
+               not list team tasks (use team_task_list for those)."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -158,12 +161,24 @@ impl Tool for ListAgentsTool {
                 .unwrap_or("—");
             let summary_short = ragent_types::truncate_bytes(summary, 100);
             let bg = if task.background { "yes" } else { "no" };
+            let report_marker = match task.report_status {
+                crate::task::ReportStatus::Continued => " (continued)",
+                crate::task::ReportStatus::Truncated => " (TRUNCATED)",
+                crate::task::ReportStatus::Complete => "",
+            };
 
             let _ = write!(
                 output,
-                "\n| {short_id} | {} | {status} | {bg} | {duration} | {summary_short} |",
+                "\n| {short_id} | {} | {status}{report_marker} | {bg} | {duration} | {summary_short} |",
                 task.agent_name
             );
+
+            // Surface the durable on-disk copy of the full untruncated
+            // report so the model (and the human) can recover it via the
+            // `read` tool when the 100-char summary above is not enough.
+            if let Some(ref file) = task.output_file {
+                let _ = write!(output, "\n  ↳ 📄 Full report: `{}`", file.display());
+            }
         }
 
         Ok(ToolOutput {
@@ -212,6 +227,20 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
 
     if let Some(ref result) = task.result {
         let _ = write!(detail, "\n\nResult:\n{result}");
+    }
+
+    // Surface when the final reply was cut by the provider; silence when it
+    // completed normally so the detail view stays clean.
+    if task.report_status != crate::task::ReportStatus::Complete {
+        let _ = write!(detail, "\n\nReport Status: {}", task.report_status);
+    }
+
+    if let Some(ref file) = task.output_file {
+        let _ = write!(
+            detail,
+            "\n\nOutput File (full untruncated report):\n{}",
+            file.display()
+        );
     }
 
     if let Some(ref error) = task.error {

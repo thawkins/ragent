@@ -230,6 +230,12 @@ enum McpConnection {
 pub struct McpClient {
     servers: Vec<McpServer>,
     connections: Arc<RwLock<HashMap<String, McpConnection>>>,
+    /// Shared HTTP client reused by every HTTP/SSE MCP transport connection.
+    ///
+    /// `reqwest::Client` is backed by an inner `Arc`, so cloning it is cheap
+    /// and all `HttpMcpClient` instances share the same connection pool and
+    /// TLS session cache (FR-007).
+    http_client: reqwest::Client,
 }
 
 impl McpClient {
@@ -251,6 +257,7 @@ impl McpClient {
         Self {
             servers: Vec::new(),
             connections: Arc::new(RwLock::new(HashMap::new())),
+            http_client: reqwest::Client::new(),
         }
     }
 
@@ -421,8 +428,8 @@ impl McpClient {
                     url = %crate::sanitize::redact_secrets(url),
                     "Connecting to HTTP MCP server via HttpMcpClient"
                 );
-
-                let client = http::HttpMcpClient::new(url, config.headers.clone());
+                let client = http::HttpMcpClient::new(url, config.headers.clone())
+                    .with_client(self.http_client.clone());
                 let tool_defs = client.list_tools().await;
 
                 tracing::info!(
