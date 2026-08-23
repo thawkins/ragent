@@ -286,7 +286,7 @@ impl AgentManager {
                     let mut tasks = self.tasks.write().await;
                     if let Some(entry) = tasks.get_mut(&task_id) {
                         entry.status = TaskStatus::Completed;
-                        entry.result = Some(summary.clone());
+                        entry.result = Some(response.clone());
                         entry.completed_at = Some(Utc::now());
                     }
                 }
@@ -296,7 +296,7 @@ impl AgentManager {
                     session_id: parent_session_id.to_string(),
                     task_id: task_id.clone(),
                     child_session_id: child_sid.clone(),
-                    summary: summary.clone(),
+                    summary,
                     success: true,
                     duration_ms,
                 });
@@ -529,7 +529,7 @@ impl AgentManager {
                         let mut t = tasks.write().await;
                         if let Some(entry) = t.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
-                            entry.result = Some(summary.clone());
+                            entry.result = Some(response.clone());
                             entry.completed_at = Some(Utc::now());
                         }
                     }
@@ -1070,5 +1070,15 @@ mod tests {
         let long = "a".repeat(50);
         let result = sanitize_for_id(&long);
         assert!(result.len() <= 20, "Result should be limited to 20 chars");
+    }
+
+    /// The `SubagentComplete` event `summary` remains truncated to 2000
+    /// chars for TUI display — this is separate from the full result.
+    #[test]
+    fn test_event_summary_is_short() {
+        let long = "z".repeat(10_000);
+        let summary = truncate_str(&long, 2000);
+        assert!(summary.len() < long.len());
+        assert!(summary.ends_with('…'));
     }
 }

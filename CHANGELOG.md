@@ -1,5 +1,30 @@
 # Changelog
 
+## Version: 1.0.50
+
+### Fixed — Sub-agent result truncation
+
+- **`agent_complete` summary vs result conflation**
+  (`crates/ragent-agent/src/task/mod.rs`,
+  `crates/ragent-agent/src/tool/wait_agents.rs`) — the
+  `SubagentComplete` event carries a `summary` field that is truncated to
+  2000 characters for TUI display. When `WaitAgentsTool` collected results it
+  was using this truncated summary as the agent output, so sub-agent responses
+  longer than 2000 chars were silently truncated for the parent agent. The
+  task entry now stores the full response in `result`, and `WaitAgentsTool`
+  looks up the complete text from the task entry (falling back to `error`,
+  then `(no output)`).
+- Added a regression test (`test_event_summary_is_short`) confirming the
+  event summary remains truncated while the full result is preserved.
+
+### Changed — How-to documentation restructure
+
+- Renamed `howto_hooks.md` to `hooks.md` and `howto_teams.md` to `teams.md`
+  to match the naming convention of the other how-to files.
+- Added new how-to guides: `codeindex.md`, `config.md`, `permissions.md`,
+  `tools.md`, and `tutorial.md`, with PDF renderings.
+- Added PDF renderings of `custom-agents` and `tool-visibility`.
+
 ## Version: 1.0.49
 
 ### Changed — Documentation Updates

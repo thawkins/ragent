@@ -159,12 +159,19 @@ impl Tool for WaitAgentsTool {
                     Ok(Ok(Event::SubagentComplete {
                         session_id,
                         task_id,
-                        summary,
                         success,
                         ..
                     })) if session_id == ctx.session_id && waiting_for.contains(&task_id) => {
                         waiting_for.remove(&task_id);
-                        results.insert(task_id, (summary, success));
+                        // The event `summary` is truncated to 2000 chars
+                        // for TUI display. Look up the full result from the
+                        // task entry so the parent agent gets complete output.
+                        let text = agent_manager
+                            .get_task(&task_id)
+                            .await
+                            .and_then(|e| e.result.or(e.error))
+                            .unwrap_or_else(|| "(no output)".to_string());
+                        results.insert(task_id, (text, success));
                     }
                     Ok(Ok(_)) => {
                         // Unrelated event — keep waiting.
