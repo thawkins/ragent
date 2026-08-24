@@ -110,15 +110,14 @@ jobs:
           path: |
             ${{ env.ASSET_NAME }}
             *.pkg
-          if-no-files-found: error
+          if-no-files-found: error    build-windows:
+      name: Build - Windows-x86_64
+      runs-on: windows-latest
+      if: false
 
-  build-windows:
-    name: Build - Windows-x86_64
-    runs-on: windows-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
 
       - name: Set asset name
         shell: bash
