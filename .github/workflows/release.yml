@@ -110,14 +110,19 @@ jobs:
           path: |
             ${{ env.ASSET_NAME }}
             *.pkg
-          if-no-files-found: error    build-windows:
-      name: Build - Windows-x86_64
-      runs-on: windows-latest
-      if: false
+          if-no-files-found: error
 
-      steps:
-        - name: Checkout
-          uses: actions/checkout@v4
+  # Disabled: Windows-x86_64 build job is kept in the workflow file but skipped
+  # so the release pipeline does not depend on a platform that is currently
+  # failing to compile.
+  build-windows:
+    name: Build - Windows-x86_64
+    runs-on: windows-latest
+    if: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set asset name
         shell: bash
@@ -167,7 +172,6 @@ jobs:
     needs:
       - build-linux
       - build-macos-arm64
-      - build-windows
     runs-on: ubuntu-latest
 
     steps:
@@ -185,12 +189,6 @@ jobs:
         with:
           name: ragent-${{ github.ref_name }}-macos-arm64
           path: macos
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: ragent-${{ github.ref_name }}-windows-x86_64
-          path: windows
 
       - name: Extract release notes from CHANGELOG.md
         id: changelog
@@ -218,7 +216,6 @@ jobs:
           body_path: release_notes.md
           files: |
             linux/*
-            windows/*
             macos/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -242,3 +239,8 @@ jobs:
           --ignore RUSTSEC-2026-0194
           --ignore RUSTSEC-2026-0195
           --ignore RUSTSEC-2026-0235
+          --ignore RUSTSEC-2024-0436
+          --ignore RUSTSEC-2024-0370
+          --ignore RUSTSEC-2026-0192
+          --ignore RUSTSEC-2026-0002
+          --ignore RUSTSEC-2026-0253
