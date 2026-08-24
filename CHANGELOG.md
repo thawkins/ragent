@@ -1,5 +1,18 @@
 # Changelog
 
+## Version: 1.0.55
+
+### Fixed
+
+- Fixed the `release.yml` workflow YAML that was corrupted when the Windows-x86_64 build job was disabled; the file is now valid and parses correctly.
+- Removed the disabled `build-windows` job from the `release` job's `needs:` dependencies so that the release job is no longer skipped when Windows is disabled.
+- Removed the Windows artifact download/upload steps from the `release` job while the Windows build is disabled.
+- Updated the informational `cargo audit` ignore list in the release workflow to include the currently-known unmaintained/unsound advisories, matching recent `cargo audit` output.
+
+### Changed
+
+- The `Build and Release` workflow now creates releases from Linux and macOS artifacts only; the Windows job remains in the file (with `if: false`) for easy re-enablement.
+
 ## Version: 1.0.54
 
 ### Fixed
