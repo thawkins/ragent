@@ -321,13 +321,29 @@ fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
     a.dev() == b.dev() && a.ino() == b.ino()
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
-    // On non-Unix platforms, fall back to the canonical path equality that
-    // `std::fs::canonicalize` already provides for symlinks. Bind mounts are
-    // not a concern on Windows here, and the volume serial / file index APIs
-    // differ across Windows versions, so we keep the portable fallback.
-    a.file_attributes() == b.file_attributes()
+    use std::os::windows::fs::MetadataExt;
+    // Volume serial number + file index uniquely identify a file on NTFS and
+    // ReFS when both values are available.  Fall back to `false` on filesystems
+    // that do not expose them.
+    match (
+        a.volume_serial_number(),
+        a.file_index(),
+        b.volume_serial_number(),
+        b.file_index(),
+    ) {
+        (Some(va), Some(ia), Some(vb), Some(ib)) => va == vb && ia == ib,
+        _ => false,
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_identity(_a: &std::fs::Metadata, _b: &std::fs::Metadata) -> bool {
+    // On other platforms, fall back to the canonical path equality that
+    // `std::fs::canonicalize` already provides for symlinks.  Bind mounts are
+    // not a concern here, so we keep the portable fallback.
+    false
 }
 
 /// Lightweight in-place path cleaning that removes `.` and `..` components

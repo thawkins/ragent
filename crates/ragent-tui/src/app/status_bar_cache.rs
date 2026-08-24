@@ -68,6 +68,7 @@ pub struct StatusBarCache {
 impl StatusBarCache {
     /// Returns `true` when every signature field matches the provided values,
     /// meaning the cached lines are still valid and can be reused.
+    #[allow(clippy::fn_params_excessive_bools)]
     pub fn signature_matches(
         &self,
         status: &str,

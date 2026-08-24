@@ -1,5 +1,19 @@
 # Changelog
 
+## Version: 1.0.54
+
+### Fixed
+
+- Fixed Clippy error `clippy::fn_params_excessive_bools` in `StatusBarCache::signature_matches` by adding an explicit `#[allow(clippy::fn_params_excessive_bools)]` attribute.
+- Fixed Clippy error `clippy::while_let_loop` in the TUI crossterm event reader by rewriting the `loop { match ... }` block as a `while let Ok(event) = ...` loop.
+- Fixed Windows release build failure in `ragent-tools-core` where `same_file_identity` called a non-existent `file_attributes()` method on `std::fs::Metadata`.  The Windows implementation now imports `std::os::windows::fs::MetadataExt` and compares `volume_serial_number()` + `file_index()` when both are available.
+- Added a `#[cfg(not(any(unix, windows)))]` fallback for `same_file_identity` that returns `false`, keeping the canonical-path equality already provided by the caller.
+
+### Changed
+
+- `cargo clippy --workspace -- -D warnings -A clippy::used_underscore_items -A clippy::redundant_pub_crate -A clippy::wildcard_imports` now passes locally.
+- `cargo check` passes locally.
+
 ## Version: 1.0.53
 
 ### Fixed

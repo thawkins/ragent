@@ -581,14 +581,9 @@ pub async fn run_tui(
     // instead of polling at a fixed 20 Hz cadence (T-002).
     let (ct_event_tx, mut ct_event_rx) = tokio::sync::mpsc::unbounded_channel::<CtEvent>();
     tokio::task::spawn_blocking(move || {
-        loop {
-            match ct_event::read() {
-                Ok(event) => {
-                    if ct_event_tx.send(event).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+        while let Ok(event) = ct_event::read() {
+            if ct_event_tx.send(event).is_err() {
+                break;
             }
         }
     });
