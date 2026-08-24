@@ -47,7 +47,7 @@ use ragent_types::llm::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 /// Compatibility re-export for moved tools that still reference `crate::event`.
@@ -297,56 +297,7 @@ pub trait Tool: Send + Sync {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput>;
 }
 
-/// Verify that `path` resolves within `root` after canonicalization.
-///
-/// # Errors
-///
-/// Returns an error if the path escapes the given root.
-pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
-    let canonical = if path.exists() {
-        path.canonicalize()?
-    } else {
-        let parent = path.parent().unwrap_or(path);
-        let canonical_parent = if parent.exists() {
-            parent.canonicalize()?
-        } else {
-            let mut p = parent;
-            let mut parts = vec![];
-            loop {
-                if p.exists() {
-                    let mut base = p.canonicalize()?;
-                    for part in parts.iter().rev() {
-                        base = base.join(part);
-                    }
-                    break base;
-                }
-                if let Some(name) = p.file_name() {
-                    parts.push(name.to_os_string());
-                }
-                p = match p.parent() {
-                    Some(pp) => pp,
-                    None => break root.to_path_buf(),
-                };
-            }
-        };
-        if let Some(filename) = path.file_name() {
-            canonical_parent.join(filename)
-        } else {
-            canonical_parent
-        }
-    };
-
-    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-
-    if !canonical.starts_with(&canonical_root) {
-        anyhow::bail!(
-            "Path escape rejected: '{}' resolves outside project root '{}'",
-            path.display(),
-            canonical_root.display()
-        );
-    }
-    Ok(())
-}
+pub use ragent_tools_core::check_path_within_root;
 
 /// Tool registry for managing available tools by name.
 pub struct ToolRegistry {

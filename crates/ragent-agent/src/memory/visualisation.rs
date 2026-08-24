@@ -165,16 +165,14 @@ pub fn generate_graph(memories: &[MemoryRow], all_tags: &HashMap<i64, Vec<String
     let mut nodes: Vec<GraphNode> = Vec::new();
     let mut edges: Vec<GraphEdge> = Vec::new();
 
-    // Category nodes.
+    // Category nodes — single pass per category (count + sum together).
     for cat in crate::memory::store::MEMORY_CATEGORIES {
-        let count = memories.iter().filter(|m| m.category == *cat).count();
+        let (count, conf_sum) = memories
+            .iter()
+            .filter(|m| m.category == *cat)
+            .fold((0usize, 0.0f64), |(c, s), m| (c + 1, s + m.confidence));
         if count > 0 {
-            let avg_confidence: f64 = memories
-                .iter()
-                .filter(|m| m.category == *cat)
-                .map(|m| m.confidence)
-                .sum::<f64>()
-                / count as f64;
+            let avg_confidence = conf_sum / count as f64;
             nodes.push(GraphNode {
                 id: format!("cat:{cat}"),
                 label: cat.to_string(),
@@ -190,8 +188,8 @@ pub fn generate_graph(memories: &[MemoryRow], all_tags: &HashMap<i64, Vec<String
     let mut tag_category_links: HashMap<(String, String), usize> = HashMap::new();
 
     for mem in memories {
-        let tags = all_tags.get(&mem.id).cloned().unwrap_or_default();
-        for tag in &tags {
+        let tags = all_tags.get(&mem.id).map(Vec::as_slice).unwrap_or(&[]);
+        for tag in tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
             let key = (tag.clone(), mem.category.clone());
             *tag_category_links.entry(key).or_insert(0) += 1;
@@ -235,8 +233,8 @@ pub fn generate_tag_cloud(
 ) -> TagCloud {
     let mut tag_counts: HashMap<String, usize> = HashMap::new();
     for mem in memories {
-        let tags = all_tags.get(&mem.id).cloned().unwrap_or_default();
-        for tag in &tags {
+        let tags = all_tags.get(&mem.id).map(Vec::as_slice).unwrap_or(&[]);
+        for tag in tags {
             *tag_counts.entry(tag.clone()).or_insert(0) += 1;
         }
     }

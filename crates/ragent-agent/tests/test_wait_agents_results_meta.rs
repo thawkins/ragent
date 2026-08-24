@@ -35,9 +35,88 @@ use ragent_agent::storage::Storage;
 use ragent_agent::task::{AgentManager, TaskEntry, TaskStatus};
 use ragent_agent::tool::wait_agents::WaitAgentsTool;
 use ragent_agent::tool::{Tool, ToolContext, ToolRegistry};
-use ragent_llm::provider::ProviderRegistry;
+use ragent_llm::provider::{ModelInfo, Provider, ProviderRegistry};
 use serde_json::json;
 use tokio::sync::RwLock as TokioRwLock;
+
+/// Provider whose model resolution panics, used to simulate a sub-agent
+/// that dies inside its background task.
+#[derive(Clone)]
+struct PanicProvider;
+
+#[async_trait::async_trait]
+impl Provider for PanicProvider {
+    fn id(&self) -> &str {
+        "panic"
+    }
+
+    fn name(&self) -> &str {
+        "Panic Provider"
+    }
+
+    fn default_models(&self) -> Vec<ModelInfo> {
+        panic!("simulated sub-agent panic during model resolution");
+    }
+
+    async fn create_client(
+        &self,
+        _api_key: &str,
+        _base_url: Option<&str>,
+        _options: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> anyhow::Result<Box<dyn ragent_agent::llm::LlmClient>> {
+        panic!("simulated sub-agent panic during client creation");
+    }
+
+    fn as_any_static(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+fn test_processor_with_panic_provider() -> Arc<SessionProcessor> {
+    let processor = test_processor();
+    let mut processor = Arc::try_unwrap(processor)
+        .unwrap_or_else(|_| panic!("test processor should have refcount 1"));
+    if let Some(registry) = Arc::get_mut(&mut processor.provider_registry) {
+        registry.register(Box::new(PanicProvider));
+    }
+    Arc::new(processor)
+}
+
+#[tokio::test]
+async fn test_wait_agents_returns_when_background_task_panics() {
+    let event_bus = Arc::new(EventBus::new(16));
+    let processor = test_processor_with_panic_provider();
+    let manager = Arc::new(AgentManager::new(event_bus.clone(), processor, 4, 300));
+    let parent_sid = "parent-sess";
+
+    let entry = manager
+        .spawn_background(
+            parent_sid,
+            "explore",
+            "do the thing",
+            None,
+            &PathBuf::from("/tmp"),
+        )
+        .await
+        .expect("spawn should succeed");
+
+    let ctx = make_ctx(parent_sid, event_bus.clone(), Arc::clone(&manager));
+    let tool = WaitAgentsTool;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        tool.execute(json!({"task_ids": [entry.id], "timeout_secs": 60}), &ctx),
+    )
+    .await
+    .expect("wait_agents should return quickly after a panic")
+    .expect("wait_agents should succeed");
+
+    assert!(
+        output.content.contains("panicked"),
+        "wait_agents should surface the panic failure; got: {}",
+        output.content
+    );
+}
 
 fn test_processor() -> Arc<SessionProcessor> {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
@@ -69,7 +148,6 @@ fn test_processor() -> Arc<SessionProcessor> {
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         telemetry: Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     })
 }
 

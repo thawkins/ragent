@@ -83,9 +83,15 @@ impl SpecManager {
             &spec.audit_trail,
             &spec.reviewers,
         )?;
-        let mut spec = spec.clone();
-        spec.spec_md = updated_spec_md;
-        SpecIo::write_spec(&self.specs_root, &spec).await
+        SpecIo::write_spec_fields(
+            &self.specs_root,
+            &spec.id,
+            &updated_spec_md,
+            &spec.plan_md,
+            &spec.review_md,
+            &spec.feedback_md,
+        )
+        .await
     }
 
     /// Create a new spec directory with SPEC.md and PLAN.md.

@@ -21,18 +21,14 @@ impl Tool for PatchTool {
     fn name(&self) -> &'static str {
         "patch"
     }
-
-    /// # Errors
-    ///
-    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
         "Apply a unified diff patch to one or more files. Required parameter: \
-         `patch` (string) in unified diff format (as produced by `diff -u` or \
-         `git diff`). Optional: `path` (string) to override the target file \
-         path for single-file patches, and `fuzz` (integer, default 0) — the \
-         number of context lines that may be dropped from the top/bottom of \
-         each hunk when matching. All hunks are validated before any files are \
-         written; if any hunk fails, nothing is applied."
+           `patch` (string) in unified diff format (as produced by `diff -u` or \
+           `git diff`). Optional: `path` (string) to override the target file \
+           path for single-file patches, and `fuzz` (integer, default 0) — the \
+           number of context lines that may be dropped from the top/bottom of \
+           each hunk when matching. All hunks are validated before any files are \
+           written; if any hunk fails, nothing is applied."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -57,10 +53,6 @@ impl Tool for PatchTool {
             "additionalProperties": false
         })
     }
-
-    /// # Errors
-    ///
-    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &'static str {
         "file:write"
     }

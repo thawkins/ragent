@@ -27,7 +27,6 @@ mod app_tests {
             event_bus: event_bus.clone(),
             agent_manager: std::sync::OnceLock::new(),
             bg_service: std::sync::OnceLock::new(),
-            last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             team_manager: std::sync::OnceLock::new(),
             // M8-T1: team-context cache (unused in tests, but required by the
             // struct literal). Mirrors the wiring in `src/main.rs`.

@@ -97,4 +97,64 @@ pub fn highest_task(plan_md: &str) -> u32 {
     highest_id(plan_md, "T")
 }
 
+/// Extract all FR-NNN IDs (formatted as `FR-001`, `FR-002`, ...) from a text.
+///
+/// Returns a sorted, deduplicated list.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_specs::id_scanner::extract_fr_ids;
+///
+/// assert_eq!(extract_fr_ids("### FR-019\n...\n### FR-001\n"), vec!["FR-001", "FR-019"]);
+/// ```
+#[must_use]
+pub fn extract_fr_ids(text: &str) -> Vec<String> {
+    extract_ids(text, &RE_FR_ID, "FR-")
+}
+
+/// Extract all NFR-NNN IDs (formatted as `NFR-001`, `NFR-002`, ...) from a text.
+///
+/// Returns a sorted, deduplicated list.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_specs::id_scanner::extract_nfr_ids;
+///
+/// assert_eq!(extract_nfr_ids("### NFR-005\n...\n### NFR-001\n"), vec!["NFR-001", "NFR-005"]);
+/// ```
+#[must_use]
+pub fn extract_nfr_ids(text: &str) -> Vec<String> {
+    extract_ids(text, &RE_NFR_ID, "NFR-")
+}
+
+/// Extract all T-NNN IDs (formatted as `T-001`, `T-002`, ...) from a text.
+///
+/// Returns a sorted, deduplicated list.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_specs::id_scanner::extract_task_ids;
+///
+/// assert_eq!(extract_task_ids("| T-040 |...| T-001 |"), vec!["T-001", "T-040"]);
+/// ```
+#[must_use]
+pub fn extract_task_ids(text: &str) -> Vec<String> {
+    extract_ids(text, &RE_TASK_ID, "T-")
+}
+
+/// Shared helper: extract `<prefix>NNN` IDs matched by `re`, sorted and deduplicated.
+fn extract_ids(text: &str, re: &regex::Regex, prefix: &str) -> Vec<String> {
+    let mut ids: Vec<String> = re
+        .captures_iter(text)
+        .filter_map(|c| c[1].parse::<u32>().ok())
+        .map(|n| format!("{prefix}{n:03}"))
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────

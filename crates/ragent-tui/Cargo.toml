@@ -76,5 +76,9 @@ harness = false
 name = "bench_history"
 harness = false
 
+[[bench]]
+name = "bench_panels"
+harness = false
+
 [dependencies.tempfile]
 version = "3.5"

@@ -33,6 +33,21 @@ use regex::Regex;
 // Re-export status types from theme
 
 impl App {
+    /// Select the `general` agent with the current model/thinking applied and
+    /// default (full) permissions. Falls back to the current agent if the
+    /// `general` agent is not in the cycleable set.
+    fn select_general_agent(&self) -> ragent_agent::agent::AgentInfo {
+        let spec_agent = self
+            .cycleable_agents
+            .iter()
+            .find(|a| a.name == "general")
+            .cloned();
+        let mut agent = spec_agent.unwrap_or_else(|| self.agent_info.clone());
+        self.apply_selected_model_and_thinking(&mut agent);
+        agent.permission = ragent_agent::agent::default_permissions();
+        agent
+    }
+
     pub(crate) fn get_command_suggestions(&self, trigger: &str) -> Vec<String> {
         match trigger {
             "team" | "teams" => {
@@ -1539,7 +1554,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.append_assistant_text(
                         "From: /init\n🔍 **Analysing project…**\n\n\
-                         The explore agent will examine the project structure, README, build \
+                         The analysis agent will examine the project structure, README, build \
                          files, and test layout, then write a summary to \
                          `.ragent/memory/PROJECT_ANALYSIS.md`. Future sessions will \
                          automatically load this context.",
@@ -1549,24 +1564,10 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         "init: starting project analysis".to_string(),
                     );
 
-                    // Find the explore agent and dispatch the analysis task directly
+                    // Find the general agent and dispatch the analysis task directly
                     // (no agent-stack push — init runs as a one-shot subagent that writes
                     // memory).
-                    let explore_agent = self
-                        .cycleable_agents
-                        .iter()
-                        .find(|a| a.name == "explore")
-                        .cloned();
-
-                    let mut agent = explore_agent.unwrap_or_else(|| {
-                        // Fallback: use current agent with a suitable prompt
-                        self.agent_info.clone()
-                    });
-
-                    self.apply_selected_model_and_thinking(&mut agent);
-
-                    // Allow file writes so the agent can call memory_store
-                    agent.permission = ragent_agent::agent::default_permissions();
+                    let agent = self.select_general_agent();
 
                     let task = "\
 You are performing a one-time project analysis to build persistent memory for this codebase.\n\n\
@@ -1588,6 +1589,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                     let msg = Message::user_text(&sid, &task);
                     self.messages.push(msg);
+                    self.messages_version = self.messages_version.wrapping_add(1);
 
                     let processor = self.session_processor.clone();
                     let flag = Arc::new(AtomicBool::new(false));
@@ -1609,6 +1611,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             },
             "clear" => {
                 self.messages.clear();
+                self.messages_version = self.messages_version.wrapping_add(1);
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
                 self.last_step_per_session.clear();
@@ -2082,69 +2085,29 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         let target = args.split_whitespace().nth(1).unwrap_or("").to_lowercase();
                         match target.as_str() {
                             "subagents" => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
-                                let dir = working_dir.join("log").join("subagents");
-                                let cleared = clear_dir_contents(&dir);
-                                self.append_assistant_text(&format!(
-                                    r"From: /log clear subagents
-
-Cleared {cleared} file{} from `{}`.",
-                                    if cleared == 1 { "" } else { "s" },
-                                    dir.display()
-                                ));
-                                self.status = "log: subagents cleared".to_string();
+                                clear_log_subdir(
+                                    self,
+                                    "log",
+                                    "subagents",
+                                    "log: subagents cleared",
+                                );
                             }
                             "panics" => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
-                                let dir = working_dir.join("log").join("panics");
-                                let cleared = clear_dir_contents(&dir);
-                                self.append_assistant_text(&format!(
-                                    r"From: /log clear panics
-
-Cleared {cleared} file{} from `{}`.",
-                                    if cleared == 1 { "" } else { "s" },
-                                    dir.display()
-                                ));
-                                self.status = "log: panics cleared".to_string();
+                                clear_log_subdir(self, "log", "panics", "log: panics cleared");
                             }
                             "research" => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
-                                let dir = working_dir.join("logs").join("research");
-                                let cleared = clear_dir_contents(&dir);
-                                self.append_assistant_text(&format!(
-                                    r"From: /log clear research
-
-Cleared {cleared} file{} from `{}`.",
-                                    if cleared == 1 { "" } else { "s" },
-                                    dir.display()
-                                ));
-                                self.status = "log: research cleared".to_string();
+                                clear_log_subdir(self, "logs", "research", "log: research cleared");
                             }
                             "editlog" => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
-                                let dir = working_dir.join("log").join("editlog");
-                                let cleared = clear_dir_contents(&dir);
-                                self.append_assistant_text(&format!(
-                                    r"From: /log clear editlog
-
-Cleared {cleared} file{} from `{}`.",
-                                    if cleared == 1 { "" } else { "s" },
-                                    dir.display()
-                                ));
-                                self.status = "log: editlog cleared".to_string();
+                                clear_log_subdir(self, "log", "editlog", "log: editlog cleared");
                             }
                             "logwindow" => {
-                                let working_dir = std::env::current_dir().unwrap_or_default();
-                                let dir = working_dir.join("log").join("logwindow");
-                                let cleared = clear_dir_contents(&dir);
-                                self.append_assistant_text(&format!(
-                                    r"From: /log clear logwindow
-
-Cleared {cleared} file{} from `{}`.",
-                                    if cleared == 1 { "" } else { "s" },
-                                    dir.display()
-                                ));
-                                self.status = "log: logwindow cleared".to_string();
+                                clear_log_subdir(
+                                    self,
+                                    "log",
+                                    "logwindow",
+                                    "log: logwindow cleared",
+                                );
                             }
                             _ => {
                                 self.append_assistant_text(
@@ -2745,6 +2708,7 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
+                self.messages_version = self.messages_version.wrapping_add(1);
                 self.set_status_working("processing");
                 self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
@@ -3161,6 +3125,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.active_team = Some(store.config);
                                 self.team_members.clear();
                                 self.team_message_counts.clear();
+                                self.team_task_counts.clear();
+                                self.team_task_counts_dirty = true;
                                 self.show_teams = true;
                                 self.ensure_team_manager_for_team(&name, Some(team_dir));
                                 self.push_log_no_agent(
@@ -3222,13 +3188,16 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                           team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
                                                                                                                                                                                                                           code_index: None,
                                                                                                                                                                                                                           bg_service: None,
-                                                                                                                                                                                                                          spec_manager: session_processor.spec_manager.get().cloned(),
-                                                                                                                                                                                                                          active_spec_id: session_processor.active_spec.read().await.clone(),
-                                                                                                                                                                                                                          config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
-                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
-                                                                                            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
-                                                                                        };
-                                                                                                                                                                                                                      let _ = tool.execute(input, &ctx).await;                                                }
+                                                                                                                                                                                                                          spec_manager: session_processor.spec_manager.get().cloned(),                                                                                                                                                                                                                            active_spec_id: session_processor.active_spec.read().await.clone(),
+                                                                                                                                                                                                                            config: Some(Arc::new(ragent_agent::Config::load().unwrap_or_default())),
+                                                                                                                                                                                                                            cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
+                                                                                                                                                                                                                            read_timestamps: session_processor.read_timestamps.clone(),
+                                                                                                                                                                                                                            canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
+                                                                                                                                                                                                                        };
+                                                                                                                                                                                                                        if let Err(e) = tool.execute(input, &ctx).await {
+                                                                                                                                                                                                                            tracing::error!("team create tool failed: {e}");
+                                                                                                                                                                                                                        }
+                                                                                                                                                                                                                  }
                                             });
                                     });
                                 }
@@ -3339,6 +3308,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.active_team = None;
                             self.team_members.clear();
                             self.team_message_counts.clear();
+                            self.team_task_counts.clear();
+                            self.team_task_counts_dirty = true;
                             self.show_teams = false;
                             self.focused_teammate = None;
                             if self
@@ -3392,6 +3363,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         self.active_team = None;
                                         self.team_members.clear();
                                         self.team_message_counts.clear();
+                                        self.team_task_counts.clear();
+                                        self.team_task_counts_dirty = true;
                                         self.show_teams = false;
                                         self.focused_teammate = None;
                                         if self
@@ -3881,6 +3854,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.active_team = None;
                             self.team_members.clear();
                             self.team_message_counts.clear();
+                            self.team_task_counts.clear();
+                            self.team_task_counts_dirty = true;
                             self.show_teams = false;
                             self.focused_teammate = None;
                             if self
@@ -4020,6 +3995,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     self.active_team = None;
                                     self.team_members.clear();
                                     self.team_message_counts.clear();
+                                    self.team_task_counts.clear();
+                                    self.team_task_counts_dirty = true;
                                     self.show_teams = false;
                                     self.focused_teammate = None;
                                     if self
@@ -4709,6 +4686,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         // (typically one assistant response, but could be more)
                         let removed_count = self.messages.len() - user_idx;
                         self.messages.truncate(user_idx);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         // Reset scroll to show the new end of conversation
                         self.scroll_offset = 0;
@@ -5021,15 +4999,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_create_log(&specname, &feature),
                         );
 
-                        let explore_agent = self
-                            .cycleable_agents
-                            .iter()
-                            .find(|a| a.name == "explore")
-                            .cloned();
-
-                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
-                        self.apply_selected_model_and_thinking(&mut agent);
-                        agent.permission = ragent_agent::agent::default_permissions();
+                        let agent = self.select_general_agent();
 
                         let task = SpecCommand::build_create_prompt(
                             &specname,
@@ -5038,6 +5008,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -5178,21 +5149,16 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 }
                             }
                         } else {
-                            // FR-002: default to explore agent, fallback to current agent
-                            let explore_agent = self
-                                .cycleable_agents
-                                .iter()
-                                .find(|a| a.name == "explore")
-                                .cloned();
-                            explore_agent.unwrap_or_else(|| self.agent_info.clone())
+                            // FR-002: default to general agent, fallback to current agent
+                            self.select_general_agent()
                         };
                         self.apply_selected_model_and_thinking(&mut selected_agent);
-                        selected_agent.permission = ragent_agent::agent::default_permissions();
 
                         // FR-002, FR-006, FR-007: build the JTBD analysis prompt
                         let task = SpecCommand::build_jtbd_prompt(&spec_id);
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -6102,18 +6068,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         match result {
                             Ok((prompt, _next_fr, _next_nfr, _next_task)) => {
                                 let sid = self.session_id.clone().unwrap_or_default();
-                                let explore_agent = self
-                                    .cycleable_agents
-                                    .iter()
-                                    .find(|a| a.name == "explore")
-                                    .cloned();
-                                let mut agent =
-                                    explore_agent.unwrap_or_else(|| self.agent_info.clone());
-                                self.apply_selected_model_and_thinking(&mut agent);
-                                agent.permission = ragent_agent::agent::default_permissions();
+                                // Select general agent (not explore — add requires
+                                // editing SPEC.md and PLAN.md, and explore's prompt
+                                // says "Do NOT modify any files").
+                                let agent = self.select_general_agent();
 
                                 let msg = Message::user_text(&sid, &prompt);
                                 self.messages.push(msg);
+                                self.messages_version = self.messages_version.wrapping_add(1);
 
                                 let processor = self.session_processor.clone();
                                 let flag = Arc::new(AtomicBool::new(false));
@@ -6125,10 +6087,14 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 let specs_root_phase2 = specs_root.clone();
                                 let spec_id_phase2 = spec_id.clone();
                                 tokio::spawn(async move {
-                                    // Phase 1: incremental add (new requirements + task rows)
-                                    if let Err(e) =
-                                        processor.process_message(&sid, &prompt, &agent, flag).await
-                                    {
+                                    // Phase 1: incremental add — the LLM uses the
+                                    // `read` and `edit` tools directly to insert new
+                                    // requirements into SPEC.md and new task rows
+                                    // into PLAN.md. No post-processing needed.
+                                    let phase1_result = processor
+                                        .process_message(&sid, &prompt, &agent, flag)
+                                        .await;
+                                    if let Err(e) = phase1_result {
                                         tracing::warn!(error = %e, "spec: add generation failed");
                                         event_bus.publish(ragent_agent::event::Event::AgentError {
                                             session_id: sid,
@@ -6276,21 +6242,17 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_update_log(&spec_id),
                         );
 
-                        // FR-007: select explore agent, fallback to current agent
-                        let explore_agent = self
-                            .cycleable_agents
-                            .iter()
-                            .find(|a| a.name == "explore")
-                            .cloned();
-                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
-                        self.apply_selected_model_and_thinking(&mut agent);
-                        agent.permission = ragent_agent::agent::default_permissions();
+                        // Select general agent (not explore — update requires
+                        // writing files, and explore's prompt says "Do NOT
+                        // modify any files").
+                        let agent = self.select_general_agent();
 
                         // FR-008/FR-011: build prompt with plan_md for status preservation
                         let prompt = SpecCommand::build_update_prompt(&spec_id, &plan_md);
                         let sid = self.session_id.clone().unwrap_or_default();
                         let msg = Message::user_text(&sid, &prompt);
                         self.messages.push(msg);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -6343,15 +6305,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             );
                         }
 
-                        let explore_agent = self
-                            .cycleable_agents
-                            .iter()
-                            .find(|a| a.name == "explore")
-                            .cloned();
-
-                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
-                        self.apply_selected_model_and_thinking(&mut agent);
-                        agent.permission = ragent_agent::agent::default_permissions();
+                        let agent = self.select_general_agent();
 
                         let task = SpecCommand::build_specify_prompt(
                             &specname,
@@ -6360,6 +6314,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -6486,14 +6441,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                             SpecCommand::build_plan_log(&spec_id, &tech_context),
                         );
 
-                        let explore_agent = self
-                            .cycleable_agents
-                            .iter()
-                            .find(|a| a.name == "explore")
-                            .cloned();
-                        let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
-                        self.apply_selected_model_and_thinking(&mut agent);
-                        agent.permission = ragent_agent::agent::default_permissions();
+                        let agent = self.select_general_agent();
 
                         let prompt = SpecCommand::build_plan_prompt(
                             &spec_id,
@@ -6507,6 +6455,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let sid_msg = self.session_id.clone().unwrap_or_default();
                         let msg = Message::user_text(&sid_msg, &prompt);
                         self.messages.push(msg);
+                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -8951,6 +8900,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     };
                     let user_msg = Message::user_text(&sid, &display_text);
                     self.messages.push(user_msg);
+                    self.messages_version = self.messages_version.wrapping_add(1);
                     self.add_to_history(display_text);
 
                     let flag = Arc::new(AtomicBool::new(false));
@@ -10434,10 +10384,6 @@ fn create_spec_impl_session_tasks(
         );
     }
 
-    let task_by_id: std::collections::HashMap<&str, &ragent_specs::PlanTask> =
-        runner.tasks().iter().map(|t| (t.id.as_str(), t)).collect();
-    let _ = task_by_id;
-
     // Phase 1: create milestone parent tasks.
     for group in milestone_groups {
         let parent_id = format!("task-{}", Uuid::new_v4().simple());
@@ -10760,4 +10706,22 @@ fn clear_dir_contents(dir: &std::path::Path) -> usize {
         }
     }
     cleared
+}
+
+/// Clear a log subdirectory and post the user-visible result message.
+///
+/// `parent` is `"log"` or `"logs"`, `name` is the subdirectory name, and
+/// `status` is the status string to set after clearing.
+fn clear_log_subdir(app: &mut App, parent: &str, name: &str, status: &str) {
+    let working_dir = std::env::current_dir().unwrap_or_default();
+    let dir = working_dir.join(parent).join(name);
+    let cleared = clear_dir_contents(&dir);
+    app.append_assistant_text(&format!(
+        r"From: /log clear {name}
+
+Cleared {cleared} file{} from `{}`.",
+        if cleared == 1 { "" } else { "s" },
+        dir.display()
+    ));
+    app.status = status.to_string();
 }

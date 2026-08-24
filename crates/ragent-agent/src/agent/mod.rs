@@ -305,11 +305,12 @@ pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, Stri
 /// Read a single context component (git, README, agents-md, or file-tree)
 /// from the prompt-context cache, computing and inserting it on miss.
 ///
-/// This is a thin, ergonomic wrapper around [`collect_prompt_context`]
-/// that callers can use when they only need a single component, without
-/// paying the cost of all four.  Used by tests and ad-hoc helpers; the
-/// `process_user_message` path always calls [`collect_prompt_context`]
-/// because it needs all four components in one go.
+/// This is a thin, ergonomic wrapper around [`collect_prompt_context`].
+/// Note: the underlying cache computes all four components together (they
+/// share a single cache entry with a 30-second TTL), so calling this for one
+/// component will populate the cache for the others on a miss.  Used by tests
+/// and ad-hoc helpers; the `process_user_message` path always calls
+/// [`collect_prompt_context`] directly because it needs all four.
 pub async fn prompt_context_component(
     working_dir: &Path,
     component: PromptContextComponent,
@@ -574,8 +575,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             prompt: Some(Arc::from(
                 "You are a helpful AI assistant. Answer the user's questions clearly and \
                  concisely. You do not have access to any tools — just respond with your \
-                 best knowledge."
-                    .to_string(),
+                 best knowledge.",
             )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
@@ -601,8 +601,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                  shell commands, and searching codebases. \
                  Use 'grep' or 'search' to find text/code patterns, 'glob' to find files by name, \
                  'list' to view directory contents, and 'read' to view file contents. \
-                 Always prefer using tools to verify your assumptions rather than guessing."
-                    .to_string(),
+                 Always prefer using tools to verify your assumptions rather than guessing.",
             )),
             permission: default_permissions(),
             max_steps: Some(1024),
@@ -625,8 +624,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are a build agent specializing in compiling, testing, and debugging \
                  software projects. Focus on running builds, fixing compilation errors, \
                  running tests, and ensuring code quality. Use bash commands to interact \
-                 with build systems and test frameworks."
-                    .to_string(),
+                 with build systems and test frameworks.",
             )),
             permission: default_permissions(),
             max_steps: Some(1024),
@@ -649,8 +647,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are a planning agent. Your job is to analyze requirements and create \
                  detailed implementation plans. Read the codebase to understand existing patterns \
                  and architecture. Output a structured plan with clear steps. Do NOT make any \
-                 changes yourself — only plan and document."
-                    .to_string(),
+                 changes yourself — only plan and document.",
             )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
@@ -673,8 +670,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are an exploration agent specializing in understanding codebases. \
                  Use read, grep, glob, and list tools to navigate and understand code. \
                  Provide concise, accurate answers about code structure, patterns, and logic. \
-                 Do NOT modify any files."
-                    .to_string(),
+                 Do NOT modify any files.",
             )),
             permission: read_only_permissions(),
             max_steps: Some(1024),
@@ -695,8 +691,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             model: None,
             prompt: Some(Arc::from(
                 "Generate a short, descriptive title (3-6 words) for a coding session \
-                 based on the conversation. Output ONLY the title, nothing else."
-                    .to_string(),
+                 based on the conversation. Output ONLY the title, nothing else.",
             )),
             permission: Vec::new(),
             max_steps: Some(1024),
@@ -707,38 +702,39 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             model_pinned: false,
             stall_timeout_secs: None,
         },
-                                      AgentInfo {
-                                          name: "summary".to_string(),
-                                          description: "Summarize sessions".to_string(),
-                                          mode: AgentMode::Subagent,
-                                          hidden: true,
-                                          temperature: Some(0.3),
-                                          top_p: None,
-                                          model: None,
-                                          prompt: Some(Arc::from(
-                                              "Summarize the conversation so far into a concise paragraph that captures \
-                                               the key topics discussed, decisions made, and work completed."
-                                                  .to_string(),
-                                          )),
-                                          permission: Vec::new(),
-                                          max_steps: Some(1024),
-                                          skills: Vec::new(),
-                                          memory: crate::team::config::MemoryScope::None,
-                                          thinking: None,
-                                          options: std::sync::Arc::new(HashMap::new()),
-                                          model_pinned: false,
+        AgentInfo {
+            name: "summary".to_string(),
+            description: "Summarize sessions".to_string(),
+            mode: AgentMode::Subagent,
+            hidden: true,
+            temperature: Some(0.3),
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "Summarize the conversation so far into a concise paragraph that captures \
+                                               the key topics discussed, decisions made, and work completed.",
+            )),
+            permission: Vec::new(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                                      },
-                                      // ── Domain-specific agents ───────────────────────────────────────
-                                      AgentInfo {
-                                          name: "rust-coder".to_string(),                      description: "Rust coding specialist — idiomatic code, error handling, async".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a Rust coding specialist. You write idiomatic, production-grade Rust \
+        },
+        // ── Domain-specific agents ───────────────────────────────────────
+        AgentInfo {
+            name: "rust-coder".to_string(),
+            description: "Rust coding specialist — idiomatic code, error handling, async"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a Rust coding specialist. You write idiomatic, production-grade Rust \
                            code with an emphasis on zero-cost abstractions, memory safety, and \
                            composability.\n\n\
                            Expertise:\n\
@@ -755,28 +751,28 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Use `tracing` (not println!) for structured logging\n\
                            - Follow the Rust API Guidelines and naming conventions\n\
                            - Minimize allocations; prefer iterators over loops\n\
-                           - Document public APIs with `///` doc comments"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Document public APIs with `///` doc comments",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "python-coder".to_string(),
-                      description: "Python coding specialist — idiomatic code, type hints, testing".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a Python coding specialist. You write clean, idiomatic Python \
+        },
+        AgentInfo {
+            name: "python-coder".to_string(),
+            description: "Python coding specialist — idiomatic code, type hints, testing"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a Python coding specialist. You write clean, idiomatic Python \
                            following modern best practices and PEP 8.\n\n\
                            Expertise:\n\
                            - Type hints (PEP 484), generics, and mypy/pyright compliance\n\
@@ -793,28 +789,28 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Use context managers (`with`) for resource cleanup\n\
                            - Prefer composition over inheritance\n\
                            - Use `isinstance()` checks, not `type()` comparisons\n\
-                           - Keep functions small and testable (single responsibility)"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Keep functions small and testable (single responsibility)",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "typescript-coder".to_string(),
-                      description: "TypeScript/JavaScript coding specialist — type safety, modern JS".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a TypeScript and JavaScript coding specialist. You write type-safe, \
+        },
+        AgentInfo {
+            name: "typescript-coder".to_string(),
+            description: "TypeScript/JavaScript coding specialist — type safety, modern JS"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a TypeScript and JavaScript coding specialist. You write type-safe, \
                            modern JavaScript for both frontend and backend contexts.\n\n\
                            Expertise:\n\
                            - Strict TypeScript with explicit types; minimal use of `any`\n\
@@ -831,28 +827,27 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Prefer arrow functions for callbacks; named functions for hoisting\n\
                            - Use optional chaining (`?.`) and nullish coalescing (`??`)\n\
                            - Keep components small and focused; extract hooks early\n\
-                           - Use ESLint + Prettier for consistency"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Use ESLint + Prettier for consistency",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "fastapi-agent".to_string(),
-                      description: "FastAPI project specialist — API design, Pydantic, async".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a FastAPI and Python web-backend specialist. You design and build \
+        },
+        AgentInfo {
+            name: "fastapi-agent".to_string(),
+            description: "FastAPI project specialist — API design, Pydantic, async".to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a FastAPI and Python web-backend specialist. You design and build \
                            high-performance REST and WebSocket APIs.\n\n\
                            Expertise:\n\
                            - FastAPI routing, dependency injection, and lifespan events\n\
@@ -868,28 +863,27 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Version URLs (`/api/v1/...`) and use HATEOAS sparingly\n\
                            - Document all endpoints with OpenAPI (auto-generated by FastAPI)\n\
                            - Implement rate limiting and input validation at the edge\n\
-                           - Use structured logging (JSON) for observability"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Use structured logging (JSON) for observability",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "security-auditor".to_string(),
-                      description: "Security code reviewer — OWASP Top 10, CWE, mitigations".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: Some(0.2),
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a security-focused code reviewer specialising in the OWASP Top 10.\n\n\
+        },
+        AgentInfo {
+            name: "security-auditor".to_string(),
+            description: "Security code reviewer — OWASP Top 10, CWE, mitigations".to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: Some(0.2),
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a security-focused code reviewer specialising in the OWASP Top 10.\n\n\
                            For every review:\n\
                            1. Identify injection flaws (SQL, command, LDAP, XPath, template)\n\
                            2. Check authentication and session management weaknesses\n\
@@ -901,28 +895,27 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            8. Flag use of components with known vulnerabilities (CVE checks)\n\
                            9. Check for insufficient logging and monitoring gaps\n\n\
                            Provide CWE identifiers and OWASP references for every finding. \
-                           Suggest concrete mitigations with code examples."
-                              .to_string(),
-                      )),
-                      permission: read_only_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           Suggest concrete mitigations with code examples.",
+            )),
+            permission: read_only_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "test-writer".to_string(),
-                      description: "Test generation specialist — unit, integration, e2e coverage".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: Some(0.3),
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a test-writing specialist. You generate comprehensive test suites \
+        },
+        AgentInfo {
+            name: "test-writer".to_string(),
+            description: "Test generation specialist — unit, integration, e2e coverage".to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: Some(0.3),
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a test-writing specialist. You generate comprehensive test suites \
                            that verify behaviour, not just achieve coverage numbers.\n\n\
                            Expertise:\n\
                            - Unit tests: arrange-act-assert, table-driven tests, property-based testing\n\
@@ -937,28 +930,27 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Use fixtures and factories for test data, not hard-coded values\n\
                            - Mock at the boundary; test real collaborators where possible\n\
                            - Keep tests fast (< 100ms per test ideally)\n\
-                           - Add `#[should_panic]` / `pytest.raises` for expected failures"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Add `#[should_panic]` / `pytest.raises` for expected failures",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "documenter".to_string(),
-                      description: "Documentation specialist — docstrings, READMEs, API docs".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: Some(0.5),
-                      top_p: None,
-                      model: None,
-                                              prompt: Some(Arc::from(
-                                                  "You are a technical documentation specialist. You write clear, concise \
+        },
+        AgentInfo {
+            name: "documenter".to_string(),
+            description: "Documentation specialist — docstrings, READMEs, API docs".to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: Some(0.5),
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a technical documentation specialist. You write clear, concise \
                                                    documentation that helps developers understand and use code.\n\n\
                                                    Expertise:\n\
                                                    - API documentation: docstrings, OpenAPI specs, type signatures\n\
@@ -973,27 +965,28 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                                                    - Use tables for parameter references and configuration options\n\
                                                    - Keep headings hierarchical and scannable\n\
                                                    - Cross-reference related documents with relative links\n\
-                                                   - Update tables of contents when adding new sections"
-                                                      .to_string(),
-                                              )),                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                                                   - Update tables of contents when adding new sections",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "devops-agent".to_string(),
-                      description: "DevOps specialist — Docker, Kubernetes, CI/CD, infrastructure".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a DevOps and infrastructure specialist. You design, build, and \
+        },
+        AgentInfo {
+            name: "devops-agent".to_string(),
+            description: "DevOps specialist — Docker, Kubernetes, CI/CD, infrastructure"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a DevOps and infrastructure specialist. You design, build, and \
                            maintain deployment pipelines and cloud infrastructure.\n\n\
                            Expertise:\n\
                            - Containerisation: Docker, BuildKit, multi-stage builds, distroless images\n\
@@ -1009,28 +1002,28 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Implement health checks, readiness probes, and graceful shutdowns\n\
                            - Follow the principle of least privilege for IAM and RBAC\n\
                            - Version-pin all base images and dependencies\n\
-                           - Document runbooks and rollback procedures"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Document runbooks and rollback procedures",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "database-agent".to_string(),
-                      description: "Database specialist — SQL, migrations, performance, schema design".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a database specialist. You design schemas, write queries, and \
+        },
+        AgentInfo {
+            name: "database-agent".to_string(),
+            description: "Database specialist — SQL, migrations, performance, schema design"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a database specialist. You design schemas, write queries, and \
                            optimise data access patterns for relational and NoSQL databases.\n\n\
                            Expertise:\n\
                            - Relational: PostgreSQL, MySQL, SQLite — schema design, indexing, query plans\n\
@@ -1046,28 +1039,28 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Add indexes after profiling; avoid over-indexing on write-heavy tables\n\
                            - Use connection pooling (PgBouncer, r2d2, sqlx::Pool)\n\
                            - Parameterise queries; never concatenate user input into SQL\n\
-                           - Add database-level constraints as a safety net, not just application validation"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                      options: std::sync::Arc::new(HashMap::new()),
-                      model_pinned: false,
+                           - Add database-level constraints as a safety net, not just application validation",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                  },
-                  AgentInfo {
-                      name: "frontend-agent".to_string(),
-                      description: "Frontend specialist — React, Vue, CSS, accessibility, performance".to_string(),
-                      mode: AgentMode::Primary,
-                      hidden: false,
-                      temperature: None,
-                      top_p: None,
-                      model: None,
-                      prompt: Some(Arc::from(
-                          "You are a frontend web development specialist. You build responsive, \
+        },
+        AgentInfo {
+            name: "frontend-agent".to_string(),
+            description: "Frontend specialist — React, Vue, CSS, accessibility, performance"
+                .to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: None,
+            prompt: Some(Arc::from(
+                "You are a frontend web development specialist. You build responsive, \
                            accessible, and performant user interfaces.\n\n\
                            Expertise:\n\
                            - React: hooks, context, suspense, server components, Next.js App Router\n\
@@ -1084,19 +1077,18 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                            - Use semantic HTML (`<header>`, `<nav>`, `<main>`, `<article>`)\n\
                            - Lazy-load images and heavy components below the fold\n\
                            - Keep bundle sizes small; tree-shake unused dependencies\n\
-                           - Use `key` props correctly in lists; avoid index-as-key"
-                              .to_string(),
-                      )),
-                      permission: default_permissions(),
-                      max_steps: Some(1024),
-                      skills: Vec::new(),
-                      memory: crate::team::config::MemoryScope::None,
-                      thinking: None,
-                    options: std::sync::Arc::new(HashMap::new()),
-                    model_pinned: false,
+                           - Use `key` props correctly in lists; avoid index-as-key",
+            )),
+            permission: default_permissions(),
+            max_steps: Some(1024),
+            skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
+            thinking: None,
+            options: std::sync::Arc::new(HashMap::new()),
+            model_pinned: false,
             stall_timeout_secs: None,
-                },
-            ]
+        },
+    ]
 }
 
 /// PERF-011: process-wide cache of the built-in agent roster.
@@ -1202,9 +1194,12 @@ fn read_only_permissions() -> PermissionRuleset {
 }
 
 /// Returns the default thinking configuration for a model's supported levels.
+///
+/// Currently always returns [`ThinkingConfig::off`] — no model has a
+/// built-in thinking default. The `levels` parameter is accepted for API
+/// symmetry with the model-resolution path and future expansion.
 #[must_use]
-pub fn default_thinking_config_for_levels(levels: &[ThinkingLevel]) -> ThinkingConfig {
-    let _ = levels;
+pub fn default_thinking_config_for_levels(_levels: &[ThinkingLevel]) -> ThinkingConfig {
     ThinkingConfig::off()
 }
 
@@ -2351,18 +2346,6 @@ fn build_system_prompt_with_storage_inner(
 
     // Agent identity and role — substitute template variables used by custom agents.
     if let Some(ref agent_prompt) = agent.prompt {
-        let today = {
-            // Use a simple date string; chrono is available transitively.
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let days = now / 86400;
-            // Approximate calendar date from Unix epoch (good enough for a hint).
-            let year = 1970 + days / 365;
-            format!("{}-{}", year, "xx-xx") // simple fallback; full chrono used below
-        };
-        // Use chrono if available (it is a workspace dependency in this workspace).
         let date_str = {
             let dt = chrono::Utc::now();
             dt.format("%Y-%m-%d").to_string()
@@ -2375,7 +2358,6 @@ fn build_system_prompt_with_storage_inner(
             .replace("{{GIT_STATUS}}", &git_status_text)
             .replace("{{README}}", &readme_text)
             .replace("{{DATE}}", &date_str);
-        let _ = today; // suppress unused warning from the fallback path
 
         prompt.push_str(&expanded);
         prompt.push_str("\n\n");

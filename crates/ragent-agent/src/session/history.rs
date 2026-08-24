@@ -810,13 +810,14 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 
     // 2. Check if any file-writing tool was executed in assistant_parts.
     let write_tools = [
-        "write_file",
-        "create_file",
-        "write_new_file",
-        "edit_file",
-        "patch_file",
-        "append_file",
-        "save_file",
+        "write",
+        "create",
+        "edit",
+        "multiedit",
+        "multi_edit",
+        "patch",
+        "apply_patch",
+        "append_to_file",
     ];
 
     let has_write_tool = assistant_parts.iter().any(|part| {

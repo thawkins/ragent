@@ -143,7 +143,6 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

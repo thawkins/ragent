@@ -42,7 +42,6 @@ fn make_app() -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -773,4 +772,107 @@ fn test_left_click_outside_file_menu_closes_popup() {
         app.file_menu.is_none(),
         "outside click should dismiss popup"
     );
+}
+// ---------- Regression: Alt+T dismisses log panel, stale selection panics ----------
+
+/// Reproduces the panic from `log/panics/panic-20260823-235726-277415.log`:
+/// "selection pane Log has no active area".
+///
+/// Sequence: the log panel is visible with a text selection anchored on it,
+/// then a side-panel toggle (Alt+T → `ToggleTasksPanel`) dismisses the log
+/// panel (`show_log = false`). The render pass zeroes `log_area`, but the
+/// `text_selection` still references `SelectionPane::Log`. The next mouse
+/// event used to trip `assert_ui_invariants`. The fix
+/// (`prune_stale_selection`) self-heals the stale selection before the
+/// assert runs.
+#[test]
+fn test_prune_stale_selection_after_log_panel_dismissed() {
+    let mut app = make_app();
+    // Simulate the log panel being visible with a real area.
+    app.show_log = true;
+    app.log_area = Rect::new(80, 1, 30, 20);
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Log,
+        anchor: (85, 5),
+        endpoint: (90, 5),
+    });
+
+    // Simulate the toggle: log panel dismissed, tasks panel shown.
+    app.show_log = false;
+    app.show_tasks_panel = true;
+    // The render pass would zero log_area here.
+    app.log_area = Rect::default();
+    app.tasks_area = Rect::new(80, 1, 30, 20);
+
+    // A mouse event arrives. Before the fix this panicked in
+    // assert_ui_invariants; now prune_stale_selection clears the stale
+    // Log selection first.
+    app.handle_mouse_event(mouse_down(10, 5));
+
+    // The stale Log selection must have been pruned.
+    assert!(
+        app.text_selection.is_none(),
+        "stale Log selection should be pruned after the panel was dismissed"
+    );
+}
+
+/// Same scenario but the stale selection is on the Memory pane and a
+/// context menu is open on the Log pane — both should be pruned when the
+/// panels are dismissed.
+#[test]
+fn test_prune_stale_selection_clears_menu_and_selection() {
+    let mut app = make_app();
+    app.show_log = true;
+    app.show_memory = true;
+    app.log_area = Rect::new(80, 1, 30, 10);
+    app.memory_area = Rect::new(80, 11, 30, 10);
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Memory,
+        anchor: (85, 15),
+        endpoint: (90, 15),
+    });
+    app.context_menu = Some(ContextMenuState {
+        x: 85,
+        y: 5,
+        pane: SelectionPane::Log,
+        selected: 0,
+        items: vec![(ContextAction::Copy, false)],
+    });
+
+    // Dismiss both panels (e.g. user opens tasks panel via Alt+T).
+    app.show_log = false;
+    app.show_memory = false;
+    app.log_area = Rect::default();
+    app.memory_area = Rect::default();
+
+    app.handle_mouse_event(mouse_down(10, 5));
+
+    assert!(
+        app.text_selection.is_none(),
+        "stale Memory selection should be pruned"
+    );
+    assert!(
+        app.context_menu.is_none(),
+        "stale Log context menu should be pruned"
+    );
+}
+
+/// A selection on a still-visible pane must NOT be pruned.
+#[test]
+fn test_prune_stale_selection_keeps_valid_selection() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Messages,
+        anchor: (5, 5),
+        endpoint: (10, 5),
+    });
+
+    app.handle_mouse_event(mouse_down(10, 5));
+
+    let sel = app
+        .text_selection
+        .as_ref()
+        .expect("valid Messages selection should survive pruning");
+    assert_eq!(sel.pane, SelectionPane::Messages);
 }

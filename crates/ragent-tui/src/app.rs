@@ -16,7 +16,16 @@ pub mod cron;
 mod event_handler;
 mod init;
 mod input_handler;
+mod md_worker;
+pub use self::md_worker::MdWorker;
+
 mod models;
+mod status_bar_cache;
+pub use self::status_bar_cache::StatusBarCache;
+
+mod model_picker_cache;
+pub use self::model_picker_cache::ModelPickerRowsCache;
+
 mod research;
 mod reverse;
 mod session_ops;

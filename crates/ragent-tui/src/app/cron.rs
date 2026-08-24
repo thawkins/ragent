@@ -1555,7 +1555,6 @@ mod tests {
             mcp_client: std::sync::OnceLock::new(),
             code_index: std::sync::OnceLock::new(),
             bg_service: std::sync::OnceLock::new(),
-            last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             active_spec: tokio::sync::RwLock::new(None),
             spec_manager: std::sync::OnceLock::new(),
             cached_tool_definitions: parking_lot::RwLock::new(None),

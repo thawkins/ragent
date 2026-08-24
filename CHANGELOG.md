@@ -1,5 +1,17 @@
 # Changelog
 
+## Version: 1.0.53
+
+### Fixed
+
+- Fixed compilation warning in `crates/ragent-tui/src/app/status_bar_cache.rs` by removing unused helper functions and imports.
+- Fixed test compilation error in `crates/ragent-tui/tests/test_thinking_defaults.rs` after `agent::resolve_agent` started returning `Arc<AgentInfo>`; tests now unwrap the `Arc` before assignment.
+
+### Changed
+
+- Full workspace now compiles cleanly with `cargo check` and all workspace tests pass.
+- Ran `cargo fmt` across the workspace.
+
 ## Version: 1.0.51
 
 ### Changed — `ragent-agent` performance optimisations (spec `agentopt`)

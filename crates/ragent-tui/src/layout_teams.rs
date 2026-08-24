@@ -17,7 +17,7 @@ use ragent_team::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
 
 use crate::app::App;
 
-/// Shorten an agent ID to the first 8 chars.
+/// Shorten an agent ID to its last 8 chars (the unique suffix).
 fn short_id(id: &str) -> String {
     let start = id.len().saturating_sub(8);
     id[start..].to_string()
@@ -205,28 +205,17 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         let id_short = short_id(&member.agent_id);
         let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
 
-        let mut steps = member
+        let steps = member
             .session_id
             .as_deref()
             .map(|sid| app.event_bus.current_step(sid))
             .unwrap_or(0);
-        if steps == 0
-            && let Some(sid) = member.session_id.as_deref()
-            && let Ok(msgs) = app.storage.get_messages(sid)
-        {
-            let assistant_msgs = msgs
-                .iter()
-                .filter(|m| matches!(m.role, ragent_agent::message::Role::Assistant))
-                .count() as u64;
-            steps = assistant_msgs.max(steps);
-        }
 
         let (claimed, done) = task_counts.get(&member.agent_id).copied().unwrap_or((0, 0));
 
         let (sent, recv) = app
             .team_message_counts
             .get(&member.agent_id)
-            .or_else(|| app.team_message_counts.get(&member.name))
             .copied()
             .unwrap_or((0, 0));
 
@@ -246,6 +235,11 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             Modifier::empty()
         };
         let focus_marker = if is_focused { "▸" } else { " " };
+        let name_label = {
+            let name_with_id = format!("{}-{}", member.name, id_short);
+            let truncated: String = name_with_id.chars().take(31).collect();
+            truncated
+        };
 
         let mut spans = vec![
             Span::styled(focus_marker, Style::default().fg(Color::Yellow)),
@@ -255,7 +249,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(
-                format!("{:<31} ", member.name.as_str()),
+                format!("{:<31} ", name_label),
                 Style::default().fg(name_color).add_modifier(name_mod),
             ),
             Span::styled(

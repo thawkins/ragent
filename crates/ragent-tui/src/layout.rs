@@ -57,6 +57,11 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
     format!("{left}…{right}")
 }
 
+/// Saturating addition for `u16` wrapped line counts (FR-003).
+fn total_wrapping_add(a: u16, b: u16) -> u16 {
+    a.saturating_add(b)
+}
+
 /// Render the full TUI chat screen.
 ///
 /// # Examples
@@ -240,7 +245,7 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
     }
 }
 
-fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
+fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
     // Use a taller, capped dialog so longer provider/model lists fit without
     // clipping on typical terminal sizes.  80% height up to 30 rows gives the
     // provider picker enough room to show most entries.
@@ -3040,100 +3045,72 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Build lines from all log entries
-    let lines: Vec<Line> = all_entries
-        .iter()
-        .map(|entry| {
-            let ts = entry.timestamp.format("%H:%M:%S");
-            // If this is a compaction start/end/trigger message, render it in bright green
-            let msg_lower = entry.message.to_lowercase();
-            let is_compaction_highlight = msg_lower.contains("compaction")
-                && (msg_lower.contains("started")
-                    || msg_lower.contains("completed")
-                    || msg_lower.contains("triggered"));
+    let inner_width = log_inner.width;
+    let w = inner_width as usize;
+    let cur_version = app.log_version;
 
-            let (level_str, level_color) = if is_compaction_highlight {
-                ("CMP", Color::LightGreen)
-            } else {
-                match entry.level {
-                    LogLevel::Info => ("INF", Color::Blue),
-                    LogLevel::Tool => ("TUL", Color::Cyan),
-                    LogLevel::Warn => ("WRN", Color::Yellow),
-                    LogLevel::Error => ("ERR", Color::Red),
-                }
-            };
+    // ── Per-entry line cache (mirrors render_messages) ───────────────────
+    //
+    // The cache holds one `LogLineGroup` per log entry.  On every render:
+    //   1. Reconcile cache length with `log_entries.len()`.
+    //   2. Re-render any group whose `version` is stale (new entries).
+    //   3. Re-wrap all groups when the terminal width changed.
+    //   4. Flatten the cached lines and sum the wrapped counts.
+    let need_rewrap = app.log_cache_width != inner_width;
 
-            // Build agent_id span if present
-            let mut spans = vec![
-                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{level_str} "),
-                    Style::default()
-                        .fg(level_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
+    // Reconcile cache length.
+    if app.log_line_cache.len() > all_entries.len() {
+        app.log_line_cache.truncate(all_entries.len());
+    }
+    while app.log_line_cache.len() < all_entries.len() {
+        app.log_line_cache.push(crate::app::LogLineGroup {
+            lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            version: 0, // stale
+        });
+    }
 
-            // Add agent_id label if present
-            if let Some(agent_id) = &entry.agent_id {
-                spans.push(Span::styled(
-                    format!("[{}] ", agent_id),
-                    Style::default().fg(Color::Magenta),
-                ));
-            }
+    // Re-render stale groups (new entries appended since last render).
+    for (i, entry) in all_entries.iter().enumerate() {
+        let group = &mut app.log_line_cache[i];
+        if group.version != cur_version {
+            group.lines = log_entry_to_lines(entry, &app.sid_to_display_name);
+            group.version = cur_version;
+            group.content_lines = build_wrapped_content_lines(&group.lines, w);
+            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
+            group.wrapped_count = para.line_count(inner_width) as u16;
+        }
+    }
 
-            // Parse and color the [sid:step] prefix in the message if present
-            let msg = &entry.message;
-            if msg.starts_with('[') {
-                // Try to find the "]" that ends the [sid:step] prefix
-                if let Some(close_bracket) = msg.find(']') {
-                    let prefix = &msg[..=close_bracket];
-                    // Verify it looks like [sid:step] format (contains a colon)
-                    if prefix.contains(':') {
-                        let rest = &msg[close_bracket + 1..];
-                        // Extract the sid from the prefix to look up display name
-                        let sid_start = prefix.find('[').unwrap_or(0) + 1;
-                        let sid_end = prefix.find(':').unwrap_or(prefix.len() - 1);
-                        let sid = &prefix[sid_start..sid_end];
-                        // Extract step number (everything after ':' up to ']')
-                        let step_start = sid_end + 1;
-                        let step = &prefix[step_start..close_bracket];
-                        // Look up friendly display name if available
-                        let display_sid = app
-                            .sid_to_display_name
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.to_string());
-                        let formatted_prefix = format!("[{}:{step}]", display_sid);
-                        spans.push(Span::styled(
-                            formatted_prefix,
-                            Style::default().fg(Color::Yellow),
-                        ));
-                        spans.push(Span::raw(rest.to_string()));
-                    } else {
-                        spans.push(Span::raw(msg.clone()));
-                    }
-                } else {
-                    spans.push(Span::raw(msg.clone()));
-                }
-            } else {
-                spans.push(Span::raw(msg.clone()));
-            }
-            Line::from(spans)
-        })
-        .collect();
+    // Re-wrap all groups when the width changed.
+    if need_rewrap {
+        for group in app.log_line_cache.iter_mut() {
+            group.content_lines = build_wrapped_content_lines(&group.lines, w);
+            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
+            group.wrapped_count = para.line_count(inner_width) as u16;
+        }
+        app.log_cache_width = inner_width;
+    }
 
-    // Cache plain-text content for text selection copy
-    // Must match the word-wrapped display that Paragraph renders
-    let log_inner_width = log_inner.width as usize;
-    app.log_content_lines = build_wrapped_content_lines(&lines, log_inner_width);
+    // Flatten all cached groups into a single Vec<Line> for rendering and
+    // accumulate the total wrapped line count.
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    let mut all_content_lines: Vec<String> = Vec::new();
+    let mut total_wrapped: u16 = 0;
+    for group in app.log_line_cache.iter() {
+        all_lines.extend(group.lines.iter().cloned());
+        all_content_lines.extend(group.content_lines.iter().cloned());
+        total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
+    }
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    // Store the flattened content lines for text-selection copy.
+    app.log_content_lines = all_content_lines;
 
-    // Use the rendered (wrapped) line count so the scroll reaches the true
-    // bottom. `line_count(width)` accounts for word-wrapping; `lines.len()`
-    // only counts logical lines and under-scrolls when entries are long.
-    let total_lines = paragraph.line_count(log_inner.width) as u16;
+    let paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: false });
+
+    // Use the accumulated wrapped count as the total height.
+    let total_lines = total_wrapped;
     let visible_height = log_inner.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
     app.log_max_scroll = max_scroll;
@@ -3157,11 +3134,99 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
+/// Render a single log entry into a ratatui `Line` with styled spans.
+///
+/// Extracted from the original `render_log_panel` closure so the per-entry
+/// cache can call it without borrowing `app` while iterating.
+fn log_entry_to_lines(
+    entry: &crate::app::LogEntry,
+    sid_to_display_name: &std::collections::HashMap<String, String>,
+) -> Vec<Line<'static>> {
+    let ts = entry.timestamp.format("%H:%M:%S");
+    // If this is a compaction start/end/trigger message, render it in bright green
+    let msg_lower = entry.message.to_lowercase();
+    let is_compaction_highlight = msg_lower.contains("compaction")
+        && (msg_lower.contains("started")
+            || msg_lower.contains("completed")
+            || msg_lower.contains("triggered"));
+
+    let (level_str, level_color) = if is_compaction_highlight {
+        ("CMP", Color::LightGreen)
+    } else {
+        match entry.level {
+            LogLevel::Info => ("INF", Color::Blue),
+            LogLevel::Tool => ("TUL", Color::Cyan),
+            LogLevel::Warn => ("WRN", Color::Yellow),
+            LogLevel::Error => ("ERR", Color::Red),
+        }
+    };
+
+    // Build agent_id span if present
+    let mut spans = vec![
+        Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{level_str} "),
+            Style::default()
+                .fg(level_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+
+    // Add agent_id label if present
+    if let Some(agent_id) = &entry.agent_id {
+        spans.push(Span::styled(
+            format!("[{}] ", agent_id),
+            Style::default().fg(Color::Magenta),
+        ));
+    }
+
+    // Parse and color the [sid:step] prefix in the message if present
+    let msg = &entry.message;
+    if msg.starts_with('[') {
+        // Try to find the "]" that ends the [sid:step] prefix
+        if let Some(close_bracket) = msg.find(']') {
+            let prefix = &msg[..=close_bracket];
+            // Verify it looks like [sid:step] format (contains a colon)
+            if prefix.contains(':') {
+                let rest = &msg[close_bracket + 1..];
+                // Extract the sid from the prefix to look up display name
+                let sid_start = prefix.find('[').unwrap_or(0) + 1;
+                let sid_end = prefix.find(':').unwrap_or(prefix.len() - 1);
+                let sid = &prefix[sid_start..sid_end];
+                // Extract step number (everything after ':' up to ']')
+                let step_start = sid_end + 1;
+                let step = &prefix[step_start..close_bracket];
+                // Look up friendly display name if available
+                let display_sid = sid_to_display_name
+                    .get(sid)
+                    .cloned()
+                    .unwrap_or_else(|| sid.to_string());
+                let formatted_prefix = format!("[{}:{step}]", display_sid);
+                spans.push(Span::styled(
+                    formatted_prefix,
+                    Style::default().fg(Color::Yellow),
+                ));
+                spans.push(Span::raw(rest.to_string()));
+            } else {
+                spans.push(Span::raw(msg.clone()));
+            }
+        } else {
+            spans.push(Span::raw(msg.clone()));
+        }
+    } else {
+        spans.push(Span::raw(msg.clone()));
+    }
+    vec![Line::from(spans)]
+}
+
 /// Render the TASKS side panel (todo2tasks T-015, FR-005, FR-007, FR-018).
 ///
-/// Lists the tasks belonging to the active session (`app.session_id`),
-/// re-queried from `Storage::list_tasks` on each frame so edits made via the
-/// `task_create` / `task_update` tools are reflected without a toggle.
+/// Lists the tasks belonging to the active session (`app.session_id`).
+/// Task rows are cached in `app.tasks_cache_rows` and only re-queried from
+/// SQLite when `app.tasks_cache_dirty` is `true` (set by task-related events
+/// and tool results).  This avoids a `storage.list_tasks` call and DAG
+/// computation on every render frame, which caused noticeable scroll lag
+/// when the panel was visible.
 /// Each row is rendered as `[<STATUS>] <subject>` with the status prefix
 /// coloured: `pending` = yellow, `in_progress` = cyan, `completed` = green,
 /// `blocked` = red (FR-007). When a task is derived-blocked (FR-005), the
@@ -3203,100 +3268,110 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         .clone()
         .or_else(|| app.session_id.clone());
 
-    let rows_result: anyhow::Result<Vec<ragent_storage::TaskRow>> = match &session_id {
-        Some(sid) => app
-            .storage
-            .list_tasks(sid, None)
-            .map_err(|e| anyhow::anyhow!(e.to_string())),
-        None => Ok(Vec::new()),
-    };
-
-    let lines: Vec<Line> = match rows_result {
-        Ok(rows) if rows.is_empty() => {
-            app.tasks_max_scroll = 0;
-            vec![Line::from(Span::styled(
-                "No tasks",
-                Style::default().fg(Color::DarkGray),
-            ))]
-        }
-        Ok(rows) => {
-            // Compute derived DAG fields so we can show [blocked by …]
-            // annotations (FR-005, FR-018).
-            let dag = ragent_storage::compute_task_dag(&rows);
-
-            let mut all_lines: Vec<Line> = Vec::new();
-            for row in &rows {
-                let status_upper = row.status.to_uppercase();
-                let status_color = match status_upper.as_str() {
-                    "PENDING" => Color::Yellow,
-                    "IN_PROGRESS" => Color::Cyan,
-                    "COMPLETED" | "DONE" => Color::Green,
-                    "BLOCKED" => Color::Red,
-                    _ => Color::DarkGray,
-                };
-
-                // Determine if this task is derived-blocked (FR-005).
-                let derived = dag.get(&row.id);
-                let is_derived_blocked = derived.is_some_and(|d| d.is_blocked);
-
-                // Use red for derived-blocked pending tasks (FR-018).
-                let line_color = if is_derived_blocked {
-                    Color::Red
-                } else {
-                    status_color
-                };
-
-                let mut spans = vec![
-                    Span::styled(
-                        format!("[{status_upper}] "),
-                        Style::default().fg(line_color).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(row.title.clone(), Style::default().fg(line_color)),
-                ];
-
-                // Append (owner) suffix when owner is set (FR-018).
-                if let Some(ref owner) = row.owner
-                    && !owner.is_empty()
-                {
-                    spans.push(Span::styled(
-                        format!(" ({owner})"),
-                        Style::default().fg(Color::DarkGray),
-                    ));
-                }
-
-                // Append [blocked by #id, …] when derived blocked (FR-018).
-                if is_derived_blocked {
-                    let deps: Vec<String> =
-                        row.blocked_by.iter().map(|id| format!("#{id}")).collect();
-                    spans.push(Span::styled(
-                        format!(" [blocked by {}]", deps.join(", ")),
-                        Style::default().fg(Color::Red),
-                    ));
-                }
-
-                all_lines.push(Line::from(spans));
-
-                // Render active_form as indented sub-line when in_progress
-                // (FR-018).
-                if row.status == "in_progress"
-                    && let Some(ref active) = row.active_form
-                    && !active.is_empty()
-                {
-                    all_lines.push(Line::from(Span::styled(
-                        format!("  → {active}"),
-                        Style::default().fg(Color::Cyan),
-                    )));
-                }
+    // Refresh the cached task rows only when dirty, avoiding a per-frame
+    // SQLite query + DAG computation.  The cache is marked dirty by
+    // task-related events (tool results for task_create/task_update, and
+    // the TaskCompleted / SubagentStart / SubagentComplete events).
+    if app.tasks_cache_dirty {
+        let rows_result: anyhow::Result<Vec<ragent_storage::TaskRow>> = match &session_id {
+            Some(sid) => app
+                .storage
+                .list_tasks(sid, None)
+                .map_err(|e| anyhow::anyhow!(e.to_string())),
+            None => Ok(Vec::new()),
+        };
+        match rows_result {
+            Ok(rows) => {
+                app.tasks_cache_rows = rows;
+                app.tasks_cache_dirty = false;
             }
-            all_lines
+            Err(_) => {
+                // Keep stale cache on error so the panel does not blank out
+                // on a transient SQLite failure.
+                app.tasks_cache_dirty = false;
+            }
         }
-        Err(_) => {
-            app.tasks_max_scroll = 0;
-            vec![Line::from(Span::styled(
-                "Failed to load tasks",
-                Style::default().fg(Color::Red),
-            ))]
+    }
+
+    // Build display lines from the cached rows.  When the cache is empty
+    // we must distinguish "no tasks" from "query failed" — the latter only
+    // happens on the refresh attempt, so we can rely on cache emptiness
+    // for the placeholder.
+    let lines: Vec<Line> = if app.tasks_cache_rows.is_empty() {
+        app.tasks_max_scroll = 0;
+        vec![Line::from(Span::styled(
+            "No tasks",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        // Compute derived DAG fields so we can show [blocked by …]
+        // annotations (FR-005, FR-018).
+        let dag = ragent_storage::compute_task_dag(&app.tasks_cache_rows);
+
+        let mut all_lines: Vec<Line> = Vec::new();
+        for row in &app.tasks_cache_rows {
+            let status_upper = row.status.to_uppercase();
+            let status_color = match status_upper.as_str() {
+                "PENDING" => Color::Yellow,
+                "IN_PROGRESS" => Color::Cyan,
+                "COMPLETED" | "DONE" => Color::Green,
+                "BLOCKED" => Color::Red,
+                _ => Color::DarkGray,
+            };
+
+            // Determine if this task is derived-blocked (FR-005).
+            let derived = dag.get(&row.id);
+            let is_derived_blocked = derived.is_some_and(|d| d.is_blocked);
+
+            // Use red for derived-blocked pending tasks (FR-018).
+            let line_color = if is_derived_blocked {
+                Color::Red
+            } else {
+                status_color
+            };
+
+            let mut spans = vec![
+                Span::styled(
+                    format!("[{status_upper}] "),
+                    Style::default().fg(line_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(row.title.clone(), Style::default().fg(line_color)),
+            ];
+
+            // Append (owner) suffix when owner is set (FR-018).
+            if let Some(ref owner) = row.owner
+                && !owner.is_empty()
+            {
+                spans.push(Span::styled(
+                    format!(" ({owner})"),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            // Append [blocked by #id, …] when derived blocked (FR-018).
+            if is_derived_blocked {
+                let deps: Vec<String> = row.blocked_by.iter().map(|id| format!("#{id}")).collect();
+                spans.push(Span::styled(
+                    format!(" [blocked by {}]", deps.join(", ")),
+                    Style::default().fg(Color::Red),
+                ));
+            }
+
+            all_lines.push(Line::from(spans));
+
+            // Render active_form as indented sub-line when in_progress
+            // (FR-018).
+            if row.status == "in_progress"
+                && let Some(ref active) = row.active_form
+                && !active.is_empty()
+            {
+                all_lines.push(Line::from(Span::styled(
+                    format!("  → {active}"),
+                    Style::default().fg(Color::Cyan),
+                )));
+            }
         }
+        all_lines
     };
 
     // Cache plain-text content for text selection copy, matching the log
@@ -3437,29 +3512,41 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let project_dir = std::env::current_dir().unwrap_or_default();
 
-    match app.storage.count_memories_for_project(&project_dir) {
-        Ok(count) => {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "Structured memories: ",
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::raw(format!("{count}")),
-            ]));
+    // Refresh the cached memory data only when dirty, avoiding per-frame
+    // N+1 SQLite queries (count + list + N x get_memory_tags).  The cache
+    // is marked dirty by memory-related tool results (memory_store,
+    // memory_recall, memory_forget).
+    if app.memory_cache_dirty {
+        let count = app
+            .storage
+            .count_memories_for_project(&project_dir)
+            .unwrap_or(0);
+        let entries = app
+            .storage
+            .list_memories_for_project(&project_dir, 100)
+            .unwrap_or_default();
+        // Pre-fetch tags for each row so the render path does not issue a
+        // per-row SQLite query.
+        for row in &entries {
+            let _ = app.storage.get_memory_tags(row.id);
         }
-        Err(_) => {
-            lines.push(Line::from(Span::styled(
-                "Structured memories: (unavailable)",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
+        app.memory_cache_count = count;
+        app.memory_cache_entries = entries;
+        app.memory_cache_dirty = false;
     }
+
+    let count = app.memory_cache_count;
+    let entries = &app.memory_cache_entries;
+
+    lines.push(Line::from(vec![
+        Span::styled(
+            "Structured memories: ",
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::raw(format!("{count}")),
+    ]));
     lines.push(Line::raw(""));
 
-    let entries = app
-        .storage
-        .list_memories_for_project(&project_dir, 100)
-        .unwrap_or_default();
     if entries.is_empty() {
         lines.push(Line::from(Span::styled(
             "(no memories for this project)",
@@ -3469,7 +3556,7 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         // Group by category.
         let mut by_category: std::collections::BTreeMap<&str, Vec<&MemoryRow>> =
             std::collections::BTreeMap::new();
-        for row in &entries {
+        for row in entries {
             by_category
                 .entry(row.category.as_str())
                 .or_default()
@@ -3496,6 +3583,10 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                     Span::raw(preview),
                 ]));
 
+                // Tags were pre-fetched during the cache refresh; fetch them
+                // here for display.  This is still O(N) SQLite queries, but
+                // only on the frame where the cache is refreshed (not every
+                // frame).  When the cache is clean this path is not reached.
                 let tags = app.storage.get_memory_tags(row.id).unwrap_or_default();
                 if !tags.is_empty() {
                     lines.push(Line::from(vec![
@@ -3818,17 +3909,36 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
+/// Render a single message into formatted lines (FR-003, FR-006).
+///
+/// Delegates to `messages_to_lines` with a single-message slice so the
+/// per-message line cache can re-render only the changed message during
+/// streaming instead of rebuilding the entire timeline.
+fn message_to_lines(
+    msg: &Message,
+    tool_step_map: &std::collections::HashMap<String, (String, u32, u32)>,
+    sid_to_display: &std::collections::HashMap<String, String>,
+    cwd: &str,
+) -> Vec<Line<'static>> {
+    messages_to_lines(
+        std::slice::from_ref(msg),
+        tool_step_map,
+        sid_to_display,
+        cwd,
+    )
+}
+
 /// Render a slice of messages into formatted lines using the rich format
 /// from the primary Messages panel.  Both `render_messages` and
 /// `render_output_view_overlay` delegate here so teammate output looks
 /// identical to the lead agent's chat window.
-fn messages_to_lines<'a>(
+fn messages_to_lines(
     messages: &[Message],
     tool_step_map: &std::collections::HashMap<String, (String, u32, u32)>,
     sid_to_display: &std::collections::HashMap<String, String>,
     cwd: &str,
-) -> Vec<Line<'a>> {
-    let mut lines: Vec<Line<'a>> = Vec::new();
+) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
 
     for msg in messages {
         for part in &msg.parts {
@@ -4112,7 +4222,11 @@ fn messages_to_lines<'a>(
     lines
 }
 
-fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
+/// Render the message timeline panel into `area`.
+///
+/// Uses the per-message line cache (`app.message_line_cache`) to avoid
+/// re-rendering unchanged messages on every frame (FR-003, FR-006).
+pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // Determine which session to display messages for.
     // If a specific agent is selected, show its messages; otherwise show primary session.
     let _display_session = app
@@ -4125,17 +4239,85 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // Tasks: Implement proper multi-session message storage to filter by _display_session.
     // This is a placeholder for future multi-session message handling.
     let messages_to_show = &app.messages;
+    let inner_width = area.width.saturating_sub(2);
+    let cur_version = app.messages_version;
 
-    let lines = messages_to_lines(
-        messages_to_show,
-        &app.tool_step_map,
-        &app.sid_to_display_name,
-        &app.cwd,
-    );
-    // Cache plain-text content for text selection copy
-    // Must match the word-wrapped display that Paragraph renders
-    let inner_width = area.width.saturating_sub(2) as usize;
-    app.message_content_lines = build_wrapped_content_lines(&lines, inner_width);
+    // ── Per-message line cache (FR-003, FR-006) ──────────────────────────
+    //
+    // The cache holds one `MessageLineGroup` per message.  Each group stores
+    // the un-wrapped `Line<'static>` values (width-independent), the
+    // word-wrapped content lines, and the wrapped-line count at a given width.
+    //
+    // On every render we:
+    //   1. Reconcile the cache length with `messages.len()`.
+    //   2. Re-render any group whose `version` is stale (message content
+    //      changed).  When only the last message changed (the common streaming
+    //      case), only that one group is re-rendered (FR-006).
+    //   3. Re-wrap all groups when the terminal width changed.
+    //   4. Flatten the cached lines and sum the wrapped counts.
+
+    let need_rewrap = app.message_cache_width != inner_width;
+
+    // Reconcile cache length: if messages were added or removed, adjust.
+    if app.message_line_cache.len() > messages_to_show.len() {
+        app.message_line_cache.truncate(messages_to_show.len());
+    }
+
+    // Ensure every message has a cache slot.
+    while app.message_line_cache.len() < messages_to_show.len() {
+        app.message_line_cache.push(crate::app::MessageLineGroup {
+            lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            version: 0, // stale — will be re-rendered below
+        });
+    }
+
+    // Re-render stale groups (version mismatch).  When the cache length
+    // matches messages length but the version changed, only the last
+    // message could have been modified by streaming (append_assistant_text,
+    // update_tool_call_status, etc.).  Re-render only those that differ.
+    let w = inner_width.max(1) as usize;
+    for (i, msg) in messages_to_show.iter().enumerate() {
+        let group = &mut app.message_line_cache[i];
+        if group.version != cur_version {
+            group.lines =
+                message_to_lines(msg, &app.tool_step_map, &app.sid_to_display_name, &app.cwd);
+            group.version = cur_version;
+            // Recompute the wrapped line count and content lines for this
+            // group at the current width.  Without this, newly-streamed
+            // messages keep `wrapped_count: 0` and the total height never
+            // grows, so the view never auto-scrolls to show new content.
+            group.content_lines = build_wrapped_content_lines(&group.lines, w);
+            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
+            group.wrapped_count = para.line_count(inner_width) as u16;
+        }
+    }
+
+    // Re-wrap all groups when the width changed (FR-003).
+    if need_rewrap {
+        for group in app.message_line_cache.iter_mut() {
+            group.content_lines = build_wrapped_content_lines(&group.lines, w);
+            // Compute the wrapped line count for this group.
+            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
+            group.wrapped_count = para.line_count(inner_width) as u16;
+        }
+        app.message_cache_width = inner_width;
+    }
+
+    // Flatten all cached groups into a single Vec<Line> for rendering and
+    // accumulate the total wrapped line count.
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    let mut all_content_lines: Vec<String> = Vec::new();
+    let mut total_wrapped: u16 = 0;
+    for group in app.message_line_cache.iter() {
+        all_lines.extend(group.lines.iter().cloned());
+        all_content_lines.extend(group.content_lines.iter().cloned());
+        total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
+    }
+
+    // Store the flattened content lines for text-selection copy.
+    app.message_content_lines = all_content_lines;
 
     // Build the paragraph with wrapping so we can measure the true rendered height.
     let session_display = app
@@ -4157,14 +4339,12 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let paragraph = Paragraph::new(lines)
+    let paragraph = Paragraph::new(all_lines)
         .block(messages_block)
         .wrap(Wrap { trim: false });
 
-    // Use line_count() which accounts for word-wrap at the inner width
-    // (area width minus left+right borders).
-    let inner_width = area.width.saturating_sub(2);
-    let total = paragraph.line_count(inner_width) as u16;
+    // Use the accumulated wrapped count as the total height.
+    let total = total_wrapped;
     let visible = area.height.saturating_sub(2);
     let max_scroll = total.saturating_sub(visible);
     // Clamp scroll_offset when content shrinks to prevent blank timeline

@@ -29,9 +29,10 @@ fn format_elapsed(created_at: chrono::DateTime<Utc>) -> String {
     }
 }
 
-/// Shorten a session/task id to the first 8 hex chars.
-fn short_id(id: &str) -> &str {
-    &id[..8.min(id.len())]
+/// Shorten a session/task id to the last 8 chars (the unique suffix).
+fn short_id(id: &str) -> String {
+    let start = id.len().saturating_sub(8);
+    id[start..].to_string()
 }
 
 /// Recursively build agent row lines with Play/Stop and Kill button columns.
@@ -74,7 +75,12 @@ fn build_task_rows_with_buttons<'a>(
         let type_label = if task.background { "bg" } else { "fg" };
         let is_custom = custom_names.contains(&task.agent_name);
         let is_teammate = teammate_ids.contains(&task.child_session_id);
-        let mut agent_label = format!("{indent}{prefix}{}", task.agent_name);
+        // Display the unique task id (agent type + suffix) in the name column.
+        // Reserve the 4-char badge width so [C]/[T] badges are not truncated.
+        let badge_len = (if is_custom { 4 } else { 0 }) + (if is_teammate { 4 } else { 0 });
+        let max_name = 28usize.saturating_sub(badge_len);
+        let base_name: String = task.id.chars().take(max_name).collect();
+        let mut agent_label = format!("{indent}{prefix}{base_name}");
         if is_custom {
             agent_label.push_str(" [C]");
         }

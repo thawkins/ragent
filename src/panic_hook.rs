@@ -49,7 +49,7 @@ fn panics_dir() -> PathBuf {
 }
 
 /// Build a unique panic log file path from the current UTC timestamp.
-fn panic_log_path(panics_dir: &PathBuf) -> PathBuf {
+fn panic_log_path(panics_dir: &std::path::Path) -> PathBuf {
     let timestamp = Utc::now().format("%Y%m%d-%H%M%S-%6f").to_string();
     panics_dir.join(format!("panic-{timestamp}.log"))
 }

@@ -284,6 +284,43 @@ pub struct ModelPickerEntry {
     pub cost_multiplier: String,
 }
 
+/// Cached rendered lines for a single message (FR-003, FR-006).
+///
+/// The raw `lines` are width-independent (they are the un-wrapped ratatui
+/// `Line` values produced by `message_to_lines`).  The `content_lines` and
+/// `wrapped_count` are width-dependent and are recomputed when the terminal
+/// width changes.
+#[derive(Clone)]
+pub struct MessageLineGroup {
+    /// Un-wrapped rendered lines for this message.
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Word-wrapped plain-text content lines (for text-selection copy).
+    pub content_lines: Vec<String>,
+    /// Number of wrapped lines this message occupies at the cached width.
+    pub wrapped_count: u16,
+    /// `messages_version` when this group was last rendered.
+    pub version: u64,
+}
+
+/// Cached rendered lines for a single log entry.
+///
+/// Mirrors [`MessageLineGroup`] for the log panel: the un-wrapped `Line`
+/// values are width-independent and rendered once per entry; the
+/// `content_lines` and `wrapped_count` are recomputed only when the
+/// terminal width changes.  The `version` tracks the log-entry version
+/// counter so only newly-added entries are re-rendered.
+#[derive(Clone)]
+pub struct LogLineGroup {
+    /// Un-wrapped rendered lines for this log entry.
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Word-wrapped plain-text content lines (for text-selection copy).
+    pub content_lines: Vec<String>,
+    /// Number of wrapped lines this entry occupies at the cached width.
+    pub wrapped_count: u16,
+    /// `log_version` when this group was last rendered.
+    pub version: u64,
+}
+
 /// Spinner state shown while a provider is fetching its model list.
 #[derive(Debug, Clone)]
 pub struct ModelLoadingState {
@@ -1239,6 +1276,18 @@ pub struct App {
     pub show_telemetry: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
+    /// Per-entry line cache for the log panel, mirroring
+    /// `message_line_cache`.  Each entry holds the rendered `Line` values
+    /// for one log entry so the render path avoids rebuilding all lines
+    /// from scratch every frame.
+    pub log_line_cache: Vec<LogLineGroup>,
+    /// Terminal inner width when the log panel's `content_lines` and
+    /// `wrapped_count` fields were last computed.  When the width changes
+    /// all log entries need re-wrapping.
+    pub log_cache_width: u16,
+    /// Monotonically increasing version counter incremented whenever
+    /// `self.log_entries` is mutated (new entries pushed).
+    pub log_version: u64,
     /// Optional file path used to spool log-panel contents when it is visible.
     pub log_window_path: Option<std::path::PathBuf>,
     /// Scroll offset for the log panel (lines from bottom).
@@ -1289,6 +1338,17 @@ pub struct App {
     pub agent_row_kill_areas: Vec<Rect>,
     /// Parallel task IDs for the agent kill click targets.
     pub agent_row_kill_task_ids: Vec<String>,
+    // ── Active-agents panel caches (FR-003, FR-008) ────────────────────────
+    /// Cached set of custom-agent names for the active-agents panel.
+    /// Rebuilt only when `custom_agent_defs.len()` changes (FR-003).
+    pub active_agents_custom_names: std::collections::HashSet<String>,
+    /// `custom_agent_defs.len()` when `active_agents_custom_names` was last built.
+    pub active_agents_custom_names_version: usize,
+    /// Cached set of teammate session IDs for the active-agents panel.
+    /// Rebuilt only when `team_members.len()` changes (FR-003).
+    pub active_agents_teammate_ids: std::collections::HashSet<String>,
+    /// `team_members.len()` when `active_agents_teammate_ids` was last built.
+    pub active_agents_teammate_ids_version: usize,
     /// Active scrollbar drag, if any.
     pub scrollbar_drag: Option<ScrollbarDragPane>,
     /// Active text selection, if any.
@@ -1301,8 +1361,27 @@ pub struct App {
     pub profile_content_lines: Vec<String>,
     /// Plain-text lines from the last TODO pane render (for copy).
     pub tasks_content_lines: Vec<String>,
+    /// Cached task rows for the Tasks side panel so the render path does
+    /// not query SQLite every frame.  Refreshed only when
+    /// `tasks_cache_dirty` is `true` (set on task mutations and cleared
+    /// after the panel reads the cache).  Stores the rows and the derived
+    /// DAG so both expensive computations are amortised.
+    pub tasks_cache_rows: Vec<ragent_storage::TaskRow>,
+    /// `true` when `tasks_cache_rows` is stale and needs a SQLite refresh
+    /// on the next `render_tasks_panel` call.
+    pub tasks_cache_dirty: bool,
     /// Plain-text lines from the last Memory pane render (for copy).
     pub memory_content_lines: Vec<String>,
+    /// Cached memory rows for the Memory side panel so the render path
+    /// does not issue N+1 SQLite queries every frame.  Refreshed only when
+    /// `memory_cache_dirty` is `true`.
+    pub memory_cache_entries: Vec<ragent_storage::storage::MemoryRow>,
+    /// Cached memory count (avoiding a separate `count_memories_for_project`
+    /// SQLite call every frame).
+    pub memory_cache_count: u64,
+    /// `true` when `memory_cache_*` is stale and needs a SQLite refresh on
+    /// the next `render_memory_panel` call.
+    pub memory_cache_dirty: bool,
     /// Plain-text lines from the last Telemetry pane render (for copy).
     pub telemetry_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
@@ -1430,6 +1509,19 @@ pub struct App {
     pub team_members: Vec<TeamMember>,
     /// Per-teammate message counters: `agent_id -> (sent, received)`.
     pub team_message_counts: HashMap<String, (u32, u32)>,
+    // ── Teams panel caches (FR-003, FR-009) ─────────────────────────────────
+    /// Cached per-agent task counts `(claimed, completed)` for the teams
+    /// panel.  Updated by `TeamTaskClaimed` / `TeamTaskCompleted` events
+    /// so the render path never reads the task store from disk (FR-009).
+    pub team_task_counts: HashMap<String, (usize, usize)>,
+    /// `true` when `team_task_counts` needs a one-shot disk refresh (set
+    /// when a team is first opened).  The render path checks this flag,
+    /// loads from disk once, then clears it so subsequent frames use the
+    /// in-memory cache only.
+    pub team_task_counts_dirty: bool,
+    /// Cached `created_at` timestamp for the lead session, so the teams
+    /// panel does not read `storage.get_session()` every frame (FR-009).
+    pub lead_session_created_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether the Teams panel is visible in the sidebar.
     pub show_teams: bool,
     /// Scroll offset for the Teams panel.
@@ -1486,6 +1578,41 @@ pub struct App {
     /// Cache for rendered markdown output, keyed by FNV-style hash of input text.
     /// Cleared when messages change.
     pub md_render_cache: LruCache<u64, String>,
+    /// Long-lived markdown-rendering worker thread (FR-010).
+    ///
+    /// The worker receives `(html, response_sender)` pairs via an mpsc channel
+    /// and runs `html2text::from_read` on each, returning the result.  This
+    /// eliminates the per-cache-miss `std::thread::spawn` overhead that the
+    /// previous implementation incurred on every streaming text delta.
+    pub md_worker: crate::app::MdWorker,
+    // ── Status bar span cache (FR-003, FR-008) ──────────────────────────────
+    /// Cached rendered status-bar spans and the signature they were built
+    /// from.  When the signature matches on the next render, the cached
+    /// spans are reused directly, avoiding per-frame `format!()` and
+    /// `String::clone()` calls (FR-003).
+    pub status_bar_cache: Option<crate::app::StatusBarCache>,
+    // ── Model picker row cache (FR-003) ─────────────────────────────────────
+    /// Cached pre-built table rows for the `SelectModel` picker dialog.
+    /// Rebuilt only when the model list changes (new discovery results),
+    /// avoiding per-frame `format!()` calls for every model's context
+    /// window, cost tier, thinking levels, and feature indicators.
+    pub model_picker_rows_cache: Option<crate::app::ModelPickerRowsCache>,
+
+    // ── Message timeline line cache (FR-003, FR-006) ────────────────────────
+    /// Per-message cache of rendered `Line<'static>` groups, so `render_messages`
+    /// can avoid re-rendering the entire timeline every frame.  Each entry
+    /// holds the lines for one message; the cache is rebuilt incrementally
+    /// when only the last message changes (streaming).
+    pub message_line_cache: Vec<MessageLineGroup>,
+    /// Terminal inner width when the `content_lines` and `wrapped_count`
+    /// fields of [`message_line_cache`] were last computed.  When the width
+    /// changes, all groups need re-wrapping (but not re-rendering).
+    pub message_cache_width: u16,
+    /// Monotonically increasing version counter incremented whenever
+    /// `self.messages` is mutated.  Compared against
+    /// [`MessageLineGroup::version`] to detect which messages need
+    /// re-rendering.
+    pub messages_version: u64,
 
     // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
     /// True when autopilot mode is active. Agent continues autonomously until
@@ -1776,8 +1903,11 @@ impl App {
                 self.input_history.clear();
                 for line in content.lines() {
                     if !line.is_empty() {
-                        // Unescape: literal "\n" → newline, "\\" → backslash
-                        let entry = line.replace("\\n", "\n").replace("\\\\", "\\");
+                        // Unescape: `\n` → newline, `\\` → backslash.
+                        // Single-pass decode avoids the order-dependent
+                        // `replace` bug that corrupts inputs containing a
+                        // literal backslash followed by 'n'.
+                        let entry = unescape_history_line(line);
                         self.input_history.push(entry);
                     }
                 }
@@ -1933,7 +2063,7 @@ impl App {
 }
 
 /// Auto-dismiss timeout (in seconds) for the transient run-cost banner.
-const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;
+pub const RUN_COST_BANNER_EXPIRY_SECS: u64 = 15;
 
 /// Grace period (in milliseconds) before a slash-command status auto-clears to
 /// `"ready"`. Long enough to read the status, short enough to feel responsive.
@@ -1950,4 +2080,34 @@ fn history_entries_to_string(entries: &[String]) -> String {
         .map(|e| e.replace('\\', "\\\\").replace('\n', "\\n"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Decode a single history line back to its original content.
+///
+/// Reverses the encoding applied by [`history_entries_to_string`]:
+/// `\\` → `\` and `\n` (literal two-char) → newline.
+///
+/// Uses a single-pass character scan instead of chained `replace` calls to
+/// avoid the order-dependent corruption that occurs when an entry contains a
+/// literal backslash followed by `n` (e.g. `\n` → `\\n` on encode, then
+/// `replace("\\n", "\n")` wrongly matches the second backslash on decode).
+fn unescape_history_line(line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('\\') => result.push('\\'),
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }

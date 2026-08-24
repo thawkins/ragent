@@ -543,7 +543,6 @@ async fn main() -> Result<()> {
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
         cached_tool_definitions: parking_lot::RwLock::new(None),
@@ -715,7 +714,7 @@ async fn main() -> Result<()> {
             let mut resolved_agent = resolved_agent.clone();
             let config_guard = config.read().await;
             agent::apply_fallback_thinking(
-                    Arc::make_mut(&mut resolved_agent),
+                Arc::make_mut(&mut resolved_agent),
                 &config_guard,
                 provider_registry.as_ref(),
             );

@@ -343,6 +343,8 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::SessionSearched { .. } => "session_searched",
         Event::MemoryCandidateExtracted { .. } => "memory_candidate_extracted",
         Event::GitLabSetupComplete { .. } => "gitlab_setup_complete",
+        Event::CopilotTokenExchangeResult { .. } => "copilot_token_exchange_result",
+        Event::CopilotDeviceFlowStartResult { .. } => "copilot_device_flow_start_result",
         Event::ServiceStartError { .. } => "service_start_error",
         Event::ProviderLoadingStarted { .. } => "provider_loading_started",
         Event::ProviderLoadingFinished { .. } => "provider_loading_finished",
@@ -1081,6 +1083,28 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "status": status,
             "exit_code": exit_code,
             "event": "completed",
+        })),
+        Event::CopilotTokenExchangeResult {
+            success,
+            api_base,
+            error,
+        } => to_data(&serde_json::json!({
+            "success": success,
+            "api_base": api_base,
+            "error": error,
+        })),
+        Event::CopilotDeviceFlowStartResult {
+            user_code,
+            verification_uri,
+            device_code,
+            interval,
+            error,
+        } => to_data(&serde_json::json!({
+            "user_code": user_code,
+            "verification_uri": verification_uri,
+            "device_code": device_code,
+            "interval": interval,
+            "error": error,
         })),
     };
     (name, data)

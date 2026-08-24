@@ -55,6 +55,7 @@ impl App {
                     self.push_log_no_agent(LogLevel::Warn, format!("opt error: {}", msg));
                 }
             }
+            self.needs_redraw = true;
         }
     }
 

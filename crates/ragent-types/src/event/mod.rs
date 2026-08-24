@@ -493,6 +493,35 @@ pub enum Event {
         /// Error message, if any.
         error: Option<String>,
     },
+    /// Result of an async Copilot token exchange started during provider
+    /// setup.  The TUI spawns the exchange in a background task and publishes
+    /// this event so the UI thread never blocks on the network call
+    /// (FR-002, FR-004).
+    CopilotTokenExchangeResult {
+        /// `true` when the token exchange succeeded and the API base was
+        /// discovered.
+        success: bool,
+        /// The Copilot API base URL discovered during the exchange.
+        api_base: Option<String>,
+        /// Error message on failure.
+        error: Option<String>,
+    },
+    /// Result of an async Copilot device-flow start.  The TUI starts the
+    /// OAuth device flow in a background task and publishes this event with
+    /// the device code / user code so the UI thread never blocks
+    /// (FR-002, FR-004).
+    CopilotDeviceFlowStartResult {
+        /// Short code the user enters at the verification URL.
+        user_code: Option<String>,
+        /// URL the user must visit to authorise.
+        verification_uri: Option<String>,
+        /// Opaque device code used when polling for the access token.
+        device_code: Option<String>,
+        /// Minimum polling interval in seconds.
+        interval: Option<u64>,
+        /// Error message when the device-flow start failed.
+        error: Option<String>,
+    },
     /// Rate-limit / quota usage from a provider response.
     QuotaUpdate {
         /// Session this update belongs to.
@@ -916,6 +945,8 @@ impl Event {
             Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
             Self::GithubDeviceFlowComplete { .. } => "GithubDeviceFlowComplete",
             Self::GitLabSetupComplete { .. } => "GitLabSetupComplete",
+            Self::CopilotTokenExchangeResult { .. } => "CopilotTokenExchangeResult",
+            Self::CopilotDeviceFlowStartResult { .. } => "CopilotDeviceFlowStartResult",
             Self::SessionAborted { .. } => "SessionAborted",
             Self::QuotaUpdate { .. } => "QuotaUpdate",
             Self::SubagentStart { .. } => "SubagentStart",
@@ -1018,7 +1049,9 @@ impl Event {
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::GithubDeviceFlowComplete { .. }
-            | Self::GitLabSetupComplete { .. } => None,
+            | Self::GitLabSetupComplete { .. }
+            | Self::CopilotTokenExchangeResult { .. }
+            | Self::CopilotDeviceFlowStartResult { .. } => None,
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }

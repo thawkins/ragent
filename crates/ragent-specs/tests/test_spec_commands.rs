@@ -378,34 +378,19 @@ fn add_prompt_contains_existing_content_and_numbering() {
     let p = SpecCommand::build_add_prompt("myspec", "Add new feature", spec_md, plan_md, 2, 1, 2);
     assert!(p.contains("Add new feature"));
     assert!(p.contains("myspec"));
+    // The prompt includes the existing content so the LLM can generate
+    // correct incremental additions without reading files.
     assert!(p.contains("FR-001"));
+    assert!(p.contains("T-001"));
     assert!(p.contains("FR-002"));
     assert!(p.contains("NFR-001"));
     assert!(p.contains("T-002"));
-    assert!(p.contains("---NEW REQUIREMENTS---"));
-    assert!(p.contains("---NEW TASKS---"));
-    assert!(p.contains("---NEW TASK DETAILS---"));
-    assert!(p.contains("---END---"));
+    // The prompt now instructs the LLM to use the `edit` tool directly,
+    // matching /spec create and /spec update. No delimited text blocks.
+    assert!(p.contains("`edit` tool"));
     assert!(p.contains("NOT rewrite"));
-}
-
-#[test]
-fn add_completion_summary_shows_ids() {
-    let s = SpecCommand::build_add_completion_summary(
-        "my-spec",
-        &["FR-002".to_string(), "FR-003".to_string()],
-        &["T-002".to_string()],
-    );
-    assert!(s.contains("my-spec"));
-    assert!(s.contains("FR-002, FR-003"));
-    assert!(s.contains("T-002"));
-    assert!(s.contains('2'));
-}
-
-#[test]
-fn add_completion_summary_empty_ids() {
-    let s = SpecCommand::build_add_completion_summary("my-spec", &[], &[]);
-    assert!(s.contains("none"));
+    assert!(!p.contains("---NEW REQUIREMENTS---"));
+    assert!(!p.contains("---END---"));
 }
 
 // ── JTBD parser tests ─────────────────────────────────────────────────────────
@@ -557,4 +542,22 @@ fn jtbd_prompt_contains_traceability_instruction() {
     assert!(p.contains("FR-NNN"));
     assert!(p.contains("NFR-NNN"));
     assert!(p.contains("untraced"));
+}
+// ── /spec add prompt tests (edit-tool based, no post-processing) ────────────
+
+#[test]
+fn build_add_prompt_includes_spec_md_and_plan_md_content() {
+    let spec_md = "## Requirements\n### FR-001\nOld.\n";
+    let plan_md = "| ID | Title |\n| T-001 | Old |\n";
+    let prompt = SpecCommand::build_add_prompt("my-spec", "add auth", spec_md, plan_md, 19, 5, 40);
+    // The prompt must include the existing content for context.
+    assert!(prompt.contains("FR-001"));
+    assert!(prompt.contains("T-001"));
+    // The prompt must instruct the LLM to use the edit tool directly.
+    assert!(prompt.contains("`edit` tool"));
+    assert!(prompt.contains("FR-019"));
+    assert!(prompt.contains("T-040"));
+    // No delimited text blocks — the LLM writes files directly.
+    assert!(!prompt.contains("---NEW REQUIREMENTS---"));
+    assert!(!prompt.contains("---END---"));
 }

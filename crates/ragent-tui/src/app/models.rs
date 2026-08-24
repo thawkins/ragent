@@ -8,7 +8,6 @@ use ragent_agent::team::TeamManager;
 use ragent_agent::{
     agent::{AgentInfo, ModelRef},
     event::Event,
-    provider::ModelInfo,
     storage::Storage,
 };
 use ragent_team::team::TeamStore;
@@ -208,19 +207,13 @@ impl App {
         // html2text may panic on malformed HTML (word-wrapper subtraction
         // overflow); run it on a dedicated thread so any panic unwinds only
         // that thread, never the UI thread (which installs the panic hook).
-        let rendered = {
-            let html_owned = html_buf;
-            match std::thread::Builder::new()
-                .name("md-html2text".to_string())
-                .spawn(move || html2text::from_read(html_owned.as_bytes(), 120))
-                .map_err(|e| e.to_string())
-                .and_then(|h| h.join().map_err(|_| "html2text panicked".to_string()))
-            {
-                Ok(Ok(text)) => sanitize_for_display(&text),
-                _ => {
-                    // Fallback to sanitized text when markdown conversion panics or fails.
-                    sanitize_for_display(text)
-                }
+        let rendered = self.md_worker.render(&html_buf);
+        let rendered = match rendered {
+            Ok(text) => sanitize_for_display(&text),
+            Err(_) => {
+                // Worker channel closed or worker panicked — fall back to
+                // sanitized text so the UI still shows something.
+                sanitize_for_display(text)
             }
         };
         let cleaned = rendered
@@ -231,8 +224,11 @@ impl App {
         let result = self.normalize_ascii_tables(&cleaned);
 
         // Limit cache size to avoid unbounded growth.
+        // Evict the least-recently-used entry rather than clearing the
+        // entire cache, which would cause a burst of re-rendering on the
+        // next 256 unique strings.
         if self.md_render_cache.len() >= 256 {
-            self.md_render_cache.clear(); // LRU handles eviction
+            self.md_render_cache.pop_lru();
         }
         self.md_render_cache.put(hash, result.clone());
         result
@@ -542,11 +538,9 @@ impl App {
     /// Backfill `selected_model_ctx_window` from cached/default provider model
     /// metadata so the UI does not block on provider discovery.
     ///
-    /// During startup this intentionally avoids synchronous model discovery
-    /// (`sync_discover_models`), which can block for 5+ seconds when a
-    /// provider endpoint is slow or unreachable.  Only cached or default
-    /// model metadata is consulted; the context window is refreshed later
-    /// when the user opens the model picker or sends a message.
+    /// Only cached or default model metadata is consulted; the context window
+    /// is refreshed later when the user opens the model picker or sends a
+    /// message and the async discovery path populates the cache.
     pub fn backfill_model_ctx_window(&mut self) {
         let model = match self.selected_model.as_deref() {
             Some(m) => m.to_string(),
@@ -1327,34 +1321,6 @@ impl App {
         }]
     }
 
-    pub(crate) fn sync_discover_models(&self, provider_id: &str) -> Vec<ModelInfo> {
-        let provider = match self.provider_registry.get(provider_id) {
-            Some(p) => p,
-            None => return Vec::new(),
-        };
-        let handle = match tokio::runtime::Handle::try_current() {
-            Ok(h) => h,
-            Err(_) => return Vec::new(),
-        };
-        // `block_in_place` is only permitted on the multi-threaded Tokio
-        // scheduler. Tests run on the current-thread scheduler (or outside a
-        // runtime), so skip synchronous discovery there to avoid a runtime
-        // panic. The caller falls back to cached/default model entries.
-        if handle.runtime_flavor() != tokio::runtime::RuntimeFlavor::MultiThread {
-            return Vec::new();
-        }
-        match tokio::task::block_in_place(|| handle.block_on(provider.discover_models())) {
-            Ok(models) => {
-                self.cache_discovered_models(provider_id, &models);
-                models
-            }
-            Err(e) => {
-                tracing::warn!(provider = %provider_id, error = %e, "Synchronous model discovery failed");
-                Vec::new()
-            }
-        }
-    }
-
     pub(crate) fn resolved_model_entries_for_provider(
         &self,
         provider_id: &str,
@@ -1372,32 +1338,24 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else {
-                    let discovered = self.sync_discover_models(provider_id);
-                    if !discovered.is_empty() {
-                        self.picker_entries_from_models(discovered)
-                    } else {
-                        self.selected_model_fallback_entries(provider_id)
-                    }
+                    // No cached models — return the selected-model fallback so
+                    // the picker shows *something* while the async discovery
+                    // (triggered via `start_model_discovery` in the provider
+                    // setup flow) populates the cache.  Never block the UI
+                    // thread with synchronous discovery (FR-002).
+                    self.selected_model_fallback_entries(provider_id)
                 }
             }
             "huggingface" => {
                 let cached = self.cached_model_entries("huggingface");
                 if !cached.is_empty() {
                     cached
-                } else if self.provider_api_key("huggingface").is_some() {
-                    // A token is configured but (a) no models are cached and
-                    // (b) synchronous discovery returned nothing. Return an
-                    // empty list so the picker shows "no models" instead of
-                    // stale hard-coded defaults.
-                    let discovered = self.sync_discover_models("huggingface");
-                    if !discovered.is_empty() {
-                        self.picker_entries_from_models(discovered)
-                    } else {
-                        Vec::new()
-                    }
                 } else {
-                    // No token and no cached/discovered models. Do not fall
-                    // back to a hard-coded catalog; models must be discovered.
+                    // No token and no cached/discovered models, or a token is
+                    // configured but async discovery has not yet completed.
+                    // Return an empty list so the picker shows "no models"
+                    // instead of stale hard-coded defaults; the async discovery
+                    // path will populate the cache when results arrive.
                     Vec::new()
                 }
             }
@@ -1405,13 +1363,6 @@ impl App {
                 let cached = self.cached_model_entries("azure_foundry");
                 if !cached.is_empty() {
                     cached
-                } else if self.provider_api_key("azure_foundry").is_some() {
-                    let discovered = self.sync_discover_models("azure_foundry");
-                    if !discovered.is_empty() {
-                        self.picker_entries_from_models(discovered)
-                    } else {
-                        default_entries()
-                    }
                 } else {
                     default_entries()
                 }
@@ -1421,12 +1372,7 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else {
-                    let discovered = self.sync_discover_models(provider_id);
-                    if !discovered.is_empty() {
-                        self.picker_entries_from_models(discovered)
-                    } else {
-                        default_entries()
-                    }
+                    default_entries()
                 }
             }
             _ => {

@@ -11,7 +11,18 @@
 //! `routes/mod.rs`.
 
 use std::path::{Path as StdPath, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+
+/// Cached research root: `cwd/research`.
+///
+/// The working directory does not change during server runtime, so we compute
+/// it once and reuse the value for every request instead of calling
+/// `std::env::current_dir()` (a syscall) on each handler invocation.
+static RESEARCH_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("research")
+});
 
 use axum::{
     Json, Router,
@@ -44,9 +55,7 @@ pub fn research_routes() -> Router<AppState> {
 /// server runs against the same project root as the CLI, so this is the
 /// straightforward `cwd/research`.
 fn research_root() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("research")
+    RESEARCH_ROOT.clone()
 }
 
 // ── GET /research ────────────────────────────────────────────────────────

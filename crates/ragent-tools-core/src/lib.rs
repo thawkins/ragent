@@ -212,7 +212,8 @@ pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
         }
     };
 
-    if !is_path_within(&canonical, &canonical_root) {
+    if !is_path_within(&canonical, &canonical_root) && !is_alias_within(&canonical, &canonical_root)
+    {
         anyhow::bail!(
             "Path escape rejected: '{}' resolves outside project root '{}'",
             path.display(),
@@ -265,7 +266,8 @@ pub fn check_path_within_root_cached(
         }
     };
 
-    if !is_path_within(&canonical, &canonical_root) {
+    if !is_path_within(&canonical, &canonical_root) && !is_alias_within(&canonical, &canonical_root)
+    {
         anyhow::bail!(
             "Path escape rejected: '{}' resolves outside project root '{}'",
             path.display(),
@@ -285,6 +287,47 @@ fn is_path_within(child: &Path, root: &Path) -> bool {
     let child_components: Vec<_> = child.components().collect();
     child_components.len() >= root_components.len()
         && child_components[..root_components.len()] == root_components[..]
+}
+
+/// Returns true when `child` resolves to the same directory as `root`,
+/// even if the absolute path strings differ (e.g. due to a bind mount,
+/// symlink, or filesystem alias).
+///
+/// Walks up from `child` through each existing parent directory and compares
+/// device/inode with `root`. This lets a path such as
+/// `/alias/project/src/main.rs` be accepted when the working directory is
+/// `/home/user/project` and `/alias/project` points to the same directory.
+fn is_alias_within(child: &Path, root: &Path) -> bool {
+    let Ok(root_meta) = root.metadata() else {
+        return false;
+    };
+
+    let mut candidate: Option<&Path> = Some(child);
+    while let Some(p) = candidate {
+        if let Ok(meta) = p.metadata()
+            && same_file_identity(&meta, &root_meta)
+        {
+            return true;
+        }
+        candidate = p.parent();
+    }
+    false
+}
+
+/// Compare two [`std::fs::Metadata`] records by device and inode.
+#[cfg(unix)]
+fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file_identity(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    // On non-Unix platforms, fall back to the canonical path equality that
+    // `std::fs::canonicalize` already provides for symlinks. Bind mounts are
+    // not a concern on Windows here, and the volume serial / file index APIs
+    // differ across Windows versions, so we keep the portable fallback.
+    a.file_attributes() == b.file_attributes()
 }
 
 /// Lightweight in-place path cleaning that removes `.` and `..` components

@@ -130,6 +130,10 @@ impl App {
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // Self-heal any selection/menu anchored on a panel that a recent
+        // toggle (e.g. Alt+T) dismissed — the render pass zeroes those
+        // areas, and a stale reference would trip assert_ui_invariants.
+        self.prune_stale_selection();
         // If context menu is open, intercept clicks.
         if self.context_menu.is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = event.kind {
@@ -731,6 +735,10 @@ impl App {
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         let before_input = self.input.clone();
         let before_cursor = self.input_cursor;
+        // Self-heal any selection/menu anchored on a panel that a recent
+        // toggle dismissed (the render pass may have zeroed its area since
+        // the last input cycle).
+        self.prune_stale_selection();
         // Dismiss the transient run-cost banner on any keypress (FR-012).
         // Non-character keys (Esc, arrows, Enter, modifier-only, etc.) are
         // consumed solely to clear the banner.  A plain printable character,

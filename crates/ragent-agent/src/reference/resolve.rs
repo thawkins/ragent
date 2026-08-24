@@ -70,6 +70,50 @@ pub async fn resolve_ref(parsed: &ParsedRef, working_dir: &Path) -> Result<Resol
     }
 }
 
+/// Read a file's content, trying binary formats first then falling back to
+/// text. Text content is line-numbered. Returns a [`ResolvedRef`] on success.
+///
+/// Shared by [`resolve_file`] and [`resolve_fuzzy`] to avoid duplicating the
+/// binary-read / truncate / number-lines / ResolvedRef-construction sequence.
+async fn read_file_content(abs_path: &Path, file_ref: FileRef, raw: &str) -> Result<ResolvedRef> {
+    if let Some(content) = try_read_binary(abs_path, raw).await? {
+        let (content, truncated) = truncate_content(content);
+        return Ok(ResolvedRef {
+            original: raw.to_string(),
+            kind: file_ref,
+            content,
+            truncated,
+            resolved_path: Some(abs_path.to_path_buf()),
+        });
+    }
+
+    let content = tokio::fs::read_to_string(abs_path)
+        .await
+        .with_context(|| format!("Cannot read file '@{raw}' ({})", abs_path.display()))?;
+
+    let (content, truncated) = truncate_content(content);
+
+    let numbered = number_lines(&content);
+
+    Ok(ResolvedRef {
+        original: raw.to_string(),
+        kind: file_ref,
+        content: numbered,
+        truncated,
+        resolved_path: Some(abs_path.to_path_buf()),
+    })
+}
+
+/// Format content with 1-based line numbers (right-aligned to 4 columns).
+fn number_lines(content: &str) -> String {
+    content
+        .lines()
+        .enumerate()
+        .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Resolve a file reference by reading its contents.
 ///
 /// For binary formats (.docx, .xlsx, .pptx, .pdf), delegates to the
@@ -81,38 +125,7 @@ async fn resolve_file(path: &Path, raw: &str, working_dir: &Path) -> Result<Reso
         working_dir.join(path)
     };
 
-    if let Some(content) = try_read_binary(&abs_path, raw).await? {
-        let (content, truncated) = truncate_content(content);
-        return Ok(ResolvedRef {
-            original: raw.to_string(),
-            kind: FileRef::File(path.to_path_buf()),
-            content,
-            truncated,
-            resolved_path: Some(abs_path),
-        });
-    }
-
-    let content = tokio::fs::read_to_string(&abs_path)
-        .await
-        .with_context(|| format!("Cannot read file '@{raw}' ({})", abs_path.display()))?;
-
-    let (content, truncated) = truncate_content(content);
-
-    // Add line numbers
-    let numbered = content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(ResolvedRef {
-        original: raw.to_string(),
-        kind: FileRef::File(path.to_path_buf()),
-        content: numbered,
-        truncated,
-        resolved_path: Some(abs_path),
-    })
+    read_file_content(&abs_path, FileRef::File(path.to_path_buf()), raw).await
 }
 
 /// Resolve a directory reference by listing its contents.
@@ -203,37 +216,7 @@ async fn resolve_fuzzy(name: &str, raw: &str, working_dir: &Path) -> Result<Reso
 
     let abs_path = working_dir.join(&best.path);
 
-    if let Some(content) = try_read_binary(&abs_path, raw).await? {
-        let (content, truncated) = truncate_content(content);
-        return Ok(ResolvedRef {
-            original: raw.to_string(),
-            kind: FileRef::File(best.path.clone()),
-            content,
-            truncated,
-            resolved_path: Some(abs_path),
-        });
-    }
-
-    let content = tokio::fs::read_to_string(&abs_path)
-        .await
-        .with_context(|| format!("Cannot read file '@{raw}' ({})", abs_path.display()))?;
-
-    let (content, truncated) = truncate_content(content);
-
-    let numbered = content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    Ok(ResolvedRef {
-        original: raw.to_string(),
-        kind: FileRef::File(best.path.clone()),
-        content: numbered,
-        truncated,
-        resolved_path: Some(abs_path),
-    })
+    read_file_content(&abs_path, FileRef::File(best.path.clone()), raw).await
 }
 
 /// Attempt to read a file as a binary document (Office or PDF).
@@ -243,15 +226,15 @@ async fn resolve_fuzzy(name: &str, raw: &str, working_dir: &Path) -> Result<Reso
 /// extension is not a binary document type (caller should fall back to
 /// text reading).
 async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
-    let ext = abs_path
+    let ext: Option<String> = abs_path
         .extension()
         .and_then(|e| e.to_str())
-        .map(str::to_lowercase);
+        .map(|s| s.to_lowercase());
 
     match ext.as_deref() {
         Some("docx" | "xlsx" | "pptx") => {
             let path = abs_path.to_path_buf();
-            let ext_owned = ext.unwrap();
+            let ext_owned = ext.unwrap_or_default();
             let raw_owned = raw.to_string();
             let content = tokio::task::spawn_blocking(move || -> Result<String> {
                 match ext_owned.as_str() {
@@ -287,12 +270,8 @@ fn truncate_content(content: String) -> (String, bool) {
         return (content, false);
     }
 
-    let end = content
-        .char_indices()
-        .map(|(i, _)| i)
-        .take_while(|&i| i <= MAX_CONTENT_SIZE)
-        .last()
-        .unwrap_or(0);
+    // Truncate at the last char boundary at or before MAX_CONTENT_SIZE.
+    let end = content.floor_char_boundary(MAX_CONTENT_SIZE);
 
     let mut truncated = content[..end].to_string();
     truncated.push_str("\n\n[Content truncated — exceeded 50KB limit]");

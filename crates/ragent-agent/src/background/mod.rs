@@ -224,6 +224,17 @@ impl BackgroundTaskService {
         Ok(rows)
     }
 
+    /// Return a cloned handle for `task_id` from the in-memory task map,
+    /// releasing the lock immediately.
+    fn command(&self, task_id: &str) -> Option<BackgroundCommand> {
+        self.state
+            .lock()
+            .expect("background state poisoned")
+            .tasks
+            .get(task_id)
+            .cloned()
+    }
+
     /// Return a single task row, overlaying in-memory state when present.
     pub async fn status(&self, task_id: &str) -> Result<BackgroundTaskRow> {
         let task_id_owned = task_id.to_string();
@@ -233,14 +244,7 @@ impl BackgroundTaskService {
             .with_context(|| format!("Background task not found: {task_id}"))?;
 
         // FR-015: single lock for the in-memory overlay.
-        let cmd_opt = self
-            .state
-            .lock()
-            .expect("background state poisoned")
-            .tasks
-            .get(task_id)
-            .cloned();
-        if let Some(cmd) = cmd_opt {
+        if let Some(cmd) = self.command(task_id) {
             row.status = cmd.status();
             row.exit_code = cmd.exit_code().map(i64::from);
             let (stdout, stderr) = cmd.output();
@@ -261,15 +265,7 @@ impl BackgroundTaskService {
     pub async fn tail(&self, task_id: &str, n: usize) -> Result<String> {
         let row = self.status(task_id).await?;
         // FR-015: single lock for the in-memory tail lookup.
-        let cmd = {
-            self.state
-                .lock()
-                .expect("background state poisoned")
-                .tasks
-                .get(task_id)
-                .cloned()
-        };
-        if let Some(cmd) = cmd {
+        if let Some(cmd) = self.command(task_id) {
             Ok(cmd.tail(n))
         } else {
             let combined = format!("{}{}", row.stdout, row.stderr);
@@ -281,15 +277,7 @@ impl BackgroundTaskService {
 
     /// Cancel a running background task.
     pub async fn cancel(&self, task_id: &str) -> Result<()> {
-        let cmd = {
-            self.state
-                .lock()
-                .expect("background state poisoned")
-                .tasks
-                .get(task_id)
-                .cloned()
-        };
-        let Some(cmd) = cmd else {
+        let Some(cmd) = self.command(task_id) else {
             bail!("Background task is not running: {task_id}");
         };
 
@@ -312,15 +300,7 @@ impl BackgroundTaskService {
 
     /// Wait for a task to finish, up to `timeout_secs`.
     pub async fn wait(&self, task_id: &str, timeout_secs: u64) -> Result<BackgroundTaskRow> {
-        let cmd = {
-            self.state
-                .lock()
-                .expect("background state poisoned")
-                .tasks
-                .get(task_id)
-                .cloned()
-        };
-        if let Some(cmd) = cmd {
+        if let Some(cmd) = self.command(task_id) {
             cmd.wait(timeout_secs).await?;
         }
         self.status(task_id).await

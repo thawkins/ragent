@@ -68,6 +68,20 @@ const SUBAGENT_SUMMARY_NUDGE: &str = "System note: you stopped calling tools \
      NOW — all issues, ranked by impact, with file, line numbers, and \
      concrete fixes. This is the deliverable.";
 
+/// Sub-agent responses shorter than this many bytes after tool-use steps
+/// are treated as narration, not findings, and trigger a summary nudge.
+const SUBAGENT_NARRATION_BYTE_LIMIT: usize = 2000;
+
+/// Build the watchdog-timeout error message for a tool that stalled past
+/// [`TOOL_WATCHDOG_TIMEOUT`].
+fn watchdog_timeout_msg(tool_desc: &str) -> String {
+    format!(
+        "Tool call {tool_desc} stalled for over {}s \
+         (watchdog timeout); aborting the run.",
+        TOOL_WATCHDOG_TIMEOUT.as_secs()
+    )
+}
+
 /// Error type for a spawned tool-execution task in the agent loop.
 ///
 /// Distinguishes a tokio join failure (panic or external abort) from a
@@ -146,13 +160,6 @@ pub struct SessionProcessor {
     /// step. Invalidated together with [`cached_tool_definitions`] by
     /// [`invalidate_tool_cache`].
     pub cached_tool_definition_bytes: parking_lot::RwLock<Option<u64>>,
-    /// Hand-off slot for the finish reason observed by the agent loop on its
-    /// last assistant message: `process_user_message` records it at finalise
-    /// time (keyed by session id) and the task layer (`AgentManager`) reads +
-    /// removes it right after `process_message` returns. This is how the
-    /// "silent truncation" signal reaches a sub-agent's parent without
-    /// changing the `process_message` return type.
-    pub last_message_finish_reason: tokio::sync::RwLock<std::collections::HashMap<String, String>>,
     /// H2: cache of warm LLM clients keyed by `provider/model`. Providers
     /// rebuild their `reqwest::Client` (and thus their connection pool / TLS /
     /// keep-alive state) inside `create_client`, which `prepare_client` used
@@ -493,26 +500,6 @@ impl SessionProcessor {
             .await
     }
 
-    /// Process a message whose `MessagePart::Text` content should be persisted
-    /// as the user turn, but whose user-side history position should NOT be
-    /// duplicated into the visible transcript. Used by the truncation
-    /// continuation retry: the appended "keep going" prompt belongs in the
-    /// LLM history but not in user-visible session listings.
-    pub async fn process_internal_message(
-        &self,
-        session_id: &str,
-        user_text: &str,
-        agent: &AgentInfo,
-        cancel_flag: Arc<AtomicBool>,
-    ) -> Result<Message> {
-        let mut user_msg = Message::user_text(session_id, user_text);
-        user_msg.id = format!("{}-internal", user_msg.id);
-        // Marking via the message id keeps this transparent to storage — no
-        // schema changes, and the history loader can skip these on display.
-        self.process_user_message(session_id, user_msg, agent, cancel_flag)
-            .await
-    }
-
     /// Process a pre-built user [`Message`] (e.g. one containing image attachments).
     ///
     /// Unlike [`process_message`] which always creates a plain-text user message,
@@ -661,8 +648,13 @@ impl SessionProcessor {
         // 4. Build chat messages from history
         // P-3: `build_turn_chat_messages` also returns the resolved
         // `context_window` so the orchestrator does not re-resolve it below.
-        let (chat_messages_vec, compressed_this_turn, last_reported_input_tokens, context_window) =
-            self.build_turn_chat_messages(
+        let (
+            chat_messages_vec,
+            mut compressed_this_turn,
+            mut last_reported_input_tokens,
+            context_window,
+        ) = self
+            .build_turn_chat_messages(
                 session_id,
                 agent,
                 &turn.model_ref,
@@ -724,13 +716,11 @@ impl SessionProcessor {
         let mut last_interim_hash: Option<u64> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
-        let mut compressed_this_turn = compressed_this_turn;
         let mut compaction_attempted_this_turn = false;
-        let mut last_reported_input_tokens = last_reported_input_tokens;
         // Finish reason observed by the inner loop for the most recent
-        // assistant message this turn. Propagated into the
-        // `last_message_finish_reason` hand-off slot at finalise time so the
-        // task layer can flag truncated sub-agent reports.
+        // assistant message this turn. Used at finalise time to publish
+        // a visible notice for interactive sessions when the provider
+        // silently truncated the reply.
         let mut last_finish_reason: Option<FinishReason> = None;
         // P-17: reuse the per-step ContentPart buffers across loop iterations
         // to avoid reallocating two `Vec<ContentPart>`s on every step. They
@@ -831,8 +821,6 @@ impl SessionProcessor {
             // and — if it exceeds `context_window - max(output, buffer)` —
             // invoke the OpenCode-derived summarisation runner before sending
             // the user prompt to the LLM.
-            let _max_retries = self.stream_config.max_retries;
-            let _backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
 
             if turn.session_config.compaction.auto && !compaction_attempted_this_turn {
@@ -954,7 +942,7 @@ impl SessionProcessor {
                 last_reported_input_tokens,
                 last_finish_reason: last_finish_reason.clone(),
             };
-            let llm_result = self
+            let mut llm_result = self
                 .call_llm_step(
                     session_id,
                     agent,
@@ -967,7 +955,6 @@ impl SessionProcessor {
                     &profiler,
                 )
                 .await?;
-            let mut llm_result = llm_result;
             chat_messages = loop_state.chat_messages;
             compressed_this_turn = loop_state.compressed_this_turn;
             compaction_attempted_this_turn = loop_state.compaction_attempted_this_turn;
@@ -1041,14 +1028,14 @@ impl SessionProcessor {
                 if agent.mode == crate::agent::AgentMode::Subagent
                     && step > 1
                     && !subagent_summary_nudged
-                    && llm_result.text_buffer.len() < 2000
+                    && llm_result.text_buffer.len() < SUBAGENT_NARRATION_BYTE_LIMIT
                 {
                     subagent_summary_nudged = true;
                     self.event_bus.publish(Event::AgentNotice {
                         session_id: session_id.to_string(),
                         message: "Sub-agent ended with a short text-only \
-                                   response after tool work — nudging it to \
-                                   produce its findings report."
+                                 response after tool work — nudging it to \
+                                 produce its findings report."
                             .to_string(),
                     });
                     tracing::info!(
@@ -1058,6 +1045,15 @@ impl SessionProcessor {
                         "sub-agent premature termination detected; injecting \
                          summary nudge"
                     );
+                    // Remove the narration text that was prematurely
+                    // pushed into `assistant_parts` so the final saved
+                    // message contains only the actual findings.
+                    {
+                        let parts = std::sync::Arc::make_mut(&mut assistant_parts);
+                        if matches!(parts.last(), Some(MessagePart::Text { .. })) {
+                            parts.pop();
+                        }
+                    }
                     // Push the assistant's narration into chat history so the
                     // model sees its own last message, then push the nudge as
                     // a user message.
@@ -1511,9 +1507,12 @@ impl SessionProcessor {
                                 let val = match &output.metadata {
                                     Some(meta) if meta.is_object() => {
                                         let mut obj = meta.clone();
-                                        obj.as_object_mut()
-                                            .unwrap()
-                                            .insert("content".to_string(), json!(output.content));
+                                        if let Some(map) = obj.as_object_mut() {
+                                            map.insert(
+                                                "content".to_string(),
+                                                json!(output.content),
+                                            );
+                                        }
                                         obj
                                     }
                                     _ => json!({ "content": output.content }),
@@ -1641,11 +1640,7 @@ impl SessionProcessor {
                             Err(_) => {
                                 abort_handle.abort();
                                 watchdog_timed_out = true;
-                                let msg = format!(
-                                    "Tool call {watchdog_tool_desc} stalled for over {}s \
-                                     (watchdog timeout); aborting the run.",
-                                    TOOL_WATCHDOG_TIMEOUT.as_secs()
-                                );
+                                let msg = watchdog_timeout_msg(&watchdog_tool_desc);
                                 warn!("{}", msg);
                                 // Close out the tool call in the UI: no `ToolCallEnd`
                                 // was published because the spawned task was aborted.
@@ -1681,12 +1676,18 @@ impl SessionProcessor {
                     for (result, stalled_tool) in results {
                         if let Some(ref tool_desc) = stalled_tool {
                             watchdog_timed_out = true;
-                            let msg = format!(
-                                "Tool call {tool_desc} stalled for over {}s \
-                                 (watchdog timeout); aborting the run.",
-                                TOOL_WATCHDOG_TIMEOUT.as_secs()
-                            );
+                            let msg = watchdog_timeout_msg(tool_desc);
                             warn!("{}", msg);
+                            // Close out the tool call in the UI: the spawned
+                            // task was aborted so no `ToolCallEnd` was emitted
+                            // by the normal completion path.
+                            self.event_bus.publish(Event::ToolCallEnd {
+                                session_id: session_id.to_string(),
+                                call_id: "watchdog-parallel".to_string(),
+                                tool: "unknown".to_string(),
+                                error: Some(msg.clone()),
+                                duration_ms: TOOL_WATCHDOG_TIMEOUT.as_millis() as u64,
+                            });
                             self.event_bus.publish(Event::AgentError {
                                 session_id: session_id.to_string(),
                                 error: msg.clone(),
@@ -1810,7 +1811,7 @@ impl SessionProcessor {
                                 let mut text = format!(
                                     "[Background Task {status_label}: {} — {}]\n\n{body}",
                                     task.agent_name,
-                                    &task.id[..8.min(task.id.len())]
+                                    task.id.chars().take(8).collect::<String>()
                                 );
                                 // The injected body may later be cut by the
                                 // generic 12k tool-result truncation; point at
@@ -1853,7 +1854,7 @@ impl SessionProcessor {
                                     "[Background Shell Task {}: {} — {} ({})]\n\n{}",
                                     task.status,
                                     task.command,
-                                    &task.task_id[..8.min(task.task_id.len())],
+                                    task.task_id.chars().take(8).collect::<String>(),
                                     exit_str,
                                     if task.tail.is_empty() {
                                         "(no output)"
@@ -2001,9 +2002,7 @@ impl SessionProcessor {
         publish_run_cost_summary(total_elapsed_ms);
         let end_reason = last_finish_reason.unwrap_or(FinishReason::Stop);
         // Interactive sessions get a visible hint when the provider
-        // silently truncated the reply; sub-agent callers pick the signal
-        // up via `LAST_MESSAGE_FINISH_REASON` instead (no noise here, the
-        // completion event carries the flag to the parent).
+        // silently truncated the reply.
         if agent.mode != crate::agent::AgentMode::Subagent
             && matches!(end_reason, FinishReason::Length | FinishReason::Truncation)
         {
@@ -2015,15 +2014,6 @@ impl SessionProcessor {
                     crate::session::finish_reason_label(&end_reason)
                 ),
             });
-        }
-        // Stash the observed finish reason for the task layer. The task
-        // manager reads the slot right after `process_message` returns and
-        // clears it, so this is a pure hand-off — no state leaks across
-        // sequential runs on the same processor instance.
-        let label = crate::session::finish_reason_label(&end_reason).to_string();
-        {
-            let mut slot = self.last_message_finish_reason.write().await;
-            slot.insert(session_id.to_string(), label);
         }
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
@@ -2159,11 +2149,11 @@ impl SessionProcessor {
         // `ChatRequest::system` field is satisfied without an intermediate
         // `String` clone.
         let system_prompt: std::sync::Arc<str> = std::sync::Arc::from(system_prompt);
-        let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
-                                           Please acknowledge them briefly.";
+        const INIT_ACK_PROMPT: &str = "AGENTS.md project guidelines have been loaded.\n\n\
+                                        Please acknowledge them briefly.";
         let init_messages = vec![ChatMessage {
             role: "user".to_string(),
-            content: ChatContent::Text(init_text.to_string()),
+            content: ChatContent::Text(INIT_ACK_PROMPT.to_string()),
         }];
         let init_request = ChatRequest {
             model: model_ref.model_id.clone(),
@@ -2221,8 +2211,7 @@ impl SessionProcessor {
                 session_id: session_id.to_string(),
                 text: ack_text.clone(),
             });
-            let init_user_text = "AGENTS.md project guidelines have been loaded.\n\n\
-                                                Please acknowledge them briefly.";
+            let init_user_text = INIT_ACK_PROMPT;
             let user_msg = Message::new(
                 session_id,
                 Role::User,

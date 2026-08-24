@@ -1185,17 +1185,18 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 
     /// Build the prompt sent to the LLM agent for incremental spec updates.
     ///
-    /// The prompt includes the existing `SPEC.md` and `PLAN.md` content and
-    /// instructs the LLM to generate **only** the incremental additions — new
-    /// requirement blocks and new task rows — rather than rewriting the entire
-    /// documents.
+    /// The prompt instructs the LLM to use the `read` and `edit` tools directly
+    /// to insert new requirements into `SPEC.md` and new task rows into
+    /// `PLAN.md`.  This matches the architecture of `/spec create` and
+    /// `/spec update` — the LLM writes files via tools, eliminating the need
+    /// for fragile post-processing of delimited text blocks.
     ///
     /// # Arguments
     ///
     /// * `spec_id` — The spec identifier (e.g. `"my-feature"`).
     /// * `feature` — The free-text feature description for the new requirements.
-    /// * `spec_md` — The current `SPEC.md` content.
-    /// * `plan_md` — The current `PLAN.md` content.
+    /// * `spec_md` — The current `SPEC.md` content (included for context).
+    /// * `plan_md` — The current `PLAN.md` content (included for context).
     /// * `next_fr` — The next available `FR-NNN` number.
     /// * `next_nfr` — The next available `NFR-NNN` number.
     /// * `next_task` — The next available `T-NNN` number.
@@ -1210,77 +1211,38 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         next_task: u32,
     ) -> String {
         format!(
-            r"You are an expert specification writer. Incrementally add new requirements to an existing spec.
-    
-    **Feature to add:** {feature}
-    
-    **Spec ID:** {spec_id}
-    
-    **IMPORTANT:** You are UPDATING an existing spec, NOT creating a new one. Generate ONLY the new requirement blocks and task rows that should be inserted. Do NOT rewrite the entire spec or plan. Do NOT modify, reorder, or delete any existing content.
-    
-    **Existing SPEC.md content:**
-    
-    {spec_md}
-    
-    **Existing PLAN.md content:**
-    
-    {plan_md}
-    
-    **Numbering rules:**
-    - New functional requirements start at **FR-{next_fr:03}** and increment sequentially.
-    - New non-functional requirements start at **NFR-{next_nfr:03}** and increment sequentially.
-    - New tasks start at **T-{next_task:03}** and increment sequentially.
-    - Do NOT renumber or rename any existing IDs.
-    
-    **Output format — use the exact delimiters below:**
-    
-    ---NEW REQUIREMENTS---
-    
-    (Insert new requirement blocks here, using EARS notation with the correct FR-NNN or NFR-NNN IDs. Each requirement should be under a `###` heading indicating its section. Use at least one EARS template type. Group requirements under the existing section heading if one matches, or create a new `##` section heading.)
-    
-    ---NEW TASKS---
-    
-    (Insert new task table rows here, one per line, in the same markdown table format as the existing PLAN.md. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.)
-    
-    ---NEW TASK DETAILS---
-    
-    (Insert optional task detail subsections here, one `### T-NNN — Title` per task, with a short description of the implementation approach.)
-    
-    ---END---
-    
-    Ensure the spec is clear, testable, and complete.",
-        )
-    }
+            r#"You are an expert specification writer. Incrementally add new requirements to an existing spec.
 
-    /// Build the completion summary shown after a successful add operation.
-    #[must_use]
-    pub fn build_add_completion_summary(
-        spec_id: &str,
-        new_req_ids: &[String],
-        new_task_ids: &[String],
-    ) -> String {
-        let req_list = if new_req_ids.is_empty() {
-            "none".to_string()
-        } else {
-            new_req_ids.join(", ")
-        };
-        let task_list = if new_task_ids.is_empty() {
-            "none".to_string()
-        } else {
-            new_task_ids.join(", ")
-        };
-        format!(
-            "From: /spec add\n✅ **Spec updated successfully.**\n\n\
-                   Spec `specs/{}/` now includes:\n\
-                   - **New requirements:** {} ({})\n\
-                   - **New tasks:** {} ({})\n\n\
-                   Validate with `/spec validate {}`.",
-            spec_id,
-            new_req_ids.len(),
-            req_list,
-            new_task_ids.len(),
-            task_list,
-            spec_id,
+**Feature to add:** {feature}
+
+**Spec ID:** {spec_id}
+
+**IMPORTANT:** You are UPDATING an existing spec, NOT creating a new one. Add ONLY new requirement blocks and task rows. Do NOT rewrite, reorder, or delete any existing content. Do NOT modify any existing FR/NFR/T IDs.
+
+**Numbering rules:**
+- New functional requirements start at **FR-{next_fr:03}** and increment sequentially.
+- New non-functional requirements start at **NFR-{next_nfr:03}** and increment sequentially.
+- New tasks start at **T-{next_task:03}** and increment sequentially.
+- Do NOT renumber or rename any existing IDs.
+
+**Steps:**
+
+1. Read `specs/{spec_id}/SPEC.md` using the `read` tool.
+2. Use the `edit` tool to insert new requirement blocks into `specs/{spec_id}/SPEC.md`. Insert them immediately before the `## Non-Functional Requirements` heading (or at the end of the file if no NFR section exists). Each requirement should use EARS notation with the correct FR-NNN or NFR-NNN IDs. Use at least one EARS template type. Do not modify any existing content — only insert new blocks.
+
+3. Read `specs/{spec_id}/PLAN.md` using the `read` tool.
+4. Use the `edit` tool to insert new task table rows into `specs/{spec_id}/PLAN.md`. Append them after the last existing row in the task table. Use the same markdown table format as the existing rows. Columns: | ID | Title | Requirement | Effort | Priority | Status | Dependencies |. Link each task to the new requirement IDs. Effort: S, M, L. Priority: Critical, High, Medium, Low. Status: Pending.
+5. If you add task detail subsections, use the `edit` tool to append them after the existing task details in `specs/{spec_id}/PLAN.md`.
+
+**Existing SPEC.md content (for reference — use the `read` and `edit` tools to modify the actual file):**
+
+{spec_md}
+
+**Existing PLAN.md content (for reference — use the `read` and `edit` tools to modify the actual file):**
+
+{plan_md}
+
+Use the `read` and `edit` tools to make all changes directly to the files. Ensure the spec is clear, testable, and complete."#,
         )
     }
 

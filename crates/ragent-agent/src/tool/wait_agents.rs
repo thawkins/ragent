@@ -31,6 +31,10 @@ async fn collect_completed_tasks(
     let fresh = agent_manager.list_agents(parent_session_id).await;
     for task in fresh {
         if waiting_for.contains(&task.id) && task.status != TaskStatus::Running {
+            // Skip if we already collected a result for this task.
+            if results.contains_key(&task.id) {
+                continue;
+            }
             let text = task
                 .result
                 .as_deref()
@@ -314,7 +318,7 @@ impl Tool for WaitAgentsTool {
                 waiting_for.len(),
                 waiting_for
                     .iter()
-                    .map(|id| id[..8.min(id.len())].to_string())
+                    .map(|id| id.chars().take(8).collect::<String>())
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
@@ -330,7 +334,7 @@ impl Tool for WaitAgentsTool {
             let agent_name = task.map_or("unknown", |t| t.agent_name.as_str());
 
             let icon = if *success { "✅" } else { "❌" };
-            let short_id = &task_id[..8.min(task_id.len())];
+            let short_id: String = task_id.chars().take(8).collect();
 
             // Report integrity: sub-agent tasks track whether the final
             // reply was fully generated, salvaged via the continuation
@@ -380,7 +384,7 @@ impl Tool for WaitAgentsTool {
                          this report as incomplete — re-run the task with a narrower scope \
                          or a model with a larger output window if you need the full text."
                     }
-                    crate::task::ReportStatus::Complete => unreachable!(),
+                    crate::task::ReportStatus::Complete => "",
                 };
                 output.push_str(note);
                 output.push('\n');

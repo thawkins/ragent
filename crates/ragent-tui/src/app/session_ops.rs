@@ -123,6 +123,7 @@ impl App {
         let display_text = format!("$ {command}");
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
+        self.messages_version = self.messages_version.wrapping_add(1);
         self.add_to_history(raw.clone());
         self.input.clear();
         self.input_cursor = 0;
@@ -198,6 +199,7 @@ impl App {
         };
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
+        self.messages_version = self.messages_version.wrapping_add(1);
         self.add_to_history(text.clone());
         self.input.clear();
         self.input_cursor = 0;
@@ -315,6 +317,7 @@ impl App {
         let msg = message.into();
         self.status = StatusCategory::Info.format(&msg);
         self.status_history.push(StatusMessage::info(msg));
+        self.needs_redraw = true;
     }
 
     /// Set the status line to a success message and record it in history.
@@ -323,6 +326,7 @@ impl App {
         let msg = message.into();
         self.status = StatusCategory::Success.format(&msg);
         self.status_history.push(StatusMessage::success(msg));
+        self.needs_redraw = true;
     }
 
     /// Set the status line to a warning message and record it in history.
@@ -331,6 +335,7 @@ impl App {
         let msg = message.into();
         self.status = StatusCategory::Warning.format(&msg);
         self.status_history.push(StatusMessage::warning(msg));
+        self.needs_redraw = true;
     }
 
     /// Set the status line to an error message and record it in history.
@@ -339,6 +344,7 @@ impl App {
         let msg = message.into();
         self.status = StatusCategory::Error.format(&msg);
         self.status_history.push(StatusMessage::error(msg));
+        self.needs_redraw = true;
     }
 
     /// Set the status line to a working/in-progress message and record it in history.
@@ -346,6 +352,7 @@ impl App {
         let msg = message.into();
         self.status = StatusCategory::Working.format(&msg);
         self.status_history.push(StatusMessage::working(msg));
+        self.needs_redraw = true;
     }
 
     /// Return whether user input is currently blocked (agent is processing,
@@ -375,6 +382,26 @@ impl App {
             SelectionPane::Memory => self.memory_area,
             SelectionPane::Telemetry => self.telemetry_area,
             SelectionPane::Input => self.input_area,
+        }
+    }
+
+    /// Clear any text selection or context menu anchored on a pane whose
+    /// layout area has collapsed to zero (e.g. a side panel that was just
+    /// dismissed by a toggle such as Alt+T). The render pass zeroes the
+    /// `*_area` of hidden panels, but the `text_selection`/`context_menu`
+    /// state may still reference that pane — left stale, the next
+    /// [`Self::assert_ui_invariants`] call would panic. This self-heals
+    /// that state whenever input arrives.
+    pub(crate) fn prune_stale_selection(&mut self) {
+        if let Some(sel) = &self.text_selection {
+            if self.pane_area(sel.pane).area() == 0 {
+                self.text_selection = None;
+            }
+        }
+        if let Some(menu) = &self.context_menu {
+            if self.pane_area(menu.pane).area() == 0 {
+                self.context_menu = None;
+            }
         }
     }
 
@@ -936,6 +963,13 @@ impl App {
     /// copying session ids, status, and current task ids so the UI reflects the
     /// authoritative persisted state. Also registers session_id → teammate
     /// name mappings for log display.
+    ///
+    /// **Note:** This method is no longer called from the render path
+    /// (FR-009).  Team member state is kept in sync by event handlers
+    /// (`TeammateSpawned`, `TeammateIdle`, `TeamTaskClaimed`, etc.).  The
+    /// method is retained for explicit one-shot refreshes when a team is
+    /// first opened.
+    #[allow(dead_code)]
     pub(crate) fn refresh_team_member_session_ids(&mut self) {
         let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
             return;
@@ -989,6 +1023,11 @@ impl App {
         let msg_count = messages.len();
 
         self.session_id = Some(session_id.to_string());
+        // Cache the resumed session's creation timestamp for the teams panel
+        // elapsed-time display (FR-009: avoids per-frame storage reads).
+        self.lead_session_created_at = chrono::DateTime::parse_from_rfc3339(&session.created_at)
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc));
         // Map the primary session's short_sid to the current agent name
         let short_sid = short_session_id(session_id);
         self.sid_to_display_name
@@ -1576,9 +1615,26 @@ impl App {
         let track_height = (area.height.saturating_sub(1)) as f32;
         let fraction = (relative / track_height).clamp(0.0, 1.0);
 
-        // fraction 0.0 = top of content, 1.0 = bottom of content
-        // scroll_offset is "lines from bottom": top -> max_scroll, bottom -> 0
-        let offset = ((1.0 - fraction) * max_scroll as f32).round() as u16;
+        // fraction 0.0 = top of scrollbar track, 1.0 = bottom.
+        // Messages, Log, and Profile use "lines from bottom" semantics
+        // (scroll_offset = 0 → bottom of content, max_scroll → top), so
+        // dragging to the top of the track must produce offset = max_scroll:
+        // offset = (1.0 - fraction) * max_scroll.
+        // Tasks, Memory, and Telemetry use "lines from top" semantics
+        // (scroll_offset = 0 → top of content, max_scroll → bottom), so
+        // dragging to the top must produce offset = 0 and dragging to the
+        // bottom must produce offset = max_scroll: offset = fraction *
+        // max_scroll.  Using a single formula for all panels inverts the
+        // drag direction for the "lines from top" family, which is the
+        // erratic-scrollbar bug.
+        let offset = match pane {
+            ScrollbarDragPane::Messages | ScrollbarDragPane::Log | ScrollbarDragPane::Profile => {
+                ((1.0 - fraction) * max_scroll as f32).round() as u16
+            }
+            ScrollbarDragPane::Tasks | ScrollbarDragPane::Memory | ScrollbarDragPane::Telemetry => {
+                (fraction * max_scroll as f32).round() as u16
+            }
+        };
 
         match pane {
             ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
@@ -1638,6 +1694,7 @@ impl App {
             agent_id,
         };
         self.log_entries.push(entry);
+        self.log_version = self.log_version.wrapping_add(1);
         if self.show_log {
             if let Some(ref path) = self.log_window_path {
                 self.append_log_entry_to_spool(path, level, &message);

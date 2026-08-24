@@ -44,7 +44,6 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -1288,10 +1287,9 @@ fn test_slash_model_show_displays_metadata_for_active_model() {
 
     // `OpenAiProvider::default_models` returns an empty catalog (models are
     // discovered at runtime), so seed the gpt-4o-mini entry into the discovery
-    // cache the way `App::sync_discover_models` would. Without this the
-    // `/model show` report cannot resolve the model entry and only emits the
-    // cached-context-window fallback, which lacks the "Context window" /
-    // "Tool use" capability lines the test asserts on.
+    // cache. Without this the `/model show` report cannot resolve the model
+    // entry and only emits the cached-context-window fallback, which lacks the
+    // "Context window" / "Tool use" capability lines the test asserts on.
     let discovered = vec![provider::ModelInfo {
         id: "gpt-4o-mini".to_string(),
         provider_id: "openai".to_string(),
@@ -3175,7 +3173,7 @@ async fn test_slash_spec_validate_all() {
 
 // Use a multi-threaded runtime because `execute_slash_command("/spec create …")`
 // spawns a background task that calls `processor.process_message`, whose model
-// resolution path can reach `sync_discover_models` → `tokio::task::block_in_place`.
+// resolution path may call `block_in_place` for spec reads/writes.
 // `block_in_place` panics on the default current-thread `#[tokio::test]` runtime;
 // `flavor = "multi_thread"` provides a runtime where it is permitted.
 #[tokio::test(flavor = "multi_thread")]

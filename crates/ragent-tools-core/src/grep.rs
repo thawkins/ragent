@@ -136,8 +136,6 @@ impl Tool for GrepTool {
         let files_bg = Arc::clone(&files_searched);
         let truncated_bg = Arc::clone(&truncated);
         let search_path_bg = search_path.clone();
-        let pattern_owned = pattern.to_owned();
-
         tokio::task::spawn_blocking(move || {
             // Build the walker with .gitignore / .ignore support.
             // Keep hidden(false) so dot-files like .eslintrc are searchable, but
@@ -208,9 +206,6 @@ impl Tool for GrepTool {
                 // Per-file errors (binary, permission denied) are silently ignored
                 let _ = searcher.search_path(&matcher, &path, sink);
             }
-
-            // Keep borrow checker happy — pattern_owned is moved here for lifetime
-            drop(pattern_owned);
         })
         .await
         .context("Grep search task panicked")?;

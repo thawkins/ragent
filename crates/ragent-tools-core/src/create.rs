@@ -1,7 +1,7 @@
 //! File creation tool.
 //!
 //! Provides [`CreateTool`], which creates a new file with the given content,
-//! failing if the file already exists. Creates parent directories as needed.
+//! overwriting any existing file. Creates parent directories as needed.
 //! Returns a summary of bytes and lines written.
 
 use anyhow::{Context, Result};
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::path_util::resolve_path;
 
-/// Creates a new file with the given content, failing if the file already exists.
+/// Creates a new file with the given content, overwriting any existing file.
 ///
 /// Parent directories are created automatically. Returns a summary including
 /// the number of bytes and lines written.

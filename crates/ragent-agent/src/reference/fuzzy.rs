@@ -100,20 +100,25 @@ pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     let mut files = Vec::new();
     walk_dir(working_dir, working_dir, &mut files, MAX_PROJECT_FILES);
 
+    // Take the truncated subset for the caller before moving the full list
+    // into the cache.  This avoids cloning up to 10 000 PathBufs — we only
+    // clone the `limit` items the caller actually needs.
+    let result: Vec<PathBuf> = files.iter().take(limit).cloned().collect();
+
     // Store the un-truncated list in the cache. If the mutex is poisoned we
     // gracefully skip caching and still return the collected paths.
     if let Ok(mut cache) = project_file_cache().lock() {
         cache.insert(
             cache_key,
             ProjectFileCacheEntry {
-                files: files.clone(),
+                files,
                 dir_mtime: current_mtime,
                 fetched_at: now,
             },
         );
     }
 
-    files.into_iter().take(limit).collect()
+    result
 }
 
 fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {

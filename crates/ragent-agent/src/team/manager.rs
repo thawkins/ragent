@@ -125,10 +125,14 @@ pub fn teammate_retry_backoff(attempt: u32) -> std::time::Duration {
     let shift = attempt.saturating_sub(1).min(20); // 2^20 s already dwarfs the cap
     let base_ms = (1u64 << shift).saturating_mul(1_000);
 
-    // Cheap pseudo-jitter from the monotonic clock.  `as_nanos()` is
-    // non-decreasing and varies across calls fast enough to desync
-    // concurrent retries from the same provider.
-    let jitter_ms = (std::time::Instant::now().elapsed().as_nanos() as u64) % MAX_JITTER_MS;
+    // Cheap pseudo-jitter from the system clock nanosecond component.
+    // `Instant::now().elapsed()` always returns ~0; use `SystemTime` so
+    // concurrent retries from the same provider actually desync.
+    let jitter_ms = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0))
+        % MAX_JITTER_MS;
 
     std::time::Duration::from_millis(
         base_ms

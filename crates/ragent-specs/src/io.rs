@@ -175,6 +175,34 @@ impl SpecIo {
         Ok(())
     }
 
+    /// Write spec files to disk using individual field values, avoiding the
+    /// need to clone an entire [`Spec`] when only `spec_md` has changed.
+    ///
+    /// Only writes REVIEW.md / FEEDBACK.md if the corresponding content is
+    /// non-empty, matching [`write_spec`] semantics.
+    pub async fn write_spec_fields(
+        specs_root: &Path,
+        spec_id: &SpecId,
+        spec_md: &str,
+        plan_md: &str,
+        review_md: &str,
+        feedback_md: &str,
+    ) -> Result<(), SpecError> {
+        let dir = specs_root.join(spec_id.dir_name());
+        if !dir.exists() {
+            fs::create_dir_all(&dir).await?;
+        }
+        Self::atomic_write(dir.join("SPEC.md"), spec_md).await?;
+        Self::atomic_write(dir.join("PLAN.md"), plan_md).await?;
+        if !review_md.is_empty() {
+            Self::atomic_write(dir.join("REVIEW.md"), review_md).await?;
+        }
+        if !feedback_md.is_empty() {
+            Self::atomic_write(dir.join("FEEDBACK.md"), feedback_md).await?;
+        }
+        Ok(())
+    }
+
     /// Get the last modified time of a file as Unix epoch seconds.
     async fn modified_time(path: &Path) -> Result<u64, SpecError> {
         let meta = fs::metadata(path).await?;

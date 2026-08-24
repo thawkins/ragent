@@ -93,9 +93,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
-        canonical_cache: std::sync::Arc::new(
-            ragent_tools_core::CanonicalPathCache::new(),
-        ),
+        canonical_cache: std::sync::Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     };
 
     let tool = TeamTaskCompleteTool;

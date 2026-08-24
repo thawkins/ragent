@@ -613,9 +613,9 @@ impl SessionProcessor {
     pub(crate) async fn build_turn_chat_messages(
         &self,
         session_id: &str,
-        agent: &AgentInfo,
+        _agent: &AgentInfo,
         model_ref: &crate::agent::ModelRef,
-        session_config: &ragent_config::Config,
+        _session_config: &ragent_config::Config,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<(Vec<ChatMessage>, bool, u64, usize)> {
         let history = {
@@ -659,13 +659,6 @@ impl SessionProcessor {
             .filter(|w| *w > 0)
             .unwrap_or(128_000);
 
-        let history = {
-            let _compression_config = &session_config.compaction;
-            let _context_window = context_window;
-            let _ = &history;
-            history
-        };
-
         let history_version = history_version_of(&history);
         let cached: Option<Vec<ChatMessage>> = {
             let session_state_lock = self
@@ -693,8 +686,6 @@ impl SessionProcessor {
                 built
             }
         };
-
-        let _ = agent; // currently unused but kept for future per-agent history shaping
 
         // P-3: return `context_window` so the orchestrator can reuse it
         // instead of resolving the identical value a second time.
@@ -816,7 +807,6 @@ impl SessionProcessor {
     ) -> Result<LlmStepResult> {
         let max_retries = self.stream_config.max_retries;
         let backoff_secs = self.stream_config.retry_backoff_secs;
-        let _session_id_arc: Arc<str> = Arc::from(session_id);
         let mut text_buffer = String::new();
         let mut reasoning_buffer = String::new();
         let mut tool_calls: Vec<PendingToolCall> = Vec::new();

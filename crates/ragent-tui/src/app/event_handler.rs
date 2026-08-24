@@ -133,6 +133,7 @@ impl App {
             let sid = session_id.to_string();
             let msg = Message::user_text(&sid, &full_task);
             self.messages.push(msg);
+            self.messages_version = self.messages_version.wrapping_add(1);
 
             // Spawn async processing
             let processor = self.session_processor.clone();
@@ -1112,9 +1113,12 @@ impl App {
             } if self.is_current_or_descendant_session(session_id) => {
                 telemetry_counters::increment_subagent_spawns(1);
                 telemetry_counters::add_agents_active(1);
-                // Map the child session's short_sid to the agent name for display
+                // Map the child session's short_sid to the task id for display.
+                // The task id already encodes the agent type plus a unique suffix
+                // (e.g. "explore-a1b2c3d4") so tools and panels can distinguish
+                // multiple subagents of the same type.
                 let short_sid = short_session_id(child_session_id);
-                self.sid_to_display_name.insert(short_sid, agent.clone());
+                self.sid_to_display_name.insert(short_sid, task_id.clone());
 
                 // Add to active_tasks so the agent panel shows it immediately.
                 let entry = ragent_agent::task::TaskEntry {
@@ -1142,13 +1146,7 @@ impl App {
                 };
                 self.push_log_no_agent(
                     LogLevel::Info,
-                    format!(
-                        "{} {} task started: {} ({})",
-                        icon,
-                        kind,
-                        &task_id[..8.min(task_id.len())],
-                        agent
-                    ),
+                    format!("{} {} task started: {} ({})", icon, kind, task_id, agent),
                 );
             }
             Event::SubagentComplete {
@@ -1334,12 +1332,13 @@ impl App {
                     {
                         m.session_id = stored.session_id.clone();
                         m.status = stored.status.clone();
-                        m.current_task_id = stored.current_task_id.clone();
-                        // Map this teammate's session short_sid → name for log display
+                        m.current_task_id = stored.current_task_id.clone(); // Map this teammate's session short_sid → a unique display
+                        // label (name + agent id) so tool step tags and panels can
+                        // distinguish teammates with the same name.
                         if let Some(ref sid) = stored.session_id {
                             let short_sid = short_session_id(sid);
-                            self.sid_to_display_name
-                                .insert(short_sid, teammate_name.clone());
+                            let display_name = format!("{}-{}", teammate_name, agent_id);
+                            self.sid_to_display_name.insert(short_sid, display_name);
                         }
                     }
                 }
@@ -2124,6 +2123,7 @@ impl App {
                     .unwrap_or(false)
             {
                 *text = rendered;
+                self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
         }
@@ -2135,6 +2135,7 @@ impl App {
                 Role::Assistant,
                 vec![MessagePart::Text { text: rendered }],
             ));
+            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 
@@ -2157,6 +2158,7 @@ impl App {
                         text: rendered.clone(),
                     });
                 }
+                self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
         }
@@ -2169,6 +2171,7 @@ impl App {
                 vec![MessagePart::Text { text: rendered }],
             );
             self.messages.push(msg);
+            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 
@@ -2183,6 +2186,7 @@ impl App {
                     text: text.to_string(),
                 });
             }
+            self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2194,6 +2198,7 @@ impl App {
                 }],
             );
             self.messages.push(msg);
+            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 
@@ -2214,6 +2219,7 @@ impl App {
                     duration_ms: None,
                 },
             });
+            self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2233,6 +2239,7 @@ impl App {
                 }],
             );
             self.messages.push(msg);
+            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 
@@ -2263,6 +2270,7 @@ impl App {
                         state.error = Some(err.to_string());
                     }
                     state.duration_ms = Some(duration_ms);
+                    self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }
             }
@@ -2287,6 +2295,7 @@ impl App {
                         // older code paths may carry a placeholder `{}`.
                         if state.input.is_null() {
                             state.input = input;
+                            self.messages_version = self.messages_version.wrapping_add(1);
                         }
                         return true;
                     }
@@ -2342,6 +2351,7 @@ impl App {
                             if let Ok(input) = serde_json::from_str::<serde_json::Value>(&args_json)
                             {
                                 state.input = input;
+                                self.messages_version = self.messages_version.wrapping_add(1);
                             }
                         }
                         self.pending_tool_args.remove(&call_id);
@@ -2381,6 +2391,7 @@ impl App {
                     && cid == call_id
                 {
                     state.output = Some(value);
+                    self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }
             }
@@ -2431,6 +2442,7 @@ impl App {
 
         let msg = Message::user_text(&session_id, &prompt);
         self.messages.push(msg);
+        self.messages_version = self.messages_version.wrapping_add(1);
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));

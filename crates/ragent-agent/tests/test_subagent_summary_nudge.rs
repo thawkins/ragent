@@ -205,7 +205,6 @@ fn make_processor(
         read_timestamps: Arc::new(std::sync::RwLock::new(HashMap::new())),
         telemetry: Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
     };
 
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -267,11 +266,11 @@ async fn test_subagent_narration_nudge_produces_findings() {
         "final output should contain finding H1, got: {output}"
     );
 
-    // The narration should also be present (it was accumulated before the
-    // nudge).
+    // The narration is deliberately removed from the final saved message so
+    // the deliverable contains only the actual findings report.
     assert!(
-        output.contains("Now let me check"),
-        "final output should contain the narration fragment, got: {output}"
+        !output.contains("Now let me check"),
+        "final output should NOT contain the premature narration fragment, got: {output}"
     );
 }
 

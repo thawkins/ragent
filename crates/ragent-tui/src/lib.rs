@@ -25,6 +25,7 @@ pub mod widgets;
 pub use app::App;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
@@ -550,7 +551,6 @@ pub async fn run_tui(
     // This works cross-platform without needing #[cfg] inside tokio::select!
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Spawn a task to listen for signals
     tokio::spawn(async move {
         #[cfg(unix)]
         {
@@ -574,7 +574,24 @@ pub async fn run_tui(
         anyhow::Result::<()>::Ok(())
     });
 
-    let mut last_draw = std::time::Instant::now();
+    let mut last_draw = Instant::now();
+
+    // Spawn a dedicated blocking task to read crossterm events and forward
+    // them to the async main loop. This lets the TUI sleep until input arrives
+    // instead of polling at a fixed 20 Hz cadence (T-002).
+    let (ct_event_tx, mut ct_event_rx) = tokio::sync::mpsc::unbounded_channel::<CtEvent>();
+    tokio::task::spawn_blocking(move || {
+        loop {
+            match ct_event::read() {
+                Ok(event) => {
+                    if ct_event_tx.send(event).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
 
     while app.is_running {
         // Only one autopilot continuation may be dispatched per event-loop
@@ -616,6 +633,12 @@ pub async fn run_tui(
         }
 
         // Drain tracing records captured by TuiTracingLayer into the log panel.
+        // Rate-limit: process at most 50 records per frame to avoid jank when
+        // a burst of log records arrives (FR-001).  Remaining records stay in
+        // the channel and are processed on subsequent frames.
+        let mut got_log_record = false;
+        let mut log_records_this_frame = 0u32;
+        const LOG_DRAIN_LIMIT: u32 = 50;
         while let Ok(record) = log_rx.try_recv() {
             use tracing::Level;
             let level = match record.level {
@@ -625,7 +648,15 @@ pub async fn run_tui(
             };
             if !record.message.is_empty() {
                 app.push_log(level, record.message, None);
+                got_log_record = true;
             }
+            log_records_this_frame += 1;
+            if log_records_this_frame >= LOG_DRAIN_LIMIT {
+                break;
+            }
+        }
+        if got_log_record {
+            app.needs_redraw = true;
         }
 
         // Check for completed /opt LLM results.
@@ -652,26 +683,40 @@ pub async fn run_tui(
         // Fire any pending autopilot continuation.
         app.poll_autopilot_continue();
 
+        // Refresh cached stats on their throttled intervals.
+        app.refresh_code_index_stats();
+        app.refresh_memory_stats();
+        // Copy the latest off-thread memory count into the status bar cache
+        // so it stays visible even when no events are arriving.
+        app.memory_entry_count = app
+            .memory_entry_count_pending
+            .load(std::sync::atomic::Ordering::Relaxed);
+
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 
-        if app.needs_redraw
-            || last_draw.elapsed() >= std::time::Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
+        if app.needs_redraw || last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
         {
             terminal.draw(|frame| layout::render(frame, &mut app))?;
             app.needs_redraw = false;
-            last_draw = std::time::Instant::now();
+            last_draw = Instant::now();
         }
+
+        // Compute the earliest deadline we must wake for.  When truly idle
+        // this is a long sleep; animations, countdowns, and pending flushes
+        // shorten it appropriately (T-002).
+        let next_deadline = compute_next_deadline(&app, last_draw);
+
         tokio::select! {
             // Handle shutdown signal (Ctrl+C/SIGINT/SIGTERM)
             _ = shutdown_rx.recv() => {
                 app.is_running = false;
             }
-            // Terminal key/mouse events (polled at 50ms intervals)
-            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                let mut got_input = false;
-                while ct_event::poll(std::time::Duration::ZERO)? {
-                    match ct_event::read()? {
+            // Terminal key/mouse events forwarded by the blocking reader task.
+            maybe_ct_event = ct_event_rx.recv() => {
+                if let Some(event) = maybe_ct_event {
+                    let mut got_input = false;
+                    match event {
                         CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
                         CtEvent::Mouse(mouse)
                             // Only process mouse events when mouse mode is enabled
@@ -687,22 +732,10 @@ pub async fn run_tui(
                         }
                         _ => {}
                     }
+                    if got_input {
+                        app.needs_redraw = true;
+                    }
                 }
-                if got_input {
-                    app.needs_redraw = true;
-                }
-
-                // Copy the latest off-thread memory count into the status bar
-                // cache so it is visible even when no events are arriving.
-                app.memory_entry_count = app.memory_entry_count_pending.load(
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-
-                // Refresh cached code index stats periodically (every 5s, not every frame).
-                app.refresh_code_index_stats();
-
-                // Refresh cached memory stats for the status bar.
-                app.refresh_memory_stats();
             }
             // Wake up when a new event arrives from the lossless mpsc bridge
             event = event_rx.recv() => {
@@ -711,6 +744,8 @@ pub async fn run_tui(
                     None => {} // Bridge task exited
                 }
             }
+            // Periodic wake for animations, countdowns, status expiry, etc.
+            _ = tokio::time::sleep_until(tokio::time::Instant::from_std(next_deadline)) => {}
         }
     }
 
@@ -756,4 +791,59 @@ pub async fn run_tui(
     }
 
     Ok(())
+}
+
+/// Compute the next time the event loop must wake, balancing low idle CPU
+/// against the need to update countdowns, spinners, status expiry, and
+/// pending history flushes (T-002).
+fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time::Instant {
+    let now = std::time::Instant::now();
+    // Default: sleep for a long time when there is nothing animate to show.
+    let mut deadline = now + Duration::from_secs(60);
+
+    // Permission countdown updates every second.
+    if !app.permission_queue.is_empty() {
+        deadline = deadline.min(now + Duration::from_secs(1));
+    }
+
+    // Smooth updates for active spinners / progress / autopilot continue.
+    let animate = app.model_loading_state.is_some()
+        || app.model_download_state.is_some()
+        || app.code_index_busy
+        || app.active_bench_task_id.is_some()
+        || (app.autopilot_enabled && app.autopilot_pending_continue.is_some());
+    if animate {
+        deadline = deadline.min(now + Duration::from_millis(250));
+    }
+
+    // Status auto-expiry.
+    if let Some(set_at) = app.status_set_at {
+        deadline = deadline.min(set_at + Duration::from_millis(crate::app::STATUS_EXPIRY_MS));
+    }
+
+    // Run-cost banner auto-dismiss.
+    if let Some(shown_at) = app.run_cost_banner_at {
+        deadline =
+            deadline.min(shown_at + Duration::from_secs(crate::app::RUN_COST_BANNER_EXPIRY_SECS));
+    }
+
+    // Pending history flush.
+    if let Some(save_deadline) = app.history_save_deadline {
+        deadline = deadline.min(save_deadline);
+    }
+
+    // Code-index / memory stat refreshes and swarm polls run on throttled
+    // intervals; wake every few seconds so their internal debounce fires.
+    if app.code_index.is_some() && !app.code_index_busy {
+        deadline = deadline.min(now + Duration::from_secs(5));
+    }
+    if app.swarm_state.is_some() {
+        deadline = deadline.min(now + Duration::from_secs(2));
+    }
+
+    // Cap at the idle redraw interval so that any missed needs_redraw still
+    // renders within a reasonable window.
+    deadline = deadline.min(last_draw + Duration::from_millis(IDLE_REDRAW_INTERVAL_MS));
+
+    deadline
 }

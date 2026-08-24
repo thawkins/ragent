@@ -624,11 +624,16 @@ pub fn build_snippet(content: &str, change_start: usize, change_end: usize) -> S
         .max(1);
     let snippet_end = (change_end_line + SNIPPET_CONTEXT_LINES).min(total_lines);
 
-    let lines: Vec<&str> = content.lines().collect();
+    // Iterate lines directly instead of collecting into a Vec<&str>, which
+    // avoids allocating a vector of line slices for the entire file. Break
+    // early once we pass snippet_end.
     let mut out = String::new();
-    for (idx, line) in lines.iter().enumerate() {
+    for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
-        if line_no < snippet_start || line_no > snippet_end {
+        if line_no > snippet_end {
+            break;
+        }
+        if line_no < snippet_start {
             continue;
         }
         let marker = if line_no >= change_start_line && line_no <= change_end_line {

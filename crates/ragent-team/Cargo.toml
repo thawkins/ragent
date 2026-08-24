@@ -34,3 +34,4 @@ anyhow = { workspace = true }
 tempfile = "3.5"
 parking_lot = { workspace = true }
 serde_json = "1"
+ragent-tools-core = { path = "../ragent-tools-core" }

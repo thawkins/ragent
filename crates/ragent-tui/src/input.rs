@@ -6,7 +6,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ragent_types::ThinkingLevel;
 
-use crate::app::DeviceFlowKind;
 use crate::app::{
     App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
 };
@@ -976,33 +975,52 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         Some(&db_lookup),
                     );
                     if let Some(ref tk) = token {
-                        // Try token exchange to check if we have a working token
+                        // Token exchange is a network call — run it in a
+                        // background task so the UI thread never blocks
+                        // (FR-002, FR-004).  Show the loading spinner while we
+                        // wait for `CopilotTokenExchangeResult`.
                         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                            let tk_clone = tk.clone();
-                            let exchange_ok = tokio::task::block_in_place(|| {
-                                handle.block_on(
-                                    ragent_agent::provider::copilot::resolve_copilot_auth(
-                                        &tk_clone, None,
-                                    ),
-                                )
+                            app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                                provider_id: pid.to_string(),
+                                provider_name: pname.to_string(),
                             });
-                            if let Ok(auth) = exchange_ok {
-                                if !auth.base_url.contains("models.inference.ai.azure.com") {
-                                    let _ =
-                                        app.storage.set_setting("copilot_api_base", &auth.base_url);
-                                    let _ = app.storage.delete_setting("provider_copilot_disabled");
-                                    app.refresh_provider();
-                                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
-                                        provider_id: pid.to_string(),
-                                        provider_name: pname.to_string(),
-                                    });
-                                    app.start_model_discovery(pid.to_string(), pname.to_string());
-                                    return;
-                                }
-                            }
+                            app.model_loading_state = Some(crate::app::ModelLoadingState {
+                                provider_id: pid.to_string(),
+                                provider_name: pname.to_string(),
+                                started_at: std::time::Instant::now(),
+                            });
+                            let event_bus = app.event_bus.clone();
+                            let tk_clone = tk.clone();
+                            handle.spawn(async move {
+                                let result = ragent_agent::provider::copilot::resolve_copilot_auth(
+                                    &tk_clone, None,
+                                )
+                                .await;
+                                let (success, api_base, error) = match result {
+                                    Ok(auth) => {
+                                        if !auth.base_url.contains("models.inference.ai.azure.com")
+                                        {
+                                            (true, Some(auth.base_url), None)
+                                        } else {
+                                            // Azure-hosted Copilot endpoint — treat as
+                                            // needing device flow for proper setup.
+                                            (false, None, None)
+                                        }
+                                    }
+                                    Err(e) => (false, None, Some(format!("{e:#}"))),
+                                };
+                                event_bus.publish(
+                                    ragent_agent::event::Event::CopilotTokenExchangeResult {
+                                        success,
+                                        api_base,
+                                        error,
+                                    },
+                                );
+                            });
+                            return;
                         }
                     }
-                    // Token exchange failed or no token — start device flow
+                    // No token or no runtime — start device flow
                     start_copilot_device_flow_setup(app);
                 } else if pid == "azure_resource" {
                     // Azure Resource: load entries from azureresources.json
@@ -2015,9 +2033,13 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
 }
 /// Starts the Copilot device flow and spawns a background polling task.
 ///
-/// On success the polling task publishes [`Event::CopilotDeviceFlowComplete`]
-/// which the app event handler picks up to finish the setup.
-fn start_copilot_device_flow_setup(app: &mut App) {
+/// The device-flow start (a network call to `github.com/login/device/code`)
+/// is itself offloaded to a background task so the UI thread never blocks
+/// (FR-002, FR-004).  When the start completes the background task publishes
+/// [`Event::CopilotDeviceFlowStartResult`]; the event handler then sets the
+/// `DeviceFlowPending` dialog and spawns the polling task.  On failure the
+/// event handler reverts to the key-entry form with an error.
+pub(crate) fn start_copilot_device_flow_setup(app: &mut App) {
     let handle = match tokio::runtime::Handle::try_current() {
         Ok(h) => h,
         Err(_) => {
@@ -2033,85 +2055,38 @@ fn start_copilot_device_flow_setup(app: &mut App) {
         }
     };
 
-    // Initiate the device flow (blocking briefly)
-    let start = tokio::task::block_in_place(|| {
-        handle.block_on(ragent_agent::provider::copilot::start_copilot_device_flow())
+    // Show the loading spinner while the device-flow start runs in the
+    // background.
+    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+        provider_id: "copilot".to_string(),
+        provider_name: "GitHub Copilot".to_string(),
+    });
+    app.model_loading_state = Some(crate::app::ModelLoadingState {
+        provider_id: "copilot".to_string(),
+        provider_name: "GitHub Copilot".to_string(),
+        started_at: std::time::Instant::now(),
     });
 
-    let flow = match start {
-        Ok(f) => f,
-        Err(e) => {
-            app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                provider_id: "copilot".to_string(),
-                provider_name: "GitHub Copilot".to_string(),
-                key_field: crate::input_field::InputField::new(),
-                endpoint_field: crate::input_field::InputField::new(),
-                active_field: 0,
-                error: Some(format!("Device flow failed: {e}")),
-            });
-            return;
-        }
-    };
-
-    let user_code = flow.user_code.clone();
-    let verification_uri = flow.verification_uri.clone();
-    let device_code = flow.device_code.clone();
-    let interval = std::time::Duration::from_secs(flow.interval.max(5));
     let event_bus = app.event_bus.clone();
-
-    app.push_log(
-        crate::app::LogLevel::Info,
-        format!(
-            "Copilot device flow started — enter code {} at {}",
-            user_code, verification_uri
-        ),
-        None,
-    );
-
-    app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {
-        flow: DeviceFlowKind::Copilot,
-        user_code,
-        verification_uri,
-    });
-    // Background task: poll until authorised or expired
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(interval).await;
-            match ragent_agent::provider::copilot::poll_copilot_device_flow(&device_code).await {
-                Ok(Some(token)) => {
-                    // Discover the plan API base.
-                    // The device flow token may lack scope for copilot_internal/user,
-                    // so also try the gh CLI token which has broader scope.
-                    let api_base = {
-                        let mut base =
-                            ragent_agent::provider::copilot::discover_copilot_api_base(&token)
-                                .await;
-                        if base.is_none() {
-                            if let Some(gh_token) =
-                                ragent_agent::provider::copilot::find_gh_cli_token()
-                            {
-                                base = ragent_agent::provider::copilot::discover_copilot_api_base(
-                                    &gh_token,
-                                )
-                                .await;
-                            }
-                        }
-                        base.unwrap_or_else(|| "https://api.githubcopilot.com".to_string())
-                    };
-                    event_bus.publish(ragent_agent::event::Event::CopilotDeviceFlowComplete {
-                        token,
-                        api_base,
-                    });
-                    break;
-                }
-                Ok(None) => {
-                    // Still waiting — keep polling
-                    continue;
-                }
-                Err(_) => {
-                    // Expired or denied — give up silently (user can Esc)
-                    break;
-                }
+    handle.spawn(async move {
+        match ragent_agent::provider::copilot::start_copilot_device_flow().await {
+            Ok(flow) => {
+                event_bus.publish(ragent_agent::event::Event::CopilotDeviceFlowStartResult {
+                    user_code: Some(flow.user_code),
+                    verification_uri: Some(flow.verification_uri),
+                    device_code: Some(flow.device_code),
+                    interval: Some(flow.interval),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                event_bus.publish(ragent_agent::event::Event::CopilotDeviceFlowStartResult {
+                    user_code: None,
+                    verification_uri: None,
+                    device_code: None,
+                    interval: None,
+                    error: Some(format!("{e:#}")),
+                });
             }
         }
     });

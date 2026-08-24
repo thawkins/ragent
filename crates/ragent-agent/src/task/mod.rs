@@ -73,6 +73,48 @@ fn sanitize_for_id(name: &str) -> String {
     result
 }
 
+/// D4 fix: Generate a human-readable task ID based on agent name.
+/// e.g., "explore-a1b2c3d4" instead of full UUID.
+fn make_task_id(agent_name: &str) -> String {
+    format!(
+        "{}-{}",
+        sanitize_for_id(agent_name),
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("task")
+    )
+}
+
+/// Build a `TaskEntry` for a newly spawned sub-agent task.
+fn build_task_entry(
+    task_id: &str,
+    parent_session_id: &str,
+    child_sid: &str,
+    agent_name: &str,
+    task_prompt: &str,
+    background: bool,
+) -> TaskEntry {
+    TaskEntry {
+        id: task_id.to_string(),
+        parent_session_id: parent_session_id.to_string(),
+        child_session_id: child_sid.to_string(),
+        agent_name: agent_name.to_string(),
+        task_prompt: task_prompt.to_string(),
+        background,
+        status: TaskStatus::Running,
+        result: None,
+        error: None,
+        created_at: Utc::now(),
+        completed_at: None,
+        reported: false,
+        waiter_count: 0,
+        output_file: None,
+        report_status: ReportStatus::Complete,
+    }
+}
+
 /// Maximum number of concurrent background tasks (default).
 pub const DEFAULT_MAX_BACKGROUND_TASKS: usize = 8;
 
@@ -274,15 +316,7 @@ impl AgentManager {
     ) -> anyhow::Result<TaskResult> {
         // D4 fix: Generate human-readable task ID based on agent name
         // e.g., "explore-a1b2c3d4" instead of full UUID
-        let task_id = format!(
-            "{}-{}",
-            sanitize_for_id(agent_name),
-            uuid::Uuid::new_v4()
-                .to_string()
-                .split('-')
-                .next()
-                .unwrap_or("task")
-        );
+        let task_id = make_task_id(agent_name);
         let start = Instant::now();
         // Create isolated session
         let child_session = self
@@ -292,23 +326,14 @@ impl AgentManager {
         let child_sid = child_session.id.clone();
 
         // Register task entry
-        let entry = TaskEntry {
-            id: task_id.clone(),
-            parent_session_id: parent_session_id.to_string(),
-            child_session_id: child_sid.clone(),
-            agent_name: agent_name.to_string(),
-            task_prompt: task_prompt.to_string(),
-            background: false,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-            waiter_count: 0,
-            output_file: None,
-            report_status: ReportStatus::Complete,
-        };
+        let entry = build_task_entry(
+            &task_id,
+            parent_session_id,
+            &child_sid,
+            agent_name,
+            task_prompt,
+            false,
+        );
         self.tasks.insert(task_id.clone(), entry);
         // P-11: spawn_sync tasks are not background (they block the caller),
         // so they are never drained by `drain_completed`. We do not set the
@@ -324,7 +349,7 @@ impl AgentManager {
             task_id: task_id.clone(),
             child_session_id: child_sid.clone(),
             agent: agent_name.to_string(),
-            task: truncate_str(task_prompt, 200),
+            task: truncate_str(task_prompt, 200).into_owned(),
             background: false,
         });
 
@@ -345,7 +370,7 @@ impl AgentManager {
         // Update task entry and publish completion
         match result {
             Ok(response) => {
-                let summary = truncate_str(&response, 2000);
+                let summary = truncate_str(&response, 2000).into_owned();
                 {
                     if let Some(mut entry) = self.tasks.get_mut(&task_id) {
                         entry.status = TaskStatus::Completed;
@@ -364,7 +389,11 @@ impl AgentManager {
                     finish_reason: "stop".to_string(),
                 });
 
-                let entry = self.tasks.get(&task_id).map(|r| r.value().clone()).unwrap();
+                let entry = self
+                    .tasks
+                    .get(&task_id)
+                    .map(|r| r.value().clone())
+                    .ok_or_else(|| anyhow::anyhow!("task {task_id} vanished after completion"))?;
                 Ok(TaskResult { entry, response })
             }
             Err(e) => {
@@ -423,15 +452,7 @@ impl AgentManager {
 
         // D4 fix: Generate human-readable task ID based on agent name
         // e.g., "explore-a1b2c3d4" instead of full UUID
-        let task_id = format!(
-            "{}-{}",
-            sanitize_for_id(agent_name),
-            uuid::Uuid::new_v4()
-                .to_string()
-                .split('-')
-                .next()
-                .unwrap_or("task")
-        );
+        let task_id = make_task_id(agent_name);
 
         // Create isolated session
         let child_session = self
@@ -441,23 +462,14 @@ impl AgentManager {
         let child_sid = child_session.id.clone();
 
         // Register task entry
-        let entry = TaskEntry {
-            id: task_id.clone(),
-            parent_session_id: parent_session_id.to_string(),
-            child_session_id: child_sid.clone(),
-            agent_name: agent_name.to_string(),
-            task_prompt: task_prompt.to_string(),
-            background: true,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-            waiter_count: 0,
-            output_file: None,
-            report_status: ReportStatus::Complete,
-        };
+        let entry = build_task_entry(
+            &task_id,
+            parent_session_id,
+            &child_sid,
+            agent_name,
+            task_prompt,
+            true,
+        );
         self.tasks.insert(task_id.clone(), entry.clone());
         // P-11: mark that there is at least one pending background task so
         // the agent loop's `drain_completed` call is not skipped.
@@ -473,7 +485,7 @@ impl AgentManager {
             task_id: task_id.clone(),
             child_session_id: child_sid.clone(),
             agent: agent_name.to_string(),
-            task: truncate_str(task_prompt, 200),
+            task: truncate_str(task_prompt, 200).into_owned(),
             background: true,
         });
 
@@ -490,98 +502,106 @@ impl AgentManager {
         let tid = task_id.clone();
         let csid = child_sid.clone();
         let working_dir_buf = working_dir.to_path_buf();
+        let cancel_flag_outer = cancel_flag.clone();
 
         tokio::spawn(async move {
             let start = Instant::now();
 
-            let config = processor.load_config_cached();
-            let mut agent_info = match crate::agent::resolve_agent_with_customs_and_model(
-                &agent,
-                &config,
-                &working_dir_buf,
-                &processor.provider_registry,
-            ) {
-                Ok(a) => Arc::unwrap_or_clone(a),
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    {
-                        if let Some(mut entry) = tasks.get_mut(&tid) {
-                            entry.status = TaskStatus::Failed;
-                            entry.error = Some(Arc::from(error_msg.as_str()));
-                            entry.completed_at = Some(Utc::now());
-                        }
-                    }
-                    cancel_flags.remove(&tid);
-                    event_bus.publish(Event::SubagentComplete {
-                        session_id: parent_sid,
-                        task_id: tid,
-                        child_session_id: csid,
-                        summary: format!("Error: {error_msg}"),
-                        success: false,
-                        duration_ms: start.elapsed().as_millis() as u64,
-                        finish_reason: "error".to_string(),
-                    });
-                    return;
-                }
-            };
-            agent_info.mode = AgentMode::Subagent;
-            agent_info.stall_timeout_secs = Some(background_timeout_secs);
+            // Run the sub-agent logic in a nested task so that panics inside
+            // process_message (or agent resolution) are caught as a JoinError
+            // rather than silently aborting this background task and leaving
+            // the parent wait_agents call stalled forever.
+            let csid_inner = csid.clone();
+            let inner = tokio::spawn(async move {
+                let config = processor.load_config_cached();
+                let mut agent_info = match crate::agent::resolve_agent_with_customs_and_model(
+                    &agent,
+                    &config,
+                    &working_dir_buf,
+                    &processor.provider_registry,
+                ) {
+                    Ok(a) => Arc::unwrap_or_clone(a),
+                    Err(e) => return Err(e),
+                };
+                agent_info.mode = AgentMode::Subagent;
+                agent_info.stall_timeout_secs = Some(background_timeout_secs);
 
-            // Apply explicit model override if provided.
-            if let Some(ref model_str) = model
-                && let Some((provider, model_id)) = model_str
-                    .split_once('/')
-                    .or_else(|| model_str.split_once(':'))
-            {
-                agent_info.model = Some(ModelRef {
-                    provider_id: provider.to_string(),
-                    model_id: model_id.to_string(),
-                });
-            } else if !agent_info.model_pinned || agent_info.model.is_none() {
-                // No explicit override: fall back to the user's persisted
-                // `selected_model` setting (same path the TUI uses via
-                // `apply_selected_model_and_thinking`). Without this, the
-                // agent would get `resolve_default_model`'s first-provider
-                // pick (Anthropic), which typically has no API key configured.
-                if let Ok(Some(model_str)) = processor
-                    .session_manager
-                    .storage()
-                    .get_setting("selected_model")
-                {
-                    if let Some((provider, model_id)) = model_str
+                // Apply explicit model override if provided.
+                if let Some(ref model_str) = model
+                    && let Some((provider, model_id)) = model_str
                         .split_once('/')
                         .or_else(|| model_str.split_once(':'))
+                {
+                    agent_info.model = Some(ModelRef {
+                        provider_id: provider.to_string(),
+                        model_id: model_id.to_string(),
+                    });
+                } else if !agent_info.model_pinned || agent_info.model.is_none() {
+                    // No explicit override: fall back to the user's persisted
+                    // `selected_model` setting (same path the TUI uses via
+                    // `apply_selected_model_and_thinking`). Without this, the
+                    // agent would get `resolve_default_model`'s first-provider
+                    // pick (Anthropic), which typically has no API key configured.
+                    if let Ok(Some(model_str)) = processor
+                        .session_manager
+                        .storage()
+                        .get_setting("selected_model")
                     {
-                        tracing::info!(
-                            agent = %agent_info.name,
-                            selected_model = %model_str,
-                            "Applied persisted selected_model to background agent"
-                        );
-                        agent_info.model = Some(ModelRef {
-                            provider_id: provider.to_string(),
-                            model_id: model_id.to_string(),
-                        });
+                        if let Some((provider, model_id)) = model_str
+                            .split_once('/')
+                            .or_else(|| model_str.split_once(':'))
+                        {
+                            tracing::info!(
+                                agent = %agent_info.name,
+                                selected_model = %model_str,
+                                "Applied persisted selected_model to background agent"
+                            );
+                            agent_info.model = Some(ModelRef {
+                                provider_id: provider.to_string(),
+                                model_id: model_id.to_string(),
+                            });
+                        }
                     }
                 }
-            }
 
-            let result = tokio::time::timeout(
+                processor
+                    .process_message(&csid_inner, &prompt, &agent_info, cancel_flag.clone())
+                    .await
+                    .map(|msg| msg.text_content())
+            });
+
+            let abort_handle = inner.abort_handle();
+            let result = match tokio::time::timeout(
                 tokio::time::Duration::from_secs(background_timeout_secs),
-                processor.process_message(&csid, &prompt, &agent_info, cancel_flag.clone()),
+                inner,
             )
             .await
-            .map_err(|_| {
-                cancel_flag.store(true, Ordering::Relaxed);
-                anyhow::anyhow!("background agent timed out after {background_timeout_secs}s")
-            })
-            .and_then(|r| r);
+            {
+                Ok(Ok(Ok(response))) => Ok(response),
+                Ok(Ok(Err(e))) => Err(e),
+                Ok(Err(join_err)) => {
+                    if join_err.is_panic() {
+                        Err(anyhow::anyhow!("sub-agent task panicked"))
+                    } else if join_err.is_cancelled() {
+                        Err(anyhow::anyhow!("sub-agent task cancelled"))
+                    } else {
+                        Err(anyhow::anyhow!("sub-agent task aborted: {join_err}"))
+                    }
+                }
+                Err(_) => {
+                    abort_handle.abort();
+                    cancel_flag_outer.store(true, Ordering::Relaxed);
+                    Err(anyhow::anyhow!(
+                        "background agent timed out after {background_timeout_secs}s"
+                    ))
+                }
+            };
 
             let duration_ms = start.elapsed().as_millis() as u64;
 
             match result {
-                Ok(response_msg) => {
-                    let response = response_msg.text_content();
-                    let summary = truncate_str(&response, 2000);
+                Ok(response) => {
+                    let summary = truncate_str(&response, 2000).into_owned();
                     {
                         if let Some(mut entry) = tasks.get_mut(&tid) {
                             entry.status = TaskStatus::Completed;
@@ -676,7 +696,7 @@ impl AgentManager {
         let _ = task_id;
         anyhow::bail!(
             "suspend_task is not implemented — the agent loop does not honour \
-             suspend flags. Use cancel_agent to stop a running sub-agent instead."
+               suspend flags. Use cancel_agent to stop a running sub-agent instead."
         )
     }
 
@@ -685,7 +705,7 @@ impl AgentManager {
         let _ = task_id;
         anyhow::bail!(
             "resume_task is not implemented — the agent loop does not honour \
-             suspend flags. Use cancel_agent and re-spawn instead."
+               suspend flags. Use cancel_agent and re-spawn instead."
         )
     }
 
@@ -987,14 +1007,17 @@ impl AgentManager {
 }
 
 /// Truncate a string to `max_len` characters, appending "…" if truncated.
-fn truncate_str(s: &str, max_len: usize) -> String {
+///
+/// Returns a borrowed slice when no truncation is needed, avoiding an
+/// allocation on the common no-op path.
+fn truncate_str(s: &str, max_len: usize) -> std::borrow::Cow<'_, str> {
     match s.char_indices().nth(max_len) {
         Some((byte_idx, _)) => {
-            let mut truncated = s[..byte_idx].to_string();
-            truncated.push('…');
-            truncated
+            let mut truncated = String::from(&s[..byte_idx]);
+            truncated.push('\u{2026}');
+            std::borrow::Cow::Owned(truncated)
         }
-        None => s.to_string(),
+        None => std::borrow::Cow::Borrowed(s),
     }
 }
 
@@ -1012,7 +1035,9 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 ///   processor's `FinishReason::Cancelled` may appear in the error chain.
 fn is_cancel_error(err: &anyhow::Error) -> bool {
     // Check the error chain for a "Cancelled" type name or a
-    // "cancelled" in any error's Display string.
+    // "cancelled" in any error's Display string. `chain()` includes
+    // the top-level error itself, so the extra top-level check below
+    // is unnecessary.
     for source in err.chain() {
         let type_name = std::any::type_name_of_val(source);
         if type_name.contains("Cancelled") {
@@ -1023,8 +1048,7 @@ fn is_cancel_error(err: &anyhow::Error) -> bool {
             return true;
         }
     }
-    // Also check the top-level error's Display (in case chain() is empty).
-    err.to_string().to_lowercase().contains("cancelled")
+    false
 }
 
 #[cfg(test)]
@@ -1043,32 +1067,32 @@ mod tests {
 
     #[test]
     fn test_truncate_str_short() {
-        assert_eq!(truncate_str("hello", 10), "hello");
+        assert_eq!(truncate_str("hello", 10).as_ref(), "hello");
     }
 
     #[test]
     fn test_truncate_str_exact() {
-        assert_eq!(truncate_str("hello", 5), "hello");
+        assert_eq!(truncate_str("hello", 5).as_ref(), "hello");
     }
 
     #[test]
     fn test_truncate_str_long() {
         let result = truncate_str("hello world", 5);
-        assert_eq!(result, "hello…");
+        assert_eq!(result.as_ref(), "hello\u{2026}");
     }
 
     #[test]
     fn test_truncate_str_multibyte_boundary_safe() {
-        let s = "café naïve résumé";
+        let s = "caf\u{e9} na\u{ef}ve r\u{e9}sum\u{e9}";
         let result = truncate_str(s, 6);
-        assert_eq!(result, "café n…");
+        assert_eq!(result.as_ref(), "caf\u{e9} n\u{2026}");
     }
 
     #[test]
     fn test_truncate_str_multibyte_not_truncated_when_shorter() {
-        let s = "naïve";
+        let s = "na\u{ef}ve";
         let result = truncate_str(s, 10);
-        assert_eq!(result, "naïve");
+        assert_eq!(result.as_ref(), "na\u{ef}ve");
     }
 
     #[test]
@@ -1144,7 +1168,7 @@ mod tests {
     #[test]
     fn test_event_summary_is_short() {
         let long = "z".repeat(10_000);
-        let summary = truncate_str(&long, 2000);
+        let summary = truncate_str(&long, 2000).into_owned();
         assert!(summary.len() < long.len());
         assert!(summary.ends_with('…'));
     }

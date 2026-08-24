@@ -155,7 +155,7 @@ impl Tool for ApplyPatchTool {
             let op_result: Result<()> = async {
                 match &op.kind {
                     OpKind::Add { content } => {
-                        if op.path.exists() && !dry_run {
+                        if op.path.exists() {
                             bail!("Add operation targets existing file: {}", op.path.display());
                         }
                         results.push(OpResult {

@@ -52,6 +52,8 @@ impl App {
                 // Set up active team state
                 self.active_team = Some(store.config.clone());
                 self.team_members.clear();
+                self.team_task_counts.clear();
+                self.team_task_counts_dirty = true;
                 self.show_teams = true;
                 self.ensure_team_manager_for_team(&team_name, Some(store.dir.clone()));
 
@@ -478,9 +480,7 @@ impl App {
                     member_name, task_id, dep_info, all_completed
                 ),
             );
-        }
-
-        // Trigger reconcile to spawn newly-unblocked members
+        } // Trigger reconcile to spawn newly-unblocked members
         if let Some(manager) = self.session_processor.team_manager.get() {
             manager.clone().reconcile_spawning_members();
         }
@@ -495,6 +495,7 @@ impl App {
         } else {
             self.status = format!("🐝 swarm: all teammates spawned");
         }
+        self.needs_redraw = true;
     }
 
     /// Periodically (every 2s) check the active swarm's overall completion
@@ -654,5 +655,6 @@ impl App {
         if let Some(ref mut s) = self.swarm_state {
             s.completed = true;
         }
+        self.needs_redraw = true;
     }
 }

@@ -57,7 +57,6 @@ fn make_app() -> App {
         event_bus: event_bus.clone(),
         agent_manager: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
-        last_message_finish_reason: tokio::sync::RwLock::new(std::collections::HashMap::new()),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -331,16 +330,18 @@ fn test_drag_memory_scrollbar_moves_offset() {
     app.memory_area = Rect::new(80, 0, 30, 21);
     app.memory_max_scroll = 60;
 
-    // Click scrollbar (column 109), drag to top → offset = max_scroll.
+    // Click scrollbar (column 109), drag to top → offset = 0 (top of
+    // content).  Memory uses "lines from top" semantics, so dragging to
+    // the top of the scrollbar track shows the first lines.
     app.handle_mouse_event(mouse_down(109, 10));
     assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Memory));
 
     app.handle_mouse_event(mouse_drag(109, 0));
-    assert_eq!(app.memory_scroll_offset, 60);
-
-    // Drag to bottom → offset = 0.
-    app.handle_mouse_event(mouse_drag(109, 20));
     assert_eq!(app.memory_scroll_offset, 0);
+
+    // Drag to bottom → offset = max_scroll (bottom of content).
+    app.handle_mouse_event(mouse_drag(109, 20));
+    assert_eq!(app.memory_scroll_offset, 60);
 }
 
 #[test]
@@ -802,8 +803,8 @@ fn test_render_memory_panel_does_not_panic_with_no_home_dir() {
 
 #[test]
 fn test_render_memory_panel_re_reads_files_on_every_render() {
-    // FR-010: the panel re-reads the SQLite store on every render so external
-    // changes are reflected without restarting the TUI.
+    // FR-010: the panel re-reads the SQLite store when the cache is dirty
+    // so external changes are reflected without restarting the TUI.
     let dir = TempDir::new().expect("tempdir");
     let _guard = with_cwd(dir.path());
 
@@ -819,6 +820,8 @@ fn test_render_memory_panel_re_reads_files_on_every_render() {
         dir.path(),
         "Fresh content marker: kiwi-rewrite",
     );
+    // Mark the cache dirty so the next render refreshes from SQLite.
+    app.memory_cache_dirty = true;
     let second = render_app_to_string(&mut app, 140, 40);
     assert!(
         second.contains("kiwi-rewrite"),
@@ -916,16 +919,16 @@ fn test_scrollbar_drag_clamps_offset_within_bounds() {
         "offset {offset} must not exceed max_scroll {}",
         app.memory_max_scroll
     );
-    // fraction = 10/20 = 0.5 → offset = (1-0.5)*100 = 50.
+    // fraction = 10/20 = 0.5 → offset = 0.5*100 = 50.
     assert_eq!(offset, 50, "middle drag should yield offset 50");
 
-    // Drag above the pane → clamps to top (offset = max_scroll).
+    // Drag above the pane → clamps to top (offset = 0).
     app.handle_mouse_event(mouse_drag(109, 0));
-    assert_eq!(app.memory_scroll_offset, 100);
-
-    // Drag below the pane → clamps to bottom (offset = 0).
-    app.handle_mouse_event(mouse_drag(109, 30));
     assert_eq!(app.memory_scroll_offset, 0);
+
+    // Drag below the pane → clamps to bottom (offset = max_scroll).
+    app.handle_mouse_event(mouse_drag(109, 30));
+    assert_eq!(app.memory_scroll_offset, 100);
 }
 
 #[tokio::test]
@@ -962,6 +965,7 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
         config: None,
         cached_team_dir: Arc::new(std::sync::Mutex::new(None)),
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(ragent_tools_core::CanonicalPathCache::new()),
     };
     tool.execute(
         json!({

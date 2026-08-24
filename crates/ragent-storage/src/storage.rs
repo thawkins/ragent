@@ -39,18 +39,40 @@ use ragent_types::message::{Message, MessagePart, Role};
 /// reasoning text.  This is the text that gets indexed in `messages_fts`
 /// and returned in [`MessageSearchResult::content`].
 fn extract_message_text(parts: &[MessagePart]) -> String {
-    let mut buf = Vec::new();
+    // Pre-compute capacity to avoid reallocations: sum of text lengths plus
+    // separators and tool-call brackets.
+    let capacity = parts
+        .iter()
+        .map(|p| match p {
+            MessagePart::Text { text } | MessagePart::Reasoning { text } => text.len() + 1,
+            MessagePart::ToolCall { tool, .. } => tool.len() + 9,
+            MessagePart::Image(_) => 0,
+        })
+        .sum();
+    let mut buf = String::with_capacity(capacity);
+    let mut first = true;
     for part in parts {
-        match part {
-            MessagePart::Text { text } => buf.push(text.clone()),
+        let text = match part {
+            MessagePart::Text { text } | MessagePart::Reasoning { text } => text.as_str(),
+            MessagePart::Image(_) => continue,
             MessagePart::ToolCall { tool, .. } => {
-                buf.push(format!("[tool: {tool}]"));
+                if !first {
+                    buf.push(' ');
+                }
+                first = false;
+                buf.push_str("[tool: ");
+                buf.push_str(tool);
+                buf.push(']');
+                continue;
             }
-            MessagePart::Reasoning { text } => buf.push(text.clone()),
-            MessagePart::Image(_) => {}
+        };
+        if !first {
+            buf.push(' ');
         }
+        first = false;
+        buf.push_str(text);
     }
-    buf.join(" ")
+    buf
 }
 
 /// Fixed key used for legacy XOR-based obfuscation (v1 format).
@@ -133,15 +155,20 @@ pub fn encrypt_key(key: &str) -> String {
 /// let encrypted = encrypt_key("my-api-key");
 /// let recovered = decrypt_key(&encrypted);
 /// assert_eq!(recovered, "my-api-key");
-/// ```
-#[must_use]
+/// ```    #[must_use]
 pub fn decrypt_key(encoded: &str) -> String {
     if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
         // v2 format: blake3-derived keystream
         let Ok(payload) = STANDARD.decode(v2_data) else {
+            tracing::warn!("decrypt_key: base64 decode failed for v2-encrypted key");
             return String::new();
         };
         if payload.len() < NONCE_LEN {
+            tracing::warn!(
+                "decrypt_key: v2 payload too short ({} < {})",
+                payload.len(),
+                NONCE_LEN
+            );
             return String::new();
         }
         let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
@@ -154,7 +181,13 @@ pub fn decrypt_key(encoded: &str) -> String {
             .zip(keystream.iter())
             .map(|(c, k)| c ^ k)
             .collect();
-        String::from_utf8(plaintext).unwrap_or_default()
+        match String::from_utf8(plaintext) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("decrypt_key: decrypted bytes are not valid UTF-8: {e}");
+                String::new()
+            }
+        }
     } else {
         // Legacy v1 format: repeating-key XOR
         deobfuscate_key_v1(encoded)
@@ -2281,6 +2314,10 @@ impl Storage {
     /// query per memory row during visualisation generation, replacing N
     /// queries with one.
     ///
+    /// Rows that fail to deserialize are silently skipped — tags are
+    /// denormalized data and a partial row is preferable to failing the
+    /// entire query.
+    ///
     /// # Errors
     ///
     /// Returns an error if the query fails.
@@ -2294,6 +2331,8 @@ impl Storage {
             let tag: String = row.get(1)?;
             Ok((memory_id, tag))
         })?;
+        // `flatten()` silently skips rows where the closure returned Err;
+        // this is intentional (see doc comment above).
         for (id, tag) in rows.flatten() {
             map.entry(id).or_default().push(tag);
         }
@@ -3435,8 +3474,8 @@ impl Storage {
     ///
     /// T-010 / FR-008: batching the output and status updates into one storage
     /// transaction avoids the previous two-write pattern on every background
-    /// task completion, and avoids writes entirely when stdout/stderr/progress
-    /// have not changed.
+    /// task completion. The caller is responsible for short-circuiting when
+    /// stdout/stderr/progress have not changed (see `background/mod.rs`).
     #[allow(clippy::too_many_arguments)]
     pub fn set_background_task_output_and_status(
         &self,

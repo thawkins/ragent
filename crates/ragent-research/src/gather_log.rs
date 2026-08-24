@@ -49,12 +49,7 @@ impl GatherLog {
     pub fn new(log_dir: &Path, research_name: &str) -> anyhow::Result<Self> {
         fs::create_dir_all(log_dir)?;
         let timestamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
-        let rand = Uuid::new_v4()
-            .to_string()
-            .split('-')
-            .next()
-            .unwrap()
-            .to_string();
+        let rand = Uuid::new_v4().simple().to_string();
         let name = format!(
             "research-{}-{timestamp}-{rand}-web.jsonl",
             sanitize(research_name)

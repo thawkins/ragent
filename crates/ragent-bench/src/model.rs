@@ -258,7 +258,7 @@ impl BenchModelRunner for LiveBenchModelRunner {
                                     output_tokens = Some(output);
                                 }
                                 StreamEvent::Finish { reason } => {
-                                    finish_reason = Some(finish_reason_label(reason));
+                                    finish_reason = Some(finish_reason_label(reason).to_string());
                                 }
                                 StreamEvent::Error { message } => {
                                     provider_error = Some(message);
@@ -486,14 +486,14 @@ fn benchmark_chat_request(
     }
 }
 
-fn finish_reason_label(reason: LlmFinishReason) -> String {
+fn finish_reason_label(reason: LlmFinishReason) -> &'static str {
     match reason {
-        LlmFinishReason::Stop => "stop".to_string(),
-        LlmFinishReason::ToolUse => "tool_use".to_string(),
-        LlmFinishReason::Length => "length".to_string(),
-        LlmFinishReason::ContentFilter => "content_filter".to_string(),
-        LlmFinishReason::Cancelled => "cancelled".to_string(),
-        LlmFinishReason::Truncation => "truncation".to_string(),
+        LlmFinishReason::Stop => "stop",
+        LlmFinishReason::ToolUse => "tool_use",
+        LlmFinishReason::Length => "length",
+        LlmFinishReason::ContentFilter => "content_filter",
+        LlmFinishReason::Cancelled => "cancelled",
+        LlmFinishReason::Truncation => "truncation",
     }
 }
 

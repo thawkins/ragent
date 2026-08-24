@@ -796,12 +796,13 @@ impl Completer for ServerCompleter {
             llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent},
             provider::ProviderRegistry,
         };
-
         let api_key = self
             .storage
             .get_provider_auth(&self.provider_id)
             .context("reading API key")?
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                anyhow::anyhow!("no API key configured for provider '{}'", self.provider_id)
+            })?;
 
         let registry = ProviderRegistry::new();
         let provider = registry

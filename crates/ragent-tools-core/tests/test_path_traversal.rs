@@ -269,3 +269,69 @@ async fn allows_normal_relative_path() {
         "normal relative path should be allowed: {out:?}"
     );
 }
+
+// ============================================================================
+// Alias / bind-mount acceptance tests
+// ============================================================================
+
+#[test]
+#[cfg(unix)]
+fn check_path_accepts_symlink_alias_to_root() {
+    let dir = tmp_dir();
+    let alias = dir
+        .parent()
+        .unwrap()
+        .join(format!("ragent_path_alias_{}", std::process::id()));
+    std::os::unix::fs::symlink(&dir, &alias).unwrap();
+
+    let file = alias.join("safe.txt");
+    std::fs::write(&file, "hello").unwrap();
+    assert!(
+        check_path_within_root(&file, &dir).is_ok(),
+        "symlink alias to root should be accepted"
+    );
+
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&alias);
+}
+
+#[test]
+#[cfg(unix)]
+fn check_path_accepts_nonexistent_under_alias_root() {
+    let dir = tmp_dir();
+    let alias = dir
+        .parent()
+        .unwrap()
+        .join(format!("ragent_path_alias_new_{}", std::process::id()));
+    std::os::unix::fs::symlink(&dir, &alias).unwrap();
+
+    let new_file = alias.join("does-not-exist-yet.txt");
+    assert!(
+        check_path_within_root(&new_file, &dir).is_ok(),
+        "non-existent path under alias root should be accepted"
+    );
+
+    let _ = std::fs::remove_file(&alias);
+}
+
+#[test]
+#[cfg(unix)]
+fn check_path_rejects_alias_to_sibling_directory() {
+    let dir = tmp_dir();
+    let sibling = tmp_dir();
+    let alias = dir
+        .parent()
+        .unwrap()
+        .join(format!("ragent_path_sibling_alias_{}", std::process::id()));
+    std::os::unix::fs::symlink(&sibling, &alias).unwrap();
+
+    let file = alias.join("secret.txt");
+    std::fs::write(&file, "secret").unwrap();
+    assert!(
+        check_path_within_root(&file, &dir).is_err(),
+        "alias to a sibling directory must still be rejected"
+    );
+
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&alias);
+}

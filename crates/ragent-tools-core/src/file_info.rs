@@ -5,6 +5,7 @@
 //! (file / directory / symlink), and Unix permissions.
 
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use std::time::UNIX_EPOCH;
 
@@ -119,55 +120,8 @@ impl Tool for FileInfoTool {
 
 /// Format a Unix timestamp (seconds since epoch) as `YYYY-MM-DD HH:MM:SS UTC`.
 fn format_unix_secs(secs: u64) -> String {
-    // Simple manual formatter — avoids pulling in a date library.
-    let s = secs;
-    let sec = s % 60;
-    let min = (s / 60) % 60;
-    let hr = (s / 3600) % 24;
-    let days = s / 86400;
-
-    // Days since 1970-01-01 → calendar date
-    let (y, m, d) = days_to_ymd(days);
-    format!("{y:04}-{m:02}-{d:02} {hr:02}:{min:02}:{sec:02} UTC")
-}
-
-fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
-    let mut year = 1970u64;
-    loop {
-        let leap = is_leap(year);
-        let days_in_year = if leap { 366 } else { 365 };
-        if days < days_in_year {
-            break;
-        }
-        days -= days_in_year;
-        year += 1;
-    }
-    let leap = is_leap(year);
-    let month_days: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut month = 0usize;
-    for &md in &month_days {
-        if days < md {
-            break;
-        }
-        days -= md;
-        month += 1;
-    }
-    (year, (month + 1) as u64, days + 1)
-}
-
-const fn is_leap(year: u64) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+    DateTime::<Utc>::from_timestamp(secs as i64, 0)
+        .map_or("1970-01-01 00:00:00 UTC".to_string(), |dt| {
+            dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+        })
 }

@@ -81,6 +81,7 @@ impl App {
                 self.push_log_no_agent(LogLevel::Warn, format!("bench error: {msg}"));
             }
         }
+        self.needs_redraw = true;
     }
 
     pub(crate) fn drain_bench_progress_events(&mut self) {
