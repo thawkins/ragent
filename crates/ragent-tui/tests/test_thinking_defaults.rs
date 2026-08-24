@@ -1,6 +1,6 @@
 //! Tests for config-driven thinking defaults in the TUI model picker and status label.
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ragent_agent::{agent, provider};
 use ragent_tui::App;
@@ -164,7 +164,9 @@ fn test_provider_label_prefers_agent_default_over_config_thinking() {
 
     let mut app = support::make_app();
     seed_anthropic_models(&app);
-    app.agent_info = agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent");
+    app.agent_info = Arc::unwrap_or_clone(
+        agent::resolve_agent("ask", &Default::default()).expect("resolve ask agent"),
+    );
     // detect_provider() relies on ambient env vars / auto-discovery (e.g. gh
     // CLI tokens) which are not present in CI. Set the configured provider
     // explicitly so the test is deterministic regardless of environment.
