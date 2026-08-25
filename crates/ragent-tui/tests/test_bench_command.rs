@@ -30,6 +30,30 @@ fn enter_temp_project_dir() -> (tempfile::TempDir, CwdGuard) {
     (temp, CwdGuard(original))
 }
 
+/// Acquire the CWD test lock and move into a fresh temporary project directory.
+///
+/// Returns the lock guard first so it is dropped last, keeping the directory
+/// isolated from concurrent tests for the entire lifetime of the caller.
+fn enter_isolated_project_dir() -> (
+    std::sync::MutexGuard<'static, ()>,
+    tempfile::TempDir,
+    CwdGuard,
+) {
+    let guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (temp, cwd) = enter_temp_project_dir();
+    (guard, temp, cwd)
+}
+
+/// Return the text of the most recently appended message.
+fn last_message_text(app: &App) -> String {
+    app.messages
+        .last()
+        .expect("at least one message")
+        .text_content()
+}
+
 /// Poll the TUI until the active benchmark task completes or a generous
 /// timeout elapses. CI runners can be slower than local machines, so the
 /// loop sleeps 50 ms between polls and waits up to 10 s.
@@ -95,10 +119,7 @@ fn test_bench_list_shows_suites_and_profiles() {
 
 #[test]
 fn test_bench_init_humaneval_creates_data_root() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
@@ -112,10 +133,7 @@ fn test_bench_init_humaneval_creates_data_root() {
 
 #[test]
 fn test_bench_init_verify_only_reports_existing_state() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
@@ -132,10 +150,7 @@ fn test_bench_init_verify_only_reports_existing_state() {
 
 #[test]
 fn test_bench_init_all_creates_every_suite_root() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init all");
@@ -155,10 +170,7 @@ fn test_bench_init_all_creates_every_suite_root() {
 
 #[test]
 fn test_bench_init_full_reports_gated_support() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init full");
@@ -174,10 +186,7 @@ fn test_bench_init_full_reports_gated_support() {
 
 #[test]
 fn test_bench_run_humaneval_creates_workbook() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
@@ -206,10 +215,7 @@ fn test_bench_run_humaneval_creates_workbook() {
 
 #[test]
 fn test_bench_run_all_creates_workbooks() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init all");
@@ -235,21 +241,14 @@ fn test_bench_run_all_creates_workbooks() {
 
 #[test]
 fn test_bench_status_reports_active_run_context() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
     app.execute_slash_command("/bench run humaneval");
     app.execute_slash_command("/bench status");
 
-    let text = app
-        .messages
-        .last()
-        .expect("bench status output")
-        .text_content();
+    let text = last_message_text(&app);
     assert!(text.contains("Active Benchmark Run"));
     assert!(text.contains("Task ID"));
     assert!(text.contains("Summary"));
@@ -274,11 +273,7 @@ fn test_bench_status_reports_case_progress() {
 
     app.execute_slash_command("/bench status");
 
-    let text = app
-        .messages
-        .last()
-        .expect("bench status output")
-        .text_content();
+    let text = last_message_text(&app);
     assert!(text.contains("Progress"));
     assert!(text.contains("suite `humaneval` (1/2)"));
     assert!(text.contains("case `3/10`"));
@@ -343,10 +338,7 @@ fn test_bench_run_drains_final_progress_events_before_completion() {
 
 #[test]
 fn test_bench_open_last_shows_latest_workbook_paths() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
@@ -366,21 +358,14 @@ fn test_bench_open_last_shows_latest_workbook_paths() {
 
 #[test]
 fn test_bench_cancel_requests_shutdown_for_active_run() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
     app.execute_slash_command("/bench run humaneval");
     app.execute_slash_command("/bench cancel");
 
-    let text = app
-        .messages
-        .last()
-        .expect("bench cancel output")
-        .text_content();
+    let text = last_message_text(&app);
     assert!(text.contains("Cancellation requested"));
     assert_eq!(app.status, "⏳ bench: cancellation requested");
     assert!(
@@ -392,10 +377,7 @@ fn test_bench_cancel_requests_shutdown_for_active_run() {
 
 #[test]
 fn test_bench_run_missing_data_fails_fast_with_init_hint() {
-    let _guard = cwd_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (_temp, _cwd) = enter_temp_project_dir();
+    let (_guard, _temp, _cwd) = enter_isolated_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench run humaneval");

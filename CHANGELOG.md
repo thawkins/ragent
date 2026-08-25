@@ -1,5 +1,15 @@
 # Changelog
 
+## Version: 1.0.57
+
+### Changed
+
+- Internal code quality cleanup in `crates/ragent-tui/tests/test_bench_command.rs`: extracted `enter_isolated_project_dir()` and `last_message_text()` helpers to remove repeated CWD lock/temp-directory setup and `messages.last().expect(...).text_content()` patterns.
+
+### Fixed
+
+- Continued from 1.0.56: `/bench` TUI integration tests remain isolated and now share helper code, keeping the previously-fixed retry/recovery logic intact.
+
 ## Version: 1.0.56
 
 ### Fixed
