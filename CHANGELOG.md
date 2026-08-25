@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 1.0.56
+
+### Fixed
+
+- Fixed flaky `/bench` TUI integration tests in `crates/ragent-tui/tests/test_bench_command.rs` that caused CI failures on slower GitHub Actions runners. The tests now wait up to 10 seconds for background benchmark runs to complete and recover gracefully from a poisoned process-wide cwd mutex, preventing one failure from cascading into multiple reported failures.
+
 ## Version: 1.0.55
 
 ### Fixed

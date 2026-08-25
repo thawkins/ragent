@@ -30,6 +30,21 @@ fn enter_temp_project_dir() -> (tempfile::TempDir, CwdGuard) {
     (temp, CwdGuard(original))
 }
 
+/// Poll the TUI until the active benchmark task completes or a generous
+/// timeout elapses. CI runners can be slower than local machines, so the
+/// loop sleeps 50 ms between polls and waits up to 10 s.
+fn wait_for_bench_completion(app: &mut App) {
+    for _ in 0..200 {
+        app.poll_pending_bench();
+        if app.active_bench_task_id.is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // One final poll so any late result is surfaced before the caller asserts.
+    app.poll_pending_bench();
+}
+
 fn configured_app() -> App {
     let mut app = support::make_app();
     app.session_id = Some("bench-test-session".to_string());
@@ -80,7 +95,9 @@ fn test_bench_list_shows_suites_and_profiles() {
 
 #[test]
 fn test_bench_init_humaneval_creates_data_root() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -95,7 +112,9 @@ fn test_bench_init_humaneval_creates_data_root() {
 
 #[test]
 fn test_bench_init_verify_only_reports_existing_state() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -113,7 +132,9 @@ fn test_bench_init_verify_only_reports_existing_state() {
 
 #[test]
 fn test_bench_init_all_creates_every_suite_root() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -134,7 +155,9 @@ fn test_bench_init_all_creates_every_suite_root() {
 
 #[test]
 fn test_bench_init_full_reports_gated_support() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -151,20 +174,15 @@ fn test_bench_init_full_reports_gated_support() {
 
 #[test]
 fn test_bench_run_humaneval_creates_workbook() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
     app.execute_slash_command("/bench run humaneval");
-
-    for _ in 0..50 {
-        app.poll_pending_bench();
-        if app.active_bench_task_id.is_none() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_bench_completion(&mut app);
 
     assert!(
         app.active_bench_task_id.is_none(),
@@ -188,20 +206,15 @@ fn test_bench_run_humaneval_creates_workbook() {
 
 #[test]
 fn test_bench_run_all_creates_workbooks() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init all");
     app.execute_slash_command("/bench run all --yes");
-
-    for _ in 0..100 {
-        app.poll_pending_bench();
-        if app.active_bench_task_id.is_none() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_bench_completion(&mut app);
 
     assert!(
         app.active_bench_task_id.is_none(),
@@ -222,7 +235,9 @@ fn test_bench_run_all_creates_workbooks() {
 
 #[test]
 fn test_bench_status_reports_active_run_context() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -328,20 +343,15 @@ fn test_bench_run_drains_final_progress_events_before_completion() {
 
 #[test]
 fn test_bench_open_last_shows_latest_workbook_paths() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
     app.execute_slash_command("/bench init humaneval");
     app.execute_slash_command("/bench run humaneval");
-
-    for _ in 0..50 {
-        app.poll_pending_bench();
-        if app.active_bench_task_id.is_none() {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    wait_for_bench_completion(&mut app);
 
     app.execute_slash_command("/bench open last");
 
@@ -356,7 +366,9 @@ fn test_bench_open_last_shows_latest_workbook_paths() {
 
 #[test]
 fn test_bench_cancel_requests_shutdown_for_active_run() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
@@ -380,7 +392,9 @@ fn test_bench_cancel_requests_shutdown_for_active_run() {
 
 #[test]
 fn test_bench_run_missing_data_fails_fast_with_init_hint() {
-    let _guard = cwd_test_lock().lock().expect("cwd lock");
+    let _guard = cwd_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let (_temp, _cwd) = enter_temp_project_dir();
     let mut app = configured_app();
 
