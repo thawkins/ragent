@@ -15,7 +15,7 @@ fn encode_config_snapshot_shows_format_and_depth() {
         iterations: Some(2),
         tier: None,
         from_urls: Vec::new(),
-        from_file: None,
+        from_files: Vec::new(),
     };
     let encoded = encode_progress_event("my-run", "topic", &event);
     let decoded = decode_progress_event(&encoded).expect("decode");
@@ -34,7 +34,7 @@ fn encode_config_snapshot_sanitizes_from_urls() {
         iterations: None,
         tier: None,
         from_urls: vec!["https://example.com\x1b[31m".to_string()],
-        from_file: None,
+        from_files: Vec::new(),
     };
     let encoded = encode_progress_event("run", "topic", &event);
     let decoded = decode_progress_event(&encoded).expect("decode");

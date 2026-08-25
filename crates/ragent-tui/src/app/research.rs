@@ -18,7 +18,7 @@ use crate::app::state::{App, LogLevel};
 impl App {
     pub(crate) fn handle_research_command(&mut self, args: &str) {
         use ragent_research::cli::ResearchCliCommand;
-        use ragent_research::{Depth, OutputFormat, ResearchManager, SessionConfig, Tier};
+        use ragent_research::{OutputFormat, ResearchManager};
         use std::sync::Arc;
 
         let cmd = ResearchCliCommand::parse(args);
@@ -52,7 +52,7 @@ impl App {
                 name,
                 topic,
                 from_urls,
-                from_file,
+                from_files,
                 iterations,
                 depth,
                 tier,
@@ -104,57 +104,39 @@ impl App {
                 // first word). The session derives the real topic from the
                 // fetched page when `--from-url` is used without a topic, or
                 // from the extracted document when `--from-file` is used.
-                let title = ragent_research::derive_title_full(
+                let title = ragent_research::derive_title_files(
                     &topic,
                     from_urls.first().map(String::as_str),
-                    from_file.as_deref(),
+                    &from_files,
                 );
-                let config = SessionConfig {
+                let req = ragent_research::ResearchRunRequest {
+                    name: name.clone(),
                     topic: topic.clone(),
-                    from_urls,
-                    from_file: from_file.map(std::path::PathBuf::from),
-                    sources_dir: sources_dir.map(std::path::PathBuf::from),
+                    title: Some(title.clone()),
+                    from_urls: from_urls.clone(),
+                    from_files: from_files.clone(),
+                    sources_dir,
                     template,
-                    disable_local: !use_local,
-                    disable_specs: !use_specs,
-                    fetch_concurrency: fetch_concurrency
-                        .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
-                    depth: depth.as_deref().and_then(Depth::parse),
-                    tier: tier.as_deref().and_then(Tier::parse).unwrap_or(Tier::Full),
+                    depth,
+                    tier,
                     iterations,
-                    max_web_results: ragent_research::DEFAULT_MAX_WEB_RESULTS,
-                    max_local_sources: 10,
-                    max_synthesis_sources: None,
-                    output_format: format
-                        .as_deref()
-                        .map(|s| OutputFormat::parse(s).unwrap_or(OutputFormat::Report))
-                        .unwrap_or(OutputFormat::Report),
+                    output_format: format.clone(),
+                    use_local,
+                    use_specs,
                     use_low_relevance,
-                    disable_scholarly: no_papers,
-                    use_pdf_web_sources: use_pdf,
-                    fetch_timeout_secs: fetch_timeout_secs.unwrap_or(30),
-                    local_concurrency: local_concurrency
-                        .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
+                    no_scholarly: no_papers,
+                    use_pdf,
+                    fetch_concurrency,
+                    local_concurrency,
+                    fetch_timeout_secs,
                     web_phase_timeout_secs,
                     local_phase_timeout_secs,
-                    search_max_retries: search_max_retries
-                        .unwrap_or(ragent_research::DEFAULT_SEARCH_MAX_RETRIES),
-                    search_retry_base_delay_ms: search_retry_base_delay_ms
-                        .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
-                    search_circuit_breaker_threshold: search_circuit_breaker_threshold
-                        .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
-                    open_access_recovery: config_arc
-                        .as_ref()
-                        .map(|c| c.research.open_access_recovery)
-                        .unwrap_or(false),
-                    contact_email: config_arc
-                        .as_ref()
-                        .and_then(|c| c.research.contact_email.clone()),
-                    oa_min_full_text_chars: config_arc
-                        .as_ref()
-                        .map(|c| c.research.oa_min_full_text_chars)
-                        .unwrap_or(ragent_research::DEFAULT_OA_MIN_FULL_TEXT_CHARS),
+                    search_max_retries,
+                    search_retry_base_delay_ms,
+                    search_circuit_breaker_threshold,
+                    ..Default::default()
                 };
+                let config = ragent_research::build_session_config(&req, config_arc.as_deref());
                 let session = crate::research_adapter::build_research_session(
                     &self.session_processor.tool_registry,
                     manager.clone(),
@@ -175,7 +157,8 @@ impl App {
                 });
                 let name_for_spawn = name.clone();
                 let topic_for_assistant = topic.clone();
-                let from_urls_for_msg = config.from_urls.clone();
+                let from_urls_for_msg = config.input.from_urls.clone();
+                let from_files_for_msg = config.input.from_files.clone();
                 let event_bus_for_spawn = self.event_bus.clone();
                 let session_id_for_spawn = self.session_id.clone().unwrap_or_default();
                 tokio::spawn(async move {
@@ -203,10 +186,16 @@ impl App {
                     .unwrap_or(OutputFormat::Report)
                     .as_str();
                 let subject_line = if topic_for_assistant.is_empty() {
-                    if from_urls_for_msg.is_empty() {
-                        "URL: ".to_string()
-                    } else {
+                    if !from_urls_for_msg.is_empty() {
                         format!("URL(s): {}", from_urls_for_msg.join(", "))
+                    } else if !from_files_for_msg.is_empty() {
+                        let paths: Vec<String> = from_files_for_msg
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect();
+                        format!("File(s): {}", paths.join(", "))
+                    } else {
+                        "URL: ".to_string()
                     }
                 } else {
                     format!("Topic: {topic_for_assistant}")

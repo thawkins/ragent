@@ -11,6 +11,7 @@
 //! with an LLM-based contradiction detector while keeping the same graph
 //! structure.
 
+use crate::polarity::source_body_text;
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -117,99 +118,155 @@ impl ContradictionGraph {
     }
 }
 
-/// Polarity dimensions used by the deterministic builder.
+/// One configurable polarity dimension.
 ///
 /// Each entry contains:
 /// - a dimension keyword (the subject being measured, e.g. "mortality");
 /// - a positive token set (claims that the dimension goes up / is good);
 /// - a negative token set (claims that the dimension goes down / is bad).
-const POLARITY_DIMENSIONS: &[(&str, &[&str], &[&str])] = &[
-    (
-        "effect",
-        &[
-            "improves",
-            "benefits",
-            "reduces risk",
-            "decreases risk",
-            "lowers risk",
-            "protects against",
-        ],
-        &[
-            "worsens",
-            "increases risk",
-            "raises risk",
-            "harmful",
-            "detrimental",
-        ],
-    ),
-    (
-        "mortality",
-        &[
-            "reduces mortality",
-            "lowers mortality",
-            "decreases mortality",
-            "improves survival",
-        ],
-        &[
-            "increases mortality",
-            "raises mortality",
-            "higher mortality",
-            "worse survival",
-        ],
-    ),
-    (
-        "performance",
-        &[
-            "improves performance",
-            "faster",
-            "better performance",
-            "higher performance",
-            "outperforms",
-        ],
-        &[
-            "degrades performance",
-            "slower",
-            "worse performance",
-            "lower performance",
-        ],
-    ),
-    (
-        "cost",
-        &["reduces cost", "lowers cost", "decreases cost", "cheaper"],
-        &[
-            "increases cost",
-            "raises cost",
-            "higher cost",
-            "more expensive",
-        ],
-    ),
-    (
-        "adoption",
-        &[
-            "increases adoption",
-            "higher adoption",
-            "widespread adoption",
-            "growing adoption",
-        ],
-        &[
-            "low adoption",
-            "decreases adoption",
-            "limited adoption",
-            "declining adoption",
-        ],
-    ),
-    (
-        "safety",
-        &["safe", "safer", "well tolerated", "few adverse effects"],
-        &[
-            "unsafe",
-            "harmful",
-            "adverse effects",
-            "side effects",
-            "toxic",
-        ],
-    ),
-];
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolarityDimension {
+    /// The subject being measured (e.g. "mortality", "performance").
+    pub keyword: String,
+    /// Tokens that indicate a positive claim about the dimension.
+    pub positives: Vec<String>,
+    /// Tokens that indicate a negative claim about the dimension.
+    pub negatives: Vec<String>,
+}
+
+impl PolarityDimension {
+    /// Create a new polarity dimension from string slices.
+    #[must_use]
+    pub fn new(keyword: impl Into<String>, positives: &[&str], negatives: &[&str]) -> Self {
+        Self {
+            keyword: keyword.into(),
+            positives: positives.iter().map(|s| (*s).to_string()).collect(),
+            negatives: negatives.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+}
+
+/// Configuration for the contradiction-graph builder.
+///
+/// By default the builder uses [`ContradictionConfig::default`], which
+/// contains the six medical/tech polarity dimensions the system shipped
+/// with. Callers can supply custom dimensions (or none at all) to make the
+/// contradiction detector useful for non-medical topics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContradictionConfig {
+    /// Polarity dimensions to scan for. Empty means no contradiction detection.
+    pub dimensions: Vec<PolarityDimension>,
+}
+
+impl ContradictionConfig {
+    /// Create a config with no dimensions (disables contradiction detection).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            dimensions: Vec::new(),
+        }
+    }
+
+    /// Create a config with the given dimensions.
+    #[must_use]
+    pub fn new(dimensions: Vec<PolarityDimension>) -> Self {
+        Self { dimensions }
+    }
+}
+
+impl Default for ContradictionConfig {
+    fn default() -> Self {
+        Self {
+            dimensions: vec![
+                PolarityDimension::new(
+                    "effect",
+                    &[
+                        "improves",
+                        "benefits",
+                        "reduces risk",
+                        "decreases risk",
+                        "lowers risk",
+                        "protects against",
+                    ],
+                    &[
+                        "worsens",
+                        "increases risk",
+                        "raises risk",
+                        "harmful",
+                        "detrimental",
+                    ],
+                ),
+                PolarityDimension::new(
+                    "mortality",
+                    &[
+                        "reduces mortality",
+                        "lowers mortality",
+                        "decreases mortality",
+                        "improves survival",
+                    ],
+                    &[
+                        "increases mortality",
+                        "raises mortality",
+                        "higher mortality",
+                        "worse survival",
+                    ],
+                ),
+                PolarityDimension::new(
+                    "performance",
+                    &[
+                        "improves performance",
+                        "faster",
+                        "better performance",
+                        "higher performance",
+                        "outperforms",
+                    ],
+                    &[
+                        "degrades performance",
+                        "slower",
+                        "worse performance",
+                        "lower performance",
+                    ],
+                ),
+                PolarityDimension::new(
+                    "cost",
+                    &["reduces cost", "lowers cost", "decreases cost", "cheaper"],
+                    &[
+                        "increases cost",
+                        "raises cost",
+                        "higher cost",
+                        "more expensive",
+                    ],
+                ),
+                PolarityDimension::new(
+                    "adoption",
+                    &[
+                        "increases adoption",
+                        "higher adoption",
+                        "widespread adoption",
+                        "growing adoption",
+                    ],
+                    &[
+                        "low adoption",
+                        "decreases adoption",
+                        "limited adoption",
+                        "declining adoption",
+                    ],
+                ),
+                PolarityDimension::new(
+                    "safety",
+                    &["safe", "safer", "well tolerated", "few adverse effects"],
+                    &[
+                        "unsafe",
+                        "harmful",
+                        "adverse effects",
+                        "side effects",
+                        "toxic",
+                    ],
+                ),
+            ],
+        }
+    }
+}
 
 /// Group of sources that take the same polarity on a single dimension.
 type PolarityGroup<'a> = Vec<(usize, &'a Source)>;
@@ -233,7 +290,20 @@ type DimensionClaims<'a> = HashMap<&'a str, (PolarityGroup<'a>, PolarityGroup<'a
 /// creating edges from placeholder text.
 #[must_use]
 pub fn build_contradiction_graph(sources: &[Source]) -> ContradictionGraph {
-    if sources.len() < 2 {
+    build_contradiction_graph_with(sources, &ContradictionConfig::default())
+}
+
+/// Build a deterministic contradiction graph using the supplied config.
+///
+/// This is the configurable variant of [`build_contradiction_graph`]; it
+/// accepts a [`ContradictionConfig`] so callers can override the polarity
+/// dimensions for non-medical topics.
+#[must_use]
+pub fn build_contradiction_graph_with(
+    sources: &[Source],
+    config: &ContradictionConfig,
+) -> ContradictionGraph {
+    if sources.len() < 2 || config.dimensions.is_empty() {
         return ContradictionGraph::empty();
     }
 
@@ -254,14 +324,20 @@ pub fn build_contradiction_graph(sources: &[Source]) -> ContradictionGraph {
     let mut dimension_claims: DimensionClaims<'_> = HashMap::new();
 
     for (idx, body, src) in &lowercased_bodies {
-        for (dimension, positives, negatives) in POLARITY_DIMENSIONS {
-            let has_positive = positives.iter().any(|token| body.contains(*token));
-            let has_negative = negatives.iter().any(|token| body.contains(*token));
+        for dim in &config.dimensions {
+            let has_positive = dim
+                .positives
+                .iter()
+                .any(|token| body.contains(token.as_str()));
+            let has_negative = dim
+                .negatives
+                .iter()
+                .any(|token| body.contains(token.as_str()));
             if !has_positive && !has_negative {
                 continue;
             }
             let entry = dimension_claims
-                .entry(dimension)
+                .entry(dim.keyword.as_str())
                 .or_insert_with(|| (Vec::new(), Vec::new()));
             // Source indices in the graph are 1-based to match the References
             // Index numbering used throughout RESEARCH.md.
@@ -337,16 +413,6 @@ pub fn build_contradiction_graph(sources: &[Source]) -> ContradictionGraph {
     deduped
 }
 
-/// Extract searchable body text from a source.
-fn source_body_text(source: &Source) -> String {
-    match source {
-        Source::Web { body, .. } => body.clone(),
-        Source::Local { body, .. } => body.clone(),
-        Source::Spec { spec_id, .. } => spec_id.clone(),
-        Source::Other { body, .. } => body.clone(),
-    }
-}
-
 /// Human-readable positive direction label for a dimension.
 fn positive_label(dimension: &str) -> &'static str {
     match dimension {
@@ -370,148 +436,5 @@ fn negative_label(dimension: &str) -> &'static str {
         "adoption" => "lower adoption",
         "safety" => "less safe",
         _ => "negative",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn web_source(index: usize, url: &str, body: &str) -> Source {
-        Source::Web {
-            url: url.to_string(),
-            title: format!("Source {index}"),
-            captured_at: chrono::Utc::now(),
-            published_at: None,
-            body_path: PathBuf::new(),
-            body: body.to_string(),
-            relevance: "High".to_string(),
-            search_tool: "mf_search".to_string(),
-            search_engine: "duckduckgo".to_string(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        }
-    }
-
-    #[test]
-    fn graph_empty_when_fewer_than_two_sources() {
-        let sources = vec![web_source(1, "https://a.example", " improves performance")];
-        let graph = build_contradiction_graph(&sources);
-        assert!(graph.is_empty());
-    }
-
-    #[test]
-    fn graph_detects_opposing_performance_claims() {
-        let sources = vec![
-            web_source(
-                1,
-                "https://a.example",
-                "The new system improves performance.",
-            ),
-            web_source(
-                2,
-                "https://b.example",
-                "The legacy system degrades performance significantly.",
-            ),
-        ];
-        let graph = build_contradiction_graph(&sources);
-        assert_eq!(graph.edges.len(), 1);
-        let edge = &graph.edges[0];
-        assert_eq!(edge.dimension, "performance");
-        assert!(edge.strength > 0);
-        assert_eq!(edge.claim_a.source_index, 1);
-        assert_eq!(edge.claim_b.source_index, 2);
-    }
-
-    #[test]
-    fn graph_ignores_short_bodies() {
-        let sources = vec![
-            web_source(1, "https://a.example", "improves"),
-            web_source(2, "https://b.example", "worsens"),
-        ];
-        let graph = build_contradiction_graph(&sources);
-        assert!(graph.is_empty());
-    }
-
-    #[test]
-    fn graph_filters_sources_with_both_polarities() {
-        // A source claiming both positive and negative on the same dimension
-        // is skipped because it does not clearly take one side.
-        let sources = vec![
-            web_source(
-                1,
-                "https://a.example",
-                "The drug improves safety in adults but adverse effects in children make it less safe overall.",
-            ),
-            web_source(
-                2,
-                "https://b.example",
-                "The drug is well tolerated and safe.",
-            ),
-        ];
-        let graph = build_contradiction_graph(&sources);
-        // Source 1 has both "safe" and "less safe" so it is not classified.
-        assert!(graph.is_empty());
-    }
-
-    #[test]
-    fn graph_ranks_stronger_edges_first() {
-        let sources = vec![
-            web_source(
-                1,
-                "https://a.example",
-                "The intervention improves performance and reduces cost.",
-            ),
-            web_source(
-                2,
-                "https://b.example",
-                "The intervention degrades performance and increases cost.",
-            ),
-        ];
-        let graph = build_contradiction_graph(&sources);
-        assert_eq!(graph.edges.len(), 1);
-        assert!(graph.edges[0].strength > 30);
-    }
-
-    #[test]
-    fn graph_can_lookup_edges_by_source_index() {
-        let sources = vec![
-            web_source(1, "https://a.example", "X improves performance."),
-            web_source(2, "https://b.example", "X degrades performance."),
-            web_source(3, "https://c.example", "X is neutral."),
-        ];
-        let graph = build_contradiction_graph(&sources);
-        assert_eq!(graph.edges_for_source(1).len(), 1);
-        assert_eq!(graph.edges_for_source(2).len(), 1);
-        assert!(graph.edges_for_source(3).is_empty());
-    }
-
-    #[test]
-    fn graph_deduplicates_pairs() {
-        let sources = vec![
-            web_source(
-                1,
-                "https://a.example",
-                "X improves performance and reduces cost.",
-            ),
-            web_source(
-                2,
-                "https://b.example",
-                "X degrades performance and increases cost.",
-            ),
-        ];
-        // Two dimensions trigger, but only one unique pair should remain.
-        let graph = build_contradiction_graph(&sources);
-        let pairs: Vec<_> = graph
-            .edges
-            .iter()
-            .map(|e| (e.claim_a.source_index, e.claim_b.source_index))
-            .collect();
-        assert_eq!(pairs.len(), 1);
     }
 }

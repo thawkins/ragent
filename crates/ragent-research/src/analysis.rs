@@ -25,6 +25,7 @@ use ragent_llm::provider::ProviderRegistry;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 mod parser;
 mod prompt;
@@ -772,16 +773,27 @@ pub fn merge_chunk_results(parts: &[AnalysisResult]) -> AnalysisResult {
 }
 
 /// Renumber the `1.`, `2.`, … prefixes in a list of findings so they are
-/// contiguous starting from 1. Findings without a numeric prefix are left
-/// unchanged (Milestone E-002).
+/// contiguous starting from 1. Also handles bold-labelled findings such as
+/// `**Finding 1:**` or `**1.**` prefixes. Findings without a numeric prefix
+/// are left unchanged (Milestone E-002, FUNC-ANL-08).
 fn renumber_findings(findings: &[String]) -> Vec<String> {
-    let num_re = Regex::new(r"^(\d+)\.\s*").expect("valid renumber regex");
+    static NUM_RE: OnceLock<Regex> = OnceLock::new();
+    static BOLD_NUM_RE: OnceLock<Regex> = OnceLock::new();
+    let num_re = NUM_RE.get_or_init(|| Regex::new(r"^(\d+)\.\s*").expect("valid renumber regex"));
+    let bold_num_re = BOLD_NUM_RE.get_or_init(|| {
+        Regex::new(r"^\*\*(?:Finding\s*)?(\d+)[.:]?\*\*\s*").expect("valid bold renumber regex")
+    });
     findings
         .iter()
         .enumerate()
         .map(|(i, finding)| {
+            let replacement = format!("{}. ", i + 1);
             if num_re.is_match(finding) {
-                num_re.replace(finding, format!("{}. ", i + 1)).to_string()
+                num_re.replace(finding, replacement.as_str()).to_string()
+            } else if bold_num_re.is_match(finding) {
+                bold_num_re
+                    .replace(finding, format!("**{}.** ", i + 1))
+                    .to_string()
             } else {
                 finding.clone()
             }

@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use ragent_research::session::NoopObserver;
 use ragent_research::source::Source;
 use ragent_research::{
-    GrepMatch, LocalGatherer, LocalTool, NoopAnalysisEngine, ResearchManager, ResearchSession,
-    SessionConfig, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    GrepMatch, LocalConfig, LocalGatherer, LocalTool, NoopAnalysisEngine, ResearchManager,
+    ResearchSession, SessionConfig, WebConfig, WebFetchTool, WebFetchedPage, WebGatherer,
+    WebSearchHit, WebSearchTool,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -165,8 +166,14 @@ async fn research_baseline_three_topics() {
     );
 
     let cfg = SessionConfig {
-        max_web_results: 20,
-        max_local_sources: 10,
+        web: WebConfig {
+            max_web_results: 20,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 10,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     };
 
@@ -185,7 +192,7 @@ async fn research_baseline_three_topics() {
 
     for (name, title, topic) in topics {
         let mut cfg = cfg.clone();
-        cfg.topic = topic.to_string();
+        cfg.input.topic = topic.to_string();
         let start = Instant::now();
         let outcome = session
             .run(name, title, &cfg, Arc::new(NoopObserver))

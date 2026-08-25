@@ -147,6 +147,43 @@ impl TierRouter {
         finished
     }
 
+    /// Run `step` if it is the next pending step, otherwise return `default`.
+    ///
+    /// This helper encapsulates the repeated `next_step()` / `start_step()` /
+    /// `finish_step()` boilerplate used throughout the session dispatch loop.
+    /// When the next pending step matches `step`, the closure `f` is called
+    /// between `start_step` and `finish_step`, and its return value is
+    /// wrapped in `Some`. When the next step does not match, `None` is
+    /// returned immediately without calling `f`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let graph: Option<ContradictionGraph> = router.run_step_if(
+    ///     RunStep::ContradictionGraph,
+    ///     &router_observer,
+    ///     || { Some(build_contradiction_graph(&sources)) },
+    /// );
+    /// ```
+    pub fn run_step_if<T, F>(
+        &mut self,
+        step: RunStep,
+        observer: &dyn TierRouterObserver,
+        f: F,
+    ) -> Option<T>
+    where
+        F: FnOnce() -> T,
+    {
+        if self.next_step() == Some(step) {
+            self.start_step(step, observer);
+            let result = f();
+            self.finish_step(step, observer);
+            Some(result)
+        } else {
+            None
+        }
+    }
+
     /// Mark `step` as skipped, optionally recording a reason.
     pub fn skip_step(
         &mut self,

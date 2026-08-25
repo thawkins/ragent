@@ -758,7 +758,6 @@ async fn main() -> Result<()> {
             let auth_token = uuid::Uuid::new_v4().to_string();
             let orchestrator_registry = ragent_agent::orchestrator::AgentRegistry::new();
             let coordinator = ragent_agent::orchestrator::Coordinator::new(orchestrator_registry);
-
             let state = ragent_server::routes::AppState {
                 event_bus,
                 config,
@@ -767,6 +766,7 @@ async fn main() -> Result<()> {
                 auth_token,
                 rate_limiter: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 coordinator: Some(coordinator),
+                research_runs: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             };
             ragent_server::start_server(&addr, state).await?;
         }

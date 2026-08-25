@@ -23,6 +23,13 @@ use crate::source::Source;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::OnceLock;
+
+static CITATION_RE: OnceLock<Regex> = OnceLock::new();
+
+fn citation_re() -> &'static Regex {
+    CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
+}
 
 /// A single critic subagent report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -259,12 +266,13 @@ fn evidence_critic(sources: &[Source], analysis: &AnalysisResult) -> CriticRepor
     let mut issues = Vec::new();
     let mut gaps = Vec::new();
 
-    let citation_re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
+    let citation_re = citation_re();
     let mut total_findings = 0usize;
     let mut cited_findings = 0usize;
 
     for (idx, finding) in analysis.findings.iter().enumerate() {
         total_findings += 1;
+        let display_idx = idx + 1;
         let mut has_valid_citation = false;
         let mut has_any_citation = false;
         for cap in citation_re.captures_iter(finding) {
@@ -274,7 +282,7 @@ fn evidence_critic(sources: &[Source], analysis: &AnalysisResult) -> CriticRepor
                     has_valid_citation = true;
                 } else {
                     issues.push(format!(
-                        "Finding {idx} cites out-of-range source #{n} (only {} sources available)",
+                        "Finding {display_idx} cites out-of-range source #{n} (only {} sources available)",
                         sources.len()
                     ));
                 }
@@ -283,8 +291,10 @@ fn evidence_critic(sources: &[Source], analysis: &AnalysisResult) -> CriticRepor
         if has_any_citation && has_valid_citation {
             cited_findings += 1;
         } else if !has_any_citation {
-            issues.push(format!("Finding {idx} does not cite any source"));
-            gaps.push(format!("Add a supporting source citation to finding {idx}"));
+            issues.push(format!("Finding {display_idx} does not cite any source"));
+            gaps.push(format!(
+                "Add a supporting source citation to finding {display_idx}"
+            ));
         }
     }
 
@@ -332,6 +342,7 @@ fn readability_critic(analysis: &AnalysisResult) -> CriticReport {
 
     let mut malformed = 0usize;
     for (idx, finding) in analysis.findings.iter().enumerate() {
+        let display_idx = idx + 1;
         let missing: Vec<&str> = required
             .iter()
             .filter(|label| !finding.contains(**label))
@@ -340,7 +351,7 @@ fn readability_critic(analysis: &AnalysisResult) -> CriticReport {
         if !missing.is_empty() {
             malformed += 1;
             issues.push(format!(
-                "Finding {idx} is missing required labels: {}",
+                "Finding {display_idx} is missing required labels: {}",
                 missing.join(", ")
             ));
         }
@@ -348,7 +359,7 @@ fn readability_critic(analysis: &AnalysisResult) -> CriticReport {
         for p in &paragraphs {
             if p.len() > 1200 {
                 issues.push(format!(
-                    "Finding {idx} contains a paragraph longer than 1200 characters"
+                    "Finding {display_idx} contains a paragraph longer than 1200 characters"
                 ));
                 break;
             }
@@ -450,7 +461,6 @@ fn count_distinct_cited_sources(
     implications: &[String],
     source_count: usize,
 ) -> usize {
-    let citation_re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
     let mut set: HashSet<usize> = HashSet::new();
     let haystack = findings
         .iter()
@@ -460,7 +470,7 @@ fn count_distinct_cited_sources(
             acc.push(' ');
             acc
         });
-    for cap in citation_re.captures_iter(&haystack) {
+    for cap in citation_re().captures_iter(&haystack) {
         if let Ok(n) = cap[1].parse::<usize>()
             && n > 0
             && n <= source_count
@@ -707,5 +717,47 @@ mod tests {
         let implications = vec!["[#1]".to_string()];
         assert_eq!(count_distinct_cited_sources(&findings, &implications, 3), 3);
         assert_eq!(count_distinct_cited_sources(&findings, &implications, 2), 2);
+    }
+
+    #[test]
+    fn evidence_critic_uses_one_based_finding_numbers() {
+        let sources = vec![web_source(1, "body")];
+        let analysis = AnalysisResult {
+            findings: vec![
+                valid_finding(1).replace("[#1]", "[#5]"),
+                valid_finding(2).replace("[#2]", ""),
+            ],
+            ..AnalysisResult::default()
+        };
+        let report = evidence_critic(&sources, &analysis);
+        assert!(
+            report.issues.iter().any(|i| i.contains("Finding 1")),
+            "expected 1-based finding numbers in {:?}",
+            report.issues
+        );
+        assert!(
+            !report.issues.iter().any(|i| i.contains("Finding 0")),
+            "expected no 0-based finding numbers in {:?}",
+            report.issues
+        );
+    }
+
+    #[test]
+    fn readability_critic_uses_one_based_finding_numbers() {
+        let analysis = AnalysisResult {
+            findings: vec!["Just a plain paragraph. [#1]".to_string()],
+            ..AnalysisResult::default()
+        };
+        let report = readability_critic(&analysis);
+        assert!(
+            report.issues.iter().any(|i| i.contains("Finding 1")),
+            "expected 1-based finding numbers in {:?}",
+            report.issues
+        );
+        assert!(
+            !report.issues.iter().any(|i| i.contains("Finding 0")),
+            "expected no 0-based finding numbers in {:?}",
+            report.issues
+        );
     }
 }

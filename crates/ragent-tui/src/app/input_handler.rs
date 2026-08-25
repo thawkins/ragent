@@ -1056,17 +1056,20 @@ impl App {
                     self.needs_redraw = true;
                 }
                 InputAction::ToggleTasksPanel => {
-                    // Toggle the TODO panel visibility (Alt+T). Implements
+                    // Toggle the TASKS side panel visibility (Alt+T). Implements
                     // FR-002 (toggle) and FR-003 (mutual exclusion of side
-                    // panels — only one of log/profile/todo is visible at a
+                    // panels — only one of log/profile/tasks is visible at a
                     // time, matching the `/log` and `/profile` slash commands
-                    // in app/slash.rs). On hide, any active Todo-pane text
+                    // in app/slash.rs). On hide, any active Tasks-pane text
                     // selection or context menu is cleared.
                     self.show_tasks_panel = !self.show_tasks_panel;
                     if self.show_tasks_panel {
-                        // Entering TODO mode: dismiss the other side panels so
+                        // Entering TASKS mode: dismiss the other side panels so
                         // only one occupies the side column (FR-012/SPEC
-                        // mutual-exclusion policy).
+                        // mutual-exclusion policy). Force a cache refresh on the
+                        // next render so the panel is always up-to-date when
+                        // first shown.
+                        self.tasks_cache_dirty = true;
                         self.show_log = false;
                         self.show_profile = false;
                         self.show_memory = false;

@@ -20,9 +20,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use ragent_research::{
-    AnalysisEngine, AnalysisOutcome, AnalysisResult, NoopAnalysisEngine, OutputFormat,
-    ResearchManager, ResearchSession, SessionConfig, SessionEvent, SessionObserver, SourceBody,
-    SynthesizeOutcome, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
+    AnalysisEngine, AnalysisOutcome, AnalysisResult, InputConfig, LocalConfig, NoopAnalysisEngine,
+    OutputConfig, OutputFormat, ResearchManager, ResearchSession, SessionConfig, SessionEvent,
+    SessionObserver, SourceBody, SynthesisEvent, SynthesizeOutcome, WebConfig, WebFetchTool,
+    WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
 };
 use tempfile::TempDir;
 
@@ -146,10 +147,9 @@ impl WebFetchTool for FakeFetch {
 struct CaptureSynthesize {
     outcomes: Mutex<Vec<SynthesizeOutcome>>,
 }
-
 impl SessionObserver for CaptureSynthesize {
     fn on_event(&self, event: SessionEvent) {
-        if let SessionEvent::SynthesizeResult { outcome, .. } = event {
+        if let SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { outcome, .. }) = event {
             self.outcomes.lock().unwrap().push(outcome);
         }
     }
@@ -159,11 +159,20 @@ impl SessionObserver for CaptureSynthesize {
 /// only the faked web source is captured.
 fn cfg_with_topic(topic: &str) -> SessionConfig {
     SessionConfig {
-        topic: topic.into(),
-        max_web_results: 5,
-        max_local_sources: 5,
-        disable_local: true,
-        disable_specs: true,
+        input: InputConfig {
+            topic: topic.into(),
+            ..InputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: true,
+            disable_specs: true,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     }
 }
@@ -345,12 +354,24 @@ async fn executive_summary_format_writes_shorter_summary_instruction() {
     let session = session_with_engine(&research_root, Arc::new(WellFormedMockEngine));
 
     let cfg = SessionConfig {
-        topic: "Rust async".into(),
-        output_format: OutputFormat::ExecutiveSummary,
-        max_web_results: 5,
-        max_local_sources: 5,
-        disable_local: true,
-        disable_specs: true,
+        input: InputConfig {
+            topic: "Rust async".into(),
+            ..InputConfig::default()
+        },
+        output: OutputConfig {
+            output_format: OutputFormat::ExecutiveSummary,
+            ..OutputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: true,
+            disable_specs: true,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     };
     let _outcome = session
@@ -431,12 +452,24 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
     let observer = Arc::new(CaptureSynthesize::default());
 
     let cfg = SessionConfig {
-        topic: "Rust async".into(),
-        output_format: OutputFormat::Imrad,
-        max_web_results: 5,
-        max_local_sources: 5,
-        disable_local: true,
-        disable_specs: true,
+        input: InputConfig {
+            topic: "Rust async".into(),
+            ..InputConfig::default()
+        },
+        output: OutputConfig {
+            output_format: OutputFormat::Imrad,
+            ..OutputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: true,
+            disable_specs: true,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     };
 

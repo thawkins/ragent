@@ -386,12 +386,17 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.31** — The core architecture, tool system (~150 tools across 18 categories), TUI,
+**v1.0.58** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Research tooling overhaul** — New `polarity.rs`, `run_request.rs`,
+  `contradiction.rs`, `corpus_critic.rs`, and `reconcile.rs` modules; unified
+  `ResearchRunRequest` builder shared across CLI/TUI/HTTP; tier routing with
+  `--tier` flag; IMRAD output format; new HTTP research routes with SSE events
+  and 202+Location async behaviour; 37 new tests (v1.0.58)
 - **Code index semantic graph** — Four new graph analysis tools
   (`codeindex_godnodes`, `codeindex_path`, `codeindex_explain`,
   `codeindex_communities`) with community detection, shortest-path traversal,

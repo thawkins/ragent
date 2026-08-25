@@ -32,6 +32,8 @@ uuid = { workspace = true }
 criterion = "0.5"
 tempfile = "3.5"
 parking_lot = { workspace = true }
+http-body-util = "0.1"
+serde_json = { workspace = true }
 
 [[bench]]
 name = "bench_sse"

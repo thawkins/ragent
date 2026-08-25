@@ -568,17 +568,24 @@ pub fn build_relevance_note(matched_terms: &[String], matches: &[GrepMatch]) -> 
 /// Returns a deduplicated, lowercase vec preserving first-seen order.
 #[must_use]
 pub fn collect_matched_terms(matches: &[GrepMatch], terms: &[String]) -> Vec<String> {
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Pre-lowercase and filter terms once so the inner loop avoids
+    // redundant `to_lowercase()` allocations (PERF-LOC-01). Terms may
+    // arrive in mixed case (e.g. from test inputs), so we lower-case
+    // them here rather than assuming they are already lowercased.
+    let lower_terms: Vec<String> = terms
+        .iter()
+        .map(|t| t.to_lowercase())
+        .filter(|t| t.len() >= 2)
+        .collect();
+    let lower_terms: Vec<&str> = lower_terms.iter().map(|s| s.as_str()).collect();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
     for m in matches {
+        // One lowercase allocation per match line instead of per (match, term) pair.
         let lower = m.text.to_lowercase();
-        for term in terms {
-            let t = term.to_lowercase();
-            if t.len() < 2 {
-                continue;
-            }
-            if lower.contains(&t) && seen.insert(t.clone()) {
-                out.push(t);
+        for &t in &lower_terms {
+            if lower.contains(t) && seen.insert(t) {
+                out.push(t.to_string());
             }
         }
     }

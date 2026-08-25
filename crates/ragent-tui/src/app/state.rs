@@ -1268,7 +1268,7 @@ pub struct App {
     pub show_log: bool,
     /// Whether the realtime profiling panel is visible.
     pub show_profile: bool,
-    /// Whether the TODO panel is visible.
+    /// Whether the TASKS side panel is visible.
     pub show_tasks_panel: bool,
     /// Whether the Memory panel is visible (toggled via Alt+M).
     pub show_memory: bool,

@@ -1100,6 +1100,11 @@ impl App {
                     format!("{}← {} {} {}", step_tag, tool, icon, display_content)
                 };
                 self.push_log_no_agent(LogLevel::Tool, log_line);
+                // Mark the Tasks side-panel cache stale when task data
+                // mutates, so the next panel render reflects the change.
+                if matches!(tool.as_str(), "task_create" | "task_update" | "task_delete") {
+                    self.tasks_cache_dirty = true;
+                }
                 self.needs_redraw = true;
             }
             Event::SubagentStart {

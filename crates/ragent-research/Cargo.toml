@@ -27,7 +27,7 @@ blake3 = { workspace = true }
 rusqlite = { workspace = true }
 ragent-tools-extended = { path = "../ragent-tools-extended" }
 reqwest = { workspace = true }
-tokio = { version = "1", features = ["fs", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }
+tokio = { workspace = true }
 similar = { workspace = true }
 regex = { workspace = true }
 
@@ -35,7 +35,6 @@ regex = { workspace = true }
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 ragent-specs = { path = "../ragent-specs" }
-tokio = { version = "1", features = ["full"] }
 async-trait = { workspace = true }
 proptest = "1"
 

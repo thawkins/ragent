@@ -43,6 +43,7 @@ use crate::synthesis::SynthesisAudit;
 use chrono::Utc;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 /// Maximum number of bytes allowed in a single untrusted source excerpt.
 /// Sources larger than this are truncated to avoid blowing up RESEARCH.md
@@ -274,7 +275,7 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     let title = strip_control_chars(&doc.item.title);
     let topic = strip_control_chars(&doc.item.topic);
 
-    let mut body = String::new();
+    let mut body = String::with_capacity(8192);
 
     // FR-020 / imradreport: if a template body was supplied, use it as the
     // skeleton after substituting the standard placeholders.
@@ -284,7 +285,9 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     }
 
     // -- Title -----------------------------------------------------------
-    body.push_str(&format!("# Title: {title}\n\n"));
+    body.push_str("# Title: ");
+    body.push_str(&title);
+    body.push_str("\n\n");
 
     // FR-004 / specs/imradreport: choose between the legacy report layout and
     // the IMRaD layout based on the configured output format.
@@ -298,7 +301,10 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     // inside code spans, fenced blocks, and existing Markdown links untouched.
     let body = linkify_urls(&body);
 
-    let content = format!("{frontmatter}\n{body}");
+    let mut content = String::with_capacity(frontmatter.len() + 1 + body.len());
+    content.push_str(&frontmatter);
+    content.push('\n');
+    content.push_str(&body);
     AssembledDocument {
         content,
         frontmatter: frontmatter
@@ -1553,7 +1559,8 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
 /// Extract 1-based source indices from `[#N]` citations in a finding body.
 /// Returns a sorted, deduplicated list suitable for rendering a Sources list.
 fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
-    let re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"));
     let mut indices: Vec<usize> = re
         .captures_iter(finding)
         .filter_map(|cap| cap[1].parse::<usize>().ok())
@@ -1577,7 +1584,11 @@ fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
 fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     // If the finding already contains a Sources paragraph (e.g. produced by
     // the LLM itself), don't append a duplicate list.
-    if finding.to_lowercase().contains("**sources:**") {
+    if finding
+        .find("**Sources:**")
+        .or_else(|| finding.find("**sources:**"))
+        .is_some()
+    {
         return None;
     }
 
@@ -1587,22 +1598,21 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     }
 
     let mut out = String::from("**Sources:**\n");
+    use std::fmt::Write;
     let mut any = false;
     for idx in &indices {
         if let Some(src) = sources.get(idx - 1) {
             any = true;
             let author = src.author().filter(|a| !a.is_empty());
-            out.push_str(&format!(
-                "- [{idx}] {title}{author} — {path}{published}\n",
-                idx = idx,
-                title = src.title(),
-                author = author.map(|a| format!(" [{a}]")).unwrap_or_default(),
-                path = src.path_or_url(),
-                published = src
-                    .published_at()
-                    .map(|dt| format!(" (published {})", dt.format("%Y-%m-%d")))
-                    .unwrap_or_default()
-            ));
+            let _ = write!(out, "- [{idx}] {}", src.title());
+            if let Some(a) = author {
+                let _ = write!(out, " [{a}]");
+            }
+            let _ = write!(out, " — {}", src.path_or_url());
+            if let Some(dt) = src.published_at() {
+                let _ = write!(out, " (published {})", dt.format("%Y-%m-%d"));
+            }
+            out.push('\n');
         }
     }
     if !any {
@@ -1612,7 +1622,8 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     // cited web sources, so the relative age of the evidence is visible at
     // a glance per finding.
     if let Some(range) = render_finding_date_range(&indices, sources) {
-        out.push_str(&format!("\n{range}"));
+        out.push('\n');
+        out.push_str(&range);
     }
     // Trim trailing newline; the caller inserts blank lines.
     out.truncate(out.trim_end().len());
@@ -2104,17 +2115,18 @@ fn split_analysis_sentences(body: &str) -> String {
 }
 
 fn normalize_finding_labels(finding: &str) -> String {
+    static PARAGRAPH_PREFIX_RE: OnceLock<Regex> = OnceLock::new();
+    static LABEL_RE: OnceLock<Regex> = OnceLock::new();
+    let paragraph_prefix = PARAGRAPH_PREFIX_RE
+        .get_or_init(|| Regex::new(r"Paragraph\s+\d+\s*—\s*").expect("valid regex"));
+    let label_re = LABEL_RE.get_or_init(|| {
+        Regex::new(r"(\*\*[-A-Za-z/\s]+:\*\*|\*[-A-Za-z/\s]+:\*)").expect("valid regex")
+    });
+
     let mut text = finding.trim().replace("\n\n\n", "\n\n");
 
     // Strip stale "Paragraph N — " prefixes before any label.
-    let paragraph_prefix = Regex::new(r"Paragraph\s+\d+\s*—\s*").expect("valid regex");
     text = paragraph_prefix.replace_all(&text, "").to_string();
-
-    // Match bold or italic labels ending in a colon, e.g. **Observation:** or
-    // *Analysis:*. The colon is required so we don't split random emphasis.
-    // Hyphens and slashes are allowed so labels like **Cross-reference / Dependencies:**
-    // are recognised correctly.
-    let label_re = Regex::new(r"(\*\*[-A-Za-z/\s]+:\*\*|\*[-A-Za-z/\s]+:\*)").expect("valid regex");
 
     // Split into alternating non-label / label segments. The first segment is
     // text before the first label (usually empty).
@@ -2150,13 +2162,17 @@ fn normalize_finding_labels(finding: &str) -> String {
         return text.trim().to_string();
     }
 
-    let mut out = String::new();
+    let mut out = String::with_capacity(finding.len());
     for (raw_label, body) in labels.iter().zip(bodies.iter()) {
         // Normalize legacy italic labels (*Label:*) to bold (**Label:**).
         let label = if raw_label.starts_with("**") {
             raw_label.clone()
         } else if raw_label.len() >= 2 && raw_label.starts_with('*') && raw_label.ends_with('*') {
-            format!("**{}**", &raw_label[1..raw_label.len() - 1])
+            let mut s = String::with_capacity(raw_label.len() + 2);
+            s.push_str("**");
+            s.push_str(&raw_label[1..raw_label.len() - 1]);
+            s.push_str("**");
+            s
         } else {
             raw_label.clone()
         };
@@ -2274,24 +2290,32 @@ pub fn render_bibliography(sources: &[Source]) -> String {
     if sources.is_empty() {
         return "# Sources Bibliography\n\n_(no sources captured)_\n".to_string();
     }
-    let mut out = String::from("# Sources Bibliography\n\n");
+    let mut out = String::with_capacity(sources.len() * 512);
+    out.push_str("# Sources Bibliography\n\n");
+    use std::fmt::Write;
     for (idx, source) in sources.iter().enumerate() {
         let n = idx + 1;
         let kind = source.type_str();
         let path = source.path_or_url();
         let title = source.title();
         let captured = source.captured_at().to_rfc3339();
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "## [{n}] {title}\n\n- **Type:** {kind}\n- **Path/URL:** {path}\n- **Captured:** {captured}\n"
-        ));
+        );
         if let Some(rel) = source.relevance()
             && !rel.is_empty()
         {
-            out.push_str(&format!("- **Relevance:** {rel}\n"));
+            let _ = writeln!(out, "- **Relevance:** {rel}");
         }
         if let Some(body) = source.body() {
-            let preview = if body.chars().count() > 240 {
-                format!("{}…", body.chars().take(240).collect::<String>())
+            // Short-circuit: only count up to 241 chars to decide whether to
+            // truncate, avoiding a full O(n) scan of large bodies.
+            let needs_truncation = body.chars().take(241).count() > 240;
+            let preview = if needs_truncation {
+                let mut p = body.chars().take(240).collect::<String>();
+                p.push('\u{2026}');
+                p
             } else {
                 body.to_string()
             };

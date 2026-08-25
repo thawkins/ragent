@@ -11,6 +11,13 @@ use crate::source::Source;
 use crate::state::ResearchState;
 use async_trait::async_trait;
 use regex::Regex;
+use std::sync::OnceLock;
+
+static CITATION_RE: OnceLock<Regex> = OnceLock::new();
+
+fn citation_re() -> &'static Regex {
+    CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
+}
 
 /// Result of a verification pass.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -53,11 +60,9 @@ impl KeywordVerifier {
     pub const fn new() -> Self {
         Self
     }
-
     /// Extract citation indices from a finding body.
     fn cited_indices(finding: &str) -> Vec<usize> {
-        let re = Regex::new(r"\[#(\d+)\]").expect("valid citation regex");
-        let mut out: Vec<usize> = re
+        let mut out: Vec<usize> = citation_re()
             .captures_iter(finding)
             .filter_map(|cap| cap[1].parse().ok())
             .filter(|n| *n > 0)
@@ -68,11 +73,14 @@ impl KeywordVerifier {
     }
 
     /// Extract content words from a text, lowercased and deduplicated.
+    /// Filters out common stop words and tokens shorter than 4 characters
+    /// so the overlap check is a better proxy for genuine source support
+    /// (FUNC-ANL-07).
     fn words(text: &str) -> Vec<String> {
         let mut words: Vec<String> = text
             .to_lowercase()
             .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| w.len() >= 4)
+            .filter(|w| w.len() >= 4 && !is_stopword_lc(w))
             .map(std::string::ToString::to_string)
             .collect();
         words.sort_unstable();
@@ -81,14 +89,55 @@ impl KeywordVerifier {
     }
 
     /// Check whether `finding` is supported by `source`.
+    /// Requires at least two non-trivial content-word overlaps so that a
+    /// single shared common word does not cause a false pass (FUNC-ANL-07).
     fn supported_by(finding: &str, source: &Source) -> bool {
         let f_words = Self::words(finding);
         let Some(body) = source.body() else {
             return false;
         };
         let s_words = Self::words(body);
-        f_words.iter().any(|w| s_words.contains(w))
+        let overlap = f_words.iter().filter(|w| s_words.contains(w)).count();
+        // Require at least 2 shared content words, or 1 when the finding
+        // has very few content words total (short findings).
+        let min_overlap = if f_words.len() <= 2 { 1 } else { 2 };
+        overlap >= min_overlap
     }
+}
+
+/// Common English stop words used as a content-word filter in the verifier.
+/// Words shorter than 4 chars are already filtered by `words()`, so only
+/// longer function words are listed here.
+fn is_stopword_lc(word: &str) -> bool {
+    matches!(
+        word,
+        "this"
+            | "that"
+            | "these"
+            | "those"
+            | "what"
+            | "which"
+            | "who"
+            | "when"
+            | "where"
+            | "why"
+            | "how"
+            | "will"
+            | "would"
+            | "could"
+            | "should"
+            | "must"
+            | "have"
+            | "been"
+            | "being"
+            | "from"
+            | "they"
+            | "them"
+            | "their"
+            | "there"
+            | "your"
+            | "our"
+    )
 }
 
 #[async_trait]

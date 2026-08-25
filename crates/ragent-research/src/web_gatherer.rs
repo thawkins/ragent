@@ -205,6 +205,41 @@ fn fence_captured_body(body: &str) -> String {
     fence_source_body(body)
 }
 
+/// Build a short preview of `body` for progress display: strip fenced-code
+/// lines, then take the first `MIN_EXTRACTABLE_CONTENT_CHARS` characters.
+///
+/// Implemented as a single streaming pass so we avoid the intermediate
+/// `Vec<&str>` + `String::join` allocations of the previous multi-pass chain
+/// (PERF-WEB-02, PERF-WEB-04).
+fn body_preview_of(body: &str) -> String {
+    let mut out = String::with_capacity(MIN_EXTRACTABLE_CONTENT_CHARS);
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            continue;
+        }
+        if out.is_empty() {
+            out.push_str(line);
+        } else {
+            out.push('\n');
+            out.push_str(line);
+        }
+        // Track char count incrementally instead of re-counting the full
+        // string on every iteration (avoids O(n^2) for long lines).
+        if out.chars().count() >= MIN_EXTRACTABLE_CONTENT_CHARS {
+            break;
+        }
+    }
+    // Trim to exact cap if we overshot on the last push.
+    if out.chars().count() > MIN_EXTRACTABLE_CONTENT_CHARS {
+        out.truncate(
+            out.char_indices()
+                .nth(MIN_EXTRACTABLE_CONTENT_CHARS)
+                .map_or(out.len(), |(i, _)| i),
+        );
+    }
+    out
+}
+
 /// Result of a decomposed web-gathering pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GatherResult {
@@ -921,14 +956,7 @@ impl WebGatherer {
                 }
             };
             let relevance = format!("Vaulted — reused from {}", hit.run_tag);
-            let body_preview: String = body
-                .lines()
-                .filter(|l| !l.trim_start().starts_with("```"))
-                .collect::<Vec<_>>()
-                .join("\n")
-                .chars()
-                .take(MIN_EXTRACTABLE_CONTENT_CHARS)
-                .collect();
+            let body_preview = body_preview_of(&body);
             let kind = classify_web_source(&hit.url, None);
             match kind {
                 WebSourceKind::Pdf => pdf_count += 1,
@@ -1750,15 +1778,7 @@ impl WebGatherer {
                         );
                         continue;
                     }
-                    let body_preview: String = page
-                        .body
-                        .lines()
-                        .filter(|l| !l.trim_start().starts_with("```"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        .chars()
-                        .take(MIN_EXTRACTABLE_CONTENT_CHARS)
-                        .collect();
+                    let body_preview = body_preview_of(&page.body);
                     tracing::info!(
                         query = %query,
                         url = %page.url,

@@ -546,6 +546,23 @@ pub fn derive_title(topic: &str, from_url: Option<&str>) -> String {
 /// seed document rather than defaulting to `"Research"`.
 #[must_use]
 pub fn derive_title_full(topic: &str, from_url: Option<&str>, from_file: Option<&str>) -> String {
+    derive_title_files(
+        topic,
+        from_url,
+        &from_file
+            .map(std::string::ToString::to_string)
+            .into_iter()
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Derive a research item title with optional repeatable `--from-file` paths.
+///
+/// Same as [`derive_title`] but accepts zero or more local file paths. The
+/// first non-empty path is used as the title fallback when no topic or
+/// `--from-url` is supplied.
+#[must_use]
+pub fn derive_title_files(topic: &str, from_url: Option<&str>, from_files: &[String]) -> String {
     let trimmed = topic.trim();
     if !trimmed.is_empty() {
         return cap_title(trimmed, DERIVED_TITLE_MAX_CHARS);
@@ -553,7 +570,11 @@ pub fn derive_title_full(topic: &str, from_url: Option<&str>, from_file: Option<
     if let Some(url) = from_url.map(str::trim).filter(|s| !s.is_empty()) {
         return url.to_string();
     }
-    if let Some(path) = from_file.map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(path) = from_files
+        .iter()
+        .map(String::as_str)
+        .find(|s| !s.trim().is_empty())
+    {
         return path.to_string();
     }
     "Research".to_string()
@@ -834,11 +855,38 @@ mod tests {
         let title = derive_title("", Some("https://example.com/article"));
         assert_eq!(title, "https://example.com/article");
     }
-
     #[test]
     fn derive_title_falls_back_to_research_when_both_empty() {
         assert_eq!(derive_title("", None), "Research");
         assert_eq!(derive_title("   ", Some("")), "Research");
+    }
+
+    #[test]
+    fn derive_title_files_falls_back_to_first_path() {
+        assert_eq!(
+            derive_title_files("", None, &["docs/notes.md".to_string()]),
+            "docs/notes.md"
+        );
+    }
+
+    #[test]
+    fn derive_title_files_prefers_topic_then_url() {
+        assert_eq!(
+            derive_title_files(
+                "real topic",
+                Some("https://example.com"),
+                &["docs/notes.md".to_string()]
+            ),
+            "real topic"
+        );
+        assert_eq!(
+            derive_title_files(
+                "",
+                Some("https://example.com"),
+                &["docs/notes.md".to_string()]
+            ),
+            "https://example.com"
+        );
     }
 
     #[test]

@@ -31,8 +31,12 @@ use crate::state::{ResearchState, SubQuestionStatus};
 use crate::status::ResearchStatus;
 use chrono::{DateTime, Utc};
 use ragent_types::strutil::truncate_bytes;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::SystemTime;
 use thiserror::Error;
 
 /// Errors surfaced by [`ResearchManager`].
@@ -219,6 +223,11 @@ fn extract_one_line_summary(body: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct ResearchManager {
     research_root: PathBuf,
+    /// Mtime-keyed cache of parsed `ResearchItem` metadata to avoid redundant
+    /// disk reads and YAML re-parsing on repeated `show()`/`list()` calls
+    /// (PERF-MGR-02). Entries are invalidated when the file's mtime changes.
+    /// Wrapped in `Arc` so `ResearchManager` remains `Clone`.
+    item_cache: Arc<Mutex<HashMap<PathBuf, (SystemTime, ResearchItem)>>>,
 }
 
 impl ResearchManager {
@@ -226,6 +235,7 @@ impl ResearchManager {
     pub fn new(research_root: impl Into<PathBuf>) -> Self {
         Self {
             research_root: research_root.into(),
+            item_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -313,7 +323,7 @@ impl ResearchManager {
             if !research_md.is_file() {
                 continue;
             }
-            match Self::read_item_from_path(&research_md).await {
+            match self.read_item_cached(&research_md).await {
                 Ok(item) => {
                     if !include_archived && item.status == ResearchStatus::Archived {
                         continue;
@@ -345,7 +355,7 @@ impl ResearchManager {
             return Err(ResearchError::NotFound(name.to_string(), suggestions));
         }
         let path = ResearchIo::research_md_path(&self.research_root, &name);
-        Self::read_item_from_path(&path).await
+        self.read_item_cached(&path).await
     }
 
     // ── Delete (T-010) ────────────────────────────────────────────────────
@@ -372,14 +382,30 @@ impl ResearchManager {
 
     /// Transition a research item to a new status. Writes the updated
     /// frontmatter back to `RESEARCH.md` and refreshes the index.
+    ///
+    /// Reads the file once, splits frontmatter in-memory, and avoids the
+    /// previous double-read pattern (PERF-MGR-01).
     pub async fn transition_status(&self, name: &str, status: ResearchStatus) -> Result<()> {
-        let mut item = self.show(name).await?;
+        let name = ResearchName::try_new(name)?;
+        if !ResearchIo::item_exists(&self.research_root, &name).await {
+            let suggestions = self.suggest_closest(name.as_str()).await;
+            return Err(ResearchError::NotFound(name.to_string(), suggestions));
+        }
+        let path = ResearchIo::research_md_path(&self.research_root, &name);
+        // Single read: get the full content, split in-memory.
+        let content = ResearchIo::read_file(&path).await?;
+        let (frontmatter, body) = ResearchIo::split_frontmatter(&content);
+        let mut item =
+            ResearchItem::from_frontmatter(&frontmatter).map_err(|e| ResearchError::Parse {
+                name: name.to_string(),
+                message: e.to_string(),
+            })?;
         item.set_status(status);
-        let frontmatter = item.render_frontmatter();
-        let path = ResearchIo::research_md_path(&self.research_root, &item.name);
-        let body = Self::read_body_after_frontmatter(&path).await?;
-        let content = format!("{frontmatter}{body}");
-        ResearchIo::atomic_write(&path, &content).await?;
+        let new_frontmatter = item.render_frontmatter();
+        let new_content = format!("{new_frontmatter}{body}");
+        ResearchIo::atomic_write(&path, &new_content).await?;
+        // Invalidate the cache entry for this item.
+        self.invalidate_cache(&path);
         tracing::info!(
             name = %item.name,
             status = %status.as_str(),
@@ -717,6 +743,43 @@ impl ResearchManager {
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────
+
+    /// Read a research item from disk, using the mtime-keyed cache to skip
+    /// redundant file reads and YAML parsing when the file hasn't changed
+    /// (PERF-MGR-02). Falls back to a direct read on any cache miss or
+    /// mtime mismatch.
+    async fn read_item_cached(&self, path: &Path) -> Result<ResearchItem> {
+        // Check cache: if we have a fresh entry with matching mtime, return it.
+        let mtime = tokio::fs::metadata(path)
+            .await
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let Some(mtime) = mtime {
+            if let Ok(cache) = self.item_cache.lock() {
+                if let Some((cached_mtime, item)) = cache.get(path) {
+                    if *cached_mtime == mtime {
+                        return Ok(item.clone());
+                    }
+                }
+            }
+        }
+        // Cache miss: read and parse from disk.
+        let item = Self::read_item_from_path(path).await?;
+        // Store in cache if we have the mtime.
+        if let Some(mtime) = mtime {
+            if let Ok(mut cache) = self.item_cache.lock() {
+                cache.insert(path.to_path_buf(), (mtime, item.clone()));
+            }
+        }
+        Ok(item)
+    }
+
+    /// Invalidate the cache entry for the given path (e.g. after a write).
+    fn invalidate_cache(&self, path: &Path) {
+        if let Ok(mut cache) = self.item_cache.lock() {
+            cache.remove(path);
+        }
+    }
 
     async fn read_item_from_path(path: &Path) -> Result<ResearchItem> {
         let content = ResearchIo::read_file(path).await?;

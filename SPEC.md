@@ -4,7 +4,7 @@
 <h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
 
 <p style="margin-top: 4em; font-size: 1.1em;">
-    <strong>Version:</strong> 1.0.43</p>
+    <strong>Version:</strong> 1.0.58</p>
   <p style="font-size: 1.1em;">
     <strong>Date:</strong> 2026-08-21
   </p>
@@ -101,14 +101,14 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **beta** (v1.0.43). The core architecture, tool system,
+Ragent is in **beta** (v1.0.58). The core architecture, tool system,
 TUI, HTTP server, memory system, spec management, skills system, research system,
 multi-agent coordination, security layer, telemetry, code index semantic graph,
 and release packaging are
 functional and under active development. The specification below documents the
 current state of all subsystems.
 
-**Current Release Highlights (v1.0.34 → v1.0.43):**
+**Current Release Highlights (v1.0.44 → v1.0.58):**
 - **Code index semantic graph** — New `codeindex_godnodes`, `codeindex_path`,
   `codeindex_explain`, and `codeindex_communities` tools; typed edge graph with
   `calls`, `imports`, `inherits`, `references`, `mixes_in`, `implements` edges;
@@ -1201,7 +1201,11 @@ ragent serve --port 9100 --host 127.0.0.1
 | GET | `/providers` | List providers |
 | GET | `/agents` | List agents |
 | POST | `/opt` | Prompt optimization |
-| GET/POST/DELETE | `/research` | Research endpoints |
+| GET | `/research` | List research items |
+| POST | `/research` | Create + run a research gathering session (returns `202 Accepted` with `Location` header) |
+| GET | `/research/{name}` | Show one research item (supports `?full=true` for extended metadata) |
+| DELETE | `/research/{name}` | Delete a research item (requires `?confirm=delete-{name}`) |
+| GET | `/research/{name}/events` | SSE stream of live research events for a background run |
 
 ### 7.3 SSE Events
 
@@ -1216,6 +1220,7 @@ The server streams the following event types:
 | `compression_started` / `compression_finished` | Context compaction lifecycle |
 | `subagent_*` / `teammate_*` | Multi-agent lifecycle |
 | `agent_notice` | Status messages |
+| `research` | Research session events (phase, web capture, synthesis, analysis, done) — streamed via `GET /research/{name}/events` |
 
 ### 7.4 Authentication
 
@@ -1643,6 +1648,44 @@ The `--format` flag selects the artifact produced at the end of a session:
 | `executive-summary` | One-page summary. |
 | `comparison-table` | Comparison table across key entities. |
 | `source-bibliography` | Standalone bibliography of all captured sources. |
+| `imrad` | Introduction, Methods, Results, Discussion structure for academic-style reports. |
+
+### 11.8 Research Tiers
+
+The `--tier` flag selects the depth of analysis:
+
+| Tier | Description |
+|---|---|
+| `light` | Minimal analysis — web gathering + mechanical digest only. |
+| `full` | Full analysis pipeline — contradiction graph, loci analysis, reconcile, corpus critic, synthesis, QA (default). |
+| `dissertation` | Extended pipeline — includes depth investigations, source tensions, evidence digest, and width sweeps. |
+
+### 11.9 HTTP Research API
+
+The research system is exposed via REST endpoints (all auth-protected):
+
+- `GET /research` — list all research items as JSON (`{items: [...], count: N}`).
+- `POST /research` — create + run a research session. Returns `202 Accepted`
+  immediately with a `Location` header pointing to `GET /research/{name}/events`.
+  The research run executes in a background `tokio::spawn` task.
+- `GET /research/{name}` — show a single research item. Pass `?full=true` to
+  include extended metadata fields (`topic`, `queries`, `output_format`,
+  `model`).
+- `DELETE /research/{name}?confirm=delete-{name}` — delete a research item
+  (requires confirmation token).
+- `GET /research/{name}/events` — SSE stream of live research events. When no
+  active run exists but the item is on disk, returns a JSON status blob. Each
+  SSE event is a JSON object `{"kind": "...", "payload": {...}}` with event
+  type `research`.
+
+The `POST /research` request body mirrors `ResearchRunRequest`:
+`name`, `topic`, `title`, `from_urls`, `from_files`, `sources_dir`,
+`template`, `depth`, `tier`, `iterations`, `format`, `use_local`, `use_specs`,
+`use_low_relevance`, `no_scholarly`, `use_pdf`, `fetch_concurrency`,
+`local_concurrency`, `fetch_timeout_secs`, `web_phase_timeout_secs`,
+`local_phase_timeout_secs`, `search_max_retries`, `search_retry_base_delay_ms`,
+`search_circuit_breaker_threshold`, `max_web_results`, `max_local_sources`,
+`max_synthesis_sources`.
 
 ---
 # Part IV: Agent Customization & Extension

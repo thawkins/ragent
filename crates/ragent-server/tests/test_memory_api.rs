@@ -65,6 +65,7 @@ fn test_state(token: &str) -> AppState {
         auth_token: token.to_string(),
         rate_limiter: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         coordinator: None,
+        research_runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
     }
 }
 

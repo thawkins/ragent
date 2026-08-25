@@ -40,6 +40,7 @@ use ragent_agent::{
 
 use crate::sse::event_to_sse;
 use ragent_prompt_opt::{Completer, OptMethod, optimize};
+use ragent_research::SessionEvent;
 
 /// Shared application state passed to every Axum handler.
 #[derive(Clone)]
@@ -60,6 +61,10 @@ pub struct AppState {
     pub rate_limiter: Arc<tokio::sync::Mutex<HashMap<String, (u32, Instant)>>>,
     /// Optional in-process coordinator for orchestration features.
     pub coordinator: Option<ragent_agent::orchestrator::Coordinator>,
+    /// In-memory registry of running background research sessions.
+    /// Keyed by research name; stores the broadcast channel for SSE events.
+    pub research_runs:
+        Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::broadcast::Sender<SessionEvent>>>>,
 }
 
 /// Bind to `addr` and serve the ragent HTTP/SSE API.

@@ -15,7 +15,7 @@ fn config_snapshot_json_includes_output_format() {
         iterations: Some(3),
         tier: Some("full".to_string()),
         from_urls: Vec::new(),
-        from_file: None,
+        from_files: Vec::new(),
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.starts_with("ragent-research: "));
@@ -25,6 +25,7 @@ fn config_snapshot_json_includes_output_format() {
     assert!(rendered.contains("\"iterations\":3"));
     assert!(rendered.contains("\"tier\":\"full\""));
     assert!(rendered.contains("\"from_urls\":[]"));
+    assert!(rendered.contains("\"from_files\":[]"));
 }
 
 #[test]
@@ -35,7 +36,7 @@ fn config_snapshot_json_omits_optional_fields() {
         iterations: None,
         tier: None,
         from_urls: Vec::new(),
-        from_file: None,
+        from_files: Vec::new(),
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.contains("\"output_format\":\"report\""));
@@ -43,6 +44,7 @@ fn config_snapshot_json_omits_optional_fields() {
     assert!(rendered.contains("\"iterations\":null"));
     assert!(rendered.contains("\"tier\":null"));
     assert!(rendered.contains("\"from_urls\":[]"));
+    assert!(rendered.contains("\"from_files\":[]"));
 }
 
 #[test]
@@ -53,7 +55,7 @@ fn config_snapshot_json_includes_from_urls() {
         iterations: None,
         tier: None,
         from_urls: vec!["https://example.com/page".to_string()],
-        from_file: None,
+        from_files: Vec::new(),
     };
     let rendered = render_session_event_json(&event);
     assert!(rendered.contains("\"output_format\":\"executive-summary\""));
@@ -71,7 +73,7 @@ fn config_snapshot_json_includes_multiple_from_urls() {
             "https://example.com/page1".to_string(),
             "https://example.com/page2".to_string(),
         ],
-        from_file: None,
+        from_files: Vec::new(),
     };
     let rendered = render_session_event_json(&event);
     assert!(
@@ -79,4 +81,32 @@ fn config_snapshot_json_includes_multiple_from_urls() {
             "\"from_urls\":[\"https://example.com/page1\",\"https://example.com/page2\"]"
         )
     );
+}
+
+#[test]
+fn config_snapshot_json_includes_from_files() {
+    let event = SessionEvent::ConfigSnapshot {
+        output_format: OutputFormat::Report.as_str().to_string(),
+        depth: None,
+        iterations: None,
+        tier: None,
+        from_urls: Vec::new(),
+        from_files: vec!["docs/notes.md".to_string()],
+    };
+    let rendered = render_session_event_json(&event);
+    assert!(rendered.contains("\"from_files\":[\"docs/notes.md\"]"));
+}
+
+#[test]
+fn config_snapshot_json_includes_multiple_from_files() {
+    let event = SessionEvent::ConfigSnapshot {
+        output_format: OutputFormat::Report.as_str().to_string(),
+        depth: None,
+        iterations: None,
+        tier: None,
+        from_urls: Vec::new(),
+        from_files: vec!["docs/notes.md".to_string(), "assets/paper.pdf".to_string()],
+    };
+    let rendered = render_session_event_json(&event);
+    assert!(rendered.contains("\"from_files\":[\"docs/notes.md\",\"assets/paper.pdf\"]"));
 }

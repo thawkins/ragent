@@ -2134,6 +2134,9 @@ Usage: `/log [clear subagents|panics|research|editlog|logwindow|help]`",
                     // `/task` (no args) toggles the Tasks side panel.
                     self.show_tasks_panel = !self.show_tasks_panel;
                     if self.show_tasks_panel {
+                        // Force a cache refresh on the next render so the
+                        // panel shows current data when first shown.
+                        self.tasks_cache_dirty = true;
                         self.show_log = false;
                         self.show_profile = false;
                         self.show_memory = false;
@@ -2144,6 +2147,7 @@ Usage: `/log [clear subagents|panics|research|editlog|logwindow|help]`",
                     } else {
                         "tasks panel hidden".to_string()
                     };
+                    self.needs_redraw = true;
                 } else {
                     let sub = args.split_whitespace().next().unwrap_or("");
                     let rest = args
@@ -2931,6 +2935,10 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 }
                 let status_filter = if args.is_empty() { None } else { Some(args) };
                 self.render_task_list(status_filter, "tasks");
+                // /tasks reads task data; refresh the side-panel cache if it
+                // is visible so the two views stay in sync.
+                self.tasks_cache_dirty = true;
+                self.needs_redraw = true;
             }
             "mcp" => {
                 let mcp_args: Vec<&str> = args.split_whitespace().collect();
@@ -7467,6 +7475,9 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                                 std::collections::HashMap::new(),
                             )),
                             coordinator: None,
+                            research_runs: std::sync::Arc::new(tokio::sync::Mutex::new(
+                                std::collections::HashMap::new(),
+                            )),
                         };
 
                         let addr_clone = addr.clone();

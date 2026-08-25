@@ -13,7 +13,7 @@
 
 pub use ragent_research::session::SessionPhase;
 
-use ragent_research::session::{SessionEvent, SynthesizeOutcome};
+use ragent_research::session::{AnalysisEvent, SessionEvent, SynthesisEvent, SynthesizeOutcome};
 
 use crate::app::sanitize_for_display;
 /// Sentinel prefix marking an [`Event::AgentNotice`] message as a research
@@ -358,7 +358,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::SynthesizeResult { outcome, detail } => {
+            SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { outcome, detail }) => {
                 let detail = match (outcome, detail) {
                     (SynthesizeOutcome::Llm, _) => "LLM analysis applied".to_string(),
                     (SynthesizeOutcome::FallbackEmpty, _) => {
@@ -430,7 +430,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 iterations,
                 tier,
                 from_urls,
-                from_file,
+                from_files,
             } => {
                 let mut parts = vec![format!("output format: {output_format}")];
                 if let Some(t) = tier {
@@ -450,8 +450,13 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                         .join(", ");
                     parts.push(format!("from-url: {urls_display}"));
                 }
-                if let Some(path) = from_file {
-                    parts.push(format!("from-file: {}", sanitize_for_display(path)));
+                if !from_files.is_empty() {
+                    let files_display = from_files
+                        .iter()
+                        .map(|p| sanitize_for_display(p))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!("from-file: {files_display}"));
                 }
                 (
                     SessionPhase::Setup,
@@ -463,7 +468,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     0,
                 )
             }
-            SessionEvent::SynthesisAudit { audit } => (
+            SessionEvent::Synthesis(SynthesisEvent::SynthesisAudit { audit }) => (
                 SessionPhase::Synthesize,
                 "done",
                 format!(
@@ -475,7 +480,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::CorpusCritic { report } => (
+            SessionEvent::Analysis(AnalysisEvent::CorpusCritic { report }) => (
                 SessionPhase::Synthesize,
                 "done",
                 format!(
@@ -490,7 +495,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::GapFetch { result } => (
+            SessionEvent::Analysis(AnalysisEvent::GapFetch { result }) => (
                 SessionPhase::Synthesize,
                 "done",
                 format!(
@@ -504,7 +509,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::SurgicalPatch { result } => (
+            SessionEvent::Synthesis(SynthesisEvent::SurgicalPatch { result }) => (
                 SessionPhase::Synthesize,
                 "done",
                 format!(
@@ -519,7 +524,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::CiteCheck { result } => (
+            SessionEvent::Synthesis(SynthesisEvent::CiteCheck { result }) => (
                 SessionPhase::Synthesize,
                 if result.passed { "done" } else { "error" },
                 format!(
@@ -537,7 +542,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::Polish { result } => (
+            SessionEvent::Synthesis(SynthesisEvent::Polish { result }) => (
                 SessionPhase::Synthesize,
                 "done",
                 format!(
@@ -551,7 +556,7 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            SessionEvent::ReadabilityAudit { result } => (
+            SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit { result }) => (
                 SessionPhase::Synthesize,
                 if result.passed { "done" } else { "error" },
                 format!(
@@ -783,10 +788,10 @@ mod tests {
         let encoded = encode_progress_event(
             "foo",
             "bar",
-            &SessionEvent::SynthesizeResult {
+            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
                 outcome: SynthesizeOutcome::Llm,
                 detail: None,
-            },
+            }),
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert_eq!(decoded.phase, SessionPhase::Synthesize);
@@ -799,10 +804,10 @@ mod tests {
         let encoded = encode_progress_event(
             "foo",
             "bar",
-            &SessionEvent::SynthesizeResult {
+            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
                 outcome: SynthesizeOutcome::FallbackError,
                 detail: Some("provider returned 401".into()),
-            },
+            }),
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert!(decoded.detail.contains("provider returned 401"));
@@ -814,10 +819,10 @@ mod tests {
         let encoded = encode_progress_event(
             "foo",
             "bar",
-            &SessionEvent::SynthesizeResult {
+            &SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult {
                 outcome: SynthesizeOutcome::NoLlm,
                 detail: None,
-            },
+            }),
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert!(decoded.detail.contains("no LLM engine configured"));
@@ -828,7 +833,7 @@ mod tests {
         let encoded = encode_progress_event(
             "foo",
             "bar",
-            &SessionEvent::Polish {
+            &SessionEvent::Synthesis(SynthesisEvent::Polish {
                 result: ragent_research::PolishResult {
                     changes: vec![ragent_research::PolishChange {
                         field: "summary".into(),
@@ -839,7 +844,7 @@ mod tests {
                     empty_paragraphs_removed: 3,
                     note: "Polished".into(),
                 },
-            },
+            }),
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert_eq!(decoded.phase, SessionPhase::Synthesize);
@@ -850,7 +855,7 @@ mod tests {
         let encoded = encode_progress_event(
             "foo",
             "bar",
-            &SessionEvent::ReadabilityAudit {
+            &SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit {
                 result: ragent_research::ReadabilityAudit {
                     score: 85,
                     passed: true,
@@ -860,7 +865,7 @@ mod tests {
                     missing_label_count: 0,
                     long_paragraph_count: 0,
                 },
-            },
+            }),
         );
         let decoded = decode_progress_event(&encoded).expect("decode");
         assert_eq!(decoded.phase, SessionPhase::Synthesize);

@@ -71,13 +71,14 @@ pub enum ResearchCommands {
         /// flag to seed multiple pages.
         #[arg(long, value_name = "URL")]
         from_urls: Vec<String>,
-        /// Extract a local document file and use its content as the research
-        /// subject in place of an explicit topic. Supported formats: PDF,
-        /// DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, and MD. The extracted
-        /// content is captured as the primary source; web search still
-        /// runs using the derived topic.
+        /// Extract one or more local documents and use their content as the
+        /// research subject in place of (or alongside) an explicit topic.
+        /// Supported formats: PDF, DOCX, XLSX, PPTX, ODT, ODS, ODP, TXT, and
+        /// MD. The extracted content is captured as the primary source; web
+        /// search still runs using the derived topic. Repeat the flag to
+        /// seed multiple files.
         #[arg(long, value_name = "PATH")]
-        from_file: Option<String>,
+        from_files: Vec<String>,
         /// Number of gathering iterations
         #[arg(long)]
         iterations: Option<u32>,
@@ -181,6 +182,14 @@ pub enum ResearchCommands {
         /// Research name
         name: String,
     },
+    /// Resume an in-progress research item, optionally with a follow-up message
+    Continue {
+        /// Research name
+        name: String,
+        /// Optional follow-up message to add to the research plan
+        #[arg(value_name = "MESSAGE", trailing_var_arg = true, num_args = 0..)]
+        message: Vec<String>,
+    },
 }
 
 /// Dispatch `ragent research …` sub-commands to the `ragent-research`
@@ -192,10 +201,19 @@ pub async fn handle_research_command(
     active_model: Option<ragent_agent::agent::ModelRef>,
 ) -> Result<()> {
     use ragent_research::cli::ResearchCliCommand;
-    use ragent_research::{
-        Depth, OutputFormat, ResearchManager, SessionConfig, SessionEvent, SessionObserver, Tier,
-    };
+    use ragent_research::{ResearchManager, SessionEvent, SessionObserver};
     use std::sync::Arc;
+
+    // Wire the session through a streaming JSON observer so the CLI consumer
+    // (e.g. `jq -R '.payload'`) can pipe the output. Shared by both the
+    // `create` and `continue` subcommands.
+    struct CliObserver;
+    impl SessionObserver for CliObserver {
+        fn on_event(&self, event: SessionEvent) {
+            println!("{}", ragent_research::render_session_event_json(&event));
+        }
+    }
+
     let working_dir = std::env::current_dir()?;
     let research_root = working_dir.join("research");
     let manager = ResearchManager::new(&research_root);
@@ -205,7 +223,7 @@ pub async fn handle_research_command(
             name,
             topic,
             from_urls,
-            from_file,
+            from_files,
             iterations,
             depth,
             tier,
@@ -227,7 +245,7 @@ pub async fn handle_research_command(
             search_circuit_breaker_threshold,
         } => {
             let topic = topic.join(" ");
-            if topic.is_empty() && from_urls.is_empty() && from_file.is_none() {
+            if topic.is_empty() && from_urls.is_empty() && from_files.is_empty() {
                 eprintln!(
                     "ragent-research: usage: ragent research create <name> <topic...> [--from-url <URL>] [--from-file <PATH>]"
                 );
@@ -237,7 +255,7 @@ pub async fn handle_research_command(
                 name,
                 topic,
                 from_urls,
-                from_file,
+                from_files,
                 iterations,
                 depth,
                 tier,
@@ -267,6 +285,14 @@ pub async fn handle_research_command(
         ResearchCommands::Show { name } => ResearchCliCommand::Show { name },
         ResearchCommands::Delete { name, yes } => ResearchCliCommand::Delete { name, yes },
         ResearchCommands::Archive { name } => ResearchCliCommand::Archive { name },
+        ResearchCommands::Continue { name, message } => ResearchCliCommand::Continue {
+            name,
+            message: if message.is_empty() {
+                None
+            } else {
+                Some(message.join(" "))
+            },
+        },
     };
     match cli_cmd {
         ResearchCliCommand::Help => {
@@ -350,7 +376,7 @@ pub async fn handle_research_command(
             name,
             topic,
             from_urls,
-            from_file,
+            from_files,
             iterations,
             depth,
             tier,
@@ -371,73 +397,44 @@ pub async fn handle_research_command(
             search_retry_base_delay_ms,
             search_circuit_breaker_threshold,
         } => {
-            // Wire the session through a streaming JSON observer so the
-            // CLI consumer (e.g. `jq -R '.payload'`) can pipe the output.
-            struct CliObserver;
-            impl SessionObserver for CliObserver {
-                fn on_event(&self, event: SessionEvent) {
-                    println!("{}", ragent_research::render_session_event_json(&event));
-                }
-            }
             // Derive a human-readable item title that summarises the topic
             // (rather than truncating to its first word). Falls back to the
-            // URL when only `--from-url` was supplied, then the file path
-            // when only `--from-file` was supplied, then to "Research".
-            let title = ragent_research::derive_title_full(
+            // URL when only `--from-url` was supplied, then the first file
+            // path when only `--from-file` was supplied, then to "Research".
+            let title = ragent_research::derive_title_files(
                 &topic,
                 from_urls.first().map(String::as_str),
-                from_file.as_deref(),
+                &from_files,
             );
             let config_arc = ragent_config::Config::load().ok().map(Arc::new);
-            // Surface the research.* ragent.json config so the CLI honours
-            // FR-011/FR-012 (open-access recovery) even when the caller did
-            // not pass any flags.
-            let (cfg_oa, cfg_contact_email, cfg_oa_min) = config_arc
-                .as_deref()
-                .map(|c| {
-                    (
-                        c.research.open_access_recovery,
-                        c.research.contact_email.clone(),
-                        c.research.oa_min_full_text_chars,
-                    )
-                })
-                .unwrap_or((false, None, ragent_research::DEFAULT_OA_MIN_FULL_TEXT_CHARS));
-            let config = SessionConfig {
-                topic: topic.clone(),
+            let req = ragent_research::ResearchRunRequest {
+                name: name.clone(),
+                topic,
+                title: Some(title.clone()),
                 from_urls,
-                from_file: from_file.map(std::path::PathBuf::from),
-                sources_dir: sources_dir.map(std::path::PathBuf::from),
+                from_files,
+                sources_dir,
                 template,
-                disable_local: !use_local,
-                disable_specs: !use_specs,
-                fetch_concurrency: fetch_concurrency
-                    .unwrap_or(ragent_research::DEFAULT_FETCH_CONCURRENCY),
-                local_concurrency: local_concurrency
-                    .unwrap_or(ragent_research::DEFAULT_LOCAL_CONCURRENCY),
-                fetch_timeout_secs: fetch_timeout_secs
-                    .unwrap_or(ragent_research::DEFAULT_FETCH_TIMEOUT.as_secs()),
-                depth: depth.as_deref().and_then(Depth::parse),
-                tier: tier.as_deref().and_then(Tier::parse).unwrap_or(Tier::Full),
+                depth,
+                tier,
                 iterations,
-                output_format: format.as_deref().map_or(OutputFormat::Report, |s| {
-                    OutputFormat::parse(s).unwrap_or(OutputFormat::Report)
-                }),
+                output_format: format,
+                use_local,
+                use_specs,
                 use_low_relevance,
-                disable_scholarly: no_papers,
-                use_pdf_web_sources: use_pdf,
+                no_scholarly: no_papers,
+                use_pdf,
+                fetch_concurrency,
+                local_concurrency,
+                fetch_timeout_secs,
                 web_phase_timeout_secs,
                 local_phase_timeout_secs,
-                search_max_retries: search_max_retries
-                    .unwrap_or(ragent_research::DEFAULT_SEARCH_MAX_RETRIES),
-                search_retry_base_delay_ms: search_retry_base_delay_ms
-                    .unwrap_or(ragent_research::DEFAULT_SEARCH_RETRY_BASE_DELAY_MS),
-                search_circuit_breaker_threshold: search_circuit_breaker_threshold
-                    .unwrap_or(ragent_research::DEFAULT_SEARCH_CIRCUIT_BREAKER_THRESHOLD),
-                open_access_recovery: cfg_oa,
-                contact_email: cfg_contact_email,
-                oa_min_full_text_chars: cfg_oa_min,
-                ..SessionConfig::default()
+                search_max_retries,
+                search_retry_base_delay_ms,
+                search_circuit_breaker_threshold,
+                ..Default::default()
             };
+            let config = ragent_research::build_session_config(&req, config_arc.as_deref());
             // Build a full research session backed by the default tool
             // registry so the CLI can capture web sources when a search API
             // key is available, as well as local in-project sources.
@@ -490,10 +487,64 @@ pub async fn handle_research_command(
             }
         }
         ResearchCliCommand::Continue { name, message } => {
-            eprintln!("ragent-research: continue is not yet supported from the CLI; use the TUI.");
-            let _ = name;
-            let _ = message;
-            std::process::exit(2);
+            // Resume an in-progress research item. The manager adds the
+            // follow-up message to the plan and marks the item InProgress;
+            // then we re-run the session to gather and synthesize.
+            match manager.continue_item(&name, message.as_deref()).await {
+                Ok(state) => {
+                    let topic = state.plan.topic.clone();
+                    let title = name.clone();
+                    eprintln!(
+                        "ragent-research: resuming research/{} — topic: {}",
+                        name, topic
+                    );
+                    // Build and run the research session.
+                    let req = ragent_research::ResearchRunRequest {
+                        name: name.clone(),
+                        topic,
+                        from_urls: Vec::new(),
+                        from_files: Vec::new(),
+                        title: Some(title.clone()),
+                        ..Default::default()
+                    };
+                    let config = ragent_research::build_session_config(&req, None);
+                    let tool_registry = Arc::new(ragent_agent::tool::create_default_registry());
+                    let event_bus = Arc::new(EventBus::new(256));
+                    let storage = Arc::new(Storage::open_in_memory()?);
+                    let session = ragent_agent::research_adapter::build_research_session(
+                        &tool_registry,
+                        manager.clone(),
+                        name.clone(),
+                        working_dir.clone(),
+                        event_bus,
+                        Some(storage),
+                        None,
+                        Some(Arc::new(ragent_agent::provider::create_default_registry())),
+                        active_model.clone(),
+                        Some(name.as_str()),
+                    );
+                    match session
+                        .run(&name, &title, &config, Arc::new(CliObserver))
+                        .await
+                    {
+                        Ok(outcome) => {
+                            println!(
+                                "ragent-research: continued research/{} ({} sources)",
+                                outcome.research_name,
+                                outcome.sources.len()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("ragent-research: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("ragent-research: {e}");
+                    std::process::exit(1);
+                }
+            }
         }
         ResearchCliCommand::Unknown(sub) => {
             eprintln!("ragent-research: unknown subcommand '{sub}'. Try `ragent research help`.");

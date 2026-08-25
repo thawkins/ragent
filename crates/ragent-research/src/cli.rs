@@ -25,12 +25,14 @@ pub enum ResearchCliCommand {
         /// web-search phase still runs using the derived topic. Repeat the
         /// flag to seed multiple pages.
         from_urls: Vec<String>,
-        /// `--from-file <PATH>`: extract the local document and use its content
-        /// as the research subject in place of (or alongside) an explicit
-        /// topic. The extracted content is captured as the primary
-        /// `Source::Other`; the normal web-search phase still runs using the
-        /// derived topic.
-        from_file: Option<String>,
+        /// `--from-file <PATH>`: extract one or more local documents and use their
+        /// content as research subjects in place of (or alongside) an explicit
+        /// topic. The extracted content from each file is captured as the
+        /// primary `Source::Other`; the normal web-search phase still runs using
+        /// the derived topic. Repeat the flag to seed multiple files. If any
+        /// referenced file is a PDF, PDF web sources are automatically enabled
+        /// for the gather phase.
+        from_files: Vec<String>,
         /// Optional FR-010 `--iterations N` override.
         iterations: Option<u32>,
         /// Optional FR-011 `--depth shallow|standard|deep`.
@@ -191,7 +193,7 @@ impl ResearchCliCommand {
                         name,
                         topic,
                         from_urls: Vec::new(),
-                        from_file: None,
+                        from_files: Vec::new(),
                         iterations: None,
                         depth: None,
                         format: None,
@@ -228,7 +230,7 @@ impl ResearchCliCommand {
         let mut name: Option<String> = None;
         let mut topic_words: Vec<&str> = Vec::new();
         let mut from_urls: Vec<String> = Vec::new();
-        let mut from_file: Option<String> = None;
+        let mut from_files: Vec<String> = Vec::new();
         let mut iterations: Option<u32> = None;
         let mut depth: Option<String> = None;
         let mut tier: Option<String> = None;
@@ -261,7 +263,7 @@ impl ResearchCliCommand {
                 }
                 "--from-file" => {
                     if let Some(v) = rest.get(i + 1) {
-                        from_file = Some((*v).to_string());
+                        from_files.push((*v).to_string());
                         i += 2;
                     } else {
                         i += 1;
@@ -417,7 +419,7 @@ impl ResearchCliCommand {
             name,
             topic,
             from_urls,
-            from_file,
+            from_files,
             iterations,
             depth,
             tier,
@@ -512,6 +514,10 @@ impl ResearchCliCommand {
                                                                  in place of (or alongside) an explicit topic. Each page is captured\n\
                                                                  as a primary source; web search still runs. Repeat the flag to seed\n\
                                                                  multiple pages.\n\
+                                           --from-file           Extract one or more local documents and use their content as the research subject\n\
+                                                                 in place of (or alongside) an explicit topic. Each file is captured\n\
+                                                                 as a primary source; web search still runs. Repeat the flag to seed\n\
+                                                                 multiple files. PDF files automatically enable PDF web sources.\n\
                                          --iterations          Override the default maximum number of iterations.\n\
                                          --depth               Choose a preset: shallow, standard, or deep (default: standard).\n\
                                          --tier                Choose a research tier: light, full, or dissertation (default: full).\n\
@@ -544,12 +550,14 @@ impl ResearchCliCommand {
     }
 }
 
-/// Render a [`SessionEvent`] as a single machine-readable JSON line on stdout
-/// (T-035). The prefix `ragent-research:` makes the line easy to grep in a
-/// mixed transcript.
+/// Render a [`SessionEvent`] as a pure JSON string (no CLI prefix).
+///
+/// This is the shared serialization core used by both the CLI line renderer
+/// ([`render_session_event_json`]) and the HTTP SSE handler. The result is
+/// always a valid JSON object of the form `{"kind": "...", "payload": {...}}`.
 #[must_use]
-pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String {
-    use crate::session::SessionEvent;
+pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
+    use crate::session::{AnalysisEvent, SessionEvent, SynthesisEvent};
     let (kind, payload) = match event {
         SessionEvent::Phase { phase } => ("phase", serde_json::json!({ "phase": phase.as_str() })),
         SessionEvent::QueriesDecomposed { queries } => {
@@ -620,7 +628,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "error": error,
             }),
         ),
-        SessionEvent::CriticResult { score, gaps } => (
+        SessionEvent::Synthesis(SynthesisEvent::CriticResult { score, gaps }) => (
             "critic",
             serde_json::json!({
                 "score": score,
@@ -645,67 +653,67 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             "follow_up_queries",
             serde_json::json!({ "queries": queries }),
         ),
-        SessionEvent::ContradictionGraph {
+        SessionEvent::Analysis(AnalysisEvent::ContradictionGraph {
             edges,
             sources_scanned,
-        } => (
+        }) => (
             "contradiction_graph",
             serde_json::json!({
                 "sources_scanned": sources_scanned,
                 "edges": edges,
             }),
         ),
-        SessionEvent::LociAnalysis {
+        SessionEvent::Analysis(AnalysisEvent::LociAnalysis {
             loci,
             sources_scanned,
-        } => (
+        }) => (
             "loci_analysis",
             serde_json::json!({
                 "sources_scanned": sources_scanned,
                 "loci": loci,
             }),
         ),
-        SessionEvent::DepthInvestigation { investigations } => (
+        SessionEvent::Analysis(AnalysisEvent::DepthInvestigation { investigations }) => (
             "depth_investigation",
             serde_json::json!({
                 "investigations": investigations,
             }),
         ),
-        SessionEvent::CrossLocusReconcile { reconcile } => (
+        SessionEvent::Analysis(AnalysisEvent::CrossLocusReconcile { reconcile }) => (
             "cross_locus_reconcile",
             serde_json::json!({
                 "sources_scanned": reconcile.sources_scanned,
                 "pairs": reconcile.pairs,
             }),
         ),
-        SessionEvent::SourceTensions { tensions } => (
+        SessionEvent::Analysis(AnalysisEvent::SourceTensions { tensions }) => (
             "source_tensions",
             serde_json::json!({
                 "sources_scanned": tensions.sources_scanned,
                 "tensions": tensions.tensions,
             }),
         ),
-        SessionEvent::EvidenceDigest { digest } => (
+        SessionEvent::Analysis(AnalysisEvent::EvidenceDigest { digest }) => (
             "evidence_digest",
             serde_json::json!({
                 "sources_scanned": digest.sources_scanned,
                 "claims": digest.claims,
             }),
         ),
-        SessionEvent::TripleDraft { draft } => (
+        SessionEvent::Analysis(AnalysisEvent::TripleDraft { draft }) => (
             "triple_draft",
             serde_json::json!({
                 "candidates": draft.candidates,
             }),
         ),
-        SessionEvent::SynthesizeResult { outcome, detail } => (
+        SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { outcome, detail }) => (
             "synthesize",
             serde_json::json!({
                 "outcome": outcome.as_str(),
                 "detail": detail,
             }),
         ),
-        SessionEvent::SynthesisAudit { audit } => (
+        SessionEvent::Synthesis(SynthesisEvent::SynthesisAudit { audit }) => (
             "synthesis_audit",
             serde_json::json!({
                 "overall_score": audit.overall_score,
@@ -714,7 +722,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "sources_used": audit.sources_used,
             }),
         ),
-        SessionEvent::CorpusCritic { report } => (
+        SessionEvent::Analysis(AnalysisEvent::CorpusCritic { report }) => (
             "corpus_critic",
             serde_json::json!({
                 "score": report.score,
@@ -727,7 +735,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "gaps": report.gaps,
             }),
         ),
-        SessionEvent::GapFetch { result } => (
+        SessionEvent::Analysis(AnalysisEvent::GapFetch { result }) => (
             "gap_fetch",
             serde_json::json!({
                 "attempted": result.attempted,
@@ -737,7 +745,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "note": result.note,
             }),
         ),
-        SessionEvent::SurgicalPatch { result } => (
+        SessionEvent::Synthesis(SynthesisEvent::SurgicalPatch { result }) => (
             "surgical_patch",
             serde_json::json!({
                 "score_before": result.score_before,
@@ -749,7 +757,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "patched_open_question_count": result.patched_open_question_count,
             }),
         ),
-        SessionEvent::CiteCheck { result } => (
+        SessionEvent::Synthesis(SynthesisEvent::CiteCheck { result }) => (
             "cite_check",
             serde_json::json!({
                 "passed": result.passed,
@@ -759,7 +767,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "failed_claims": result.failed_claims,
             }),
         ),
-        SessionEvent::Polish { result } => (
+        SessionEvent::Synthesis(SynthesisEvent::Polish { result }) => (
             "polish",
             serde_json::json!({
                 "control_chars_removed": result.control_chars_removed,
@@ -769,7 +777,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "note": result.note,
             }),
         ),
-        SessionEvent::ReadabilityAudit { result } => (
+        SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit { result }) => (
             "readability_audit",
             serde_json::json!({
                 "score": result.score,
@@ -825,7 +833,7 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
             iterations,
             tier,
             from_urls,
-            from_file,
+            from_files,
         } => (
             "config",
             serde_json::json!({
@@ -834,18 +842,23 @@ pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String
                 "iterations": iterations,
                 "tier": tier,
                 "from_urls": from_urls,
-                "from_file": from_file,
+                "from_files": from_files,
             }),
         ),
     };
-    format!(
-        "ragent-research: {}",
-        serde_json::to_string(&serde_json::json!({
-            "kind": kind,
-            "payload": payload,
-        }))
-        .unwrap_or_else(|_| "{}".to_string())
-    )
+    serde_json::to_string(&serde_json::json!({
+        "kind": kind,
+        "payload": payload,
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Render a [`SessionEvent`] as a single machine-readable JSON line on stdout
+/// (T-035). The prefix `ragent-research:` makes the line easy to grep in a
+/// mixed transcript.
+#[must_use]
+pub fn render_session_event_json(event: &crate::session::SessionEvent) -> String {
+    format!("ragent-research: {}", session_event_json(event))
 }
 
 /// Pretty-print a research item (T-034: `ragent research show`).
@@ -1096,6 +1109,7 @@ async fn walk(root: &Path, dir: &Path, ext: &str, out: &mut Vec<PathBuf>) -> any
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{AnalysisEvent, SynthesisEvent};
 
     #[test]
     fn parse_help() {
@@ -1584,6 +1598,50 @@ mod tests {
         }
     }
     #[test]
+    fn parse_create_with_from_file() {
+        let cmd = ResearchCliCommand::parse("create myitem --from-file docs/notes.md");
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_files,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "");
+                assert_eq!(from_files, vec!["docs/notes.md".to_string()]);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn parse_create_with_multiple_from_files() {
+        let cmd = ResearchCliCommand::parse(
+            "create myitem --from-file docs/notes.md --from-file assets/paper.pdf",
+        );
+        match cmd {
+            ResearchCliCommand::Create {
+                name,
+                topic,
+                from_files,
+                ..
+            } => {
+                assert_eq!(name, "myitem");
+                assert_eq!(topic, "");
+                assert_eq!(
+                    from_files,
+                    vec!["docs/notes.md".to_string(), "assets/paper.pdf".to_string()]
+                );
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+    #[test]
+    fn help_message_documents_from_file_flag() {
+        let h = ResearchCliCommand::build_help_message();
+        assert!(h.contains("--from-file"), "help missing `--from-file`: {h}");
+    }
+    #[test]
     fn help_message_documents_from_url_flag() {
         let h = ResearchCliCommand::build_help_message();
         assert!(h.contains("--from-url"), "help missing `--from-url`: {h}");
@@ -1640,10 +1698,10 @@ mod tests {
 
     #[test]
     fn render_session_event_json_for_critic_and_verification() {
-        let event = crate::session::SessionEvent::CriticResult {
+        let event = crate::session::SessionEvent::Synthesis(SynthesisEvent::CriticResult {
             score: Some(72),
             gaps: vec!["missing citation".into()],
-        };
+        });
         let line = render_session_event_json(&event);
         assert!(line.contains("\"critic\""));
         assert!(line.contains("72"));
@@ -1727,10 +1785,10 @@ mod tests {
             note: "opposing performance claims".into(),
             strength: 50,
         };
-        let event = crate::session::SessionEvent::ContradictionGraph {
+        let event = crate::session::SessionEvent::Analysis(AnalysisEvent::ContradictionGraph {
             sources_scanned: 2,
             edges: vec![edge],
-        };
+        });
         let line = render_session_event_json(&event);
         assert!(line.contains("contradiction_graph"));
         assert!(line.contains("\"sources_scanned\":2"));
@@ -1750,9 +1808,9 @@ mod tests {
             }],
             sources_scanned: 2,
         };
-        let event = crate::session::SessionEvent::EvidenceDigest {
+        let event = crate::session::SessionEvent::Analysis(AnalysisEvent::EvidenceDigest {
             digest: digest.clone(),
-        };
+        });
         let line = render_session_event_json(&event);
         assert!(line.contains("evidence_digest"));
         assert!(line.contains(r#""sources_scanned":2"#));
@@ -1766,7 +1824,7 @@ mod tests {
                 note: "consensus-leaning draft".into(),
             }],
         };
-        let event = crate::session::SessionEvent::TripleDraft { draft };
+        let event = crate::session::SessionEvent::Analysis(AnalysisEvent::TripleDraft { draft });
         let line = render_session_event_json(&event);
         assert!(line.contains("triple_draft"));
         assert!(line.contains(r#""candidates""#));
@@ -1789,7 +1847,7 @@ mod tests {
             isolated_sources: Vec::new(),
             passed: true,
         };
-        let event = crate::session::SessionEvent::CorpusCritic { report };
+        let event = crate::session::SessionEvent::Analysis(AnalysisEvent::CorpusCritic { report });
         let line = render_session_event_json(&event);
         assert!(line.contains("corpus_critic"));
         assert!(line.contains(r#""score":65"#));
@@ -1802,7 +1860,7 @@ mod tests {
             attempted: true,
             note: "no web gatherer configured; gap-fill fetch skipped".into(),
         };
-        let event = crate::session::SessionEvent::GapFetch { result };
+        let event = crate::session::SessionEvent::Analysis(AnalysisEvent::GapFetch { result });
         let line = render_session_event_json(&event);
         assert!(line.contains("gap_fetch"));
         assert!(line.contains(r#""attempted":true"#));
@@ -1826,7 +1884,8 @@ mod tests {
             patched_implication_count: 0,
             patched_open_question_count: 1,
         };
-        let event = crate::session::SessionEvent::SurgicalPatch { result };
+        let event =
+            crate::session::SessionEvent::Synthesis(SynthesisEvent::SurgicalPatch { result });
         let line = render_session_event_json(&event);
         assert!(line.contains("surgical_patch"));
         assert!(line.contains(r#""score_before":55"#));
@@ -1843,9 +1902,9 @@ mod tests {
             issues: Vec::new(),
             gate_open: true,
         };
-        let event = crate::session::SessionEvent::CiteCheck {
+        let event = crate::session::SessionEvent::Synthesis(SynthesisEvent::CiteCheck {
             result: result.clone(),
-        };
+        });
         let line = render_session_event_json(&event);
         assert!(line.contains("cite_check"));
         assert!(line.contains(r#""passed":true"#));
@@ -1859,7 +1918,8 @@ mod tests {
             issues: vec!["[#2] unknown".into()],
             gate_open: false,
         };
-        let event = crate::session::SessionEvent::CiteCheck { result: failed };
+        let event =
+            crate::session::SessionEvent::Synthesis(SynthesisEvent::CiteCheck { result: failed });
         let line = render_session_event_json(&event);
         assert!(line.contains(r#""passed":false"#));
         assert!(line.contains("CITATION_VERIFICATION_FAILED"));
@@ -1877,7 +1937,8 @@ mod tests {
             empty_paragraphs_removed: 3,
             note: "Polished".to_string(),
         };
-        let event = crate::session::SessionEvent::Polish { result: polish };
+        let event =
+            crate::session::SessionEvent::Synthesis(SynthesisEvent::Polish { result: polish });
         let line = render_session_event_json(&event);
         assert!(line.contains("polish"));
         assert!(line.contains(r#""control_chars_removed":1"#));
@@ -1892,7 +1953,9 @@ mod tests {
             missing_label_count: 0,
             long_paragraph_count: 0,
         };
-        let event = crate::session::SessionEvent::ReadabilityAudit { result: audit };
+        let event = crate::session::SessionEvent::Synthesis(SynthesisEvent::ReadabilityAudit {
+            result: audit,
+        });
         let line = render_session_event_json(&event);
         assert!(line.contains("readability_audit"));
         assert!(line.contains(r#""score":85"#));

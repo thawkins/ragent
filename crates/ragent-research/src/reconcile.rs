@@ -18,6 +18,7 @@
 
 use crate::contradiction::ContradictionGraph;
 use crate::locus::{DepthLevel, LocusSet};
+use crate::polarity::depth_from_count;
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -167,15 +168,14 @@ pub fn build_cross_locus_reconcile(
             if shared.len() < 2 {
                 continue;
             }
+            let shared_set: HashSet<usize> = shared.iter().copied().collect();
             let conflicting_edges = graph
                 .map(|g| {
                     g.edges
                         .iter()
                         .filter(|e| {
-                            (shared.contains(&e.claim_a.source_index)
-                                || shared.contains(&e.claim_b.source_index))
-                                && (a.label.to_lowercase() == e.dimension.to_lowercase()
-                                    || b.label.to_lowercase() == e.dimension.to_lowercase())
+                            shared_set.contains(&e.claim_a.source_index)
+                                || shared_set.contains(&e.claim_b.source_index)
                         })
                         .count()
                 })
@@ -307,160 +307,5 @@ pub fn build_source_tensions(
     SourceTensions {
         tensions,
         sources_scanned: sources.len(),
-    }
-}
-
-fn depth_from_count(n: usize) -> DepthLevel {
-    match n {
-        0 | 1 => DepthLevel::Surface,
-        2 | 3 => DepthLevel::Moderate,
-        _ => DepthLevel::Deep,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::contradiction::{ContradictionClaim, ContradictionEdge, ContradictionGraph};
-    use crate::locus::{Locus, LocusSet};
-    use std::path::PathBuf;
-
-    fn web_source(index: usize, body: &str) -> Source {
-        Source::Web {
-            url: format!("https://{index}.example"),
-            title: format!("Source {index}"),
-            captured_at: chrono::Utc::now(),
-            published_at: None,
-            body_path: PathBuf::new(),
-            body: body.to_string(),
-            relevance: "High".to_string(),
-            search_tool: "mf_search".to_string(),
-            search_engine: "duckduckgo".to_string(),
-            content_type: None,
-            page_type: None,
-            media_type: "page".to_string(),
-            language: None,
-            oa_recovery: None,
-            author: None,
-        }
-    }
-
-    fn locus(label: &str, indices: &[usize]) -> Locus {
-        Locus {
-            keyword: label.to_lowercase(),
-            label: label.to_string(),
-            source_indices: indices.to_vec(),
-            snippets: Vec::new(),
-            mentions: indices.len(),
-        }
-    }
-
-    fn edge(a: usize, b: usize, dimension: &str) -> ContradictionEdge {
-        ContradictionEdge {
-            claim_a: ContradictionClaim {
-                text: "positive".into(),
-                source_index: a,
-                source_kind: "web".into(),
-                source_path: format!("https://{a}.example"),
-            },
-            claim_b: ContradictionClaim {
-                text: "negative".into(),
-                source_index: b,
-                source_kind: "web".into(),
-                source_path: format!("https://{b}.example"),
-            },
-            dimension: dimension.into(),
-            note: format!("opposing claims on {dimension}"),
-            strength: 50,
-        }
-    }
-
-    #[test]
-    fn reconcile_empty_when_fewer_than_two_loci() {
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1, 2])],
-        };
-        let rec = build_cross_locus_reconcile(&loci, None, 2);
-        assert!(rec.is_empty());
-    }
-
-    #[test]
-    fn reconcile_finds_shared_sources() {
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1, 2, 3]), locus("Cost", &[2, 3, 4])],
-        };
-        let rec = build_cross_locus_reconcile(&loci, None, 4);
-        assert_eq!(rec.pairs.len(), 1);
-        assert_eq!(rec.pairs[0].shared_sources, 2);
-        let mut got = rec.pairs[0].shared_source_indices.clone();
-        got.sort();
-        assert_eq!(got, vec![2, 3]);
-        assert_eq!(rec.pairs[0].conflicting_edges, 0);
-    }
-
-    #[test]
-    fn reconcile_counts_conflicting_edges() {
-        let mut graph = ContradictionGraph::empty();
-        graph.add_edge(edge(2, 3, "Performance"));
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1, 2, 3]), locus("Cost", &[2, 3, 4])],
-        };
-        let rec = build_cross_locus_reconcile(&loci, Some(&graph), 4);
-        assert_eq!(rec.pairs.len(), 1);
-        assert_eq!(rec.pairs[0].conflicting_edges, 1);
-    }
-
-    #[test]
-    fn tensions_include_contradictions() {
-        let mut graph = ContradictionGraph::empty();
-        graph.add_edge(edge(1, 2, "Performance"));
-        let sources = vec![web_source(1, "x"), web_source(2, "y")];
-        let tensions = build_source_tensions(&LocusSet::empty(), Some(&graph), &sources);
-        assert_eq!(tensions.tensions.len(), 1);
-        assert_eq!(tensions.tensions[0].kind, TensionKind::Contradiction);
-    }
-
-    #[test]
-    fn tensions_flag_shallow_evidence() {
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1])],
-        };
-        let sources = vec![web_source(1, "x")];
-        let tensions = build_source_tensions(&loci, None, &sources);
-        assert!(
-            tensions
-                .tensions
-                .iter()
-                .any(|t| t.kind == TensionKind::ShallowEvidence)
-        );
-    }
-
-    #[test]
-    fn tensions_flag_isolated_sources() {
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1, 2]), locus("Cost", &[2, 3])],
-        };
-        let sources = vec![web_source(1, "x"), web_source(2, "x"), web_source(3, "x")];
-        let tensions = build_source_tensions(&loci, None, &sources);
-        let isolated: Vec<_> = tensions
-            .tensions
-            .iter()
-            .filter(|t| t.kind == TensionKind::IsolatedSource)
-            .collect();
-        assert_eq!(isolated.len(), 2);
-        assert!(isolated.iter().any(|t| t.source_indices == vec![1]));
-        assert!(isolated.iter().any(|t| t.source_indices == vec![3]));
-    }
-
-    #[test]
-    fn tensions_sort_contradictions_first() {
-        let mut graph = ContradictionGraph::empty();
-        graph.add_edge(edge(1, 2, "Performance"));
-        let loci = LocusSet {
-            loci: vec![locus("Performance", &[1])],
-        };
-        let sources = vec![web_source(1, "x"), web_source(2, "x")];
-        let tensions = build_source_tensions(&loci, Some(&graph), &sources);
-        assert_eq!(tensions.tensions[0].kind, TensionKind::Contradiction);
     }
 }

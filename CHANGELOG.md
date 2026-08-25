@@ -1,6 +1,43 @@
 # Changelog
 
+## Version: 1.0.58
+
+### Added
+
+- **Research tooling overhaul** — major upgrade to the research system across CLI, TUI, and HTTP server:
+  - New `polarity.rs` module and `run_request.rs` builder for unified research run configuration (`ResearchRunRequest`).
+  - New `contradiction.rs` module for detecting and reporting conflicting findings across sources.
+  - New `corpus_critic.rs` module for critiquing research corpus quality and coverage.
+  - New `reconcile.rs` module for reconciling conflicting evidence and producing consensus scores.
+  - Extended `cli.rs` with tier routing (`--tier` flag), IMRAD output format support, and shared `build_session_config` builder.
+  - New HTTP research routes (`GET/POST/DELETE /research`, SSE events endpoint at `/{name}/events`) with 202 + Location async behaviour and `?full=true` query param.
+  - New TUI research progress display with tier-aware rendering and session event JSON handling.
+  - New test suites: `test_contradiction.rs`, `test_corpus_critic.rs`, `test_reconcile.rs`, `test_research_run_request.rs`, `test_research_routes.rs` (37 new tests).
+  - `session.rs` refactored (2300+ lines) with unified session config, IMRAD support, and tier router integration.
+
+### Changed
+
+- Shared `build_session_config` / `ResearchRunRequest` builder now used by CLI, TUI, and HTTP, ensuring configuration convergence.
+- Research route registration fixed — relative paths inside `.nest("/research", ...)` to avoid doubled prefixes.
+- `ResearchItemRow` extended with `topic`, `queries`, `output_format`, and `model` fields.
+- `AppState` gained `research_runs` field for async research job tracking.
+
+### Fixed
+
+- Fixed pre-existing compile errors in `test_integration.rs` and `test_memory_api.rs` (missing `research_runs` field in `AppState`).
+
 ## Version: 1.0.57
+
+### Added
+
+- **Research Phase 4 — Integration / rollout**:
+  - `session_event_json` helper extracted from `render_session_event_json` — the SSE handler now uses pure JSON without stripping the CLI `ragent-research: ` prefix (R-017).
+  - Extended `ResearchItemRow` with `topic`, `queries`, `output_format`, and `model` fields; `GET /research/{name}?full=true` controls inclusion (R-018).
+  - End-to-end tests for the shared `build_session_config` / `ResearchRunRequest` builder (24 tests) and HTTP research routes (13 tests) verifying CLI/TUI/HTTP convergence from a common fixture.
+  - Fixed pre-existing compile errors in `test_integration.rs` and `test_memory_api.rs` (missing `research_runs` field in `AppState`).
+  - Fixed research route registration — `research_routes()` was using absolute paths (`/research/...`) inside a `.nest("/research", ...)`, causing doubled prefixes; now uses relative paths (`/`, `/{name}`, `/{name}/events`).
+  - SPEC.md updated with HTTP Research API section (§11.9), Research Tiers (§11.8), `imrad` output format, `research` SSE event type, and detailed endpoint documentation.
+  - QUICKSTART.md updated with `?full=true`, `POST /research` 202+Location behaviour, SSE events endpoint, and `--tier` flag.
 
 ### Changed
 

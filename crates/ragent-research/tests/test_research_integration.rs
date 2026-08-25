@@ -183,8 +183,9 @@ async fn search_finds_text_across_research_items() {
 async fn session_uses_analysis_engine_to_synthesize_findings() {
     use async_trait::async_trait;
     use ragent_research::{
-        AnalysisEngine, AnalysisResult, CrossReference, LocalGatherer, LocalTool, NoopObserver,
-        ResearchManager, ResearchSession, SessionConfig,
+        AnalysisEngine, AnalysisResult, CrossReference, InputConfig, LocalConfig, LocalGatherer,
+        LocalTool, NoopObserver, OutputConfig, ResearchManager, ResearchSession, SessionConfig,
+        WebConfig,
     };
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
@@ -280,11 +281,27 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
     let session = ResearchSession::new(manager, None, Some(local), Arc::new(MockEngine));
 
     let config = SessionConfig {
-        topic: "Rust async".into(),
-        max_local_sources: 5,
-        depth: Some(ragent_research::Depth::Shallow),
-        output_format: ragent_research::OutputFormat::Report,
-        disable_local: false,
+        input: InputConfig {
+            topic: "Rust async".into(),
+            ..InputConfig::default()
+        },
+        output: OutputConfig {
+            output_format: ragent_research::OutputFormat::Report,
+            ..OutputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            disable_local: false,
+            ..LocalConfig::default()
+        },
+        analysis: ragent_research::AnalysisConfig {
+            depth: Some(ragent_research::Depth::Shallow),
+            ..ragent_research::AnalysisConfig::default()
+        },
         ..SessionConfig::default()
     };
     session
@@ -332,9 +349,10 @@ async fn session_uses_analysis_engine_to_synthesize_findings() {
 async fn session_writes_supporting_files_with_actual_web_bodies() {
     use async_trait::async_trait;
     use ragent_research::{
-        AnalysisEngine, AnalysisResult, LocalGatherer, LocalTool, ResearchManager, ResearchSession,
-        SessionConfig, SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer,
-        WebSearchHit, WebSearchTool,
+        AnalysisEngine, AnalysisResult, InputConfig, LocalConfig, LocalGatherer, LocalTool,
+        ResearchManager, ResearchSession, SessionConfig, SessionEvent, SessionObserver,
+        SynthesisEvent, WebConfig, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
+        WebSearchTool,
     };
     use std::sync::Mutex;
 
@@ -432,9 +450,18 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
 
     let observer = Arc::new(CaptureObserver::default());
     let cfg = SessionConfig {
-        topic: "rust lifetimes".into(),
-        max_web_results: 5,
-        max_local_sources: 5,
+        input: InputConfig {
+            topic: "rust lifetimes".into(),
+            ..InputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: 5,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: 5,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     };
     session
@@ -475,9 +502,10 @@ async fn session_writes_supporting_files_with_actual_web_bodies() {
     // The SynthesizeResult event must have fired.
     let events = observer.events.lock().unwrap();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::SynthesizeResult { .. })),
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Synthesis(SynthesisEvent::SynthesizeResult { .. })
+        )),
         "session must emit a SynthesizeResult event"
     );
 }

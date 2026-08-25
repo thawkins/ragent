@@ -3285,10 +3285,11 @@ fn render_tasks_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 app.tasks_cache_rows = rows;
                 app.tasks_cache_dirty = false;
             }
-            Err(_) => {
+            Err(e) => {
                 // Keep stale cache on error so the panel does not blank out
-                // on a transient SQLite failure.
-                app.tasks_cache_dirty = false;
+                // on a transient SQLite failure. Retry on the next render.
+                tracing::warn!("tasks panel cache refresh failed: {e}");
+                app.tasks_cache_dirty = true;
             }
         }
     }

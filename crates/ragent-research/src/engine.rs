@@ -15,7 +15,7 @@
 //! resume state across turns (T-012, T-013).
 
 use crate::analysis::{AnalysisEngine, AnalysisResult, build_source_bodies};
-use crate::session::{SessionEvent, SessionObserver};
+use crate::session::{SessionEvent, SessionObserver, SynthesisEvent};
 use crate::source::Source;
 use crate::state::{EvidenceGap, ResearchState, SubQuestionStatus};
 use crate::verify::Verifier;
@@ -271,14 +271,14 @@ impl IterativeEngine {
                 }
             }
 
-            observer.on_event(SessionEvent::CriticResult {
+            observer.on_event(SessionEvent::Synthesis(SynthesisEvent::CriticResult {
                 score: state.evaluation_score,
                 gaps: state
                     .active_gaps()
                     .iter()
                     .map(|g| g.description.clone())
                     .collect(),
-            });
+            }));
 
             // Verify claims from the synthesis step (T-010).
             let verification = self.verify(&state, analysis.as_ref()).await;

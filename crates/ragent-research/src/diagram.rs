@@ -55,6 +55,13 @@ pub struct FindingEdge {
 }
 
 use regex::Regex;
+use std::sync::OnceLock;
+
+static FINDING_RE: OnceLock<Regex> = OnceLock::new();
+
+fn finding_re() -> &'static Regex {
+    FINDING_RE.get_or_init(|| Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid finding regex"))
+}
 
 /// Extract dependency edges from the **Cross-reference / Dependencies:**
 /// paragraphs of the supplied findings.
@@ -81,7 +88,7 @@ pub fn extract_finding_edges(findings: &[String]) -> Vec<FindingEdge> {
     if findings.len() <= 1 {
         return Vec::new();
     }
-    let finding_re = Regex::new(r"(?i)\bfinding\s+(\d+)\b").expect("valid regex");
+    let finding_re = finding_re();
     let mut edges: Vec<FindingEdge> = Vec::new();
     for (idx, finding) in findings.iter().enumerate() {
         let from = idx + 1;

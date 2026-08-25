@@ -60,11 +60,13 @@ pub mod open_access;
 pub mod patcher;
 pub mod plan_dep;
 pub mod planner;
+mod polarity;
 pub mod readability;
 pub mod reconcile;
 pub mod research_name;
 pub mod run_config;
 pub mod run_manifest;
+pub mod run_request;
 pub mod session;
 pub mod source;
 pub mod source_registry;
@@ -86,10 +88,11 @@ pub use analysis::{
 pub use cite_checker::{CitationCheckResult, check_citations};
 pub use cli::{
     FsLocalTool, ResearchCliCommand, render_list_output, render_search_output,
-    render_session_event_json, render_show_output,
+    render_session_event_json, render_show_output, session_event_json,
 };
 pub use contradiction::{
-    ContradictionClaim, ContradictionEdge, ContradictionGraph, build_contradiction_graph,
+    ContradictionClaim, ContradictionConfig, ContradictionEdge, ContradictionGraph,
+    PolarityDimension, build_contradiction_graph, build_contradiction_graph_with,
 };
 pub use corpus_critic::{
     CorpusCriticReport, GapFetchResult, build_corpus_critic, derive_gap_queries,
@@ -105,7 +108,8 @@ pub use engine::{
 };
 pub use io::{IndexEntry, ResearchIo, ResearchIoError};
 pub use item::{
-    DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_full,
+    DERIVED_TITLE_MAX_CHARS, ResearchItem, ResearchItemError, derive_title, derive_title_files,
+    derive_title_full,
 };
 pub use local_gatherer::{
     DEFAULT_GLOBS, DEFAULT_LOCAL_CONCURRENCY, DEFAULT_MAX_LOCAL_SOURCES, GrepMatch,
@@ -140,9 +144,11 @@ pub use run_config::{Depth, OutputFormat, Tier};
 pub use run_manifest::{
     ResumeOutcome, RunManifest, RunManifestError, RunStep, StepEntry, StepStatus,
 };
+pub use run_request::{ResearchRunRequest, build_session_config};
 pub use session::{
-    NoopObserver, ResearchSession, RunOutcome, SessionConfig, SessionEvent, SessionObserver,
-    SessionPhase, SynthesizeOutcome,
+    AnalysisConfig, AnalysisEvent, InputConfig, LocalConfig, NoopObserver, OutputConfig,
+    ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome, SessionConfig, SessionEvent,
+    SessionObserver, SessionPhase, SynthesisEvent, SynthesizeOutcome, WebConfig,
 };
 pub use source::{LocalSourceKind, Source};
 pub use source_registry::{BuiltinSourceRegistry, ResearchSourceKind, SourceRegistry};

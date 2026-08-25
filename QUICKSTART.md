@@ -1112,6 +1112,14 @@ ragent research delete rust-async --yes
 
 The HTTP API exposes the same surface at `GET /research`, `POST /research`,
 `GET /research/<name>`, and `DELETE /research/<name>` (auth-protected).
+`POST /research` returns `202 Accepted` with a `Location` header pointing to
+`GET /research/<name>/events` (SSE stream of live research events).
+`GET /research/<name>` supports `?full=true` to include `topic`, `queries`,
+`output_format`, and `model` metadata.
+
+The `--tier` flag selects the analysis depth: `light` (minimal), `full`
+(default), or `dissertation` (extended with depth investigations and
+source tensions).
 
 See [`docs/research.md`](docs/research.md) for the full workflow guide.
 
