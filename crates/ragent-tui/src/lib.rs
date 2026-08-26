@@ -299,12 +299,15 @@ pub async fn run_tui(
     let t0 = Instant::now();
     if resume_session_id.is_none() {
         let dir = std::env::current_dir().unwrap_or_default();
+        let t_db = Instant::now();
         match app.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
+                startup.record("Session create (DB)", t_db.elapsed());
                 let session_id = session.id.clone();
                 app.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
 
+                let t_render = Instant::now();
                 // Render the ASCII art banner into the message window now that
                 // the session is valid (append_assistant_text requires session_id).
                 let banner = crate::logo::LOGO.join("\n");
@@ -339,8 +342,10 @@ pub async fn run_tui(
                 }
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
+                startup.record("Session create (render)", t_render.elapsed());
 
                 // Kick off the AGENTS.md acknowledgement exchange in the background
+                let t_init = Instant::now();
                 let proc = Arc::clone(&app.session_processor);
                 let mut init_agent = app.agent_info.clone();
                 if !init_agent.model_pinned || init_agent.model.is_none() {
@@ -362,8 +367,10 @@ pub async fn run_tui(
                         tracing::warn!(error = %e, "Startup init exchange failed");
                     }
                 });
+                startup.record("Session create (init exchange)", t_init.elapsed());
             }
             Err(e) => {
+                startup.record("Session create (DB)", t_db.elapsed());
                 tracing::warn!(error = %e, "Failed to auto-create session at startup");
             }
         }
@@ -388,6 +395,7 @@ pub async fn run_tui(
     // The code index open + watcher setup can take several seconds on large
     // projects.  We spawn it in a background task so the TUI event loop starts
     // immediately and the index becomes available when ready.
+    let t0 = Instant::now();
     app.status = "starting code index…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -503,6 +511,11 @@ pub async fn run_tui(
     let mut code_index_fallback_thread: Option<std::thread::JoinHandle<()>> = None;
 
     // -- Spec manager startup --
+    // Record the code-index spawn + spec/cron setup together so the gap
+    // between "Input history load" and "Spec mgr & resume & backfill" is
+    // fully covered.
+    startup.record("Code index spawn & spec/cron setup", t0.elapsed());
+
     let t0 = Instant::now();
     let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
     let _ = session_processor
@@ -723,6 +736,16 @@ pub async fn run_tui(
                             // Strip carriage returns but preserve newlines,
                             // and replace any active input selection.
                             app.handle_paste_text(&text);
+                            got_input = true;
+                        }
+                        // Re-send EnableMouseCapture after a resize or focus
+                        // regain.  Some terminal emulators (notably VTE-based
+                        // ones like GNOME Terminal and Konsole) reset mouse
+                        // capture mode on these events, causing all mouse
+                        // input to silently stop.  Re-arming here keeps mouse
+                        // events flowing without a restart.
+                        CtEvent::Resize(_, _) | CtEvent::FocusGained => {
+                            let _ = execute!(std::io::stdout(), EnableMouseCapture);
                             got_input = true;
                         }
                         _ => {}

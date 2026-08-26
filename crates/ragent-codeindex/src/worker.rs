@@ -275,33 +275,39 @@ fn worker_loop(
             }
         }
 
-        // Drain watch events (non-blocking).
-        loop {
-            match event_rx.try_recv() {
-                Ok(ev) => {
-                    trace!("watch event: {ev:?}");
+        // R-7: Block on the event channel with a timeout instead of
+        // busy-spinning with `try_recv` + `sleep`. The thread wakes only when
+        // an event arrives or the timeout fires (for manual-command and
+        // debounce checks). This eliminates ~20 idle wakeups/second.
+        match event_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(ev) => {
+                trace!("watch event: {ev:?}");
+                batch.push(ev);
+                last_event_time = Some(Instant::now());
+
+                // Drain any additional events that arrived in the same batch.
+                while let Ok(ev) = event_rx.try_recv() {
                     batch.push(ev);
                     last_event_time = Some(Instant::now());
+                }
 
-                    // Drop oldest if queue is too large.
-                    if batch.len() > config.max_queue_size {
-                        warn!(
-                            "event queue exceeded max_queue_size, clearing batch and triggering full reindex"
-                        );
-                        batch.clear();
-                        let _ = index.full_reindex();
-                        last_event_time = None;
-                    }
+                // Drop oldest if queue is too large.
+                if batch.len() > config.max_queue_size {
+                    warn!(
+                        "event queue exceeded max_queue_size, clearing batch and triggering full reindex"
+                    );
+                    batch.clear();
+                    let _ = index.full_reindex();
+                    last_event_time = None;
                 }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    debug!("event channel disconnected, worker stopping");
-                    // Process remaining batch before exit.
-                    if !batch.is_empty() {
-                        process_batch(&index, &mut batch, &config, &stats, &stop);
-                    }
-                    return;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => { /* idle — check below */ }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                debug!("event channel disconnected, worker stopping");
+                if !batch.is_empty() {
+                    process_batch(&index, &mut batch, &config, &stats, &stop);
                 }
+                return;
             }
         }
 
@@ -313,9 +319,6 @@ fn worker_loop(
             process_batch(&index, &mut batch, &config, &stats, &stop);
             last_event_time = None;
         }
-
-        // Sleep briefly to avoid busy-spinning.
-        std::thread::sleep(Duration::from_millis(50));
     }
 
     // Process any remaining events before shutdown.

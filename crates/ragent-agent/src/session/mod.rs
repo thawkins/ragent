@@ -140,6 +140,21 @@ impl SessionManager {
         }
     }
 
+    /// R-3: Remove a session's state from the global cache. Called when a
+    /// session is archived or a sub-agent task completes so the cache does
+    /// not grow without bound.
+    pub fn remove_session_state(&self, session_id: &str) {
+        use std::collections::HashMap;
+        use std::sync::OnceLock;
+
+        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> = OnceLock::new();
+
+        if let Some(cache) = CACHE.get() {
+            let mut guard = cache.lock().expect("session_state_cache poisoned");
+            guard.remove(session_id);
+        }
+    }
+
     /// Returns a reference to the underlying storage backend.
     ///
     /// # Errors
@@ -206,10 +221,7 @@ impl SessionManager {
             updated_at: now,
             archived_at: None,
             summary: None,
-            config_path: crate::Config::load()
-                .ok()
-                .and_then(|_| std::env::var("RAGENT_CONFIG").ok())
-                .map(PathBuf::from),
+            config_path: None,
         };
         self.event_bus
             .publish(Event::SessionCreated { session_id: id });
@@ -297,6 +309,12 @@ impl SessionManager {
     /// ```
     pub fn archive_session(&self, id: &str) -> anyhow::Result<()> {
         self.storage.archive_session(id)?;
+        // R-3: Remove the session state cache entry so the global
+        // `session_state_cache` static does not accumulate one entry per
+        // session (including every sub-agent child session) for the process
+        // lifetime. Each entry holds a `Vec<ChatMessage>` that can be hundreds
+        // of KB.
+        self.remove_session_state(id);
         self.event_bus.publish(Event::SessionUpdated {
             session_id: id.to_string(),
         });

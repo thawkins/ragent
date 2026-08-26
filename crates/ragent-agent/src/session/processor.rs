@@ -2255,7 +2255,7 @@ impl SessionProcessor {
         }
 
         // Copilot: prefer DB-stored device flow token (works for token
-        // exchange), then fall back to env var → IDE → gh CLI discovery.
+        // exchange), then fall back to env var → IDE discovery.
         if provider_id == "copilot" {
             // DB first — device flow tokens stored here work for copilot_internal/v2/token
             if let Ok(Some(key)) = self.storage_op(|s| s.get_provider_auth("copilot")).await
@@ -2272,7 +2272,7 @@ impl SessionProcessor {
             }
             bail!(
                 "No GitHub token found for Copilot. Use /provider to configure, \
-                 or authenticate with `gh auth login` then `gh auth refresh -s copilot`."
+                 or set the GITHUB_COPILOT_TOKEN environment variable."
             );
         }
 

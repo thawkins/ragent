@@ -712,6 +712,13 @@ pub fn clear_edit_log_contents(working_dir: &Path) -> usize {
 mod tests {
     use super::*;
     use std::path::Path;
+    use std::sync::Mutex;
+
+    /// Serialize tests that mutate the process-global `EDIT_LOG_MODE` flag.
+    /// Without this, a parallel test can restore its own saved flag between
+    /// one test's `set_edit_log_enabled(true)` and its `log_edit_operation`
+    /// calls, causing writes to be skipped and counts to come up short.
+    static EDIT_LOG_TEST_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn log_dir_resolves_under_working_dir() {
@@ -723,6 +730,7 @@ mod tests {
 
     #[test]
     fn summary_counts_success_and_failure() {
+        let _guard = EDIT_LOG_TEST_GUARD.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let wd = tmp.path();
         let prev = is_edit_log_enabled();
@@ -760,6 +768,7 @@ mod tests {
 
     #[test]
     fn edit_log_stats_aggregates_by_tool_and_reason() {
+        let _guard = EDIT_LOG_TEST_GUARD.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let wd = tmp.path();
         let prev = is_edit_log_enabled();
@@ -854,6 +863,7 @@ mod tests {
 
     #[test]
     fn edit_log_analyse_aggregates_risks_for_failures() {
+        let _guard = EDIT_LOG_TEST_GUARD.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let wd = tmp.path();
         let prev = is_edit_log_enabled();

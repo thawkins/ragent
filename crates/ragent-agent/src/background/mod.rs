@@ -336,6 +336,11 @@ impl BackgroundTaskService {
             for id in &done_ids {
                 state.tasks.remove(id);
                 state.sessions.remove(id);
+                // R-12: Clear drained_ids entries alongside the existing
+                // tasks/sessions cleanup so the HashSet does not grow
+                // without bound (one permanent string ID per background
+                // command ever spawned).
+                state.drained_ids.remove(id);
             }
         }
 

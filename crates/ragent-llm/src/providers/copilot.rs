@@ -227,7 +227,7 @@ impl Provider for CopilotProvider {
     /// Discover available models from the Copilot `/models` endpoint.
     async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
         let token = resolve_copilot_github_token(None)
-            .context("Copilot model discovery requires a GitHub token. Configure it via `gh auth` or set GITHUB_TOKEN/GITHUB_COPILOT_TOKEN.")?;
+            .context("Copilot model discovery requires a GitHub token. Set GITHUB_COPILOT_TOKEN or configure a key via /provider.")?;
         let models = list_copilot_models(&token)
             .await
             .with_context(|| "Copilot model discovery failed")?;
@@ -656,54 +656,6 @@ pub fn find_copilot_token() -> Option<String> {
     None
 }
 
-/// Process-wide cache for the `gh auth token` result so we don't spawn a
-/// subprocess on every call to [`find_gh_cli_token`].  The token does not
-/// change during a single ragent session.
-static GH_CLI_TOKEN_CACHE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-
-/// Attempts to get a GitHub OAuth token from the `gh` CLI.
-///
-/// Runs `gh auth token` and returns the token if available. Only returns
-/// OAuth tokens (`gho_` / `ghu_`); fine-grained PATs are filtered out
-/// since they cannot be used with the Copilot internal API.
-///
-/// The result is cached process-wide via a `OnceLock` so the `gh`
-/// subprocess is spawned at most once per session.
-///
-/// # Examples
-///
-/// ```no_run
-/// use ragent_llm::provider::copilot::find_gh_cli_token;
-///
-/// if let Some(token) = find_gh_cli_token() {
-///     println!("Got token from gh CLI: {}", &token[..8]);
-/// }
-/// ```
-#[must_use]
-pub fn find_gh_cli_token() -> Option<String> {
-    GH_CLI_TOKEN_CACHE
-        .get_or_init(|| {
-            let output = std::process::Command::new("gh")
-                .args(["auth", "token"])
-                .stderr(std::process::Stdio::null())
-                .output()
-                .ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if token.is_empty() {
-                return None;
-            }
-            // Only accept OAuth tokens; PATs can't use copilot_internal
-            if token.starts_with("github_pat_") || token.starts_with("ghp_") {
-                return None;
-            }
-            Some(token)
-        })
-        .clone()
-}
-
 /// Returns `true` if the token looks like a fine-grained or classic PAT
 /// (which cannot be used with the Copilot internal API).
 ///
@@ -723,7 +675,10 @@ pub fn is_pat_token(token: &str) -> bool {
 
 /// Resolves a Copilot-compatible GitHub token from all available sources.
 ///
-/// Priority: env var → IDE auto-discover → `gh` CLI → database.
+/// Priority: env var → IDE auto-discover → database.
+/// The `gh` CLI (`gh auth token`) is intentionally **not** consulted — that
+/// authentication path has been disabled.
+///
 /// Returns `None` if no valid token is found.
 ///
 /// # Examples
@@ -752,11 +707,9 @@ pub fn resolve_copilot_github_token(
     if let Some(token) = find_copilot_token() {
         return Some(token);
     }
-    // 3. gh CLI
-    if let Some(token) = find_gh_cli_token() {
-        return Some(token);
-    }
-    // 4. Database (if provided)
+    // 3. Database (if provided)
+    //    The `gh` CLI path was removed — only explicit credential sources
+    //    (env var, IDE config, secure storage) are used.
     if let Some(lookup) = db_lookup
         && let Some(token) = lookup()
         && !token.is_empty()
@@ -1072,22 +1025,11 @@ pub async fn resolve_copilot_auth(
     }
 }
 
-/// Tries to discover the plan-specific Copilot API base URL using multiple
-/// token sources.  First attempts `copilot_internal/user` with the given
-/// token, then falls back to the `gh` CLI token (which typically has broader
-/// scope).
+/// Tries to discover the plan-specific Copilot API base URL using the
+/// given token.  The `gh` CLI fallback was removed — only the primary
+/// token is used for discovery.
 async fn discover_api_base_multi_source(primary_token: &str) -> Option<String> {
-    if let Some(base) = discover_copilot_api_base(primary_token).await {
-        return Some(base);
-    }
-    // The primary token (e.g. device flow) may lack scope; try gh CLI
-    if let Some(gh_token) = find_gh_cli_token()
-        && gh_token != primary_token
-        && let Some(base) = discover_copilot_api_base(&gh_token).await
-    {
-        return Some(base);
-    }
-    None
+    discover_copilot_api_base(primary_token).await
 }
 
 /// Response from the Copilot token exchange endpoint.

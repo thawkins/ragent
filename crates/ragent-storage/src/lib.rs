@@ -6,10 +6,12 @@
 //! - Snapshot storage (file snapshots, diffs)
 //! - Team storage (team state, mailboxes, tasks)
 
+pub mod activity_log;
 pub mod snapshot;
 pub mod storage;
 
 // Re-export commonly used types
+pub use activity_log::{ActivityLog, AppendError};
 pub use snapshot::{IncrementalSnapshot, Snapshot};
 pub use storage::{
     BackgroundTaskRow, ConversationStats, CronEventRow, CycleError, EmbeddingMatch,

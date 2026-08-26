@@ -213,6 +213,7 @@ fn fence_captured_body(body: &str) -> String {
 /// (PERF-WEB-02, PERF-WEB-04).
 fn body_preview_of(body: &str) -> String {
     let mut out = String::with_capacity(MIN_EXTRACTABLE_CONTENT_CHARS);
+    let mut char_count = 0usize;
     for line in body.lines() {
         if line.trim_start().starts_with("```") {
             continue;
@@ -221,11 +222,13 @@ fn body_preview_of(body: &str) -> String {
             out.push_str(line);
         } else {
             out.push('\n');
+            char_count += 1;
             out.push_str(line);
         }
+        char_count += line.chars().count();
         // Track char count incrementally instead of re-counting the full
         // string on every iteration (avoids O(n^2) for long lines).
-        if out.chars().count() >= MIN_EXTRACTABLE_CONTENT_CHARS {
+        if char_count >= MIN_EXTRACTABLE_CONTENT_CHARS {
             break;
         }
     }

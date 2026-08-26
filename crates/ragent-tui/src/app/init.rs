@@ -144,6 +144,7 @@ impl App {
             .and_then(|s| s.parse::<usize>().ok());
         let selected_thinking_level = Self::load_persisted_thinking_level(storage.as_ref());
         sub.record("App: settings load", t0.elapsed());
+        let t0 = Instant::now();
         let mut app = Self {
             messages: Vec::new(),
             input: String::new(),
@@ -383,6 +384,9 @@ impl App {
             run_cost_banner_at: None,
             trigger_runtime: None,
         }; // end Self { ... }
+        if let Some(ref mut st) = app.startup_timings {
+            st.record("App: struct init", t0.elapsed());
+        }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));

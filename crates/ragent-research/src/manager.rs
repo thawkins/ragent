@@ -754,22 +754,20 @@ impl ResearchManager {
             .await
             .ok()
             .and_then(|m| m.modified().ok());
-        if let Some(mtime) = mtime {
-            if let Ok(cache) = self.item_cache.lock() {
-                if let Some((cached_mtime, item)) = cache.get(path) {
-                    if *cached_mtime == mtime {
-                        return Ok(item.clone());
-                    }
-                }
-            }
+        if let Some(mtime) = mtime
+            && let Ok(cache) = self.item_cache.lock()
+            && let Some((cached_mtime, item)) = cache.get(path)
+            && *cached_mtime == mtime
+        {
+            return Ok(item.clone());
         }
         // Cache miss: read and parse from disk.
         let item = Self::read_item_from_path(path).await?;
         // Store in cache if we have the mtime.
-        if let Some(mtime) = mtime {
-            if let Ok(mut cache) = self.item_cache.lock() {
-                cache.insert(path.to_path_buf(), (mtime, item.clone()));
-            }
+        if let Some(mtime) = mtime
+            && let Ok(mut cache) = self.item_cache.lock()
+        {
+            cache.insert(path.to_path_buf(), (mtime, item.clone()));
         }
         Ok(item)
     }

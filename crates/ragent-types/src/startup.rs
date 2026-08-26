@@ -66,6 +66,21 @@ impl StartupTimings {
         self.global_start.elapsed().as_millis()
     }
 
+    /// Sum of all recorded stage durations.
+    ///
+    /// Compared with [`total_elapsed_ms`], the difference reveals time spent
+    /// in uninstrumented sections of the startup pipeline.
+    #[must_use]
+    pub fn sum_stages_ms(&self) -> u128 {
+        self.stages.iter().map(|s| s.duration_ms).sum()
+    }
+
+    /// Uninstrumented time: `total_elapsed_ms - sum_stages_ms`.
+    #[must_use]
+    pub fn untracked_ms(&self) -> u128 {
+        self.total_elapsed_ms().saturating_sub(self.sum_stages_ms())
+    }
+
     /// Return a reference to the recorded stages.
     #[must_use]
     pub fn stages(&self) -> &[StartupStage] {
@@ -145,6 +160,24 @@ impl StartupTimings {
         }
         out.push_str(&rule);
         out.push('\n');
+        // Show the sum of instrumented stages alongside the wall-clock total
+        // so the uninstrumented gap is immediately visible.
+        let sum_ms = self.sum_stages_ms();
+        out.push_str(&format!(
+            "{:<name_w$}  {:>time_w$}\n",
+            "Sum",
+            format!("{} ms", sum_ms),
+            name_w = name_w,
+            time_w = time_w
+        ));
+        let untracked = self.untracked_ms();
+        out.push_str(&format!(
+            "{:<name_w$}  {:>time_w$}\n",
+            "Untracked",
+            format!("{} ms", untracked),
+            name_w = name_w,
+            time_w = time_w
+        ));
         out.push_str(&format!(
             "{:<name_w$}  {:>time_w$}\n",
             "Total",

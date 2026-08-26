@@ -78,3 +78,8 @@ define_id!(SessionId, "A unique session identifier.");
 define_id!(MessageId, "A unique message identifier.");
 define_id!(ProviderId, "A unique provider identifier.");
 define_id!(ToolCallId, "A unique tool call identifier.");
+define_id!(RunId, "A unique activity-log run identifier.");
+define_id!(
+    EventId,
+    "An immutable identifier for a single event in an activity log."
+);

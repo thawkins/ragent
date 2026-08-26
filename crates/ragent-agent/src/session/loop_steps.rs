@@ -286,7 +286,22 @@ impl SessionProcessor {
                 {
                     Ok(c) => {
                         let arc: Arc<dyn crate::llm::LlmClient> = Arc::from(c);
-                        self.llm_client_cache.write().insert(cache_key, arc.clone());
+                        // R-21: Bound the LLM client cache so cycling
+                        // through many models does not accumulate one
+                        // `reqwest::Client` (connection pool, TLS state)
+                        // per model for the session lifetime.
+                        {
+                            let mut cache = self.llm_client_cache.write();
+                            const MAX_LLM_CLIENTS: usize = 8;
+                            if cache.len() >= MAX_LLM_CLIENTS {
+                                // Evict an arbitrary entry (HashMap has no
+                                // ordering, so this is effectively random).
+                                if let Some(key) = cache.keys().next().cloned() {
+                                    cache.remove(&key);
+                                }
+                            }
+                            cache.insert(cache_key, arc.clone());
+                        }
                         arc
                     }
                     Err(e) => {
@@ -900,17 +915,25 @@ impl SessionProcessor {
                 outbound_bytes: chat_request_payload_bytes(&attempt_request),
             });
             llm_recorder.record_request(&turn.model_ref.model_id, &turn.model_ref.provider_id);
-
             // H4: surface provider progress so long `create_stream` waits do not
             // feel like hangs. A background task publishes an AgentNotice every 30s
             // after the first 30s, until the first stream event arrives.
             let first_event_arrived = Arc::new(AtomicBool::new(false));
+            // R-1: Wrap the notice task in an `AbortOnDrop` guard so it is
+            // aborted on every scope exit — including the `continue 'retry`
+            // and `bail!` error paths below — not just the success path.
+            struct AbortOnDrop(tokio::task::JoinHandle<()>);
+            impl Drop for AbortOnDrop {
+                fn drop(&mut self) {
+                    self.0.abort();
+                }
+            }
             let notice_handle = {
                 let event_bus = Arc::clone(&self.event_bus);
                 let session_id = session_id.to_string();
                 let first_event_arrived = Arc::clone(&first_event_arrived);
                 let provider_id = turn.model_ref.provider_id.clone();
-                tokio::spawn(async move {
+                AbortOnDrop(tokio::spawn(async move {
                     let interval = std::time::Duration::from_secs(30);
                     let mut elapsed = 0u64;
                     loop {
@@ -930,7 +953,7 @@ impl SessionProcessor {
                             message,
                         });
                     }
-                })
+                }))
             };
             let mut stream = {
                 let _scope = profiler.scope("loop.llm.create_stream");
@@ -1044,9 +1067,11 @@ impl SessionProcessor {
                     }
                 }
             };
-
-            // Stop the H4 progress-notice task: the stream has been created.
-            notice_handle.abort();
+            // Stop the H4 progress-notice task immediately now that the stream
+            // has been created. The `AbortOnDrop` guard (R-1) also aborts on
+            // scope exit, but we cancel here for promptness so the notice task
+            // does not fire during stream processing.
+            notice_handle.0.abort();
 
             let mut had_retryable_error = false;
             let mut first_stream_event_pending = true;

@@ -238,6 +238,30 @@ pub struct McpClient {
     http_client: reqwest::Client,
 }
 
+impl Drop for McpClient {
+    /// R-15: On drop, attempt to kill any MCP stdio child processes. Since
+    /// `Drop` is synchronous and `disconnect()` is async, we use
+    /// `Arc::try_unwrap` / `Weak` to extract connections and cancel them
+    /// best-effort. If the `Arc` is still shared (strong count > 1) we
+    /// cannot cancel synchronously — the caller should have called
+    /// `disconnect_all().await` before dropping.
+    fn drop(&mut self) {
+        // Best-effort: try to get exclusive access to the connections map.
+        // If we can, cancel each Rmcp service's underlying child process.
+        if let Some(conns) = Arc::get_mut(&mut self.connections) {
+            // We have exclusive access — no async needed, just drop the map.
+            // The `RunningService` inside each `McpConnection::Rmcp` will be
+            // dropped, which (in recent rmcp versions) sends a shutdown to
+            // the child process.
+            conns.get_mut().clear();
+        }
+        // If we don't have exclusive access, the connections are still
+        // shared elsewhere and will be cleaned up when the last Arc is
+        // dropped. Callers should use `disconnect_all().await` for
+        // deterministic cleanup.
+    }
+}
+
 impl McpClient {
     /// Default timeout for tool calls in seconds.
     const TOOL_CALL_TIMEOUT_SECS: u64 = 120;

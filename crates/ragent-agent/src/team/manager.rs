@@ -395,7 +395,6 @@ pub async fn run_team_hook(
 // ── TeamManager ───────────────────────────────────────────────────────────────
 
 /// Tracks the runtime state of one teammate.
-#[derive(Debug)]
 struct TeammateHandle {
     /// Friendly name (e.g. `"security-reviewer"`).
     _name: String,
@@ -412,6 +411,12 @@ struct TeammateHandle {
     /// M6-T1: last time progress was observed for this teammate (idle / failure /
     /// task completion). Used by the watchdog to detect hung agents.
     last_progress: Arc<std::sync::Mutex<std::time::Instant>>,
+    /// R-19: Handle to the teammate agent-loop task so it can be force-aborted
+    /// on `shutdown_teammate` / `Drop`.
+    agent_handle: Option<tokio::task::JoinHandle<()>>,
+    /// R-18: Handle to the mailbox poll-loop task so it can be force-aborted
+    /// on `shutdown_teammate` / `Drop`.
+    poll_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Manages the runtime lifecycle of all teammates in one team.
@@ -435,7 +440,10 @@ pub struct TeamManager {
     /// `ragent-agent`).
     handles: Arc<dashmap::DashMap<String, TeammateHandle>>,
     /// Underlying session processor (shared with the lead).
-    processor: Arc<SessionProcessor>,
+    ///
+    /// R-6: Stored as `Weak` to break the `TeamManager` ↔ `SessionProcessor`
+    /// `Arc` cycle. Upgraded to `Arc` on access via `processor()`.
+    processor: std::sync::Weak<SessionProcessor>,
     /// Event bus for publishing team lifecycle events.
     event_bus: Arc<EventBus>,
     /// Mailbox poll interval.
@@ -477,6 +485,21 @@ pub struct TeamManager {
     /// freshly-written list back into the cache, so the cache and the disk
     /// never drift apart.
     task_cache: parking_lot::Mutex<TaskCacheEntry>,
+}
+
+impl Drop for TeamManager {
+    /// R-5: On drop, set every `poll_cancel` and `cancel` flag in `handles`
+    /// so orphaned mailbox poll loops and teammate agent loops stop doing
+    /// filesystem I/O. Without this, abandoning a team without
+    /// `team_cleanup` leaves poll loops running at 500 ms intervals
+    /// forever.
+    fn drop(&mut self) {
+        self.watchdog_cancel.store(true, Ordering::Relaxed);
+        for entry in self.handles.iter() {
+            entry.cancel.store(true, Ordering::Relaxed);
+            entry.poll_cancel.store(true, Ordering::Relaxed);
+        }
+    }
 }
 
 /// PERF-023: cached `TaskList` with the `mtime` of the on-disk file at the
@@ -533,12 +556,14 @@ impl TeamManager {
             }
         }
 
+        // R-6: Store a `Weak<SessionProcessor>` to break the
+        // `TeamManager` ↔ `SessionProcessor` `Arc` cycle.
         Self {
             team_name: name,
             lead_session_id: lead_sid,
             team_dir,
             handles: Arc::new(dashmap::DashMap::new()),
-            processor,
+            processor: Arc::downgrade(&processor),
             event_bus,
             poll_interval: Duration::from_millis(500),
             spawn_lock: Arc::new(Mutex::new(())),
@@ -622,14 +647,19 @@ impl TeamManager {
                             // not team_dir, so teammates resolve relative paths correctly.
                             let lead_wd = manager
                                 .processor
-                                .session_manager
-                                .get_session(&manager.lead_session_id)
-                                .ok()
-                                .flatten()
-                                .map_or_else(
-                                    || std::env::current_dir().unwrap_or_default(),
-                                    |s| s.directory,
-                                );
+                                .upgrade()
+                                .and_then(|p| {
+                                    p.session_manager
+                                        .get_session(&manager.lead_session_id)
+                                        .ok()
+                                        .flatten()
+                                        .map_or_else(
+                                            || std::env::current_dir().unwrap_or_default(),
+                                            |s| s.directory,
+                                        )
+                                        .into()
+                                })
+                                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
                             match manager
                                 .spawn_teammate_internal(
                                     &name,
@@ -739,8 +769,11 @@ impl TeamManager {
 
         // Create isolated child session.
         tracing::info!(team = %self.team_name, agent_id = %agent_id, "Creating child session for teammate");
-        let child_session = self
+        let processor = self
             .processor
+            .upgrade()
+            .expect("SessionProcessor dropped while TeamManager still alive");
+        let child_session = processor
             .session_manager
             .create_session(working_dir.to_path_buf())?;
         let child_sid = child_session.id.clone();
@@ -815,7 +848,11 @@ impl TeamManager {
             memory_scope
         };
         if effective_scope != super::config::MemoryScope::None {
-            let storage = self.processor.session_manager.storage();
+            let processor = self
+                .processor
+                .upgrade()
+                .expect("SessionProcessor dropped while TeamManager still alive");
+            let storage = processor.session_manager.storage();
             let memory_block = load_team_memory_block(storage, &self.team_name, teammate_name);
             let current = agent.prompt.as_deref().unwrap_or("");
             Arc::make_mut(&mut agent).prompt = Some(Arc::from(format!("{current}{memory_block}")));
@@ -840,10 +877,16 @@ impl TeamManager {
                 poll_cancel: poll_cancel.clone(),
                 notify: Arc::clone(&notify),
                 last_progress: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
+                agent_handle: None,
+                poll_handle: None,
             },
         );
         // Start agent loop in background. Capture agent_id and team_dir for error persistence.
-        let proc = Arc::clone(&self.processor);
+        let proc = self
+            .processor
+            .upgrade()
+            .expect("SessionProcessor dropped while TeamManager still alive");
+        let proc = Arc::clone(&proc);
         let child_sid_clone = child_sid.clone();
         let agent_clone = agent.clone();
         let prompt_owned = prompt.to_string();
@@ -853,7 +896,7 @@ impl TeamManager {
         let team_name_clone = self.team_name.clone();
         let lead_sid_clone = self.lead_session_id.clone();
         let event_bus_clone = self.event_bus.clone();
-        tokio::spawn(async move {
+        let agent_handle = tokio::spawn(async move {
             // Retry with exponential backoff + jitter for transient API errors
             // (e.g. rate limits, cloud-provider cold-start).  Linear backoff
             // was insufficient — multiple teammates that failed at the same
@@ -964,7 +1007,14 @@ impl TeamManager {
         });
 
         // Start mailbox polling loop.
-        self.start_poll_loop(agent_id.clone(), poll_cancel, notify);
+        let poll_handle = self.start_poll_loop(agent_id.clone(), poll_cancel, notify);
+
+        // R-18/R-19: Store the JoinHandles so they can be force-aborted on
+        // shutdown_teammate / Drop.
+        if let Some(mut entry) = self.handles.get_mut(&agent_id) {
+            entry.agent_handle = Some(agent_handle);
+            entry.poll_handle = Some(poll_handle);
+        }
 
         // Publish TeammateSpawned event.
         self.event_bus.publish(Event::TeammateSpawned {
@@ -985,7 +1035,12 @@ impl TeamManager {
     /// Uses `tokio::select!` to wake on either:
     /// - `notify.notified()` — instant push from [`Mailbox::push`], or
     /// - `sleep(poll_interval)` — fallback for external writers.
-    fn start_poll_loop(&self, agent_id: String, cancel: Arc<AtomicBool>, notify: Arc<Notify>) {
+    fn start_poll_loop(
+        &self,
+        agent_id: String,
+        cancel: Arc<AtomicBool>,
+        notify: Arc<Notify>,
+    ) -> tokio::task::JoinHandle<()> {
         let team_dir = self.team_dir.clone();
         let team_name = self.team_name.clone();
         let lead_session_id = self.lead_session_id.clone();
@@ -1035,7 +1090,7 @@ impl TeamManager {
                 }
             }
             debug!(agent_id, "Mailbox polling loop stopped");
-        });
+        })
     }
 
     // ── Shutdown ──────────────────────────────────────────────────────────
@@ -1150,6 +1205,17 @@ impl TeamManager {
                 handle.notify.notify_one();
             }
 
+            // R-18/R-19: Force-abort the spawned tasks so they stop
+            // immediately even if they don't check the cancel flags.
+            if let Some((_key, handle)) = self.handles.remove(agent_id) {
+                if let Some(h) = handle.agent_handle {
+                    h.abort();
+                }
+                if let Some(h) = handle.poll_handle {
+                    h.abort();
+                }
+            }
+
             // Deregister the notifier now that this agent is shutting down.
             deregister_notifier(&self.team_dir, agent_id);
         }
@@ -1174,7 +1240,7 @@ impl TeamManager {
             &correlation_id,
         ))?;
 
-        // ── On-disk status update ────────────────────────��────────────────
+        // ── On-disk status update ─────────────────────────────────────────
         let mut store = TeamStore::load(&self.team_dir)?;
         if let Some(member) = store.config.member_by_id_mut(agent_id) {
             member.status = if graceful {
@@ -1187,6 +1253,19 @@ impl TeamManager {
             }
             // M5-T4: record the correlation id for the ack reply.
             member.shutdown_request_id = Some(correlation_id);
+        }
+        // R-24: For graceful shutdown, remove the handle entry so cancel
+        // flags and JoinHandles are dropped rather than lingering in the
+        // handles map. The teammate's agent loop will observe the
+        // ShutdownRequest mailbox message and exit on its own.
+        if graceful {
+            if let Some((_key, handle)) = self.handles.remove(agent_id) {
+                // Abort the poll loop immediately; the agent loop will
+                // exit via the mailbox message.
+                if let Some(h) = handle.poll_handle {
+                    h.abort();
+                }
+            }
         }
         store.save()?;
 

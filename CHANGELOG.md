@@ -1,5 +1,89 @@
 # Changelog
 
+## Version: 1.0.59
+
+### Added
+
+- **Activity log system** — new `ragent-types/src/activity.rs` event schema and
+  `ragent-storage/src/activity_log.rs` append-only JSONL event store with
+  `RunId`/`EventId` identifiers, projection types (checkpoint, message,
+  permission, tool call/result), rollback/resume/termination support, and
+  consistency validation. Re-exported from `ragent-types` and `ragent-storage`.
+- **Storage schema-version fast path** — `Storage::migrate` now records a
+  `schema_version` setting; warm starts skip the full 34-statement
+  `CREATE ... IF NOT EXISTS` batch and 7 column probes, reducing `Storage::open`
+  from ~41 SQL round-trips to a single `CREATE TABLE` + `SELECT`.
+- **WAL auto-checkpoint** — `PRAGMA wal_autocheckpoint=500` (down from the
+  default 1000) plus a `checkpoint_wal()` method for graceful shutdown to keep
+  the WAL file small during long sessions.
+- **Startup timing untracked gap** — `StartupTimings` now reports
+  `sum_stages_ms` and `untracked_ms` alongside the wall-clock total so
+  uninstrumented startup sections are visible.
+- **Criterion benchmark for activity log** — `ragent-storage/benches/activity_log_bench.rs`.
+
+### Changed — Provider detection and startup performance
+
+- **Removed `gh auth token` auto-discovery** — Copilot provider detection no
+  longer spawns the `gh` CLI subprocess. Only explicit credential sources
+  (env var, secure storage, config-based resource file) are honoured. The
+  `find_gh_cli_token` function and process-wide cache have been removed.
+- **Removed fast/slow provider-detection pass** — `detect_provider` and
+  `get_configured_providers_impl` simplified to a single pass without the
+  `defer_gh_cli` parameter.
+- **Preferred-provider reordering** — the user's `preferred_provider` setting
+  now moves a credentialed provider to the front of the list instead of being
+  pushed unconditionally (which could select a provider without credentials).
+- **Provider health-check timeouts** — Ollama health check capped at 2 s,
+  Copilot at 8 s, with elapsed-time `tracing::info!` logging.
+- **TUI struct-init timing** — `App` struct construction is now instrumented
+  as a startup stage.
+
+### Changed — Background task and code-index performance
+
+- **Background command `wait`/`cancel` use `tokio::sync::Notify`** instead of
+  polling `is_done()` every 50–200 ms, eliminating hundreds of idle wakeups
+  per cancelled task.
+- **Background `waiter_task` uses async `child.wait()`** with a
+  `cancel_notify` select instead of `try_wait()` polling every 100 ms.
+- **Code-index worker uses `recv_timeout`** instead of `try_recv` + `sleep`
+  busy-spin, eliminating ~20 idle wakeups/second.
+- **Askpass poll interval** increased from 100 ms to 500 ms (R-8) to reduce
+  idle CPU wakeups during sudo-capable bash commands.
+
+### Changed — Memory and resource bounding
+
+- **TUI message trimming** — `trim_messages_if_needed()` caps the in-memory
+  message list and `message_line_cache` to 500 entries (FIFO eviction).
+- **TUI log entry trimming** — `trim_log_entries_if_needed()` caps
+  `log_entries` and `log_line_cache` to 1000 entries.
+- **LLM request stats rolling window** — `llm_request_stats` capped at 1000
+  entries to prevent unbounded growth over long sessions.
+- **Read-timestamp map eviction** — `read_timestamps` map capped at 2000
+  entries with oldest-quarter eviction.
+- **Background `drained_ids` cleanup** — drained background task IDs are now
+  removed from the `drained_ids` HashSet on cleanup.
+- **Session state cache eviction** — `SessionManager::remove_session_state`
+  removes entries from the global cache on archive/sub-agent completion.
+- **MCP client `Drop` guard** — best-effort cleanup of stdio child processes
+  on `McpClient` drop.
+- **Orchestrator job task handles** — coordinator stores `JoinHandle`s and
+  uses an `ActiveJobsGuard` drop guard so `active_jobs` is decremented even on
+  panic/cancellation.
+- **Orchestrator registry mailbox-handle abort** — `unregister` aborts the
+  mailbox-loop task so re-registration does not accumulate orphaned loops.
+- **H4 progress-notice `AbortOnDrop` guard** — the provider-progress notice
+  task is now aborted on every scope exit (including error/retry paths), not
+  just the success path.
+
+### Fixed
+
+- **Edit-log test serialisation** — `EDIT_LOG_TEST_GUARD` mutex serialises
+  tests that mutate the process-global `EDIT_LOG_MODE` flag, preventing
+  parallel-test flakiness.
+- **`config_path` no longer probed at session creation** — `SessionMeta`
+  defaults `config_path` to `None` instead of reading `Config::load()` on
+  every `create_session` call.
+
 ## Version: 1.0.58
 
 ### Added

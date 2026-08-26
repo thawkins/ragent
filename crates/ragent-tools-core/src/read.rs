@@ -320,6 +320,18 @@ fn record_read_timestamp(path: &Path, ctx: &ToolContext) {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
         if let Ok(mut map) = ctx.read_timestamps.write() {
+            // R-13: Cap the read-timestamps map so a code-reading session
+            // touching thousands of files does not accumulate thousands of
+            // entries. When the cap is reached, evict roughly the oldest
+            // quarter (simple random-ish eviction by draining the front).
+            const MAX_READ_TIMESTAMPS: usize = 2000;
+            if map.len() >= MAX_READ_TIMESTAMPS {
+                let to_remove: Vec<PathBuf> =
+                    map.keys().take(MAX_READ_TIMESTAMPS / 4).cloned().collect();
+                for k in to_remove {
+                    map.remove(&k);
+                }
+            }
             map.insert(path.to_path_buf(), millis);
         }
     }

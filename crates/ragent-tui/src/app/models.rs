@@ -715,23 +715,14 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Detect the first configured provider from persisted credentials/env.
-    /// Returns `None` when no provider has been set up.
+    /// Detect the best configured provider at startup.
     ///
-    /// This is the hot path used at startup and on provider refresh.  It first
-    /// runs a cheap pass that never spawns a subprocess (env vars, `apps.json`,
-    /// database), and only falls back to the Copilot `gh auth token` CLI
-    /// subprocess when nothing cheaper was found — so provider detection never
-    /// blocks startup on a cold keyring / slow `gh`.
+    /// Only providers with an explicit credential source (environment
+    /// variable, secure-storage key, or a config-based resource file) are
+    /// detected.  Auto-discovery via external tools (e.g. `gh auth token`)
+    /// is no longer performed.
     pub fn detect_provider(storage: &Storage) -> Option<ConfiguredProvider> {
-        // Fast pass: cheap sources only (no `gh` subprocess).
-        let mut fast = Self::get_configured_providers_impl(storage, true);
-        if !fast.is_empty() {
-            return Some(fast.remove(0));
-        }
-        // Slow fallback: include Copilot discovery via the `gh` CLI subprocess,
-        // only reached when no provider was found cheaply.
-        Self::get_configured_providers_impl(storage, false)
+        Self::get_configured_providers_impl(storage)
             .into_iter()
             .next()
     }
@@ -739,19 +730,24 @@ impl App {
     /// Enumerate all configured providers from the database, honouring explicit
     /// `provider_{id}_disabled` opt-out flags set via `/provider reset`.
     pub fn get_configured_providers(storage: &Storage) -> Vec<ConfiguredProvider> {
-        Self::get_configured_providers_impl(storage, false)
+        Self::get_configured_providers_impl(storage)
     }
 
     /// Shared implementation of configured-provider enumeration.
     ///
-    /// When `defer_gh_cli` is `true`, the Copilot provider is only detected from
-    /// cheap sources (env var, IDE `apps.json`, database) and the `gh auth token`
-    /// CLI subprocess is skipped.  Used by [`detect_provider`] on its fast path to
-    /// avoid spawning a subprocess during startup.
-    fn get_configured_providers_impl(
-        storage: &Storage,
-        defer_gh_cli: bool,
-    ) -> Vec<ConfiguredProvider> {
+    /// Only providers with an explicit credential source are returned:
+    ///
+    /// - **Environment variable** — a provider-specific env var (e.g.
+    ///   `ANTHROPIC_API_KEY`) is set and non-empty.
+    /// - **Secure storage** — a key is stored in the ragent encrypted
+    ///   credential store (`provider_auth` table).
+    /// - **Config-based resource file** — for providers like Azure Resource
+    ///   that use a user-created config file (`azureresources.json`).
+    ///
+    /// Auto-discovery via external tooling (e.g. `gh auth token` CLI, IDE
+    /// `apps.json` scraping) has been removed — those are not explicit
+    /// credential sources.
+    fn get_configured_providers_impl(storage: &Storage) -> Vec<ConfiguredProvider> {
         // Helper: returns true when the user has explicitly reset this provider.
         let is_disabled = |pid: &str| -> bool {
             storage
@@ -774,18 +770,8 @@ impl App {
             }
         };
 
-        // 1. Check for an explicit user preference first — this overrides auto-discovery
-        //    so that e.g. selecting Ollama doesn't get overwritten by Copilot IDE tokens.
-        if let Ok(Some(preferred)) = storage.get_setting("preferred_provider") {
-            if !preferred.is_empty()
-                && !is_disabled(&preferred)
-                && let Some(&(pid, pname)) = PROVIDER_LIST.iter().find(|(id, _)| *id == preferred)
-            {
-                push(pid, pname, ProviderSource::Database);
-            }
-        }
-
-        // 2. Check each provider in PROVIDER_LIST order (env vars, then auto-discovery)
+        // 1. Check each provider in PROVIDER_LIST order for explicit credential
+        //    sources (env vars and config-based resource files).
         for &(pid, pname) in PROVIDER_LIST {
             if is_disabled(pid) {
                 continue;
@@ -856,29 +842,10 @@ impl App {
                         None
                     }
                 }
-                "copilot" => {
-                    if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
-                        if !key.is_empty() {
-                            Some(ProviderSource::EnvVar)
-                        } else if ragent_agent::provider::copilot::find_copilot_token().is_some() {
-                            Some(ProviderSource::AutoDiscovered)
-                        } else if !defer_gh_cli
-                            && ragent_agent::provider::copilot::find_gh_cli_token().is_some()
-                        {
-                            Some(ProviderSource::AutoDiscovered)
-                        } else {
-                            None
-                        }
-                    } else if ragent_agent::provider::copilot::find_copilot_token().is_some() {
-                        Some(ProviderSource::AutoDiscovered)
-                    } else if !defer_gh_cli
-                        && ragent_agent::provider::copilot::find_gh_cli_token().is_some()
-                    {
-                        Some(ProviderSource::AutoDiscovered)
-                    } else {
-                        None
-                    }
-                }
+                "copilot" => std::env::var("GITHUB_COPILOT_TOKEN")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
                 "ollama" => std::env::var("OLLAMA_HOST")
                     .ok()
                     .filter(|k| !k.is_empty())
@@ -909,13 +876,25 @@ impl App {
             }
         }
 
-        // 3. Check database for any stored provider auth (for providers not already found)
+        // 2. Check database for any stored provider auth (for providers not already found)
         for (pid, pname) in PROVIDER_LIST {
             if is_disabled(pid) {
                 continue;
             }
             if let Ok(Some(_key)) = storage.get_provider_auth(pid) {
                 push(pid, pname, ProviderSource::Database);
+            }
+        }
+
+        // 3. Honour explicit user preference: if the preferred provider is
+        //    among those with credentials, move it to the front so it is
+        //    selected first.  Providers without credentials are never pushed.
+        if let Ok(Some(preferred)) = storage.get_setting("preferred_provider") {
+            if !preferred.is_empty() && !is_disabled(&preferred) {
+                if let Some(pos) = configured.iter().position(|p| p.id == preferred) {
+                    let item = configured.remove(pos);
+                    configured.insert(0, item);
+                }
             }
         }
 
@@ -2011,13 +1990,24 @@ impl App {
                 None
             };
 
+            let check_start = std::time::Instant::now();
+
             let available = match provider.id.as_str() {
-                "ollama" => ragent_agent::provider::ollama::list_ollama_models(None)
-                    .await
-                    .is_ok(),
+                "ollama" => tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    ragent_agent::provider::ollama::list_ollama_models(None),
+                )
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false),
                 "copilot" => {
                     if let Some(token) = copilot_token {
-                        ragent_agent::provider::copilot::check_copilot_health(&token).await
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(8),
+                            ragent_agent::provider::copilot::check_copilot_health(&token),
+                        )
+                        .await
+                        .unwrap_or(false)
                     } else {
                         false
                     }
@@ -2025,6 +2015,13 @@ impl App {
                 // For API-key providers we trust the key is present
                 _ => true,
             };
+
+            tracing::info!(
+                provider = %provider.id,
+                available,
+                elapsed_ms = check_start.elapsed().as_millis(),
+                "Provider health check completed"
+            );
 
             health.store(if available { 1 } else { 2 }, Ordering::Relaxed);
         });

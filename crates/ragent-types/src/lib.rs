@@ -8,8 +8,10 @@
 //! - LLM provider traits
 //! - Resource management
 //! - Utility functions
+//! - Activity-log event schema and types
 //! - Cron scheduling types
 
+pub mod activity;
 pub mod cron;
 pub mod embedding;
 pub mod error;
@@ -28,13 +30,19 @@ pub mod thinking;
 pub mod trigger;
 
 // Re-export commonly used types
+pub use activity::{
+    ACTIVITY_EVENT_SCHEMA_VERSION, ActivityEvent, BoundaryTarget, ConsistencyError, EventKind,
+    Principal, ProjectedCheckpoint, ProjectedMessage, ProjectedPermission, ProjectedToolCall,
+    ProjectedToolResult, Projection, ResumeResult, RollbackResult, RunStatus, TerminationReason,
+    validate_event_log_consistency,
+};
 pub use cron::{
     CronEvent, CronForm, CronSchedule, DurationParseError, ParsedSchedule, ScheduleParseError,
     parse_duration, parse_schedule,
 };
 pub use error::RagentError;
 pub use event::{Event, EventBus};
-pub use id::{MessageId, SessionId};
+pub use id::{EventId, MessageId, RunId, SessionId};
 pub use llm::{
     ChatContent, ChatMessage, ChatRequest, ContentPart, LlmFinishReason, StreamEvent,
     ToolDefinition,

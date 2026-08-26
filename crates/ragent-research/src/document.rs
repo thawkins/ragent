@@ -1583,12 +1583,10 @@ fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
 /// The line reads `—` when no cited web source exposes a publication date.
 fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     // If the finding already contains a Sources paragraph (e.g. produced by
-    // the LLM itself), don't append a duplicate list.
-    if finding
-        .find("**Sources:**")
-        .or_else(|| finding.find("**sources:**"))
-        .is_some()
-    {
+    // the LLM itself), don't append a duplicate list. Match any case variant
+    // (`**Sources:**`, `**sources:**`, `**SOURCES:**`) via a lowercase
+    // comparison so we don't miss a duplicate.
+    if finding.to_lowercase().contains("**sources:**") {
         return None;
     }
 

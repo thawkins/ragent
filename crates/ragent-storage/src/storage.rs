@@ -33,6 +33,16 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use ragent_types::message::{Message, MessagePart, Role};
 
+/// Monotonically increasing schema version.
+///
+/// Bumped whenever the migration batch in [`Storage::migrate`] changes (new
+/// tables, columns, indexes, or FTS virtual tables).  On a warm start the
+/// stored version is compared against this constant; when they match the
+/// entire 34-statement `CREATE ... IF NOT EXISTS` batch and the 7
+/// `pragma_table_info` column probes are skipped, reducing `Storage::open`
+/// from ~41 SQL round-trips to a single `CREATE TABLE` + `SELECT`.
+const SCHEMA_VERSION: u32 = 1;
+
 /// Extract searchable text content from a message's parts.
 ///
 /// Concatenates all [`MessagePart::Text`] blocks, tool-call names, and
@@ -349,12 +359,25 @@ impl Storage {
         // rebuild.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
+        // R-23: Set an explicit WAL auto-checkpoint so the WAL file does not
+        // grow to hundreds of MB. The default is 1000 pages; 500 is more
+        // aggressive for a desktop agent that may run for hours.
+        conn.pragma_update(None, "wal_autocheckpoint", 500)?;
         let storage = Self {
             conn: Mutex::new(conn),
             has_format_version: std::sync::atomic::AtomicBool::new(false),
         };
         storage.migrate()?;
         Ok(storage)
+    }
+
+    /// R-23: Run a `PRAGMA wal_checkpoint(TRUNCATE)` to truncate the WAL file
+    /// back to zero size. Call on graceful shutdown to keep the WAL file
+    /// small.
+    pub fn checkpoint_wal(&self) -> Result<()> {
+        let conn = self.conn.lock().expect("storage conn lock poisoned");
+        conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
+        Ok(())
     }
 
     /// Returns the current `journal_mode` (e.g. `"wal"`, `"delete"`) for the
@@ -393,6 +416,36 @@ impl Storage {
 
     fn migrate(&self) -> Result<()> {
         let conn = lock_conn!(self)?;
+
+        // Fast path: ensure the `settings` table exists (a single cheap
+        // `CREATE TABLE IF NOT EXISTS`), then check whether the stored
+        // `schema_version` matches [`SCHEMA_VERSION`].  On a warm start this
+        // avoids re-parsing and catalog-checking all 34 `CREATE ... IF NOT
+        // EXISTS` statements and 7 `pragma_table_info` column probes.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+            );",
+        )?;
+        let stored_version: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if stored_version.as_deref() == Some(SCHEMA_VERSION.to_string().as_str()) {
+            // Schema is current — skip the full batch.  The
+            // `format_version` column definitely exists on any DB with this
+            // version, so cache that fact for `get_session` / `list_sessions`.
+            self.has_format_version
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            return Ok(());
+        }
+
+        // Slow path: run the full migration batch.
         conn.execute_batch(
             "
 
@@ -708,6 +761,14 @@ impl Storage {
                 conn.execute_batch(&sql)?;
             }
         }
+
+        // Record the schema version so the next `Storage::open` (including
+        // the background FTS warmup connection) hits the fast path.
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?1, ?2)",
+            params![SCHEMA_VERSION.to_string(), now],
+        )?;
 
         Ok(())
     }

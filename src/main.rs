@@ -693,6 +693,7 @@ async fn main() -> Result<()> {
             } else {
                 // Print startup banner before entering TUI alternate screen
                 print_banner();
+                let t0 = Instant::now();
                 ragent_tui::run_tui(
                     event_bus,
                     storage,
@@ -707,6 +708,7 @@ async fn main() -> Result<()> {
                     startup,
                 )
                 .await?;
+                tracing::info!(elapsed_ms = t0.elapsed().as_millis(), "run_tui returned");
             }
         }
         Some(Commands::Run { prompt }) => {

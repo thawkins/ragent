@@ -283,6 +283,18 @@ pub struct AgentManager {
     has_pending_background: AtomicBool,
 }
 
+impl Drop for AgentManager {
+    /// R-4: On drop, set all cancel flags so detached sub-agent tasks stop
+    /// promptly. Without this, spawned background tasks hold an
+    /// `Arc<SessionProcessor>` (and its storage, caches, event bus)
+    /// indefinitely — a stalled sub-agent pins the entire processor.
+    fn drop(&mut self) {
+        for entry in self.cancel_flags.iter() {
+            entry.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
 impl AgentManager {
     /// Creates a new task manager.
     pub fn new(
@@ -857,6 +869,14 @@ impl AgentManager {
         if !still_pending {
             self.has_pending_background.store(false, Ordering::Relaxed);
         }
+        // R-2: Reap completed, reported, non-running entries with no active
+        // waiters so the DashMap does not grow without bound. Each entry holds
+        // its full `result: Arc<str>` (up to 32 KB) and prompt string; without
+        // reaping, every sub-agent ever spawned stays in memory for the
+        // process lifetime.
+        self.tasks.retain(|_k, e| {
+            !(e.reported && e.status != TaskStatus::Running && e.waiter_count == 0)
+        });
         completed
     }
 

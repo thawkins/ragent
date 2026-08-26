@@ -43,7 +43,11 @@ use crate::event::{Event, EventBus};
 const DISMISS_MARKER: &str = "[User dismissed question]";
 
 /// How long the watcher task waits between directory scans.
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
+///
+/// R-8: Increased from 100 ms to 500 ms to reduce idle CPU wakeups from
+/// 10/s to 2/s during sudo-capable bash commands. The askpass broker
+/// writes a response file, so sub-second latency is not critical.
+const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Maximum time the watcher waits for a single password response before
 /// giving up (matched by the helper's own poll loop so both sides fail at

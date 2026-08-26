@@ -262,20 +262,13 @@ pub async fn action_setup(port: Option<u16>, headless: bool) -> Result<Value> {
     // Get version info.
     let version = super::cdp::discover_version(&http_endpoint).await?;
 
-    // Detach the child process so it keeps running.
-    // We don't store the Child handle — the browser runs independently.
-    // On drop, tokio::process::Child does NOT kill the process by default
-    // (unless the `kill_on_drop` flag is set, which we haven't set).
-    // However, we need to prevent the child from being waited on.
-    // We can forget the child by detaching it.
-    // Actually, tokio's Child will be killed on drop unless we call
-    // `child.detach()` or set `kill_on_drop(false)` (the default).
-    // Wait — the default for `kill_on_drop` is `false`, so dropping the
-    // Child will NOT kill the process. But we should still call detach()
-    // to avoid the process becoming a zombie.
+    // R-16: The browser process runs independently. Tokio's default
+    // `kill_on_drop = false` means dropping the `Child` handle does NOT
+    // kill the process — the browser keeps running. We read the PID for
+    // the response payload, then let the `Child` handle drop naturally.
+    // Tokio's internal process reaper prevents zombie accumulation.
     let pid = child.id().map(|p| json!(p)).unwrap_or(Value::Null);
-    // Don't await — just let the child run.
-    // We intentionally don't store the Child handle.
+    // Intentionally do not call `child.kill()` — the browser should persist.
 
     Ok(json!({
         "action": "setup",

@@ -12,7 +12,8 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdout};
-use tracing::{debug, warn};
+use tokio::sync::Notify;
+use tracing::{debug, trace};
 
 use crate::bash;
 use crate::event::{Event, EventBus};
@@ -40,6 +41,12 @@ struct Inner {
     done: bool,
     /// Total bytes dropped from the combined buffers due to the size cap.
     bytes_dropped: usize,
+    /// R-17: Notified by `waiter_task` when `done` is set so `cancel()` can
+    /// block on it instead of polling every 50 ms.
+    done_notify: Arc<Notify>,
+    /// R-9: Notified by `cancel()` to wake the `waiter_task` out of
+    /// `child.wait().await` so it can kill the process.
+    cancel_notify: Arc<Notify>,
 }
 
 /// A handle to a command running in the background.
@@ -93,6 +100,9 @@ impl BackgroundCommand {
             .take()
             .context("Failed to acquire stderr pipe for background command")?;
 
+        let done_notify = Arc::new(Notify::new());
+        let cancel_notify = Arc::new(Notify::new());
+
         let inner = Arc::new(Mutex::new(Inner {
             child: Some(child),
             stdout: String::new(),
@@ -103,6 +113,8 @@ impl BackgroundCommand {
             cancelled: false,
             done: false,
             bytes_dropped: 0,
+            done_notify: Arc::clone(&done_notify),
+            cancel_notify: Arc::clone(&cancel_notify),
         }));
 
         let handle = Self {
@@ -131,6 +143,8 @@ impl BackgroundCommand {
             command,
             session_id,
             event_bus,
+            done_notify,
+            cancel_notify,
         ));
 
         Ok(handle)
@@ -211,19 +225,38 @@ impl BackgroundCommand {
                 // `start_kill` sends the signal without awaiting.
                 let _ = child.start_kill();
             }
+            // R-9: Wake the waiter task so it stops blocking on `child.wait()`
+            // and can observe the killed process exiting.
+            inner.cancel_notify.notify_one();
         }
-        // Wait until the waiter task observes the exit and marks `done`.
+        // R-17: Block on the Notify signalled by `waiter_task` when `done` is
+        // set, instead of polling `is_done()` every 50 ms (200 wakeups for a
+        // 10 s timeout). Falls back to a deadline in case the waiter task
+        // itself panicked and never sets `done`.
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
-        while tokio::time::Instant::now() < deadline {
+        let done_notify = {
+            let inner = self.inner.lock().expect("background inner lock poisoned");
+            Arc::clone(&inner.done_notify)
+        };
+        loop {
             if self.is_done() {
                 return Ok(());
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            // Use a short timeout so we re-check `is_done` even if the notify
+            // is missed (e.g. waiter panicked before signalling).
+            tokio::select! {
+                _ = done_notify.notified() => {}
+                _ = tokio::time::sleep_until(deadline) => {
+                    if self.is_done() {
+                        return Ok(());
+                    }
+                    bail!(
+                        "Timed out waiting for cancelled background task {} to exit",
+                        self.id
+                    );
+                }
+            }
         }
-        bail!(
-            "Timed out waiting for cancelled background task {} to exit",
-            self.id
-        );
     }
 
     /// Block until the process exits or the timeout elapses.
@@ -233,13 +266,25 @@ impl BackgroundCommand {
     /// use [`BackgroundCommand::cancel`] if they want to stop it.
     pub async fn wait(&self, timeout_secs: u64) -> Result<()> {
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
-        while tokio::time::Instant::now() < deadline {
+        let done_notify = {
+            let inner = self.inner.lock().expect("background inner lock poisoned");
+            Arc::clone(&inner.done_notify)
+        };
+        loop {
             if self.is_done() {
                 return Ok(());
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            // R-17: Block on the Notify instead of polling every 200 ms.
+            tokio::select! {
+                _ = done_notify.notified() => {}
+                _ = tokio::time::sleep_until(deadline) => {
+                    if self.is_done() {
+                        return Ok(());
+                    }
+                    bail!("Timeout waiting for background task {}", self.id);
+                }
+            }
         }
-        bail!("Timeout waiting for background task {}", self.id)
     }
 
     async fn reader_task(
@@ -340,7 +385,6 @@ impl BackgroundCommand {
             }
             progress_update = Some(guard.progress.clone());
         }
-
         if let (Some(bus), Some(progress)) = (event_bus, progress_update) {
             bus.publish(Event::BackgroundTaskUpdated {
                 session_id: session_id.to_string(),
@@ -352,7 +396,9 @@ impl BackgroundCommand {
 
         let status = guard.status.clone();
         drop(guard);
-        debug!(
+        // Per-line: use trace! (non-hot path) to avoid log flooding when
+        // RUST_LOG=debug is set on a long-running command.
+        trace!(
             %task_id,
             command = %command,
             is_stdout,
@@ -384,41 +430,40 @@ impl BackgroundCommand {
         command: String,
         session_id: String,
         event_bus: Option<Arc<EventBus>>,
+        done_notify: Arc<Notify>,
+        cancel_notify: Arc<Notify>,
     ) {
-        // Poll the child with `try_wait` so the [`Inner::child`] handle remains
-        // available for [`BackgroundCommand::cancel`] to signal `start_kill`.
-        // A non-blocking poll loop avoids holding the `Mutex` across an await.
-        let (exit_status, taken_child) = loop {
-            let still_running: bool = {
-                let mut guard = inner.lock().expect("background inner lock poisoned");
-                match guard.child.as_mut() {
-                    Some(child) => match child.try_wait() {
-                        Ok(Some(status)) => {
-                            // Process exited — take it out so it can be dropped.
-                            let taken = guard.child.take();
-                            break (Some(status), taken);
-                        }
-                        Ok(None) => true,
-                        Err(e) => {
-                            warn!(%task_id, error = %e, "try_wait error on background child");
-                            let taken = guard.child.take();
-                            break (None, taken);
-                        }
-                    },
-                    None => {
-                        // Child was already taken (e.g. by a prior loop or
-                        // cancel path). Nothing to reap.
-                        break (None, None);
-                    }
-                }
-            };
-            if still_running {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
+        // R-9: Take the child out of `Inner` so we can call `child.wait()`
+        // (async-aware) instead of polling `try_wait()` every 100 ms. The
+        // `cancel()` path signals `cancel_notify`; we `select!` on both so
+        // cancel wakes the waiter immediately rather than waiting for the
+        // next poll tick.
+        let mut child = {
+            let mut guard = inner.lock().expect("background inner lock poisoned");
+            guard.child.take()
         };
 
-        // Drop the taken child to close process resources.
-        drop(taken_child);
+        let exit_status: Option<std::process::ExitStatus> = if let Some(ref mut child) = child {
+            loop {
+                tokio::select! {
+                    status = child.wait() => {
+                        break status.ok();
+                    }
+                    // R-9: cancel() called start_kill() and notified us. Kill
+                    // if not already killed, then keep waiting — `child.wait()`
+                    // will return once the killed process exits.
+                    _ = cancel_notify.notified() => {
+                        let _ = child.start_kill();
+                    }
+                }
+            }
+        } else {
+            // Child was already taken (e.g. by a prior loop or cancel path).
+            None
+        };
+
+        // Drop the child to close process resources.
+        drop(child);
 
         let (status, exit_code) = match exit_status {
             Some(status) if status.success() => ("completed", status.code()),
@@ -434,6 +479,8 @@ impl BackgroundCommand {
         }
         guard.exit_code = exit_code;
         guard.done = true;
+        // R-17: Wake any caller blocked in `cancel()` or `wait()`.
+        done_notify.notify_waiters();
         let final_status = guard.status.clone();
         let progress = guard.progress.clone();
         drop(guard);

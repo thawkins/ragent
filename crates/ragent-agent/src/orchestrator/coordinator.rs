@@ -74,6 +74,10 @@ struct JobEntry {
     pub status: String,
     pub result: Option<String>,
     pub events_tx: broadcast::Sender<JobEvent>,
+    /// R-20: Handle to the spawned job task so it can be aborted on
+    /// shutdown. Wrapped in `Option` so the entry can be constructed
+    /// before the handle is available.
+    handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Simple metrics recorded by the coordinator for observability hooks.
@@ -99,6 +103,19 @@ impl Metrics {
             timeouts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             errors: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
+    }
+}
+
+/// R-20: Drop guard that decrements `active_jobs` when the job task finishes
+/// (including on panic or cancellation), preventing stuck "running" jobs.
+struct ActiveJobsGuard {
+    active_jobs: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Drop for ActiveJobsGuard {
+    fn drop(&mut self) {
+        self.active_jobs
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -377,6 +394,7 @@ impl Coordinator {
             status: "running".to_string(),
             result: None,
             events_tx: tx.clone(),
+            handle: None,
         };
         self.jobs.insert(job_id.clone(), entry);
 
@@ -389,7 +407,13 @@ impl Coordinator {
         metrics
             .active_jobs
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        tokio::spawn(async move {
+        // R-20: Store the JoinHandle in the JobEntry so it can be aborted on
+        // shutdown. A Drop guard ensures metrics are updated even on panic.
+        let metrics_guard = ActiveJobsGuard {
+            active_jobs: Arc::clone(&metrics.active_jobs),
+        };
+        let handle = tokio::spawn(async move {
+            let _guard = metrics_guard;
             // publish JobStarted
             let _ = tx.send(JobEvent::JobStarted {
                 job_id: job_id_for_spawn.clone(),
@@ -410,9 +434,6 @@ impl Coordinator {
                 metrics
                     .errors
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                metrics
-                    .active_jobs
-                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 return;
             }
 
@@ -443,7 +464,6 @@ impl Coordinator {
                             agent_id: agent_id.clone(),
                             success: false,
                         });
-                        // record timeout vs error
                         let es = e.to_string();
                         if es.contains("timed out") || es.contains("timeout") {
                             metrics
@@ -454,7 +474,6 @@ impl Coordinator {
                                 .errors
                                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        // continue to next agent
                     }
                 }
             }
@@ -469,12 +488,14 @@ impl Coordinator {
                 success: true,
             });
             metrics
-                .active_jobs
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            metrics
                 .completed_jobs
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         });
+
+        // Store the handle so it can be aborted on shutdown.
+        if let Some(mut j) = self.jobs.get_mut(&job_id) {
+            j.handle = Some(handle);
+        }
 
         Ok(job_id)
     }

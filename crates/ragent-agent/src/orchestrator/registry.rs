@@ -21,7 +21,6 @@ pub struct OrchestrationRequest {
 }
 
 /// Agent metadata stored in the registry.
-#[derive(Clone)]
 pub struct AgentEntry {
     /// Unique agent identifier.
     pub id: AgentId,
@@ -31,6 +30,9 @@ pub struct AgentEntry {
     pub mailbox: Option<mpsc::Sender<OrchestrationRequest>>,
     /// Last seen heartbeat time (updated on register/heartbeat).
     pub last_heartbeat: Option<DateTime<Utc>>,
+    /// R-14: Handle to the mailbox-loop task. Aborted on `unregister` so
+    /// re-registration does not accumulate orphaned loops.
+    pub mailbox_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl AgentEntry {
@@ -45,6 +47,7 @@ impl AgentEntry {
             capabilities,
             mailbox,
             last_heartbeat: Some(Utc::now()),
+            mailbox_handle: None,
         }
     }
 }
@@ -82,39 +85,69 @@ impl AgentRegistry {
         let id = id.into();
 
         let mut mailbox_opt = None;
+        let mut mailbox_handle = None;
         if let Some(responder) = responder {
             // create a channel for the agent mailbox
             let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(100);
             mailbox_opt = Some(tx);
 
             // Spawn the agent loop which turns mailbox messages into responder calls.
-            tokio::spawn(async move {
+            // R-14: store the JoinHandle so `unregister` can abort it.
+            mailbox_handle = Some(tokio::spawn(async move {
                 while let Some(req) = rx.recv().await {
                     let fut = (responder)(req.payload);
                     let resp = fut.await;
                     // best-effort: ignore send error
                     let _ = req.reply.send(resp);
                 }
-            });
+            }));
         }
 
-        let entry = AgentEntry::new(id.clone(), capabilities, mailbox_opt);
+        let mut entry = AgentEntry::new(id.clone(), capabilities, mailbox_opt);
+        entry.mailbox_handle = mailbox_handle;
         self.inner.write().await.insert(id, entry);
     }
 
     /// Unregister an agent by ID.
     pub async fn unregister(&self, id: &str) {
-        self.inner.write().await.remove(id);
+        // R-14: abort the mailbox-loop task so re-registration does not
+        // accumulate orphaned infinite loops.
+        let value = self.inner.write().await.remove(id);
+        if let Some(entry) = value {
+            if let Some(handle) = entry.mailbox_handle {
+                handle.abort();
+            }
+        }
     }
 
     /// List all agents.
+    ///
+    /// Returns entries without the mailbox `JoinHandle` (which is not
+    /// `Clone`); callers that need the handle should use `get`.
     pub async fn list(&self) -> Vec<AgentEntry> {
-        self.inner.read().await.values().cloned().collect()
+        self.inner
+            .read()
+            .await
+            .values()
+            .map(|e| AgentEntry {
+                id: e.id.clone(),
+                capabilities: e.capabilities.clone(),
+                mailbox: e.mailbox.clone(),
+                last_heartbeat: e.last_heartbeat,
+                mailbox_handle: None,
+            })
+            .collect()
     }
 
     /// Get a specific agent by id.
     pub async fn get(&self, id: &str) -> Option<AgentEntry> {
-        self.inner.read().await.get(id).cloned()
+        self.inner.read().await.get(id).map(|e| AgentEntry {
+            id: e.id.clone(),
+            capabilities: e.capabilities.clone(),
+            mailbox: e.mailbox.clone(),
+            last_heartbeat: e.last_heartbeat,
+            mailbox_handle: None,
+        })
     }
 
     /// Update heartbeat for an agent (mark it as alive now).
@@ -156,7 +189,13 @@ impl AgentRegistry {
                     .iter()
                     .all(|req| entry.capabilities.iter().any(|c| c.contains(req)))
             })
-            .cloned()
+            .map(|e| AgentEntry {
+                id: e.id.clone(),
+                capabilities: e.capabilities.clone(),
+                mailbox: e.mailbox.clone(),
+                last_heartbeat: e.last_heartbeat,
+                mailbox_handle: None,
+            })
             .collect()
     }
 }

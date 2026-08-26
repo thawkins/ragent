@@ -161,7 +161,7 @@ impl GatherObserver for GatherEventForwarder {
     }
 }
 /// Inputs the caller supplies to [`ResearchSession::run`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SessionConfig {
     /// Topic and seed inputs.
     pub input: InputConfig,
@@ -180,7 +180,7 @@ pub struct SessionConfig {
 }
 
 /// Topic and seed inputs for a research session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InputConfig {
     /// Free-form research topic — used to derive web queries and grep terms.
     ///
@@ -292,7 +292,7 @@ pub struct LocalConfig {
 }
 
 /// Analysis and synthesis knobs for a research session.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AnalysisConfig {
     /// Depth preset selected via `--depth`. When `None`, the engine behaves as
     /// `Depth::Standard` for budget purposes and remains single-pass.
@@ -380,17 +380,6 @@ impl SessionConfig {
     }
 }
 
-impl Default for InputConfig {
-    fn default() -> Self {
-        Self {
-            topic: String::new(),
-            sources_dir: None,
-            from_urls: Vec::new(),
-            from_files: Vec::new(),
-        }
-    }
-}
-
 impl Default for OutputConfig {
     fn default() -> Self {
         Self {
@@ -426,17 +415,6 @@ impl Default for LocalConfig {
     }
 }
 
-impl Default for AnalysisConfig {
-    fn default() -> Self {
-        Self {
-            depth: None,
-            iterations: None,
-            max_synthesis_sources: None,
-            contradiction: None,
-        }
-    }
-}
-
 impl Default for ResilienceConfig {
     fn default() -> Self {
         Self {
@@ -454,20 +432,6 @@ impl Default for ResilienceConfig {
 impl Default for RunEngineConfig {
     fn default() -> Self {
         Self { tier: Tier::Full }
-    }
-}
-
-impl Default for SessionConfig {
-    fn default() -> Self {
-        Self {
-            input: InputConfig::default(),
-            output: OutputConfig::default(),
-            web: WebConfig::default(),
-            local: LocalConfig::default(),
-            analysis: AnalysisConfig::default(),
-            resilience: ResilienceConfig::default(),
-            engine: RunEngineConfig::default(),
-        }
     }
 }
 
@@ -519,44 +483,57 @@ pub enum AnalysisEvent {
     /// The contradiction-graph step produced a ranked set of opposing source
     /// claims (T-007).
     ContradictionGraph {
+        /// Contradiction edges found.
         edges: Vec<crate::contradiction::ContradictionEdge>,
+        /// Number of sources scanned.
         sources_scanned: usize,
     },
     /// The loci-analysis step identified key recurring dimensions (T-008).
     LociAnalysis {
+        /// Identified recurring dimensions.
         loci: crate::locus::LocusSet,
+        /// Number of sources scanned.
         sources_scanned: usize,
     },
     /// The depth-investigation step classified each detected locus (T-008).
     DepthInvestigation {
+        /// Per-locus depth investigation results.
         investigations: Vec<crate::locus::DepthInvestigation>,
     },
     /// The cross-locus reconcile step identified dimensions that share common
     /// sources (T-009).
     CrossLocusReconcile {
+        /// Cross-locus reconciliation result.
         reconcile: crate::reconcile::CrossLocusReconcile,
     },
     /// The source-tensions step surfaced contradictions, shallow evidence, and
     /// isolated sources (T-009).
     SourceTensions {
+        /// Source tensions identified.
         tensions: crate::reconcile::SourceTensions,
     },
     /// The evidence-digest step summarised claim support and conflict levels
     /// (T-011).
     EvidenceDigest {
+        /// Evidence digest summary.
         digest: crate::digest::EvidenceDigest,
     },
     /// The corpus-critic step audited the gathered corpus (T-010).
     CorpusCritic {
+        /// Corpus critic audit report.
         report: crate::corpus_critic::CorpusCriticReport,
     },
     /// The gap-fill fetch step issued targeted follow-up queries (T-010).
     GapFetch {
+        /// Gap-fill fetch result.
         result: crate::corpus_critic::GapFetchResult,
     },
     /// The triple-draft step produced three deterministic candidate summaries
     /// (T-011).
-    TripleDraft { draft: crate::digest::TripleDraft },
+    TripleDraft {
+        /// Triple-draft candidate summaries.
+        draft: crate::digest::TripleDraft,
+    },
 }
 
 /// Synthesis and quality-assurance events emitted by the post-analysis
@@ -568,27 +545,44 @@ pub enum AnalysisEvent {
 pub enum SynthesisEvent {
     /// The synthesis phase finished (or fell back).
     SynthesizeResult {
+        /// Synthesis outcome.
         outcome: SynthesizeOutcome,
+        /// Additional detail about the synthesis.
         detail: Option<String>,
     },
     /// The deterministic 4-critic audit produced a structured quality report
     /// (T-012).
     SynthesisAudit {
+        /// Synthesis audit report.
         audit: crate::synthesis::SynthesisAudit,
     },
     /// A critic subagent finished (T-012).
     CriticResult {
+        /// Critic score, if available.
         score: Option<u32>,
+        /// Gaps identified by the critic.
         gaps: Vec<String>,
     },
     /// The surgical patcher step applied deterministic revisions (T-013).
-    SurgicalPatch { result: PatchResult },
+    SurgicalPatch {
+        /// Patch result.
+        result: PatchResult,
+    },
     /// The cite-check step verified every `[#N]` citation (T-014).
-    CiteCheck { result: CitationCheckResult },
+    CiteCheck {
+        /// Citation check result.
+        result: CitationCheckResult,
+    },
     /// The polish step applied deterministic final edits (T-015).
-    Polish { result: PolishResult },
+    Polish {
+        /// Polish result.
+        result: PolishResult,
+    },
     /// The readability audit scored the polished draft (T-015).
-    ReadabilityAudit { result: ReadabilityAudit },
+    ReadabilityAudit {
+        /// Readability audit result.
+        result: ReadabilityAudit,
+    },
 }
 
 /// Progress event emitted as a research session runs. The TUI/CLI/HTTP
@@ -596,77 +590,161 @@ pub enum SynthesisEvent {
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
     /// A new phase has started.
-    Phase { phase: SessionPhase },
+    Phase {
+        /// The phase that has started.
+        phase: SessionPhase,
+    },
     /// The web-gathering phase produced these focused sub-queries.
-    QueriesDecomposed { queries: Vec<String> },
+    QueriesDecomposed {
+        /// Decomposed web-gathering queries.
+        queries: Vec<String>,
+    },
     /// The web-gathering phase captured a single source.
     WebCaptured {
+        /// Source URL.
         url: String,
+        /// Source title.
         title: String,
+        /// Search tool used.
         search_tool: String,
+        /// Search engine used.
         search_engine: String,
+        /// Preview of the page body.
         body_preview: String,
+        /// Detected language of the page.
         language: String,
+        /// Open-access recovery info, if applicable.
         oa_recovery: Option<Box<crate::open_access::RecoveredOpenAccess>>,
     },
     /// The `--from-url` primary page was fetched.
-    FromUrlBodyPreview { url: String, body_preview: String },
+    FromUrlBodyPreview {
+        /// The fetched URL.
+        url: String,
+        /// Preview of the fetched page body.
+        body_preview: String,
+    },
     /// The `--from-file` primary document was extracted.
-    FromFileBodyPreview { path: String, body_preview: String },
+    FromFileBodyPreview {
+        /// Path of the file.
+        path: String,
+        /// Preview of the extracted document body.
+        body_preview: String,
+    },
     /// The local-gathering phase scored and captured a file.
-    LocalCaptured { path: String, score: usize },
+    LocalCaptured {
+        /// Path of the captured file.
+        path: String,
+        /// Relevance score of the file.
+        score: usize,
+    },
     /// The session captured a prior spec as a cross-reference.
-    SpecCaptured { spec_id: String },
+    SpecCaptured {
+        /// Identifier of the captured spec.
+        spec_id: String,
+    },
     /// The web-gathering phase failed as a whole.
-    WebSearchFailed { error: String },
+    WebSearchFailed {
+        /// Error describing the search failure.
+        error: String,
+    },
     /// A single candidate page could not be fetched.
-    WebFetchFailed { url: String, error: String },
+    WebFetchFailed {
+        /// URL that failed to fetch.
+        url: String,
+        /// Error describing the fetch failure.
+        error: String,
+    },
     /// A generic source fetch failed and was recorded in session state.
     SourceFailed {
+        /// Source identifier, if available.
         source: Option<String>,
+        /// Error describing the failure.
         error: String,
     },
     /// The research plan was updated with new sub-questions.
-    PlanUpdated { sub_questions: Vec<String> },
+    PlanUpdated {
+        /// Updated sub-questions.
+        sub_questions: Vec<String>,
+    },
     /// A sub-question changed status.
-    SubQuestionStatusChanged { id: String, status: String },
+    SubQuestionStatusChanged {
+        /// Identifier of the sub-question.
+        id: String,
+        /// New status of the sub-question.
+        status: String,
+    },
     /// The verifier finished checking claims against sources.
-    VerificationResult { passed: bool, issues: Vec<String> },
+    VerificationResult {
+        /// Whether verification passed.
+        passed: bool,
+        /// Issues found during verification.
+        issues: Vec<String>,
+    },
     /// A single iteration of the research loop completed.
-    IterationCompleted { iteration: u32, score: Option<u32> },
+    IterationCompleted {
+        /// Iteration number.
+        iteration: u32,
+        /// Score from the iteration, if available.
+        score: Option<u32>,
+    },
     /// Follow-up bridge queries were generated to close evidence gaps.
-    FollowUpQueries { queries: Vec<String> },
+    FollowUpQueries {
+        /// Generated follow-up queries.
+        queries: Vec<String>,
+    },
     /// Analysis-phase events (contradiction graph, loci, reconcile, etc.).
-    Analysis(AnalysisEvent),
+    Analysis(
+        /// Analysis event.
+        AnalysisEvent,
+    ),
     /// Synthesis and quality-assurance events (audit, patches, cite check,
     /// polish, readability).
-    Synthesis(SynthesisEvent),
+    Synthesis(
+        /// Synthesis event.
+        SynthesisEvent,
+    ),
     /// The session has finished and a fully-populated document was written.
     Done {
+        /// Total number of sources captured.
         total_sources: usize,
+        /// Number of PDF sources captured.
         pdf_count: usize,
+        /// Number of YouTube sources captured.
         youtube_count: usize,
+        /// Number of sources excluded.
         excluded_count: usize,
     },
     /// A single pipeline step started, completed, skipped, or failed.
     RunStep {
+        /// Name of the pipeline step.
         step: String,
+        /// Status of the step.
         status: String,
+        /// Additional detail about the step.
         detail: Option<String>,
     },
     /// Tier-router summary emitted when the pipeline reaches a terminal state.
     TierDone {
+        /// Number of steps completed.
         completed: usize,
+        /// Number of steps skipped.
         skipped: usize,
+        /// Number of steps failed.
         failed: usize,
     },
     /// Resolved run options, emitted once at the start of a session.
     ConfigSnapshot {
+        /// Output format.
         output_format: String,
+        /// Depth preset.
         depth: Option<String>,
+        /// Iteration count.
         iterations: Option<u32>,
+        /// Selected tier.
         tier: Option<String>,
+        /// `--from-url` URLs.
         from_urls: Vec<String>,
+        /// `--from-file` paths.
         from_files: Vec<String>,
     },
 }
@@ -1266,7 +1344,8 @@ impl ResearchSession {
         // E-003: apply the max_synthesis_sources cap when configured. Select
         // the highest-relevance sources so the LLM sees the most valuable
         // evidence. `--use-low-relevance` sources are already in the pool
-        // when `use_low_relevance` is true; the cap just picks the top N by          // relevance rank.
+        // when `use_low_relevance` is true; the cap just picks the top N by
+        // relevance rank.
         let synthesis_sources: Vec<Source> =
             if let Some(cap) = config.analysis.max_synthesis_sources {
                 if sources.len() > cap {

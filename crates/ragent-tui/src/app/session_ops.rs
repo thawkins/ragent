@@ -131,6 +131,8 @@ impl App {
         self.set_status_working("running command");
         self.stream_in_bytes = 0;
         self.stream_out_bytes = 0;
+        // R-10: trim messages to bound memory.
+        self.trim_messages_if_needed();
 
         self.push_log_no_agent(LogLevel::Info, format!("bang command: {command}"));
 
@@ -207,6 +209,8 @@ impl App {
         self.set_status_working("processing");
         self.stream_in_bytes = 0;
         self.stream_out_bytes = 0;
+        // R-10: trim messages to bound memory.
+        self.trim_messages_if_needed();
 
         let has_refs = !ragent_agent::reference::parse::parse_refs(&text).is_empty();
         if has_refs {
@@ -1695,9 +1699,44 @@ impl App {
         };
         self.log_entries.push(entry);
         self.log_version = self.log_version.wrapping_add(1);
+        // R-11: Cap log entries with FIFO eviction so the Vec (and its
+        // mirror `log_line_cache`) do not grow without bound over a long
+        // session.
+        self.trim_log_entries_if_needed();
         if self.show_log {
             if let Some(ref path) = self.log_window_path {
                 self.append_log_entry_to_spool(path, level, &message);
+            }
+        }
+    }
+
+    /// R-10: Trim `messages` and `message_line_cache` to `MAX_TUI_MESSAGES`
+    /// using FIFO eviction so long sessions do not accumulate every message
+    /// (with all `MessagePart`s up to 12 KB each) without bound.
+    pub(crate) fn trim_messages_if_needed(&mut self) {
+        const MAX_TUI_MESSAGES: usize = 500;
+        if self.messages.len() > MAX_TUI_MESSAGES {
+            let drop_count = self.messages.len() - MAX_TUI_MESSAGES;
+            self.messages.drain(0..drop_count);
+            // Trim the line cache to match.
+            if self.message_line_cache.len() > MAX_TUI_MESSAGES {
+                let drop_cache = self.message_line_cache.len() - MAX_TUI_MESSAGES;
+                self.message_line_cache.drain(0..drop_cache);
+            }
+            self.messages_version = self.messages_version.wrapping_add(1);
+        }
+    }
+
+    /// R-11: Trim `log_entries` and `log_line_cache` to `MAX_LOG_ENTRIES`
+    /// using FIFO eviction.
+    pub(crate) fn trim_log_entries_if_needed(&mut self) {
+        const MAX_LOG_ENTRIES: usize = 1000;
+        if self.log_entries.len() > MAX_LOG_ENTRIES {
+            let drop_count = self.log_entries.len() - MAX_LOG_ENTRIES;
+            self.log_entries.drain(0..drop_count);
+            if self.log_line_cache.len() > MAX_LOG_ENTRIES {
+                let drop_cache = self.log_line_cache.len() - MAX_LOG_ENTRIES;
+                self.log_line_cache.drain(0..drop_cache);
             }
         }
     }

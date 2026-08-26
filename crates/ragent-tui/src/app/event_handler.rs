@@ -134,6 +134,7 @@ impl App {
             let msg = Message::user_text(&sid, &full_task);
             self.messages.push(msg);
             self.messages_version = self.messages_version.wrapping_add(1);
+            self.trim_messages_if_needed();
 
             // Spawn async processing
             let processor = self.session_processor.clone();
@@ -994,6 +995,13 @@ impl App {
                         input_tokens,
                         output_tokens,
                     });
+                    // R-22: Cap the stats vec to a rolling window so it does
+                    // not grow without bound over a long session.
+                    const MAX_LLM_REQUEST_STATS: usize = 1000;
+                    if self.llm_request_stats.len() > MAX_LLM_REQUEST_STATS {
+                        let drop_count = self.llm_request_stats.len() - MAX_LLM_REQUEST_STATS;
+                        self.llm_request_stats.drain(0..drop_count);
+                    }
                 }
                 self.push_log_no_agent(
                     LogLevel::Info,
@@ -1102,7 +1110,7 @@ impl App {
                 self.push_log_no_agent(LogLevel::Tool, log_line);
                 // Mark the Tasks side-panel cache stale when task data
                 // mutates, so the next panel render reflects the change.
-                if matches!(tool.as_str(), "task_create" | "task_update" | "task_delete") {
+                if matches!(tool.as_str(), "task_create" | "task_update") {
                     self.tasks_cache_dirty = true;
                 }
                 self.needs_redraw = true;
@@ -2141,6 +2149,7 @@ impl App {
                 vec![MessagePart::Text { text: rendered }],
             ));
             self.messages_version = self.messages_version.wrapping_add(1);
+            self.trim_messages_if_needed();
         }
     }
 
@@ -2204,6 +2213,7 @@ impl App {
             );
             self.messages.push(msg);
             self.messages_version = self.messages_version.wrapping_add(1);
+            self.trim_messages_if_needed();
         }
     }
 
@@ -2245,6 +2255,7 @@ impl App {
             );
             self.messages.push(msg);
             self.messages_version = self.messages_version.wrapping_add(1);
+            self.trim_messages_if_needed();
         }
     }
 
@@ -2448,6 +2459,7 @@ impl App {
         let msg = Message::user_text(&session_id, &prompt);
         self.messages.push(msg);
         self.messages_version = self.messages_version.wrapping_add(1);
+        self.trim_messages_if_needed();
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
