@@ -603,6 +603,19 @@ fn build_line2_right(
         ));
     }
 
+    // Activity-log status
+    {
+        let (icon, color) = if ragent_config::activity_log::is_enabled() {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        spans.push(Span::styled(
+            format!("Alog:{icon} "),
+            Style::default().fg(color),
+        ));
+    }
+
     // Autopilot status
     {
         let (icon, color) = if app.autopilot_enabled {

@@ -833,7 +833,11 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        Command::new(program).args(&args).output(),
+        Command::new(program)
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output(),
     )
     .await;
 
@@ -1010,6 +1014,66 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
     Ok(())
 }
 
+/// Build the argv prefix that runs a shell command at low CPU/IO priority so
+/// heavy agent workloads do not make the host system unresponsive.
+///
+/// Returns `["nice", "-n", "<level>", "ionice", "-c", "3"]` on Linux (or
+/// `["nice", "-n", "<level>"]` elsewhere) when a `nice` level is configured via
+/// `bash.nice` in `ragent.json` (default `10`). Returns an empty vector when no
+/// level is configured or on Windows (the wrappers are POSIX utilities).
+///
+/// Callers prepend the returned argv to their program invocation so the actual
+/// program runs as a child of `nice`, lowering its CPU scheduling priority, and
+/// (on Linux) of `ionice -c 3`, marking its I/O as idle-class.
+fn low_priority_prefix(shell: &ShellType) -> Vec<std::ffi::OsString> {
+    // POSIX wrappers only; Git Bash and PowerShell on Windows also understand
+    // them but the shell executable may not be a standard `nice`/`ionice`, so
+    // restrict the wrappers to native POSIX shells.
+    if matches!(shell, ShellType::PowerShell(_) | ShellType::GitBash(_)) || is_windows() {
+        return Vec::new();
+    }
+
+    let Some(level) = ragent_config::bash_lists::nice_level() else {
+        return Vec::new();
+    };
+
+    let mut prefix: Vec<std::ffi::OsString> =
+        vec!["nice".into(), "-n".into(), level.to_string().into()];
+    if cfg!(target_os = "linux") {
+        prefix.push("ionice".into());
+        prefix.push("-c".into());
+        prefix.push("3".into());
+    }
+    prefix
+}
+
+/// Prepend the low-priority argv prefix (see [`low_priority_prefix`]) to a
+/// command so the real program runs as a child of `nice` / `ionice`.
+///
+/// This rewrites `cmd` to run `nice ... <original program> <original args>`.
+/// `kill_on_drop` is carried over from the original command. Callers should
+/// invoke this after configuring cwd/stdio on the command; the wrapper inherits
+/// the parent's stdio (which matches the wrapped shell's needs in every call
+/// site here).
+fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
+    let prefix = low_priority_prefix(shell);
+    if prefix.is_empty() {
+        return;
+    }
+
+    let original_program = cmd.as_std().get_program().to_os_string();
+    let original_args: Vec<std::ffi::OsString> = cmd.as_std().get_args().map(Into::into).collect();
+    let kill_on_drop = cmd.get_kill_on_drop();
+
+    let mut rebuilt = Command::new(prefix.first().unwrap());
+    rebuilt.args(&prefix[1..]);
+    rebuilt.args([original_program]);
+    rebuilt.args(original_args);
+    rebuilt.kill_on_drop(kill_on_drop);
+
+    *cmd = rebuilt;
+}
+
 /// Spawn a long-running shell command for background execution.
 ///
 /// The returned [`tokio::process::Child`] has stdin closed, stdout/stderr
@@ -1034,6 +1098,7 @@ pub async fn spawn_background_shell(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            prepend_low_priority(&mut cmd, shell);
             cmd
         }
         ShellType::GitBash(path) => {
@@ -1045,6 +1110,7 @@ pub async fn spawn_background_shell(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            prepend_low_priority(&mut cmd, shell);
             cmd
         }
         ShellType::PowerShell(path) => {
@@ -1059,6 +1125,7 @@ pub async fn spawn_background_shell(
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            prepend_low_priority(&mut cmd, shell);
             cmd
         }
     };
@@ -1249,6 +1316,17 @@ impl Tool for BashTool {
                 // Detach stdin from the tty so nothing can block on it; sudo
                 // is handled via SUDO_ASKPASS instead.
                 cmd.stdin(std::process::Stdio::null());
+                // Kill the child process when the future is dropped (e.g.
+                // when `tokio::time::timeout` elapses).  Without this, a
+                // timed-out command becomes an orphan that keeps consuming
+                // CPU — the root cause of the "100% CPU stuck mid-run"
+                // bug.  The background shell path already sets this
+                // (see `spawn_background_shell`).
+                cmd.kill_on_drop(true);
+                // Run at low CPU/IO priority so heavy commands do not make the
+                // host system unresponsive.  `nice -n <level>` lowers the CPU
+                // scheduling priority; `ionice -c 3` marks I/O as idle-class.
+                prepend_low_priority(&mut cmd, shell);
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
@@ -1263,6 +1341,8 @@ impl Tool for BashTool {
                 let mut cmd = Command::new(path);
                 cmd.arg("-c").arg(&wrapper).current_dir(&ctx.working_dir);
                 cmd.stdin(std::process::Stdio::null());
+                cmd.kill_on_drop(true);
+                prepend_low_priority(&mut cmd, shell);
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
@@ -1274,18 +1354,17 @@ impl Tool for BashTool {
             }
             ShellType::PowerShell(path) => {
                 // PowerShell on Windows — use -Command to pass inline command
-                tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    Command::new(path)
-                        .arg("-NoLogo")
-                        .arg("-NoProfile")
-                        .arg("-NonInteractive")
-                        .arg("-Command")
-                        .arg(&wrapper)
-                        .current_dir(&ctx.working_dir)
-                        .output(),
-                )
-                .await
+                let mut cmd = Command::new(path);
+                cmd.arg("-NoLogo")
+                    .arg("-NoProfile")
+                    .arg("-NonInteractive")
+                    .arg("-Command")
+                    .arg(&wrapper)
+                    .current_dir(&ctx.working_dir)
+                    .kill_on_drop(true);
+                prepend_low_priority(&mut cmd, shell);
+                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
+                    .await
             }
         };
 

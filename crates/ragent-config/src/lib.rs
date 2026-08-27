@@ -7,6 +7,7 @@
 //! - Runtime allowlists and denylists (bash, directories)
 //! - YOLO mode configuration
 
+pub mod activity_log;
 pub mod bash_lists;
 pub mod compaction;
 pub mod config;

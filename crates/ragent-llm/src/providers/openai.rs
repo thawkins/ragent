@@ -246,16 +246,16 @@ impl OpenAiClient {
                         // Assistant message with tool calls
                         let tool_calls: Vec<Value> = tool_uses
                             .iter()
-                            .map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => json!({
+                            .filter_map(|p| match p {
+                                ContentPart::ToolUse { id, name, input } => Some(json!({
                                     "id": id,
                                     "type": "function",
                                     "function": {
                                         "name": name,
                                         "arguments": input.to_string()
                                     }
-                                }),
-                                _ => unreachable!(),
+                                })),
+                                _ => None,
                             })
                             .collect();
                         messages.push(json!({
@@ -445,26 +445,25 @@ impl OpenAiClient {
 
             while let Some(newline_pos) = buffer.find('\n') {
                 let line = buffer[..newline_pos].to_string();
-                buffer = buffer[newline_pos + 1..].to_string();
+                buffer = buffer[newline_pos + 1..].to_string();                  let line = line.trim();
+                  if line.is_empty() {
+                      continue;
+                  }
 
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
-                }
+                  let data = match line.strip_prefix("data: ") {
+                      Some(d) => d.trim(),
+                      None => continue,
+                  };
 
-                let data = match line.strip_prefix("data: ") {
-                    Some(d) => d.trim(),
-                    None => continue,
-                };
+                  if data == "[DONE]" {
+                      yield StreamEvent::Finish { reason: FinishReason::Stop };
+                      return;
+                  }
 
-                if data == "[DONE]" {
-                    break;
-                }
-
-                let parsed: Value = match serde_json::from_str(data) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
+                  let parsed: Value = match serde_json::from_str(data) {
+                      Ok(v) => v,
+                      Err(_) => continue,
+                  };
 
                 // Handle usage info (sent with stream_options.include_usage)
                 if let Some(usage) = parsed.get("usage")

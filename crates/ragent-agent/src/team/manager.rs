@@ -51,38 +51,24 @@ fn fs_mtime(path: &Path) -> Option<SystemTime> {
 /// These errors come from Anthropic, `OpenAI`, and GitHub Copilot when the prompt
 /// is too long for the model's context window. They are *not* permanent failures —
 /// the session processor's compression pipeline will reduce context on retry.
+///
+/// This is a thin wrapper around the canonical implementation in
+/// [`crate::session::history::is_token_overflow_error_message`] so the team
+/// manager stays in sync with the same patterns used by the session loop.
 fn is_token_overflow_error(error_msg: &str) -> bool {
-    let msg = error_msg.to_lowercase();
-    // Anthropic: "prompt token count of N exceeds the limit of M"
-    // OpenAI / Copilot: "context_length_exceeded", "maximum context length"
-    // Generic fallback phrases
-    msg.contains("prompt token count") && msg.contains("exceeds")
-        || msg.contains("context_length_exceeded")
-        || msg.contains("maximum context length")
-        || msg.contains("prompt is too long")
-        || msg.contains("input too large")
+    crate::session::history::is_token_overflow_error_message(error_msg)
 }
 
 /// Check if an error message indicates a permanent (non-retryable) API error.
 ///
 /// Matches HTTP 4xx errors, excluding 429 (Too Many Requests), 408 (Timeout),
 /// and token-overflow errors (handled by the compression pipeline on retry).
+///
+/// This is a thin wrapper around the canonical implementation in
+/// [`crate::session::history::is_permanent_llm_api_error`] so the team
+/// manager stays in sync with the same patterns used by the session loop.
 fn is_permanent_api_error(error_msg: &str) -> bool {
-    // Token overflow is recoverable via compression — never treat as permanent.
-    if is_token_overflow_error(error_msg) {
-        return false;
-    }
-    // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
-    if let Some(rest) = error_msg.strip_prefix("HTTP ")
-        && let Some(code_str) = rest
-            .split(':')
-            .next()
-            .or_else(|| rest.split_whitespace().next())
-        && let Ok(code) = code_str.trim().parse::<u16>()
-    {
-        return (400..500).contains(&code) && code != 429 && code != 408;
-    }
-    false
+    crate::session::history::is_permanent_llm_api_error(error_msg)
 }
 
 /// Compute the retry backoff for a teammate agent loop that has just failed.

@@ -3,6 +3,12 @@
 //! This crate owns the Milestone 5 extracted tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
+// The `yfinance_rs` dependency generates deeply nested async futures that trip
+// the `recursion_depth_exceeding_limit` future-incompat lint (rust-lang/rust
+// #159228). Raising the recursion limit keeps the crate compiling on newer
+// toolchains until the dependency is fixed upstream.
+#![recursion_limit = "256"]
+
 pub mod browser;
 pub mod channels;
 pub mod codeindex_communities;

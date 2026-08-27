@@ -52,6 +52,9 @@ impl AgentEntry {
     }
 }
 
+/// Maximum pending orchestration requests per agent mailbox.
+const MAILBOX_BUFFER_SIZE: usize = 100;
+
 /// Simple capability-based registry for agents.
 ///
 /// The registry supports registering in-process agents with a mailbox, looking
@@ -88,7 +91,7 @@ impl AgentRegistry {
         let mut mailbox_handle = None;
         if let Some(responder) = responder {
             // create a channel for the agent mailbox
-            let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(100);
+            let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(MAILBOX_BUFFER_SIZE);
             mailbox_opt = Some(tx);
 
             // Spawn the agent loop which turns mailbox messages into responder calls.

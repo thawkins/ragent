@@ -148,9 +148,5 @@ pub fn should_ignore(root: &Path, path: &Path) -> bool {
     }
 
     // Ignore directories themselves (we only want files).
-    if path.is_dir() {
-        return true;
-    }
-
-    false
+    path.is_dir()
 }

@@ -448,11 +448,7 @@ fn is_list_page(html_lower: &str, extracted_text_length: usize) -> bool {
 
     // Table with many rows.
     let tr_count = html_lower.matches("<tr").count();
-    if tr_count >= 10 {
-        return true;
-    }
-
-    false
+    tr_count >= 10
 }
 
 /// Check if the page looks like a forum thread.

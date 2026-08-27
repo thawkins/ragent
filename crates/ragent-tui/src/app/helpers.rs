@@ -57,6 +57,25 @@ pub(crate) fn short_session_id(session_id: &str) -> String {
     session_id[start..].to_string()
 }
 
+/// Truncate a [`RunId`] to a stable short prefix for compact display.
+///
+/// Returns the last 8 characters of the run id, mirroring
+/// [`short_session_id`]. If the run id is shorter than 8 characters the
+/// whole value is returned unchanged.
+pub(crate) fn short_run_id(run_id: &ragent_types::id::RunId) -> String {
+    let s = run_id.as_str();
+    let start = s.len().saturating_sub(8);
+    s[start..].to_string()
+}
+
+/// Resolve the activity-log database path from the main storage database path.
+///
+/// Thin wrapper around [`ragent_storage::ActivityLog::default_path`] so the
+/// TUI and the binary share a single source of truth for the path convention.
+pub(crate) fn activity_log_db_path(db_path: &std::path::Path) -> std::path::PathBuf {
+    ragent_storage::ActivityLog::default_path(db_path)
+}
+
 pub(crate) fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
@@ -119,12 +138,13 @@ pub fn sanitize_for_display(text: &str) -> String {
 #[must_use]
 /// Render an image reference as placeholder text showing dimensions.
 pub fn image_dimensions_or_placeholder(alt: &str, src: &str, base_dir: &std::path::Path) -> String {
-    let resolved = if src.starts_with("http://") || src.starts_with("https://") {
+    let is_url = src.starts_with("http://") || src.starts_with("https://");
+    let resolved = if is_url {
         src.to_string()
     } else {
         base_dir.join(src).to_string_lossy().to_string()
     };
-    let dims = if src.starts_with("http://") || src.starts_with("https://") {
+    let dims = if is_url {
         None
     } else {
         std::fs::metadata(&resolved).ok().and_then(|_| {

@@ -35,12 +35,22 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::event::{Event, EventBus};
 use crate::message::Message;
 use crate::session::cache::SessionState;
 use crate::storage::Storage;
-use std::sync::Mutex;
+
+/// Wraps a [`tokio::task::JoinHandle`] so the task is aborted when the guard is
+/// dropped. Shared by `loop_steps` and `processor` to guarantee background
+/// notice/usage tasks are cancelled on every scope exit.
+pub(crate) struct AbortOnDrop(pub tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 /// A conversation session between a user and an agent.
 ///

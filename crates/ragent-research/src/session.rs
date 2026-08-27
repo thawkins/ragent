@@ -1739,17 +1739,11 @@ impl ResearchSession {
             };
             match web.fetch_url_as_source(url).await {
                 Ok((src, page)) => {
-                    let src_url = match &src {
-                        Source::Web { url, .. } => url.clone(),
-                        _ => url.to_string(),
-                    };
-                    let src_title = match &src {
-                        Source::Web { title, .. } => title.clone(),
-                        _ => String::new(),
-                    };
-                    let src_body = match &src {
-                        Source::Web { body, .. } => body.clone(),
-                        _ => String::new(),
+                    let (src_url, src_title, src_body) = match &src {
+                        Source::Web {
+                            url, title, body, ..
+                        } => (url.clone(), title.clone(), body.clone()),
+                        _ => (url.to_string(), String::new(), String::new()),
                     };
                     let src_language = page
                         .language

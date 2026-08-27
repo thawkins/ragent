@@ -83,7 +83,7 @@ fn make_task_id(agent_name: &str) -> String {
             .to_string()
             .split('-')
             .next()
-            .unwrap_or("task")
+            .expect("UUID always has a first segment")
     )
 }
 

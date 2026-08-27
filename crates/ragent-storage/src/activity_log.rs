@@ -140,6 +140,22 @@ impl std::fmt::Display for ActivityLog {
 }
 
 impl ActivityLog {
+    /// Resolve the activity-log database path from the main storage database
+    /// path.
+    ///
+    /// The activity log lives in the same data directory as the main ragent
+    /// database (e.g. `~/.local/share/ragent/`), using the filename
+    /// `activity_log.db`.  Given the main `db_path` (e.g.
+    /// `~/.local/share/ragent/ragent.db`), this returns
+    /// `~/.local/share/ragent/activity_log.db`.
+    #[must_use]
+    pub fn default_path(db_path: &Path) -> std::path::PathBuf {
+        db_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("activity_log.db")
+    }
+
     /// Opens (or creates) the append-only event log at the given filesystem
     /// path and runs the schema migration.
     ///
@@ -229,7 +245,7 @@ impl ActivityLog {
     /// Returns `true` if the run's last committed event is a termination with
     /// reason `Interrupted` or `Aborted` (FR-006). While in this state, new
     /// events cannot be appended until a resume operation is initiated.
-    fn is_interrupted_locked(conn: &Connection, run_id: &RunId) -> bool {
+    fn is_interrupted_locked(conn: &Connection, run_id: &RunId) -> Result<bool> {
         let kind_json: Option<String> = conn
             .query_row(
                 "SELECT kind FROM activity_events
@@ -239,10 +255,8 @@ impl ActivityLog {
                 params![run_id.as_str()],
                 |row| row.get(0),
             )
-            .optional()
-            .ok()
-            .flatten();
-        match kind_json {
+            .optional()?;
+        Ok(match kind_json {
             Some(json) => match serde_json::from_str::<EventKind>(&json) {
                 Ok(EventKind::Termination { reason, .. }) => {
                     matches!(
@@ -254,7 +268,7 @@ impl ActivityLog {
                 _ => false,
             },
             None => false,
-        }
+        })
     }
 
     /// Appends an event to the log.
@@ -292,7 +306,7 @@ impl ActivityLog {
         }
         let conn = self.lock()?;
         // FR-006: reject appends to interrupted runs (before a resume).
-        if Self::is_interrupted_locked(&conn, &event.run_id) {
+        if Self::is_interrupted_locked(&conn, &event.run_id)? {
             return Err(AppendError::RunInterrupted {
                 run_id: event.run_id.clone(),
             });
@@ -385,7 +399,7 @@ impl ActivityLog {
             .transaction()
             .map_err(|e| AppendError::Storage(anyhow::anyhow!("begin tx: {e}")))?;
         // FR-006: reject appends to interrupted runs (before a resume).
-        if Self::is_interrupted_locked(&tx, run_id) {
+        if Self::is_interrupted_locked(&tx, run_id)? {
             return Err(AppendError::RunInterrupted {
                 run_id: run_id.clone(),
             });
@@ -750,6 +764,22 @@ impl ActivityLog {
             }
         }
         Ok(status)
+    }
+
+    /// Returns the current `journal_mode` (e.g. `"wal"`, `"delete"`) for the
+    /// underlying connection.
+    ///
+    /// `ActivityLog::open` always sets WAL, so a file-backed log reports
+    /// `"wal"` once it has been opened at least once.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection cannot be locked or the pragma
+    /// query fails.
+    pub fn journal_mode(&self) -> Result<String> {
+        let conn = self.lock()?;
+        let mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        Ok(mode)
     }
 
     /// Lists all run identifiers that have at least one event in the log
@@ -1294,7 +1324,12 @@ impl ActivityLog {
                     .to_string()
             });
             // FR-010: record the rejected mutation as a separate audit event.
-            let _ = Self::append_mutation_rejected_locked(&conn, run_id, seq, attempted);
+            let _ = Self::append_mutation_rejected_locked(&conn, run_id, seq, attempted.clone());
+            return Err(AppendError::MutationRejected {
+                run_id: run_id.clone(),
+                target_seq: seq,
+                attempted,
+            });
         }
         Err(AppendError::MutationRejected {
             run_id: run_id.clone(),
@@ -1375,7 +1410,7 @@ impl ActivityLog {
         let conn = self.lock()?;
 
         // FR-006: only interrupted runs can be resumed.
-        if !Self::is_interrupted_locked(&conn, run_id) {
+        if !Self::is_interrupted_locked(&conn, run_id)? {
             return Err(anyhow::anyhow!("run {run_id} is not interrupted"));
         }
 

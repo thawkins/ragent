@@ -473,7 +473,7 @@ async fn delete_research(
 // ── helpers ─────────────────────────────────────────────────────────────
 
 fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
-    (status, Json(serde_json::json!({ "error": message })))
+    super::error_response(status, message)
 }
 // ── GET /research/{name}/events ──────────────────────────────────────────
 //
@@ -528,19 +528,22 @@ async fn research_events_stream(
 
     // Subscribe to the broadcast channel.
     let rx = tx.subscribe();
-    let stream = BroadcastStream::new(rx).map(|result| {
-        match result {
-            Ok(event) => {
-                // Serialize the SessionEvent as pure JSON (no CLI prefix).
-                let json = ragent_research::session_event_json(&event);
-                Ok::<_, std::convert::Infallible>(
-                    axum::response::sse::Event::default()
-                        .event("research")
-                        .data(json),
-                )
-            }
-            Err(_) => Ok(axum::response::sse::Event::default()),
+    let stream = BroadcastStream::new(rx).map(|result| match result {
+        Ok(event) => {
+            // Serialize the SessionEvent as pure JSON (no CLI prefix).
+            let json = ragent_research::session_event_json(&event);
+            Ok::<_, std::convert::Infallible>(
+                axum::response::sse::Event::default()
+                    .event("research")
+                    .data(json),
+            )
         }
+        // The broadcast channel lagged behind or the sender was dropped.
+        // Emit a visible marker so clients know events were dropped rather
+        // than silently swallowing the error as an empty event.
+        Err(_) => Ok(axum::response::sse::Event::default()
+            .event("research")
+            .data("[LAGGED]")),
     });
 
     use axum::response::sse::{KeepAlive, Sse};

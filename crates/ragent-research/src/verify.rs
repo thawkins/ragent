@@ -11,6 +11,7 @@ use crate::source::Source;
 use crate::state::ResearchState;
 use async_trait::async_trait;
 use regex::Regex;
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 static CITATION_RE: OnceLock<Regex> = OnceLock::new();
@@ -96,8 +97,8 @@ impl KeywordVerifier {
         let Some(body) = source.body() else {
             return false;
         };
-        let s_words = Self::words(body);
-        let overlap = f_words.iter().filter(|w| s_words.contains(w)).count();
+        let s_words: HashSet<String> = Self::words(body).into_iter().collect();
+        let overlap = f_words.iter().filter(|w| s_words.contains(*w)).count();
         // Require at least 2 shared content words, or 1 when the finding
         // has very few content words total (short findings).
         let min_overlap = if f_words.len() <= 2 { 1 } else { 2 };

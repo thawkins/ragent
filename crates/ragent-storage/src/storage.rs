@@ -165,7 +165,8 @@ pub fn encrypt_key(key: &str) -> String {
 /// let encrypted = encrypt_key("my-api-key");
 /// let recovered = decrypt_key(&encrypted);
 /// assert_eq!(recovered, "my-api-key");
-/// ```    #[must_use]
+/// ```
+#[must_use]
 pub fn decrypt_key(encoded: &str) -> String {
     if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
         // v2 format: blake3-derived keystream
@@ -358,7 +359,12 @@ impl Storage {
         // behind a writer and startup `get_setting` calls stall for the whole
         // rebuild.
         conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "busy_timeout", 5000)?;
+        // R-24: Use a generous busy_timeout so a startup write (e.g. the
+        // background FTS warm-up, which holds a single long write transaction
+        // on a second connection to the same DB) never surfaces as an
+        // immediate `SQLITE_BUSY` / "database is locked" error. The warm-up
+        // can take ~9s on a 2,000+ message history, so 5s was too short.
+        conn.pragma_update(None, "busy_timeout", 30000)?;
         // R-23: Set an explicit WAL auto-checkpoint so the WAL file does not
         // grow to hundreds of MB. The default is 1000 pages; 500 is more
         // aggressive for a desktop agent that may run for hours.

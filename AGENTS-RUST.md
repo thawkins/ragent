@@ -2,6 +2,67 @@
 
 When loaded, first say: "Rust language instructions loaded."
 
+## MANDATORY: Run `cargo fmt` After EVERY Rust File Edit
+
+**THIS IS THE MOST IMPORTANT RULE IN THIS FILE. READ IT TWICE.**
+
+Rust is NOT Python, NOT JavaScript, NOT Go. Rust files have strict, non-negotiable
+formatting rules enforced by `rustfmt`. If you try to hand-format a Rust file the way
+you would format Python (indentation, brace placement, spacing), you WILL get it wrong
+and break the build with `cargo fmt --check` failures.
+
+**You MUST run `cargo fmt` after writing or editing ANY `.rs` file. No exceptions.**
+
+### The Rule
+
+After you create, edit, or append to ANY Rust source file (`.rs`), you MUST run:
+
+```bash
+cargo fmt
+```
+
+BEFORE you do anything else. Do this for every single file you touch. Do not batch
+it. Do not skip it because "the edit looked small." Do not skip it because "I already
+know rustfmt style." YOU DO NOT. RUN IT.
+
+### Why This Is Non-Negotiable
+
+1. **You will get indentation wrong.** Rust uses 4 spaces, no tabs. Python-trained
+   models frequently emit 2-space or tab-indented Rust. `cargo fmt` fixes this
+   automatically.
+2. **You will get brace and parenthesis spacing wrong.** `rustfmt` has specific rules
+   for spacing inside `fn(...)`, `match { ... }`, struct literals, etc. that differ
+   from Python/JS conventions. You cannot reproduce these by hand reliably.
+3. **You will get import ordering wrong.** `rustfmt` reorders `use` statements.
+   Hand-ordering them will fail `cargo fmt --check`.
+4. **`cargo fmt --check` is enforced.** A file that does not pass `cargo fmt --check`
+   is a broken file, period. It does not matter if the code compiles.
+5. **Broken formatting wastes review cycles.** Every time you submit a Rust file that
+   fails `cargo fmt --check`, a human or CI must fix your mistake. This is
+   unacceptable.
+
+### Enforcement Procedure
+
+For every Rust file you edit, the workflow is:
+
+```
+edit/create the .rs file  →  run `cargo fmt`  →  verify `cargo fmt --check` passes
+```
+
+If you edit three Rust files, you run `cargo fmt` three times (or at minimum once at
+the end before you finish). NEVER mark a task complete if any edited `.rs` file has
+not been formatted with `cargo fmt`.
+
+**If you are unsure whether a file is formatted correctly, run `cargo fmt`. It is
+always safe — `rustfmt` is idempotent and will only fix formatting, never change
+semantics.**
+
+### What This Replaces
+
+Do NOT attempt to format Rust code by hand to "match existing style." Do NOT copy
+indentation from a Python file. Do NOT guess at `rustfmt` rules. The ONLY reliable
+source of truth for Rust formatting is the `cargo fmt` command itself. Use it.
+
 ## Technology Stack
 
 - **Language**: Rust edition 2024 or greater
@@ -49,8 +110,8 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 Use the `Bash` tool to run the following cargo commands:
 
 - `cargo clippy` — Run linter with clippy
-- `cargo fmt` — Format code with rustfmt, always use this to fix indentation
-- `cargo fmt --check` — Check formatting without changes
+- `cargo fmt` — Format code with rustfmt. **MANDATORY** to run after editing any `.rs` file. See the top of this file for the full procedure.
+- `cargo fmt --check` — Check formatting without changes. Fails if any file is unformatted. This is the CI gate.
 
 ## Workspace Layout
 
@@ -97,4 +158,4 @@ Workflow & Tool Enforcement
 
 * **Zero Warnings Policy:** Generated code must compile cleanly without warnings under standard compiler checks.
 * **Clippy Compliance:** Run and pass `cargo clippy` with standard lints on all proposed changes.
-* **Automated Formatting Check:** Ensure all code output is formatted via `cargo fmt` before final file writing.
+* **Automated Formatting Check (MANDATORY):** You MUST run `cargo fmt` on every Rust file you edit before finishing. See the "MANDATORY: Run `cargo fmt`" section at the top of this file for the full procedure. `cargo fmt` is idempotent and safe — run it freely. A task is NOT complete if any edited `.rs` file has not been formatted with `cargo fmt`. This is enforced by `cargo fmt --check` in CI; unformatted files are build failures.

@@ -55,6 +55,7 @@ fn test_state(token: &str) -> AppState {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        activity_log: std::sync::OnceLock::new(),
         bg_service: std::sync::OnceLock::new(),
     });
     AppState {

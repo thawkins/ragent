@@ -1,5 +1,93 @@
 # Changelog
 
+## Version: 1.0.60
+
+### Added
+
+- **`/alog` activity-log slash commands** — new TUI command family for the
+  append-only activity log (`help`, `on`, `off`, `list`, `show`, `stats`),
+  with config persistence via the new `ragent_config::activity_log` module
+  (default on) and an `Alog:` status-bar indicator.
+- **Activity-log wiring in the session processor** —
+  `SessionProcessor::set_activity_log` plus a best-effort
+  `record_activity_event` helper that off-loads SQLite writes to
+  `tokio::task::spawn_blocking` so recording never stalls the async executor.
+  Wired from `main.rs` after the dry-run early return.
+- **`ActivityLog::default_path`** — resolves `activity_log.db` next to the
+  main ragent database; the TUI `activity_log_db_path` helper shares the same
+  convention.
+- **`bash.nice` low-priority execution** — shell commands now run as children
+  of `nice -n <level>` (default 10) and, on Linux, `ionice -c 3`, so heavy
+  agent workloads keep the host responsive. PowerShell/Git Bash and Windows
+  are excluded (POSIX wrappers only). Documented in `docs/howtos/bash.md`.
+- **`/simplify all`** — the simplify skill now accepts `all` (apply every
+  issue, not just safe ones) or an output-path argument, and gained the
+  `edit`/`multi_edit` tools so it can apply fixes directly.
+- **`docs/howtos/bash.md`** — full bash-tool documentation covering the
+  seven-layer security model, nice/ionice priority management, and the
+  `/bash` slash commands.
+
+### Fixed
+
+- **Gemini stream parser infinite loop** — a `continue` in the inner SSE
+  buffer loop re-parsed the same partial line forever (100% CPU). Replaced
+  with `break` so the outer stream loop fetches more data; regression tests
+  added in `crates/ragent-llm/tests/test_gemini_stream_spin.rs`.
+- **Orphaned bash children on timeout** — `kill_on_drop(true)` added to the
+  `validate_bash_syntax` subprocess and the main execute-path `Command`
+  builders so timed-out commands are reaped instead of spinning at 100% CPU
+  after their future is dropped.
+- **SSE `[DONE]` termination** — OpenAI, Copilot, Azure Resource, and Bedrock
+  stream loops now emit `StreamEvent::Finish { FinishReason::Stop }` on
+  `[DONE]` instead of silently breaking, which downstream truncation
+  detection could misread.
+- **Removed `unreachable!()` in tool-call mapping** — OpenAI and Copilot
+  message conversion now uses `filter_map` and skips non-tool content parts
+  instead of panicking on unexpected variants.
+- **Team manager error classification** — token-overflow and
+  permanent-API-error detection now delegate to the canonical
+  `session::history` helpers so team and session loops stay in sync.
+- **Activity log interrupt checks** — `is_interrupted_locked` now propagates
+  SQLite errors (`Result<bool>`) instead of treating failures as
+  "not interrupted".
+- **Background stream readers** — stdout/stderr reader tasks log and break on
+  read errors instead of the `while let Ok(...)` pattern silently ending the
+  task on the error path.
+- **Research SSE lag marker** — the `/research` event stream emits a visible
+  `[LAGGED]` event when the broadcast channel falls behind instead of an
+  empty event.
+- **LLM stream read timeout** — the session loop applies a 60-second timeout
+  per streamed chunk so a stalled provider connection cannot wedge a run.
+- **Config test isolation** — `test_activity_log_persist_helper_updates_config_file`
+  now runs in a temp project with `XDG_CONFIG_HOME` overridden so
+  `save_to_source` writes to the temp project config rather than the user's
+  real configuration file.
+
+### Changed
+
+- **TUI idle redraw** — idle redraw interval raised from 250 ms to 2 s and
+  rendering is gated on the dirty flag; the previous value forced a
+  full-frame re-render (including unicode re-segmentation of the transcript)
+  4x per second while idle, burning 10-15% of a core.
+- **Startup flag sync** — `yolo`, `edit_log`, and `activity_log` expose
+  `sync_from_config_value`, letting `main.rs` sync all three runtime flags
+  from the already-loaded config instead of performing three extra disk
+  reads; `persist_*` helpers now propagate config-load errors instead of
+  silently writing defaults.
+- **Copilot provider detection** — no longer spawns the `gh` CLI subprocess
+  for token discovery; only explicit credential sources are honoured.
+- **Research synthesis and analysis** — fewer intermediate allocations when
+  building keyword blobs; `summarize_subject` logs and degrades gracefully
+  on client or stream errors instead of aborting.
+- **Orchestrator mailbox buffer** — pending-request buffer size extracted to
+  the `MAILBOX_BUFFER_SIZE` constant (100) with documentation.
+- **Hygiene** — `#![recursion_limit = "256"]` added to `ragent-tools-extended`
+  (yfinance_rs future nesting trips the `recursion_depth_exceeding_limit`
+  future-incompat lint), clippy `needless_bool` and `possible_missing_else`
+  fixes in `ragent-codeindex`, `ragent-tools-extended`, and `ragent-llm`,
+  a repaired `decrypt_key` doctest, and AGENTS-RUST.md now mandates running
+  `cargo fmt` after every Rust file edit.
+
 ## Version: 1.0.59
 
 ### Added

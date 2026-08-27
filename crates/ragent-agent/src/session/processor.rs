@@ -207,6 +207,14 @@ pub struct SessionProcessor {
     /// avoid re-reading the `SKILL.md` body from disk. The cache is a
     /// best-effort optimisation: a miss simply triggers a fresh load.
     pub skill_body_cache: Arc<RwLock<HashMap<String, String>>>,
+    /// Optional activity-log store for agent execution events.
+    ///
+    /// Set once after construction via [`SessionProcessor::set_activity_log`],
+    /// matching the `OnceLock` pattern used by `code_index`, `bg_service`,
+    /// etc. Recording is gated at call sites by
+    /// [`ragent_config::activity_log::is_enabled`] so that `/alog off`
+    /// suppresses all writes without unwiring the handle.
+    pub activity_log: std::sync::OnceLock<Arc<ragent_storage::ActivityLog>>,
 }
 
 /// P-2: the cached resolved config plus the inputs used to build it.
@@ -228,6 +236,51 @@ pub struct CachedConfig {
 }
 
 impl SessionProcessor {
+    /// Set the activity-log store.
+    ///
+    /// Called once after construction (matching the `OnceLock` pattern for
+    /// `code_index`, `bg_service`, etc.). Recording is gated at each call
+    /// site by [`ragent_config::activity_log::is_enabled`], so the handle
+    /// can be wired unconditionally and `/alog off` simply suppresses writes.
+    pub fn set_activity_log(&self, log: Arc<ragent_storage::ActivityLog>) {
+        let _ = self.activity_log.set(log);
+    }
+
+    /// Record an activity-log event if logging is enabled.
+    ///
+    /// This is a no-op when [`ragent_config::activity_log::is_enabled`]
+    /// returns `false` or when no [`ActivityLog`] handle has been wired.
+    /// Errors are logged at `warn` level and never propagated — activity
+    /// logging is best-effort and must never break the agent loop.
+    ///
+    /// The SQLite write is off-loaded to a blocking thread via
+    /// `tokio::task::spawn_blocking` to avoid stalling the async executor.
+    /// The `ActivityLog` owns a `std::sync::Mutex<Connection>` and all its
+    /// public methods are synchronous — calling them directly from an async
+    /// context would block the tokio worker thread during every INSERT.
+    async fn record_activity_event<F>(&self, f: F)
+    where
+        F: FnOnce(
+                &ragent_storage::ActivityLog,
+            ) -> std::result::Result<
+                ragent_types::activity::ActivityEvent,
+                ragent_storage::AppendError,
+            > + Send
+            + 'static,
+    {
+        if !ragent_config::activity_log::is_enabled() {
+            return;
+        }
+        if let Some(log) = self.activity_log.get() {
+            let log = log.clone();
+            match tokio::task::spawn_blocking(move || f(&log)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!(error = %e, "activity_log: recording failed"),
+                Err(e) => tracing::warn!(error = %e, "activity_log: spawn_blocking failed"),
+            }
+        }
+    }
+
     /// Set the MCP client and register all tools from connected servers into the tool registry.
     ///
     /// This should be called once after the MCP client has connected to all configured servers.
@@ -541,6 +594,19 @@ impl SessionProcessor {
             message_id: user_msg.id.clone(),
         });
 
+        // Activity log: generate a RunId for this turn and record the user
+        // message. The run_id is threaded through the loop to link all
+        // events (model messages, tool calls, tool results, termination)
+        // for this turn.
+        let run_id = ragent_types::id::RunId::new();
+        let user_content = user_msg.text_content();
+        let user_msg_id = user_msg.id.clone();
+        let run_id_for_user = run_id.clone();
+        self.record_activity_event(move |log| {
+            log.record_model_message(&run_id_for_user, "user", &user_content, Some(user_msg_id))
+        })
+        .await;
+
         // 2. Prepare LLM client, config, working dir, team context
         let turn = self
             .prepare_client(session_id, &user_msg.id, agent, &profiler)
@@ -577,12 +643,7 @@ impl SessionProcessor {
                 }
             })
         };
-        struct AbortOnDrop(tokio::task::JoinHandle<()>);
-        impl Drop for AbortOnDrop {
-            fn drop(&mut self) {
-                self.0.abort();
-            }
-        }
+        use crate::session::AbortOnDrop;
         let _usage_guard = AbortOnDrop(usage_listener);
 
         let prices = merged_prices(&turn.session_config.prices);
@@ -792,6 +853,15 @@ impl SessionProcessor {
                     message_id: cancelled_id,
                     reason: FinishReason::Cancelled,
                 });
+                // Activity log: record interruption on cancel.
+                let run_id_for_cancel = run_id.clone();
+                self.record_activity_event(move |log| {
+                    log.record_termination(
+                        &run_id_for_cancel,
+                        ragent_types::activity::TerminationReason::Interrupted,
+                    )
+                })
+                .await;
                 publish_run_cost_summary(total_elapsed_ms);
                 return Ok(Message::new(session_id, Role::Assistant, vec![]));
             }
@@ -933,9 +1003,6 @@ impl SessionProcessor {
             let mut loop_state = crate::session::loop_steps::LoopState {
                 chat_messages: std::mem::take(&mut chat_messages),
                 assistant_parts: std::sync::Arc::clone(&assistant_parts),
-                agent_switch_requested,
-                agent_complete_requested,
-                last_interim_hash,
                 cumulative_model_wait_ms,
                 compressed_this_turn,
                 compaction_attempted_this_turn,
@@ -1007,6 +1074,19 @@ impl SessionProcessor {
                     std::sync::Arc::make_mut(&mut assistant_parts).push(MessagePart::Text {
                         text: llm_result.text_buffer.clone(),
                     });
+                    // Activity log: record the assistant's text response.
+                    let assistant_text = llm_result.text_buffer.clone();
+                    let assistant_msg_id_for_log = assistant_msg_id.clone();
+                    let run_id_for_msg = run_id.clone();
+                    self.record_activity_event(move |log| {
+                        log.record_model_message(
+                            &run_id_for_msg,
+                            "assistant",
+                            &assistant_text,
+                            Some(assistant_msg_id_for_log),
+                        )
+                    })
+                    .await;
                 }
             }
 
@@ -1236,6 +1316,15 @@ impl SessionProcessor {
                         tool: tc.name.clone(),
                         args: tc.args_json.clone(),
                     });
+                    // Activity log: record the tool call.
+                    let tc_id = tc.id.clone();
+                    let tc_name = tc.name.clone();
+                    let tc_args = tc.args_json.clone();
+                    let run_id_for_tc = run_id.clone();
+                    self.record_activity_event(move |log| {
+                        log.record_tool_call(&run_id_for_tc, tc_id, tc_name, tc_args)
+                    })
+                    .await;
                     // P-8/P-9: clone the per-step `ToolContext` rather than
                     // rebuilding it (and re-acquiring the `active_spec` async
                     // lock) for every tool call. `base_tool_ctx` is built once
@@ -1714,6 +1803,42 @@ impl SessionProcessor {
                 // P-15: publish a single `ToolCallBatch` for this step with
                 // all per-call summaries, so consumers can render atomically.
                 if !batch_entries.is_empty() {
+                    // Activity log: record each tool result from the batch.
+                    if ragent_config::activity_log::is_enabled() {
+                        if let Some(log) = self.activity_log.get() {
+                            let log = log.clone();
+                            let entries: Vec<_> = batch_entries
+                                .iter()
+                                .map(|e| {
+                                    (
+                                        e.call_id.clone(),
+                                        e.tool.clone(),
+                                        e.success,
+                                        e.content.clone(),
+                                    )
+                                })
+                                .collect();
+                            let run_id_for_results = run_id.clone();
+                            tokio::task::spawn_blocking(move || {
+                                for (call_id, tool, success, content) in entries {
+                                    if let Err(e) = log.record_tool_result(
+                                        &run_id_for_results,
+                                        call_id,
+                                        tool,
+                                        success,
+                                        content,
+                                    ) {
+                                        tracing::warn!(
+                                            error = %e,
+                                            "activity_log: record_tool_result failed"
+                                        );
+                                    }
+                                }
+                            })
+                            .await
+                            .ok();
+                        }
+                    }
                     self.event_bus.publish(Event::ToolCallBatch {
                         session_id: session_id_arc.to_string(),
                         step: step as u64,
@@ -1959,6 +2084,15 @@ impl SessionProcessor {
                 message_id: msg_id,
                 reason: FinishReason::Cancelled,
             });
+            // Activity log: record interruption on watchdog timeout.
+            let run_id_for_watchdog = run_id.clone();
+            self.record_activity_event(move |log| {
+                log.record_termination(
+                    &run_id_for_watchdog,
+                    ragent_types::activity::TerminationReason::Interrupted,
+                )
+            })
+            .await;
             publish_run_cost_summary(total_elapsed_ms);
             return Err(anyhow::anyhow!(
                 "agent run terminated: tool call stalled beyond the {}s watchdog timeout",
@@ -2020,6 +2154,15 @@ impl SessionProcessor {
             message_id: msg_id_for_end,
             reason: end_reason,
         });
+        // Activity log: record normal completion.
+        let run_id_for_complete = run_id.clone();
+        self.record_activity_event(move |log| {
+            log.record_termination(
+                &run_id_for_complete,
+                ragent_types::activity::TerminationReason::Completed,
+            )
+        })
+        .await;
         crate::hooks::fire_hooks(
             &turn.parsed_hook_configs,
             crate::hooks::HookTrigger::OnSessionEnd,
@@ -2171,21 +2314,32 @@ impl SessionProcessor {
         };
 
         let mut ack_text = String::new();
-
         match client.chat(init_request).await {
-            Ok(mut stream) => {
-                while let Some(ev) = stream.next().await {
-                    if cancel_flag.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    match ev {
-                        StreamEvent::TextDelta { text } => {
-                            ack_text.push_str(&text);
+            Ok(mut stream) => loop {
+                let ev =
+                    match tokio::time::timeout(std::time::Duration::from_secs(60), stream.next())
+                        .await
+                    {
+                        Ok(Some(event)) => event,
+                        Ok(None) => break,
+                        Err(_) => {
+                            tracing::warn!(
+                                session_id = %session_id,
+                                "AGENTS.md init exchange stream stalled — no data for 60s"
+                            );
+                            break;
                         }
-                        _ => {}
-                    }
+                    };
+                if cancel_flag.load(Ordering::Relaxed) {
+                    break;
                 }
-            }
+                match ev {
+                    StreamEvent::TextDelta { text } => {
+                        ack_text.push_str(&text);
+                    }
+                    _ => {}
+                }
+            },
             Err(e) => {
                 tracing::warn!(
                     session_id = %session_id,

@@ -68,6 +68,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        activity_log: std::sync::OnceLock::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -3248,6 +3249,14 @@ fn test_slash_config_show_displays_paths() {
     assert!(
         text.contains("Code Index"),
         "config show should contain Code Index section"
+    );
+    assert!(
+        text.contains("Resolved Values"),
+        "config show should contain Resolved Values section"
+    );
+    assert!(
+        text.contains("key") && text.contains("source"),
+        "config show should render a resolved-values table with key/source columns"
     );
 }
 

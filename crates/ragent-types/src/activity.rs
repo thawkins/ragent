@@ -523,12 +523,8 @@ impl Projection {
     /// results (no pruning). Pass `0` to omit all tool results.
     #[must_use]
     pub fn pruned_tool_results(&self, keep_last: usize) -> &[ProjectedToolResult] {
-        let total = self.tool_results.len();
-        if keep_last >= total {
-            &self.tool_results
-        } else {
-            &self.tool_results[total - keep_last..]
-        }
+        let start = self.tool_results.len().saturating_sub(keep_last);
+        &self.tool_results[start..]
     }
 }
 

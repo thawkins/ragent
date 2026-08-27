@@ -387,14 +387,23 @@ fn readability_critic(analysis: &AnalysisResult) -> CriticReport {
 /// Concatenate all synthesis text into a single lower-case string for keyword
 /// searches.
 fn build_haystack(analysis: &AnalysisResult) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    parts.extend(analysis.findings.clone());
-    parts.extend(analysis.top_implications.clone());
-    parts.extend(analysis.open_questions.clone());
-    for cr in &analysis.cross_references {
-        parts.push(format!("{} {}", cr.path, cr.relevance));
+    let mut joined = String::new();
+    for s in analysis
+        .findings
+        .iter()
+        .chain(&analysis.top_implications)
+        .chain(&analysis.open_questions)
+    {
+        joined.push_str(s);
+        joined.push(' ');
     }
-    parts.join(" ").to_lowercase()
+    for cr in &analysis.cross_references {
+        joined.push_str(&cr.path);
+        joined.push(' ');
+        joined.push_str(&cr.relevance);
+        joined.push(' ');
+    }
+    joined.to_lowercase()
 }
 
 /// Average of the four critic scores, rounded down.

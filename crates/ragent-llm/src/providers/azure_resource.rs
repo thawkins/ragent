@@ -453,15 +453,16 @@ impl LlmClient for AzureAnthropicClient {
                     }
 
                     if let Some(data) = line.strip_prefix("data: ") {
-                        let data = data.trim();
-                        if data == "[DONE]" {
-                            break;
-                        }
+                          let data = data.trim();
+                          if data == "[DONE]" {
+                              yield StreamEvent::Finish { reason: FinishReason::Stop };
+                              return;
+                          }
 
-                        let parsed: Value = match serde_json::from_str(data) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
+                          let parsed: Value = match serde_json::from_str(data) {
+                              Ok(v) => v,
+                              Err(_) => continue,
+                          };
 
                         match current_event_type.as_str() {
                             "content_block_start" => {

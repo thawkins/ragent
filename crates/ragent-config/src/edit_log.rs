@@ -1,38 +1,26 @@
 //! Edit-log persistence helpers.
 //!
-//! Mirrors the `ragent_config::yolo` module: a process-wide atomic flag is
-//! synchronised with the `edit_log` field in `ragent.json` so the toggle
-//! survives restarts.
+//! A process-wide atomic flag is synchronised with the `edit_log` field in
+//! `ragent.json` so the toggle survives restarts.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static EDIT_LOG_MODE: AtomicBool = AtomicBool::new(false);
-static EDIT_LOG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Returns `true` if edit logging is currently enabled.
 #[must_use]
 pub fn is_enabled() -> bool {
-    let _guard = EDIT_LOG_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     EDIT_LOG_MODE.load(Ordering::Relaxed)
 }
 
 /// Enable or disable edit logging globally.
 pub fn set_enabled(enabled: bool) {
-    let _guard = EDIT_LOG_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     EDIT_LOG_MODE.store(enabled, Ordering::Relaxed);
 }
 
 /// Toggle edit logging and return the new state.
 #[must_use]
 pub fn toggle() -> bool {
-    let _guard = EDIT_LOG_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let was = EDIT_LOG_MODE.fetch_xor(true, Ordering::Relaxed);
     !was
 }
@@ -44,8 +32,12 @@ pub fn toggle() -> bool {
 /// result is written back to the same source file that was loaded (project
 /// config preferred over global config). Any error during persistence is
 /// returned so callers can decide how to report it.
+///
+/// If the config file cannot be loaded (e.g. it is corrupt), the error is
+/// propagated rather than silently overwriting the file with defaults.
 pub fn persist_edit_log(enabled: bool) -> anyhow::Result<()> {
-    let mut config = crate::config::Config::load().unwrap_or_default();
+    let mut config = crate::config::Config::load()
+        .context("failed to load config before persisting edit_log")?;
     config.edit_log = enabled;
     config.save_to_source()?;
     set_enabled(enabled);
@@ -53,14 +45,16 @@ pub fn persist_edit_log(enabled: bool) -> anyhow::Result<()> {
 }
 
 /// Load the current config and update the runtime edit-log flag from its value.
-///
-/// This is intentionally separate from [`Config::load`](crate::config::Config::load)
-/// so that config reloads used only to read settings do not race with an in-flight
-/// toggle in multi-threaded contexts (e.g. parallel tests).
 pub fn sync_from_config() {
     let enabled = crate::config::Config::load()
         .map(|c| c.edit_log)
         .unwrap_or_default();
+    set_enabled(enabled);
+}
+
+/// Update the runtime edit-log flag from an already-loaded config value,
+/// avoiding a redundant disk read.
+pub fn sync_from_config_value(enabled: bool) {
     set_enabled(enabled);
 }
 
@@ -75,3 +69,5 @@ pub fn toggle_persist() -> anyhow::Result<bool> {
     persist_edit_log(new_state)?;
     Ok(new_state)
 }
+
+use anyhow::Context as _;

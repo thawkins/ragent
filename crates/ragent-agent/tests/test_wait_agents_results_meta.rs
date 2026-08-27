@@ -148,6 +148,7 @@ fn test_processor() -> Arc<SessionProcessor> {
         read_timestamps: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         telemetry: Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
+        activity_log: std::sync::OnceLock::new(),
     })
 }
 

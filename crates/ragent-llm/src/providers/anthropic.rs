@@ -457,7 +457,8 @@ impl LlmClient for AnthropicClient {
                     if let Some(data) = line.strip_prefix("data: ") {
                         let data = data.trim();
                         if data == "[DONE]" {
-                            break;
+                            yield StreamEvent::Finish { reason: FinishReason::Stop };
+                            return;
                         }
 
                         let parsed: Value = match serde_json::from_str(data) {

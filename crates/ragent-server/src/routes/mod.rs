@@ -905,7 +905,7 @@ async fn prompt_opt_handler(
 }
 
 /// Helper to build standardized error JSON response bodies.
-fn error_response(
+pub(crate) fn error_response(
     status: StatusCode,
     message: impl Into<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {

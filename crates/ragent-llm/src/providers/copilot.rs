@@ -344,16 +344,16 @@ impl CopilotClient {
                     if !tool_uses.is_empty() {
                         let tool_calls: Vec<Value> = tool_uses
                             .iter()
-                            .map(|p| match p {
-                                ContentPart::ToolUse { id, name, input } => json!({
+                            .filter_map(|p| match p {
+                                ContentPart::ToolUse { id, name, input } => Some(json!({
                                     "id": id,
                                     "type": "function",
                                     "function": {
                                         "name": name,
                                         "arguments": input.to_string()
                                     }
-                                }),
-                                _ => unreachable!(),
+                                })),
+                                _ => None,
                             })
                             .collect();
                         messages.push(json!({
@@ -513,16 +513,15 @@ impl LlmClient for CopilotClient {
                     let data = match line.strip_prefix("data: ") {
                         Some(d) => d.trim(),
                         None => continue,
-                    };
+                    };                      if data == "[DONE]" {
+                          yield StreamEvent::Finish { reason: FinishReason::Stop };
+                          return;
+                      }
 
-                    if data == "[DONE]" {
-                        break;
-                    }
-
-                    let parsed: Value = match serde_json::from_str(data) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
+                      let parsed: Value = match serde_json::from_str(data) {
+                          Ok(v) => v,
+                          Err(_) => continue,
+                      };
 
                     // Usage info
                     if let Some(usage) = parsed.get("usage")

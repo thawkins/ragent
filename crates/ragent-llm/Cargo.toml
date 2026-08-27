@@ -46,3 +46,4 @@ hex = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"
+bytes = "1"

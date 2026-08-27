@@ -19,11 +19,6 @@ use std::path::PathBuf;
 /// * `allowed_tools` - Tools the skill may use
 /// * `body` - The instruction body
 ///
-/// # Errors
-///
-/// This function does not return errors. It always constructs a valid `SkillInfo`
-/// with the provided parameters and defaults for optional fields.
-///
 /// # Examples
 ///
 /// ```
@@ -79,11 +74,6 @@ pub fn make_bundled_skill(
 /// - `/debug` — Troubleshoots the current session via debug logs
 /// - `/loop` — Runs a prompt repeatedly on an interval
 ///
-/// # Errors
-///
-/// This function does not return errors. It always returns a vector of exactly
-/// 4 bundled skills with pre-configured frontmatter and bodies.
-///
 /// # Examples
 ///
 /// ```
@@ -109,7 +99,7 @@ fn simplify_skill() -> SkillInfo {
     make_bundled_skill(
         "simplify",
         "Reviews recently changed files for code quality, reuse, and efficiency issues",
-        Some("[output_path]"),
+        Some("[all|output_path]"),
         false,
         vec![
             "bash".to_string(),
@@ -118,6 +108,8 @@ fn simplify_skill() -> SkillInfo {
             "glob".to_string(),
             "create".to_string(),
             "write".to_string(),
+            "edit".to_string(),
+            "multi_edit".to_string(),
         ],
         SIMPLIFY_BODY,
     )
@@ -174,7 +166,12 @@ fn loop_skill() -> SkillInfo {
 const SIMPLIFY_BODY: &str = "\
 Review recently changed files in this project for code quality improvements.
 
-**Output path (if provided): $ARGUMENTS**
+**Arguments: $ARGUMENTS**
+
+Parse the arguments:
+- If the argument is `all`, apply EVERY issue found (not just the safe ones)
+- If the argument is a file path, treat it as an output path and write the summary there
+- If no argument is given, only apply safe/straightforward fixes (default)
 
 Steps:
 1. Run `git diff --name-only HEAD~3` to find recently changed files
@@ -186,17 +183,23 @@ Steps:
    - Performance inefficiencies (unnecessary allocations, redundant operations)
    - Dead code or unused imports
 4. For each issue found, explain the problem and suggest a concrete fix
-5. Apply the fixes if they are safe and straightforward
+5. Apply fixes:
+   - **Default (no argument):** Apply only safe and straightforward fixes
+   - **`all` argument:** Apply EVERY issue found — including larger refactors,
+     duplicated logic extraction, and complex changes. Do NOT skip issues just
+     because they are large; break them down and apply them one by one.
+   - In both cases, after applying fixes, run `cargo fmt` and verify with `cargo check`
 
 Focus on substance over style — ignore formatting and naming preferences.
 
 **IMPORTANT - Output file requirement:**
-Check the output path above. If it contains a file path (not empty/blank), you MUST:
+If a file path was provided (not `all` and not empty), you MUST:
 1. Create a markdown summary document with all your findings
 2. Use the `write` tool to save the summary to that EXACT path
 3. Confirm to the user that the file was saved
 
-Example: If output path shows 'docs/review.md', save findings to 'docs/review.md'.";
+Example: `/simplify docs/review.md` saves findings to docs/review.md.
+Example: `/simplify all` applies all found fixes without writing a summary file.";
 
 const BATCH_BODY: &str = "\
 Apply the following instruction across all matching files in the codebase:
@@ -313,7 +316,7 @@ mod tests {
         assert_eq!(skill.name, "simplify");
         assert!(skill.body.contains("git diff"));
         assert!(!skill.disable_model_invocation);
-        assert_eq!(skill.argument_hint.as_deref(), Some("[output_path]"));
+        assert_eq!(skill.argument_hint.as_deref(), Some("[all|output_path]"));
     }
 
     #[test]

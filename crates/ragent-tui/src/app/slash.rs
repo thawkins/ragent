@@ -25,7 +25,7 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::{parse_swarm_args, short_session_id};
+use crate::app::helpers::{activity_log_db_path, parse_swarm_args, short_run_id, short_session_id};
 
 // Redaction patterns for bug reports
 use regex::Regex;
@@ -178,6 +178,18 @@ impl App {
             }
             "init" => {
                 vec!["config".to_string()]
+            }
+            "alog" => {
+                vec![
+                    "help".to_string(),
+                    "on".to_string(),
+                    "off".to_string(),
+                    "config".to_string(),
+                    "list".to_string(),
+                    "status".to_string(),
+                    "delete".to_string(),
+                    "export".to_string(),
+                ]
             }
             _ => Vec::new(),
         }
@@ -740,6 +752,654 @@ Usage: `/telemetry help|on|off|setup|counters`",
         }
     }
 
+    /// Handle the `/alog` slash command (activity log UI).
+    ///
+    /// Dispatcher skeleton (FR-002) — routes `/alog <subcommand>` to the
+    /// appropriate per-subcommand handler.  Subcommands already implemented
+    /// (`config`, `list`, `status`) call their handlers directly; remaining
+    /// subcommands (`help`, `delete`, `export`) are routed to dedicated
+    /// handler methods whose bodies will be filled in by later tasks
+    /// (T-004, T-012, T-022).  An empty argument (`/alog` with no
+    /// subcommand) is treated as `/alog help` per FR-003.
+    ///
+    /// FR-010 read-only guarantee: the inspection subcommands (`help`,
+    /// `config`, `list`, `status`) only call read-only `ActivityLog` methods
+    /// (`journal_mode`, `list_runs`, `count`, `run_status`, `read_run`).
+    /// None of them invoke `append`, `append_new`, `record_*`, `expire_run`,
+    /// `archive_run`, `try_delete_event`, `try_update_event`,
+    /// `branch_from_checkpoint`, or `resume_run`.  The only non-`SELECT`
+    /// SQL executed is the idempotent schema setup inside `ActivityLog::open`
+    /// (`CREATE TABLE IF NOT EXISTS`, `PRAGMA journal_mode=WAL`), which does
+    /// not insert, update, delete, or archive any activity events.
+    fn handle_alog_command(&mut self, args: &str) {
+        let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+        let rest = {
+            let mut parts = args.split_whitespace();
+            parts.next();
+            parts.collect::<Vec<_>>().join(" ")
+        };
+        match sub.as_str() {
+            "" | "help" => self.handle_alog_help(),
+            "on" => match ragent_config::activity_log::persist_activity_log(true) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /alog on\n\n\u{2705} Activity logging enabled.",
+                    );
+                    self.status = "alog: on".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /alog on\n\n\u{26a0} Failed to persist activity-log state: {e}"
+                    ));
+                    self.status = format!("alog: persist failed ({e})");
+                }
+            },
+            "off" => match ragent_config::activity_log::persist_activity_log(false) {
+                Ok(()) => {
+                    self.append_assistant_text(
+                        "From: /alog off\n\n\u{2705} Activity logging disabled.",
+                    );
+                    self.status = "alog: off".to_string();
+                }
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /alog off\n\n\u{26a0} Failed to persist activity-log state: {e}"
+                    ));
+                    self.status = format!("alog: persist failed ({e})");
+                }
+            },
+            "config" => self.handle_alog_config(),
+            "list" => self.handle_alog_list(),
+            "status" => self.handle_alog_status(),
+            "delete" => self.handle_alog_delete(&rest),
+            "export" => self.handle_alog_export(&rest),
+            _ => {
+                self.append_assistant_text(
+                    "From: /alog\n\nUnknown subcommand. \
+                     Usage: `/alog help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes`",
+                );
+                self.status = "alog: usage".to_string();
+            }
+        }
+    }
+
+    /// Render the `/alog help` subcommand (FR-003).
+    ///
+    /// Displays a help table listing every `/alog` subcommand and its
+    /// description.  Also shown when the user enters `/alog` with no
+    /// subcommand.
+    fn handle_alog_help(&mut self) {
+        let enabled = ragent_config::activity_log::is_enabled();
+        let output = "From: /alog help\n\n\
+            ## /alog — Activity Log\n\n\
+            Current state: **logging {}**\n\n\
+            | Subcommand | Description |\n\
+            |---|---|\n\
+            | `help` | Show this help table |\n\
+            | `on` | Enable activity logging (default) |\n\
+            | `off` | Disable activity logging |\n\
+            | `config` | Show activity-log database path, journal mode, and schema version |\n\
+            | `list` | Enumerate all runs with per-run event counts by EventKind |\n\
+            | `status` | Show overall activity-log health summary |\n\
+            | `delete <run-id> --yes` | Delete all events for a run (irreversible; requires `--yes`) |\n\
+            | `export <run-id> --yes` | Export all events for a run as JSONL (requires `--yes`) |";
+        let output = output.replace("{}", if enabled { "ON" } else { "OFF" });
+        self.append_assistant_text(&output);
+        self.status = "alog: help".to_string();
+    }
+
+    /// Handle the `/alog delete <run-id> --yes` subcommand (FR-011, FR-015).
+    ///
+    /// Deletes all activity-log events belonging to the specified `RunId`.
+    /// The `--yes` flag is mandatory; without it the command warns and aborts
+    /// (FR-011).  If the run-id is missing or unknown, a usage error or
+    /// warning is shown (FR-012, FR-013).  After a successful deletion, a
+    /// confirmation message states the `RunId` and the number of events
+    /// removed (FR-014).  The storage operation runs on a blocking thread
+    /// (FR-008, FR-015).
+    fn handle_alog_delete(&mut self, args: &str) {
+        use ragent_storage::activity_log::ActivityLog;
+        use ragent_types::id::RunId;
+
+        // Parse arguments: extract run-id and check for --yes flag (FR-011).
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        let has_yes = parts.contains(&"--yes");
+        let run_id = parts.iter().find(|p| **p != "--yes").copied();
+
+        // FR-012: validate <run-id> argument presence.  If the user
+        // omits the run-id (or supplies only `--yes`), show a usage
+        // error with the expected syntax and abort before any storage
+        // access.  RunId is a plain string newtype (no additional
+        // syntax validation is required beyond non-emptiness); the
+        // existence check happens later against list_runs() (FR-013).
+        let run_id = match run_id {
+            Some(id) => id.to_string(),
+            None => {
+                self.append_assistant_text(
+                    "From: /alog delete\n\n\
+                     \u{26a0} Missing <run-id> argument.\n\n\
+                     Usage: `/alog delete <run-id> --yes`",
+                );
+                self.status = "alog: error".to_string();
+                return;
+            }
+        };
+
+        // FR-011/NFR-001: --yes flag is mandatory.  No code path past
+        // this point can reach the storage operation without --yes.
+        if !has_yes {
+            // NFR-002: warn that the operation is irreversible.
+            self.append_assistant_text(
+                "From: /alog delete\n\n\
+                 \u{26a0} The `--yes` flag is required to confirm this destructive operation.\n\n\
+                 This action is irreversible \u{2014} deleted events cannot be recovered.\n\
+                 To proceed, re-run:\n\
+                 `/alog delete <run-id> --yes`",
+            );
+            self.status = "alog: error".to_string();
+            return;
+        }
+
+        let alog_path = activity_log_db_path(&self.db_path);
+        let run_id_for_block = RunId::from(run_id);
+
+        // FR-008/FR-015: perform the storage operation on a blocking thread.
+        // Return either a success message (with event count) or an error.
+        let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
+            let log = match ActivityLog::open(&alog_path) {
+                Ok(log) => log,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog delete\n\n\
+                         \u{26a0} Failed to open activity log at `{}`: {e}",
+                        alog_path.display(),
+                    ));
+                }
+            };
+
+            // FR-013: verify the run-id exists before attempting deletion.
+            let runs = match log.list_runs() {
+                Ok(runs) => runs,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog delete\n\n\
+                         \u{26a0} Failed to list activity-log runs: {e}",
+                    ));
+                }
+            };
+
+            if !runs.iter().any(|r| r == &run_id_for_block) {
+                return Err(format!(
+                    "From: /alog delete\n\n\
+                     \u{26a0} No run with id `{}` was found in the activity log.",
+                    run_id_for_block.as_str(),
+                ));
+            }
+
+            // Capture the event count before deletion for the confirmation
+            // message (FR-014).
+            let count = log.count(&run_id_for_block).unwrap_or(0);
+
+            // FR-015: delete all events for the run via `expire_run`.
+            match log.expire_run(&run_id_for_block, "deleted via /alog delete --yes") {
+                Ok(()) => Ok((count, run_id_for_block.as_str().to_string())),
+                Err(e) => Err(format!(
+                    "From: /alog delete\n\n\
+                     \u{26a0} Failed to delete run `{}`: {e}",
+                    run_id_for_block.as_str(),
+                )),
+            }
+        });
+
+        match result {
+            Ok((count, rid)) => {
+                // FR-014: post-delete confirmation.
+                self.append_assistant_text(&format!(
+                    "From: /alog delete\n\n\
+                     \u{2714} Deleted run `{}` \u{2014} {} event(s) removed.",
+                    rid, count,
+                ));
+                self.status = "alog: deleted".to_string();
+            }
+            Err(msg) => {
+                self.append_assistant_text(&msg);
+                self.status = "alog: error".to_string();
+            }
+        }
+    }
+
+    /// Handle the `/alog export <run-id> --yes` subcommand (FR-018, FR-021,
+    /// FR-023).
+    ///
+    /// Exports all activity-log events belonging to the specified `RunId` as
+    /// JSON Lines to `log/exports/export-<run-id>.jsonl` relative to the
+    /// current working directory.  The `--yes` flag is mandatory; without it
+    /// the command warns and aborts (FR-018).  If the run-id is missing or
+    /// unknown, a usage error or warning is shown (FR-019, FR-020).  After a
+    /// successful export, a confirmation message states the `RunId`, the
+    /// number of events exported, and the file path (FR-022).  The storage
+    /// operation runs on a blocking thread (FR-008, FR-023).
+    fn handle_alog_export(&mut self, args: &str) {
+        use ragent_storage::activity_log::ActivityLog;
+        use ragent_types::id::RunId;
+
+        // Parse arguments: extract run-id and check for --yes flag (FR-018).
+        let parts: Vec<&str> = args.split_whitespace().collect();
+        let has_yes = parts.contains(&"--yes");
+        let run_id = parts.iter().find(|p| **p != "--yes").copied();
+
+        // FR-019: validate <run-id> argument presence.  If the user
+        // omits the run-id (or supplies only `--yes`), show a usage
+        // error with the expected syntax and abort before any storage
+        // access.  RunId is a plain string newtype (no additional
+        // syntax validation is required beyond non-emptiness); the
+        // existence check happens later against list_runs() (FR-020).
+        let run_id = match run_id {
+            Some(id) => id.to_string(),
+            None => {
+                self.append_assistant_text(
+                    "From: /alog export\n\n\
+                     \u{26a0} Missing <run-id> argument.\n\n\
+                     Usage: `/alog export <run-id> --yes`",
+                );
+                self.status = "alog: error".to_string();
+                return;
+            }
+        };
+
+        // FR-018/NFR-003: --yes flag is mandatory.  No code path past
+        // this point can reach the storage operation or file write
+        // without --yes.
+        if !has_yes {
+            self.append_assistant_text(
+                "From: /alog export\n\n\
+                 \u{26a0} The `--yes` flag is required to confirm this operation.\n\n\
+                 To proceed, re-run:\n\
+                 `/alog export <run-id> --yes`",
+            );
+            self.status = "alog: error".to_string();
+            return;
+        }
+
+        let alog_path = activity_log_db_path(&self.db_path);
+        let run_id_for_block = RunId::from(run_id);
+
+        // FR-023: perform the storage operation on a blocking thread.
+        // Return either a success tuple (events count, file path string) or
+        // an error message.
+        let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
+            let log = match ActivityLog::open(&alog_path) {
+                Ok(log) => log,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog export\n\n\
+                         \u{26a0} Failed to open activity log at `{}`: {e}",
+                        alog_path.display(),
+                    ));
+                }
+            };
+
+            // FR-020: verify the run-id exists before attempting export.
+            let runs = match log.list_runs() {
+                Ok(runs) => runs,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog export\n\n\
+                         \u{26a0} Failed to list activity-log runs: {e}",
+                    ));
+                }
+            };
+
+            if !runs.iter().any(|r| r == &run_id_for_block) {
+                return Err(format!(
+                    "From: /alog export\n\n\
+                     \u{26a0} No run with id `{}` was found in the activity log.",
+                    run_id_for_block.as_str(),
+                ));
+            }
+
+            // Capture the event count for the confirmation message (FR-022).
+            let count = log.count(&run_id_for_block).unwrap_or(0);
+
+            // FR-021: export the run as JSONL.
+            let jsonl = match log.export_jsonl(&run_id_for_block) {
+                Ok(jsonl) => jsonl,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog export\n\n\
+                         \u{26a0} Failed to export run `{}`: {e}",
+                        run_id_for_block.as_str(),
+                    ));
+                }
+            };
+
+            // FR-021: write to log/exports/export-<run-id>.jsonl relative to
+            // the current working directory.
+            let export_dir = std::path::PathBuf::from("log/exports");
+            if let Err(e) = std::fs::create_dir_all(&export_dir) {
+                return Err(format!(
+                    "From: /alog export\n\n\
+                     \u{26a0} Failed to create export directory `{}`: {e}",
+                    export_dir.display(),
+                ));
+            }
+
+            let file_name = format!("export-{}.jsonl", run_id_for_block.as_str());
+            let export_path = export_dir.join(&file_name);
+
+            if let Err(e) = std::fs::write(&export_path, &jsonl) {
+                return Err(format!(
+                    "From: /alog export\n\n\
+                     \u{26a0} Failed to write export file `{}`: {e}",
+                    export_path.display(),
+                ));
+            }
+
+            Ok((count, export_path.display().to_string()))
+        });
+
+        match result {
+            Ok((count, path)) => {
+                // FR-022: post-export confirmation.
+                self.append_assistant_text(&format!(
+                    "From: /alog export\n\n\
+                     \u{2714} Exported run `{}` \u{2014} {} event(s) written to:\n\
+                     `{}`",
+                    run_id_for_block.as_str(),
+                    count,
+                    path,
+                ));
+                self.status = "alog: exported".to_string();
+            }
+            Err(msg) => {
+                self.append_assistant_text(&msg);
+                self.status = "alog: error".to_string();
+            }
+        }
+    }
+
+    /// Render the `/alog config` subcommand (FR-004).
+    ///
+    /// Displays the resolved activity-log database path, whether the file
+    /// exists on disk, the SQLite journal mode, the schema version constant,
+    /// and the location convention (platform data directory). Storage
+    /// access is read-only.  All storage queries run on a blocking thread
+    /// (FR-008).
+    fn handle_alog_config(&mut self) {
+        use ragent_storage::activity_log::ActivityLog;
+        use ragent_types::activity::ACTIVITY_EVENT_SCHEMA_VERSION;
+
+        let alog_path = activity_log_db_path(&self.db_path);
+        let alog_path_for_block = alog_path.clone();
+
+        // FR-008: run the storage query (open + journal_mode pragma) on a
+        // blocking thread so the async event loop is not held up.
+        let journal_mode = tokio::task::block_in_place(|| {
+            if !alog_path_for_block.exists() {
+                return "(database not yet created)".to_string();
+            }
+            match ActivityLog::open(&alog_path_for_block) {
+                Ok(log) => log.journal_mode().unwrap_or_else(|e| format!("error: {e}")),
+                Err(e) => format!("error: {e}"),
+            }
+        });
+
+        let exists = alog_path.exists();
+        let data_dir = dirs::data_dir()
+            .map(|d| d.join("ragent").display().to_string())
+            .unwrap_or_else(|| "(platform data directory unavailable)".to_string());
+
+        let exists_label = if exists { "yes" } else { "no" };
+        let enabled = ragent_config::activity_log::is_enabled();
+
+        let output = format!(
+            "From: /alog config\n\n\
+             ## Activity Log Configuration\n\n\
+             | Property | Value |\n\
+             |---|---|\n\
+             | Logging enabled | {} |\n\
+             | Database path | `{}` |\n\
+             | File exists | {} |\n\
+             | Journal mode | {} |\n\
+             | Schema version | {} |\n\
+             | Location convention | `{}` (platform data directory) |\n",
+            if enabled {
+                "yes (default)"
+            } else {
+                "no (disabled)"
+            },
+            alog_path.display(),
+            exists_label,
+            journal_mode,
+            ACTIVITY_EVENT_SCHEMA_VERSION,
+            data_dir,
+        );
+        self.append_assistant_text(&output);
+        self.status = "alog: config".to_string();
+    }
+
+    /// Render the `/alog list` subcommand (FR-005).
+    ///
+    /// Opens the activity log at the same data-directory path used by the
+    /// main process, enumerates every run returned by `ActivityLog::list_runs`,
+    /// and for each run displays the `RunId`, derived `RunStatus`, total event
+    /// count, and a per-`EventKind` breakdown. If the log is empty, displays a
+    /// message stating so. Storage access is read-only (FR-010).
+    fn handle_alog_list(&mut self) {
+        use ragent_storage::activity_log::ActivityLog;
+        use ragent_types::activity::{EventKind, RunStatus};
+
+        let alog_path = activity_log_db_path(&self.db_path);
+
+        // FR-008: perform all storage queries on a blocking thread to avoid
+        // blocking the async event loop.  Return either the formatted output
+        // or an error message; the caller handles the UI update.
+        let result = tokio::task::block_in_place(|| -> Result<String, String> {
+            let log = match ActivityLog::open(&alog_path) {
+                Ok(log) => log,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog list\n\n⚠ Failed to open activity log at `{}`: {e}",
+                        alog_path.display(),
+                    ));
+                }
+            };
+
+            let runs = match log.list_runs() {
+                Ok(runs) => runs,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog list\n\n⚠ Failed to list activity-log runs: {e}",
+                    ));
+                }
+            };
+
+            if runs.is_empty() {
+                return Ok("From: /alog list\n\nThe activity log is empty (no runs).".to_string());
+            }
+
+            let mut output = String::from(
+                "From: /alog list\n\n## Activity Log — Runs\n\n\
+                 | Run | Status | Events | Model msgs | Tool calls | Tool results | Permissions | Checkpoints | Terminations | Branch-origin | Mutation-rej | Lifecycle |\n\
+                 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n",
+            );
+
+            for run_id in &runs {
+                let status = log.run_status(run_id).unwrap_or(RunStatus::Active);
+                let total = log.count(run_id).unwrap_or(0);
+
+                // Per-kind breakdown via a single read_run pass (FR-005).
+                let events = log.read_run(run_id).unwrap_or_default();
+                let (mut model_msgs, mut tool_calls, mut tool_results, mut permissions) =
+                    (0u64, 0u64, 0u64, 0u64);
+                let (mut checkpoints, mut terminations, mut branch_origins, mut mutation_rej) =
+                    (0u64, 0u64, 0u64, 0u64);
+                let mut lifecycle = 0u64;
+                for ev in &events {
+                    match &ev.kind {
+                        EventKind::ModelMessage { .. } => model_msgs += 1,
+                        EventKind::ToolCall { .. } => tool_calls += 1,
+                        EventKind::ToolResult { .. } => tool_results += 1,
+                        EventKind::PermissionDecision { .. } => permissions += 1,
+                        EventKind::Checkpoint { .. } => checkpoints += 1,
+                        EventKind::Termination { .. } => terminations += 1,
+                        EventKind::BranchOrigin { .. } => branch_origins += 1,
+                        EventKind::MutationRejected { .. } => mutation_rej += 1,
+                        EventKind::Lifecycle { .. } => lifecycle += 1,
+                    }
+                }
+
+                let short = short_run_id(run_id);
+                output.push_str(&format!(
+                    "| `{short}` | {status:?} | {total} | {model_msgs} | {tool_calls} | \
+                     {tool_results} | {permissions} | {checkpoints} | {terminations} | \
+                     {branch_origins} | {mutation_rej} | {lifecycle} |\n",
+                ));
+            }
+
+            Ok(output)
+        });
+
+        match result {
+            Ok(output) => {
+                self.append_assistant_text(&output);
+                self.status = "alog: list".to_string();
+            }
+            Err(msg) => {
+                self.append_assistant_text(&msg);
+                self.status = "alog: error".to_string();
+            }
+        }
+    }
+
+    /// Render the `/alog status` subcommand (FR-006).
+    ///
+    /// Displays an overall health summary of the activity-log system:
+    /// whether the database file is openable, total runs, total events across
+    /// all runs, a per-`RunStatus` breakdown, the current schema version, and a
+    /// one-line health indication. Storage access is read-only (FR-010).
+    fn handle_alog_status(&mut self) {
+        use ragent_storage::activity_log::ActivityLog;
+        use ragent_types::activity::{ACTIVITY_EVENT_SCHEMA_VERSION, RunStatus};
+
+        let alog_path = activity_log_db_path(&self.db_path);
+        let file_exists = alog_path.exists();
+        let enabled = ragent_config::activity_log::is_enabled();
+
+        // FR-008: perform all storage queries on a blocking thread to avoid
+        // blocking the async event loop.  Return either the formatted output
+        // or an error message; the caller handles the UI update.
+        let result = tokio::task::block_in_place(|| -> Result<String, String> {
+            // Attempt to open the database (FR-006: "whether the database
+            // file is openable").  On failure, report a degraded status
+            // without crashing (FR-008).
+            let log = match ActivityLog::open(&alog_path) {
+                Ok(log) => log,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog status\n\n⚠ Activity log is not openable at `{}`: {e}",
+                        alog_path.display(),
+                    ));
+                }
+            };
+
+            let openable = "yes";
+
+            let runs = match log.list_runs() {
+                Ok(runs) => runs,
+                Err(e) => {
+                    return Err(format!(
+                        "From: /alog status\n\n⚠ Failed to list activity-log runs: {e}",
+                    ));
+                }
+            };
+
+            let total_runs = runs.len();
+
+            // Tally total events and per-status run counts in a single pass.
+            let mut total_events: u64 = 0;
+            let mut active = 0u64;
+            let mut completed = 0u64;
+            let mut interrupted = 0u64;
+            let mut unrecoverable = 0u64;
+            let mut rebuilding = 0u64;
+            let mut rolled_back = 0u64;
+
+            for run_id in &runs {
+                total_events += log.count(run_id).unwrap_or(0);
+                let status = log.run_status(run_id).unwrap_or(RunStatus::Active);
+                match status {
+                    RunStatus::Active => active += 1,
+                    RunStatus::Completed => completed += 1,
+                    RunStatus::Interrupted => interrupted += 1,
+                    RunStatus::Unrecoverable => unrecoverable += 1,
+                    RunStatus::Rebuilding => rebuilding += 1,
+                    RunStatus::RolledBack => rolled_back += 1,
+                }
+            }
+
+            // One-line health indication (FR-006). The subsystem is healthy
+            // when the database opens, no run is unrecoverable, and no run
+            // is mid-rebuild.
+            let healthy = unrecoverable == 0 && rebuilding == 0;
+            let health_line = if healthy { "healthy" } else { "degraded" };
+
+            let output = format!(
+                "From: /alog status\n\n\
+                 ## Activity Log — Status\n\n\
+                 | Property | Value |\n\
+                 |---|---|\n\
+                 | Logging enabled | {} |\n\
+                 | Database path | `{}` |\n\
+                 | File exists | {} |\n\
+                 | Openable | {} |\n\
+                 | Total runs | {} |\n\
+                 | Total events | {} |\n\
+                 | Schema version | {} |\n\
+                 | Health | {} |\n\n\
+                 ### Runs by status\n\n\
+                 | Status | Count |\n\
+                 |---|---:|\n\
+                 | Active | {} |\n\
+                 | Completed | {} |\n\
+                 | Interrupted | {} |\n\
+                 | Unrecoverable | {} |\n\
+                 | Rebuilding | {} |\n\
+                 | Rolled back | {} |",
+                if enabled {
+                    "yes (default)"
+                } else {
+                    "no (disabled)"
+                },
+                alog_path.display(),
+                if file_exists { "yes" } else { "no" },
+                openable,
+                total_runs,
+                total_events,
+                ACTIVITY_EVENT_SCHEMA_VERSION,
+                health_line,
+                active,
+                completed,
+                interrupted,
+                unrecoverable,
+                rebuilding,
+                rolled_back,
+            );
+            Ok(output)
+        });
+
+        match result {
+            Ok(output) => {
+                self.append_assistant_text(&output);
+                self.status = "alog: status".to_string();
+            }
+            Err(msg) => {
+                self.append_assistant_text(&msg);
+                self.status = "alog: error".to_string();
+            }
+        }
+    }
+
     /// Handle the `/editlog` slash command.
     fn handle_editlog_command(&mut self, args: &str) {
         use ragent_config::edit_log::{is_enabled as is_edit_log_enabled, persist_edit_log};
@@ -1255,6 +1915,169 @@ Usage: `/telemetry help|on|off|setup|counters`",
                         ));
                     }
 
+                    // ── Resolved configuration values with provenance ───────────
+                    // Reload the merged config and, for each top-level key, report
+                    // the highest-precedence file that explicitly sets it. Source
+                    // detection mirrors Config::load() precedence: defaults <
+                    // global < project < env file < RAGENT_CONFIG_CONTENT. Fields
+                    // with union/append/OR semantics are annotated "(union)".
+                    output.push_str("\n⚙️  **Resolved Values**\n\n");
+
+                    match ragent_agent::Config::load() {
+                        Ok(cfg) => {
+                            let global_label = if global_config.exists() {
+                                "global".to_string()
+                            } else {
+                                "defaults".to_string()
+                            };
+                            let project_label = "project";
+
+                            // Highest-precedence source per top-level key.
+                            let mut key_source: std::collections::HashMap<String, String> =
+                                std::collections::HashMap::new();
+
+                            // 1. Defaults (lowest precedence).
+                            let defaults_json =
+                                serde_json::to_value(ragent_config::Config::default())
+                                    .unwrap_or(serde_json::Value::Null);
+                            if let serde_json::Value::Object(map) = &defaults_json {
+                                for k in map.keys() {
+                                    key_source.insert(k.clone(), "defaults".to_string());
+                                }
+                            }
+
+                            // 2. Global file.
+                            if global_config.exists() {
+                                if let Ok(raw) = std::fs::read_to_string(&global_config) {
+                                    if let Ok(serde_json::Value::Object(map)) =
+                                        serde_json::from_str::<serde_json::Value>(&raw)
+                                    {
+                                        for (k, v) in map {
+                                            if !v.is_null() {
+                                                key_source.insert(k, global_label.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Project file.
+                            if project_config.exists() {
+                                if let Ok(raw) = std::fs::read_to_string(&project_config) {
+                                    if let Ok(serde_json::Value::Object(map)) =
+                                        serde_json::from_str::<serde_json::Value>(&raw)
+                                    {
+                                        for (k, v) in map {
+                                            if !v.is_null() {
+                                                key_source.insert(k, project_label.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. RAGENT_CONFIG env file (higher precedence).
+                            if let Some(ref env_path) = env_config {
+                                if let Ok(raw) = std::fs::read_to_string(env_path) {
+                                    if let Ok(serde_json::Value::Object(map)) =
+                                        serde_json::from_str::<serde_json::Value>(&raw)
+                                    {
+                                        for (k, v) in map {
+                                            if !v.is_null() {
+                                                key_source.insert(k, format!("env ({env_path})"));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 5. RAGENT_CONFIG_CONTENT inline JSON (highest).
+                            if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
+                                if let Ok(serde_json::Value::Object(map)) =
+                                    serde_json::from_str::<serde_json::Value>(&content)
+                                {
+                                    for (k, v) in map {
+                                        if !v.is_null() {
+                                            key_source.insert(
+                                                k,
+                                                "env (RAGENT_CONFIG_CONTENT)".to_string(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Fields with union/append/OR semantics across layers.
+                            let union_fields = [
+                                "permission",
+                                "instructions",
+                                "skill_dirs",
+                                "hooks",
+                                "bash",
+                                "hidden_tools",
+                                "yolo",
+                                "edit_log",
+                                "sdd",
+                                "piegap",
+                                "experimental",
+                            ];
+
+                            let merged_json =
+                                serde_json::to_value(&cfg).unwrap_or(serde_json::Value::Null);
+                            if let serde_json::Value::Object(map) = &merged_json {
+                                let mut keys: Vec<&String> = map.keys().collect();
+                                keys.sort();
+                                output.push_str(&format!(
+                                    "| {:<30} | {:<30} | value |\n",
+                                    "key", "source"
+                                ));
+                                output.push_str("|---|---|---|\n");
+                                for key in keys {
+                                    let value = map.get(key).cloned().unwrap_or_default();
+                                    // Mask known secret-bearing keys (API keys,
+                                    // tokens, emails) that live in nested JSON
+                                    // objects where the generic regex misses them.
+                                    let is_secret_key = key.ends_with("_api_key")
+                                        || key.ends_with("_key")
+                                        || key == "openalex_email"
+                                        || key == "gitlab"
+                                        || key == "gmail"
+                                        || key == "channels";
+                                    let rendered = if is_secret_key {
+                                        "<redacted>".to_string()
+                                    } else {
+                                        redact_secrets(&value.to_string())
+                                    };
+                                    let source = key_source.get(key).map(String::as_str).unwrap_or(
+                                        if key == "config_paths" {
+                                            "runtime"
+                                        } else {
+                                            "defaults"
+                                        },
+                                    );
+                                    let both_files =
+                                        global_config.exists() && project_config.exists();
+                                    let source_label = if union_fields.contains(&key.as_str())
+                                        && both_files
+                                        && matches!(source, "global" | "project")
+                                    {
+                                        "global + project (union)"
+                                    } else {
+                                        source
+                                    };
+                                    output.push_str(&format!(
+                                        "| {key:<30} | {source_label:<30} | `{rendered}`\n"
+                                    ));
+                                }
+                            } else {
+                                output.push_str("(could not serialise merged config)\n");
+                            }
+                        }
+                        Err(e) => {
+                            output.push_str(&format!("❌ Failed to load config: {e}\n"));
+                        }
+                    }
+
                     // Storage database
                     output.push_str(&format!(
                         "\n💾 **Storage**\n\n| {:<24} | {}\n",
@@ -1433,8 +2256,9 @@ Usage: `/telemetry help|on|off|setup|counters`",
                 }
                 _ => {
                     self.append_assistant_text(
-                        "From: /config\nUsage:\n  `/config show` — display all application \
-                         paths\n  `/config save` — back up the global ragent.json\n  \
+                        "From: /config\nUsage:\n  `/config show` — display application paths \
+                         and resolved config values (with source: global/project/env)\n  \
+                         `/config save` — back up the global ragent.json\n  \
                          `/config list` — browse saved backups and restore one",
                     );
                     self.status = "config: usage".to_string();
@@ -2314,18 +3138,27 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 self.status = "llm stats".to_string();
             }
             "history" => {
+                let filter = args.trim().to_lowercase();
                 if self.input_history.is_empty() {
                     self.status = "No input history yet".to_string();
                 } else {
-                    // Show newest entries first
-                    let entries: Vec<String> = self.input_history.iter().rev().cloned().collect();
-                    self.history_picker = Some(crate::app::state::HistoryPickerState {
-                        entries,
-                        selected: 0,
-                        scroll_offset: 0,
-                    });
-                    self.input.clear();
-                    self.input_cursor = 0;
+                    // Show newest entries first, optionally filtered by substring match.
+                    let mut entries: Vec<String> =
+                        self.input_history.iter().rev().cloned().collect();
+                    if !filter.is_empty() {
+                        entries.retain(|e| e.to_lowercase().contains(&filter));
+                    }
+                    if entries.is_empty() {
+                        self.status = format!("No history entries contain {:?}", args.trim());
+                    } else {
+                        self.history_picker = Some(crate::app::state::HistoryPickerState {
+                            entries,
+                            selected: 0,
+                            scroll_offset: 0,
+                        });
+                        self.input.clear();
+                        self.input_cursor = 0;
+                    }
                 }
             }
             "model" => match args.trim() {
@@ -4728,7 +5561,10 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
 
                 let name = args.trim();
-                let session_id = self.session_id.clone().unwrap();
+                let Some(session_id) = self.session_id.clone() else {
+                    self.status = "⚠ No active session to name".to_string();
+                    return;
+                };
 
                 if name.is_empty() {
                     // Clear the session name
@@ -4770,6 +5606,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                     }
                 }
             }
+            "alog" => self.handle_alog_command(args),
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
                 let (sub, _rest) = args

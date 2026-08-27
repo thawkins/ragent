@@ -642,7 +642,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "history",
-        description: "Browse and re-use previous inputs (↑/↓ to select, Enter to insert)",
+        description: "Browse and re-use previous inputs; /history [filter] restricts to matching entries (↑/↓ to select, Enter to insert)",
     },
     SlashCommandDef {
         trigger: "inputdiag",
@@ -871,6 +871,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "name",
         description: "Set a human-readable display name for the session: /name <display-name>",
+    },
+    SlashCommandDef {
+        trigger: "alog",
+        description: "Activity log: /alog help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.

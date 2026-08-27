@@ -66,6 +66,7 @@ pub fn make_app() -> App {
             std::collections::HashMap::new(),
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
+        activity_log: std::sync::OnceLock::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

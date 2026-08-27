@@ -25,7 +25,7 @@ use ragent_agent::{
     telemetry::{ShutdownGuard, TelemetrySubsystem},
     tool,
 };
-use ragent_config::{edit_log, yolo::sync_from_config};
+use ragent_config::{activity_log, edit_log, yolo};
 
 mod cli;
 mod panic_hook;
@@ -356,12 +356,13 @@ async fn main() -> Result<()> {
         Config::load()?
     };
     startup.record("Config load", t0.elapsed());
-    // Keep the in-memory YOLO flag in sync with the loaded config. This is done
-    // explicitly here rather than inside Config::load so that config reloads
-    // triggered elsewhere do not race with an in-flight toggle in multi-threaded
-    // contexts (e.g. parallel tests).
-    sync_from_config();
-    edit_log::sync_from_config();
+    // Keep the in-memory YOLO/edit-log/activity-log flags in sync with the
+    // loaded config. We pass the already-loaded config values to the
+    // `sync_from_config_value` entry points so each module does not need to
+    // reload the config from disk a second time.
+    yolo::sync_from_config_value(config.yolo);
+    edit_log::sync_from_config_value(config.edit_log);
+    activity_log::sync_from_config_value(config.activity_log);
     tracing::info!("Configuration loaded successfully");
 
     let auto_extract_config = config.memory.auto_extract.clone();
@@ -560,6 +561,7 @@ async fn main() -> Result<()> {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(
             std::collections::HashMap::new(),
         )),
+        activity_log: std::sync::OnceLock::new(),
         telemetry,
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
@@ -638,7 +640,6 @@ async fn main() -> Result<()> {
         .spec_manager
         .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
     startup.record("Spec manager init", t0.elapsed());
-
     if cli.dry_run {
         run_dry_run_and_exit(
             cli.config.clone(),
@@ -650,6 +651,33 @@ async fn main() -> Result<()> {
             Arc::clone(&tool_registry),
         )
         .await;
+    }
+
+    // Wire the activity-log store into the session processor.
+    //
+    // The handle is set unconditionally; recording is gated at each call site
+    // by `ragent_config::activity_log::is_enabled()` so `/alog off` suppresses
+    // writes without unwiring the handle. A failure to open the log is
+    // non-fatal — the agent loop simply skips recording (best-effort).
+    //
+    // This is intentionally placed *after* the `dry_run` early-return so a
+    // readiness check does not open (or create) the activity-log database.
+    let alog_path = ragent_agent::storage::ActivityLog::default_path(&db_path);
+    match ragent_agent::storage::ActivityLog::open(&alog_path) {
+        Ok(log) => {
+            session_processor.set_activity_log(Arc::new(log));
+            tracing::info!(
+                path = %alog_path.display(),
+                "Activity log store initialized"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %alog_path.display(),
+                "Failed to open activity log at startup; activity logging will be disabled"
+            );
+        }
     }
 
     match cli.command {

@@ -616,7 +616,8 @@ impl LlmClient for BedrockAnthropicClient {
                     if let Some(data) = line.strip_prefix("data: ") {
                         let data = data.trim();
                         if data == "[DONE]" {
-                            break;
+                            yield StreamEvent::Finish { reason: FinishReason::Stop };
+                            return;
                         }
 
                         let parsed: Value = match serde_json::from_str(data) {
@@ -927,7 +928,6 @@ impl LlmClient for BedrockConverseClient {
             let mut buffer = String::new();
             let mut current_event_type = String::new();
             let mut active_tool_call_id = String::new();
-            let _active_tool_call_name = String::new();
 
             futures::pin_mut!(stream);
 
@@ -959,20 +959,21 @@ impl LlmClient for BedrockConverseClient {
                     if let Some(data) = line.strip_prefix("data: ") {
                         let data = data.trim();
                         if data == "[DONE]" {
-                            break;
+                            yield StreamEvent::Finish { reason: FinishReason::Stop };
+                            return;
                         }
 
-                        let parsed: Value = match serde_json::from_str(data) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
+                          let parsed: Value = match serde_json::from_str(data) {
+                              Ok(v) => v,
+                              Err(_) => continue,
+                          };
 
-                        // Check for Bedrock-level errors
-                        if let Some(error) = parsed.get("error") {
-                            let message = error
-                                .get("message")
-                                .and_then(Value::as_str)
-                                .unwrap_or("Unknown Bedrock error");
+                          // Check for Bedrock-level errors
+                          if let Some(error) = parsed.get("error") {
+                              let message = error
+                                  .get("message")
+                                  .and_then(Value::as_str)
+                                  .unwrap_or("Unknown Bedrock error");
                             yield StreamEvent::Error { message: message.to_string() };
                             continue;
                         }

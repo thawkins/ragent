@@ -588,9 +588,16 @@ impl LlmClient for GeminiClient {
                     let parsed: Value = match serde_json::from_str(line) {
                         Ok(v) => v,
                         Err(_) => {
-                            // Try to accumulate more data
+                            // Put the unparseable line back and wait for more
+                            // data from the outer stream loop. Using `break`
+                            // exits this inner buffer-parsing loop so the outer
+                            // `stream.next().await` can fetch the next chunk
+                            // to complete the partial JSON object. Using
+                            // `continue` here would re-enter this inner loop
+                            // and find the same `\n` we just re-inserted,
+                            // spinning at 100% CPU forever.
                             buffer = format!("{}\n{}", line, buffer);
-                            continue;
+                            break;
                         }
                     };
 

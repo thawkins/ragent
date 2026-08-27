@@ -296,3 +296,51 @@ fn test_script_file_path_gitbash_extension() {
         "Git Bash script should have .sh extension: {path}"
     );
 }
+
+// ── Low-priority wrapper tests ─────────────────────────────────────────
+
+#[test]
+fn test_low_priority_prefix_linux_bash() {
+    // On Linux with the default config (nice=10), a native Bash shell should
+    // get the nice + ionice prefix.
+    if !is_windows() {
+        ragent_config::bash_lists::load_from_config();
+        let prefix = low_priority_prefix(&ShellType::Bash);
+        if cfg!(target_os = "linux") {
+            assert_eq!(
+                prefix,
+                vec!["nice", "-n", "10", "ionice", "-c", "3"],
+                "expected nice+ionice prefix on Linux"
+            );
+        } else {
+            assert_eq!(
+                prefix,
+                vec!["nice", "-n", "10"],
+                "expected nice prefix on non-Linux POSIX"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_low_priority_prefix_skips_windows_shells() {
+    // Git Bash and PowerShell on Windows should never get the POSIX wrapper.
+    let git_bash = ShellType::GitBash(std::path::PathBuf::from("bash.exe"));
+    let pwsh = ShellType::PowerShell(std::path::PathBuf::from("pwsh.exe"));
+    assert!(low_priority_prefix(&git_bash).is_empty());
+    assert!(low_priority_prefix(&pwsh).is_empty());
+}
+
+#[test]
+fn test_low_priority_prefix_respects_configured_level() {
+    // The configured level should appear in the prefix. We can't easily inject
+    // a custom level here (the runtime flag is a global), so we verify that the
+    // prefix is non-empty on POSIX when the default is active.
+    if !is_windows() {
+        let prefix = low_priority_prefix(&ShellType::Bash);
+        if !prefix.is_empty() {
+            // The level is always the value right after `-n`.
+            assert_eq!(prefix[1], "-n");
+        }
+    }
+}

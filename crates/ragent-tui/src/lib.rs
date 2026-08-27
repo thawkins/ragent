@@ -122,7 +122,16 @@ use ragent_agent::storage::Storage;
 
 use tracing_layer::TuiLogReceiver;
 
-const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
+/// Safety-net interval for redrawing when no event has marked the UI dirty.
+///
+/// The primary redraw trigger is `App::needs_redraw`, set by input handlers
+/// and event handlers. This cap only guards against a missed flag leaving a
+/// stale screen: when idle the loop wakes at most every 2 seconds and skips
+/// the render entirely unless something changed. The previous 250 ms value
+/// caused an unconditional full-frame render 4x/second, which re-wrapped the
+/// entire transcript through unicode segmentation each frame and burned
+/// 10-15% of a core while idle.
+const IDLE_REDRAW_INTERVAL_MS: u64 = 2000;
 
 /// Run the TUI application.
 ///
@@ -703,6 +712,10 @@ pub async fn run_tui(
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 
+        // Render only when the UI is dirty. The elapsed fallback is a
+        // stale-render safety net (see IDLE_REDRAW_INTERVAL_MS); when idle
+        // this branch is skipped entirely, cutting idle renders from 4/sec
+        // to at most 0.5/sec.
         if app.needs_redraw || last_draw.elapsed() >= Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
         {
             terminal.draw(|frame| layout::render(frame, &mut app))?;

@@ -306,17 +306,26 @@ impl BackgroundCommand {
         let command_stdout = command.clone();
         let stdout_handle = tokio::spawn(async move {
             let mut lines = stdout_reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let formatted = format!("{line}\n");
-                Self::append_line(
-                    &inner_stdout,
-                    &formatted,
-                    true,
-                    &task_id_stdout,
-                    &command_stdout,
-                    &session_id_stdout,
-                    event_bus_stdout.as_ref(),
-                );
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        let formatted = format!("{line}\n");
+                        Self::append_line(
+                            &inner_stdout,
+                            &formatted,
+                            true,
+                            &task_id_stdout,
+                            &command_stdout,
+                            &session_id_stdout,
+                            event_bus_stdout.as_ref(),
+                        );
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        debug!(error = %e, %task_id_stdout, "stdout reader error");
+                        break;
+                    }
+                }
             }
         });
 
@@ -325,17 +334,26 @@ impl BackgroundCommand {
         let session_id_stderr = session_id.clone();
         let stderr_handle = tokio::spawn(async move {
             let mut lines = stderr_reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let formatted = format!("{line}\n");
-                Self::append_line(
-                    &inner_stderr,
-                    &formatted,
-                    false,
-                    &task_id_stderr,
-                    &command,
-                    &session_id_stderr,
-                    event_bus.as_ref(),
-                );
+            loop {
+                match lines.next_line().await {
+                    Ok(Some(line)) => {
+                        let formatted = format!("{line}\n");
+                        Self::append_line(
+                            &inner_stderr,
+                            &formatted,
+                            false,
+                            &task_id_stderr,
+                            &command,
+                            &session_id_stderr,
+                            event_bus.as_ref(),
+                        );
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        debug!(error = %e, %task_id_stderr, "stderr reader error");
+                        break;
+                    }
+                }
             }
         });
 

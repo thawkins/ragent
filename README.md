@@ -386,12 +386,22 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v1.0.59** — The core architecture, tool system (~169 tools across 18 categories), TUI,
+**v1.0.60** — The core architecture, tool system (~169 tools across 18 categories), TUI,
 HTTP server, memory system, teams/swarm coordination, spec management, skills system,
 research system, and multi-layered security are functional and under active development.
 
 Recent highlights:
 
+- **Activity-log slash commands** — `/alog on|off|list|show|stats` with config
+  persistence, a status-bar indicator, and best-effort async recording wired
+  into the session processor (v1.0.60)
+- **Low-priority shell execution** — `bash.nice` config runs shell commands as
+  children of `nice -n <level>` (and `ionice -c 3` on Linux) so heavy agent
+  workloads keep the host responsive (v1.0.60)
+- **CPU-spin fixes** — Gemini SSE parser infinite loop fixed (`continue` to
+  `break`), timed-out bash children now killed via `kill_on_drop`, and the
+  TUI idle redraw interval raised from 250 ms to 2 s with dirty-flag gating
+  (v1.0.60)
 - **Performance and resource bounding** — removed `gh auth token` subprocess
   auto-discovery, replaced background-task polling with `tokio::sync::Notify`,
   code-index worker busy-spin with `recv_timeout`, capped TUI messages (500),

@@ -303,7 +303,7 @@ pub fn detect_old_str_risks(old_str: &str) -> Vec<OldStrRisk> {
 
     let has_crlf = old_str.contains("\r\n");
     let has_lf = old_str.contains('\n');
-    if has_crlf && has_lf && old_str.contains('\n') {
+    if has_crlf && has_lf {
         // Confirm that there is at least one LF that is not part of a CRLF.
         let lf_not_crlf = old_str
             .chars()

@@ -388,10 +388,16 @@ impl LlmAnalysisEngine {
     pub async fn summarize_subject(&self, body: &str) -> Option<(String, String)> {
         let provider = self.provider_registry.get(&self.provider_id)?;
         let api_key = self.api_key.clone().unwrap_or_default();
-        let client = provider
+        let client = match provider
             .create_client(&api_key, self.base_url.as_deref(), &HashMap::new())
             .await
-            .ok()?;
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "summarize_subject: failed to create client");
+                return None;
+            }
+        };
 
         const MAX_INPUT_CHARS: usize = 12_000;
         let truncated: String = body.chars().take(MAX_INPUT_CHARS).collect();
@@ -422,16 +428,35 @@ impl LlmAnalysisEngine {
             thinking: None,
         };
 
-        let mut stream = client.chat(request).await.ok()?;
+        let mut stream = match client.chat(request).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "summarize_subject: chat request failed");
+                return None;
+            }
+        };
         let mut text = String::new();
         while let Some(event) = stream.next().await {
             match event {
                 StreamEvent::TextDelta { text: delta } => text.push_str(&delta),
-                StreamEvent::Error { .. } | StreamEvent::Finish { .. } => break,
+                StreamEvent::Error { message, .. } => {
+                    tracing::warn!(error = %message, "summarize_subject: stream error");
+                    return None;
+                }
+                StreamEvent::Finish { .. } => break,
                 _ => {}
             }
         }
-        parse_subject_summary(&text)
+        match parse_subject_summary(&text) {
+            Some(result) => Some(result),
+            None => {
+                tracing::debug!(
+                    text_len = text.len(),
+                    "summarize_subject: could not parse model output"
+                );
+                None
+            }
+        }
     }
 
     /// Issue the synthesis request to the provider and return the raw model

@@ -27,6 +27,8 @@ pub struct BashLists {
     pub allowlist: Vec<String>,
     /// Substring patterns that unconditionally reject a command.
     pub denylist: Vec<String>,
+    /// Low-priority niceness for shell commands (`None` = normal priority).
+    pub nice: Option<i32>,
 }
 
 static BASH_LISTS: OnceLock<RwLock<BashLists>> = OnceLock::new();
@@ -46,6 +48,7 @@ pub fn load_from_config() {
         Ok(cfg) => BashLists {
             allowlist: cfg.bash.allowlist,
             denylist: cfg.bash.denylist,
+            nice: cfg.bash.nice,
         },
         Err(e) => {
             tracing::warn!("bash_lists: failed to load config: {e}");
@@ -76,6 +79,13 @@ pub fn get_denylist() -> Vec<String> {
         .read()
         .map(|g| g.denylist.clone())
         .unwrap_or_default()
+}
+
+/// Returns the configured `nice` level for shell commands, or `None` if shell
+/// commands should run at normal priority.
+#[must_use]
+pub fn nice_level() -> Option<i32> {
+    global().read().ok().and_then(|g| g.nice)
 }
 
 /// Returns `true` if the command's first token matches any user-defined allowlist entry.

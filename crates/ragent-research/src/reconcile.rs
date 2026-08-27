@@ -159,12 +159,7 @@ pub fn build_cross_locus_reconcile(
             let b = &loci.loci[j];
             let a_set: HashSet<usize> = a.source_indices.iter().copied().collect();
             let b_set: HashSet<usize> = b.source_indices.iter().copied().collect();
-            let shared: Vec<usize> = a_set
-                .intersection(&b_set)
-                .copied()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .collect();
+            let shared: Vec<usize> = a_set.intersection(&b_set).copied().collect();
             if shared.len() < 2 {
                 continue;
             }

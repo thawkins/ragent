@@ -492,6 +492,7 @@ impl App {
             "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
+            "alog" => Some("[help|on|off|config|list|status|delete <run-id> --yes|export <run-id> --yes]".to_string()),
             "log" => Some("[clear subagents|panics|research|editlog|help]".to_string()),
             "help" => Some("[<command>]".to_string()),
             "quit" | "exit" => None,

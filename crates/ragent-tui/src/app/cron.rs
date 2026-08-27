@@ -178,6 +178,10 @@ async fn cron_tick(
 ) {
     let now = Utc::now();
 
+    // Load the available agent types once per tick so multiple due events
+    // do not each scan the filesystem independently.
+    let (all_agents, _) = ragent_agent::agent::load_all_agents(working_dir);
+
     // Process enabled due events (fire or log error for unknown agent).
     match storage.list_due_cron_events(&now) {
         Ok(events) => {
@@ -225,6 +229,7 @@ async fn cron_tick(
                         event,
                         now,
                         running_events,
+                        &all_agents,
                     )
                     .await;
                 }
@@ -267,6 +272,7 @@ async fn fire_cron_event(
     event: &ragent_storage::CronEventRow,
     now: chrono::DateTime<Utc>,
     running_events: &RunningEvents,
+    all_agents: &[Arc<ragent_agent::agent::AgentInfo>],
 ) {
     tracing::info!(
         event_id = %event.id,
@@ -278,7 +284,6 @@ async fn fire_cron_event(
     // FR-016: validate the agent type before spawning. If the agent type is
     // unknown to the system (not a built-in and no custom OASF definition),
     // log "error" and skip the spawn.
-    let (all_agents, _) = ragent_agent::agent::load_all_agents(working_dir);
     let agent_known = all_agents.iter().any(|a| a.name == event.agent_type);
     if !agent_known {
         tracing::warn!(
@@ -1573,6 +1578,7 @@ mod tests {
             skill_body_cache: std::sync::Arc::new(std::sync::RwLock::new(
                 std::collections::HashMap::new(),
             )),
+            activity_log: std::sync::OnceLock::new(),
         }
     }
 

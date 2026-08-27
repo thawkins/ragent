@@ -10,33 +10,22 @@
 //! This is inherently dangerous. Use only when you trust the agent and its
 //! inputs completely, or for local development/debugging.
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static YOLO_MODE: AtomicBool = AtomicBool::new(false);
-static YOLO_LOCK: Mutex<()> = Mutex::new(());
 
 /// Returns `true` if YOLO mode is currently enabled.
 pub fn is_enabled() -> bool {
-    let _guard = YOLO_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     YOLO_MODE.load(Ordering::Relaxed)
 }
 
 /// Enable or disable YOLO mode globally.
 pub fn set_enabled(enabled: bool) {
-    let _guard = YOLO_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     YOLO_MODE.store(enabled, Ordering::Relaxed);
 }
 
 /// Toggle YOLO mode and return the new state.
 pub fn toggle() -> bool {
-    let _guard = YOLO_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let was = YOLO_MODE.fetch_xor(true, Ordering::Relaxed);
     !was
 }
@@ -47,8 +36,12 @@ pub fn toggle() -> bool {
 /// written back to the same source file that was loaded (project config preferred
 /// over global config). Any error during persistence is returned so callers can
 /// decide how to report it.
+///
+/// If the config file cannot be loaded (e.g. it is corrupt), the error is
+/// propagated rather than silently overwriting the file with defaults.
 pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
-    let mut config = crate::config::Config::load().unwrap_or_default();
+    let mut config =
+        crate::config::Config::load().context("failed to load config before persisting yolo")?;
     config.yolo = enabled;
     config.save_to_source()?;
     set_enabled(enabled);
@@ -56,14 +49,16 @@ pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
 }
 
 /// Load the current config and update the runtime YOLO flag from its value.
-///
-/// This is intentionally separate from [`Config::load`](crate::config::Config::load)
-/// so that config reloads used only to read settings do not race with an in-flight
-/// toggle in multi-threaded contexts (e.g. parallel tests).
 pub fn sync_from_config() {
     let enabled = crate::config::Config::load()
         .map(|c| c.yolo)
         .unwrap_or_default();
+    set_enabled(enabled);
+}
+
+/// Update the runtime YOLO flag from an already-loaded config value, avoiding
+/// a redundant disk read.
+pub fn sync_from_config_value(enabled: bool) {
     set_enabled(enabled);
 }
 
@@ -78,3 +73,5 @@ pub fn toggle_persist() -> anyhow::Result<bool> {
     persist_yolo(new_state)?;
     Ok(new_state)
 }
+
+use anyhow::Context as _;

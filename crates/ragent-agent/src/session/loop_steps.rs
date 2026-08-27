@@ -18,8 +18,6 @@
 //!    results.
 //! 7. [`Self::finalize_assistant_message`] — final save + timing + hooks.
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,12 +78,6 @@ pub(crate) struct LoopState {
     pub chat_messages: Arc<Vec<ChatMessage>>,
     /// Accumulated assistant message parts for the final save (COW via `Arc`).
     pub assistant_parts: Arc<Vec<MessagePart>>,
-    /// Set when a tool returns `agent_switch` / `agent_restore` metadata.
-    pub agent_switch_requested: bool,
-    /// Set when a tool returns `agent_complete` metadata.
-    pub agent_complete_requested: bool,
-    /// Content hash of `assistant_parts` from the last interim save.
-    pub last_interim_hash: Option<u64>,
     /// Cumulative milliseconds spent waiting for the LLM.
     pub cumulative_model_wait_ms: u64,
     /// Hysteresis flag: compression already ran this turn.
@@ -108,8 +100,13 @@ pub(crate) struct LlmStepResult {
     pub tool_calls: Vec<PendingToolCall>,
     pub last_input_tokens: u64,
     pub last_output_tokens: u64,
+    /// Start time of the LLM request. Currently set but not consumed by
+    /// the caller (timing is tracked separately in `processor.rs`); retained
+    /// for future per-step profiling.
+    #[allow(dead_code)]
     pub llm_request_start: Instant,
     /// `true` if the step should break the main loop (fatal error).
+    #[allow(dead_code)]
     pub should_break: bool,
 }
 
@@ -414,7 +411,10 @@ impl SessionProcessor {
                 crate::agent::build_memory_prompt_section(&wd, Some(&storage), Some(&memory_cfg))
             })
             .await
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "memory prompt section task failed");
+                String::new()
+            })
         };
         // JCODEPLAN M8 (T-070): surface active durable initiatives on every
         // turn so the agent stays aware of long-term goals across sessions.
@@ -426,7 +426,10 @@ impl SessionProcessor {
                 crate::tool::initiative::build_initiatives_prompt_section(&storage, &wd)
             })
             .await
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "initiatives prompt section task failed");
+                String::new()
+            })
         };
         let mut system_prompt = {
             let _scope = profiler.scope("prompt.build_system_prompt");
@@ -757,7 +760,23 @@ impl SessionProcessor {
                 });
                 match client.chat(init_request).await {
                     Ok(mut stream) => {
-                        while let Some(ev) = stream.next().await {
+                        loop {
+                            let ev = match tokio::time::timeout(
+                                std::time::Duration::from_secs(60),
+                                stream.next(),
+                            )
+                            .await
+                            {
+                                Ok(Some(event)) => event,
+                                Ok(None) => break,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        session_id = %session_id,
+                                        "AGENTS.md init exchange stream stalled — no data for 60s"
+                                    );
+                                    break;
+                                }
+                            };
                             match ev {
                                 StreamEvent::TextDelta { text } => {
                                     self.event_bus.publish(Event::TextDelta {
@@ -922,12 +941,7 @@ impl SessionProcessor {
             // R-1: Wrap the notice task in an `AbortOnDrop` guard so it is
             // aborted on every scope exit — including the `continue 'retry`
             // and `bail!` error paths below — not just the success path.
-            struct AbortOnDrop(tokio::task::JoinHandle<()>);
-            impl Drop for AbortOnDrop {
-                fn drop(&mut self) {
-                    self.0.abort();
-                }
-            }
+            use crate::session::AbortOnDrop;
             let notice_handle = {
                 let event_bus = Arc::clone(&self.event_bus);
                 let session_id = session_id.to_string();
@@ -1471,6 +1485,7 @@ impl SessionProcessor {
 
     /// Final save of the assistant message, timing breakdown, and
     /// on_session_end hook.
+    #[allow(dead_code)]
     pub(crate) async fn finalize_assistant_message(
         &self,
         session_id: &str,

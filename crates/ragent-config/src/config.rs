@@ -148,6 +148,13 @@ pub struct Config {
     /// Edit-operation logging enabled for `edit` and `multi_edit`.
     #[serde(default)]
     pub edit_log: bool,
+    /// Activity-log recording enabled (default: `true`).
+    ///
+    /// When `true`, agent execution events (model messages, tool calls,
+    /// tool results, permission decisions, etc.) are recorded to the
+    /// activity-log SQLite database. Toggled via `/alog on|off`.
+    #[serde(default = "default_true")]
+    pub activity_log: bool,
     /// User-defined price overrides for cost estimation (FR-011).
     ///
     /// Each entry overrides the built-in price table for a specific model.
@@ -311,7 +318,6 @@ impl ToolVisibilityConfig {
         ]
         .into_iter()
     }
-
     /// Explicitly set the `codeindex` switch and mark it as user-specified.
     ///
     /// Use this (rather than direct field assignment) when persisting a user
@@ -321,6 +327,33 @@ impl ToolVisibilityConfig {
     pub fn set_codeindex(&mut self, enabled: bool) {
         self.codeindex = enabled;
         self.specified.codeindex = true;
+    }
+
+    /// Merge explicitly-specified fields from `overlay` into `self`.
+    ///
+    /// Only fields whose corresponding `specified` flag is set on the overlay
+    /// are copied; unspecified fields are left untouched on `self`. The
+    /// `specified` flags are propagated so a subsequent serialise writes the
+    /// field explicitly and the value survives a reload.
+    pub fn merge_specified(&mut self, overlay: &Self) {
+        macro_rules! merge_field {
+            ($field:ident) => {
+                if overlay.specified.$field {
+                    self.$field = overlay.$field;
+                    self.specified.$field = true;
+                }
+            };
+        }
+        merge_field!(office);
+        merge_field!(github);
+        merge_field!(gitlab);
+        merge_field!(teams);
+        merge_field!(agents);
+        merge_field!(plan);
+        merge_field!(codeindex);
+        merge_field!(masterfetch);
+        merge_field!(browser);
+        merge_field!(finance);
     }
 }
 
@@ -1047,7 +1080,7 @@ pub struct AgentConfig {
 /// `denylist` are substring patterns that always reject a command (e.g.
 /// `"git push --force"`).  Both global and project configs are merged —
 /// the union of all entries is used.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BashConfig {
     /// Command prefixes exempted from the banned-command check.
     #[serde(default)]
@@ -1055,6 +1088,28 @@ pub struct BashConfig {
     /// Patterns that unconditionally reject a command.
     #[serde(default)]
     pub denylist: Vec<String>,
+    /// Run shell commands at low CPU/IO priority (`nice -n <nice_level>` and,
+    /// on Linux, `ionice -c 3`) so that heavy agent workloads do not make the
+    /// host system unresponsive.  When `Some(level)` the `nice` wrapper is
+    /// applied with that niceness; when `None` commands run at normal priority.
+    #[serde(default = "default_nice_level")]
+    pub nice: Option<i32>,
+}
+
+/// Default `nice` level for the bash tool: `10` (clearly lower than normal
+/// priority but not so low that interactive shells become sluggish).
+const fn default_nice_level() -> Option<i32> {
+    Some(10)
+}
+
+impl Default for BashConfig {
+    fn default() -> Self {
+        Self {
+            allowlist: Vec::new(),
+            denylist: Vec::new(),
+            nice: default_nice_level(),
+        }
+    }
 }
 
 /// Configuration for directory/file path allow and deny lists.
@@ -1733,6 +1788,16 @@ impl Config {
         if overlay.experimental.parallel_tool_calls {
             base.experimental.parallel_tool_calls = true;
         }
+        // max_background_agents and background_agent_timeout are value fields
+        // (not opt-in OR-flag booleans), so the overlay must take precedence
+        // over the compiled defaults and any lower-precedence config file.
+        if overlay.experimental.max_background_agents != default_max_background_agents() {
+            base.experimental.max_background_agents = overlay.experimental.max_background_agents;
+        }
+        if overlay.experimental.background_agent_timeout != default_background_agent_timeout() {
+            base.experimental.background_agent_timeout =
+                overlay.experimental.background_agent_timeout;
+        }
 
         // Telemetry: merge the overlay telemetry config into the base. The
         // overlay takes precedence when it explicitly enables telemetry.
@@ -1848,46 +1913,8 @@ impl Config {
 
         // tool_visibility: overlay takes precedence only for explicitly set fields.
         // Propagate `specified` flags so an explicit toggle persists on save.
-        if overlay.tool_visibility.specified.office {
-            base.tool_visibility.office = overlay.tool_visibility.office;
-            base.tool_visibility.specified.office = true;
-        }
-        if overlay.tool_visibility.specified.github {
-            base.tool_visibility.github = overlay.tool_visibility.github;
-            base.tool_visibility.specified.github = true;
-        }
-        if overlay.tool_visibility.specified.gitlab {
-            base.tool_visibility.gitlab = overlay.tool_visibility.gitlab;
-            base.tool_visibility.specified.gitlab = true;
-        }
-        if overlay.tool_visibility.specified.teams {
-            base.tool_visibility.teams = overlay.tool_visibility.teams;
-            base.tool_visibility.specified.teams = true;
-        }
-        if overlay.tool_visibility.specified.agents {
-            base.tool_visibility.agents = overlay.tool_visibility.agents;
-            base.tool_visibility.specified.agents = true;
-        }
-        if overlay.tool_visibility.specified.plan {
-            base.tool_visibility.plan = overlay.tool_visibility.plan;
-            base.tool_visibility.specified.plan = true;
-        }
-        if overlay.tool_visibility.specified.codeindex {
-            base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
-            base.tool_visibility.specified.codeindex = true;
-        }
-        if overlay.tool_visibility.specified.masterfetch {
-            base.tool_visibility.masterfetch = overlay.tool_visibility.masterfetch;
-            base.tool_visibility.specified.masterfetch = true;
-        }
-        if overlay.tool_visibility.specified.browser {
-            base.tool_visibility.browser = overlay.tool_visibility.browser;
-            base.tool_visibility.specified.browser = true;
-        }
-        if overlay.tool_visibility.specified.finance {
-            base.tool_visibility.finance = overlay.tool_visibility.finance;
-            base.tool_visibility.specified.finance = true;
-        }
+        base.tool_visibility
+            .merge_specified(&overlay.tool_visibility);
 
         // Compaction: overlay takes precedence.
         base.compaction = overlay.compaction;
@@ -1899,6 +1926,15 @@ impl Config {
         if overlay.edit_log {
             base.edit_log = overlay.edit_log;
         }
+
+        // Activity-log: overlay takes precedence (last-wins, same semantics
+        // as `compaction` above). This cannot use the OR semantics of
+        // `yolo`/`edit_log` because `/alog off` must be respected — once any
+        // config disables logging, a higher-precedence config that re-enables
+        // it should win, and vice-versa. Without this line the merged value
+        // always stayed at the derived-`Default` of `false`, so the status bar
+        // showed "off" at startup regardless of the configured state.
+        base.activity_log = overlay.activity_log;
 
         // SDD flags: OR semantics — a flag enabled in either base or overlay
         // stays enabled. All flags default to false (opt-in, FR-019).

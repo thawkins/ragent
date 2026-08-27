@@ -141,6 +141,7 @@ fn make_processor(event_bus: Arc<EventBus>) -> (SessionProcessor, std::path::Pat
         read_timestamps: Arc::new(std::sync::RwLock::new(HashMap::new())),
         telemetry: Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
+        activity_log: std::sync::OnceLock::new(),
     };
 
     let tmp = tempfile::tempdir().expect("tempdir");
