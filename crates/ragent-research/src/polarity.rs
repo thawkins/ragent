@@ -48,3 +48,19 @@ pub(crate) fn citation_re() -> &'static Regex {
     static CITATION_RE: OnceLock<Regex> = OnceLock::new();
     CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
 }
+
+/// Extract the distinct, 1-based source indices cited by `text` via `[#N]`.
+///
+/// Indices are parsed, filtered to `> 0`, sorted, and deduplicated so callers
+/// can iterate citations without repeating the capture loop. Shared by the
+/// verification, synthesis, and cite-checking passes.
+pub(crate) fn cited_indices(text: &str) -> Vec<usize> {
+    let mut out: Vec<usize> = citation_re()
+        .captures_iter(text)
+        .filter_map(|cap| cap[1].parse().ok())
+        .filter(|n| *n > 0)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}

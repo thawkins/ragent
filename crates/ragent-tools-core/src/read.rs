@@ -51,7 +51,9 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
 
     // Check cache first (avoid holding lock across await)
     {
-        let mut cache = read_cache().lock().expect("cache poisoned");
+        let mut cache = read_cache()
+            .lock()
+            .map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?;
         if let Some(content) = cache.get(&key) {
             return Ok(Arc::clone(content));
         }
@@ -66,7 +68,9 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
     })?;
     let arc = Arc::new(raw);
     {
-        let mut cache = read_cache().lock().expect("cache poisoned");
+        let mut cache = read_cache()
+            .lock()
+            .map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?;
         cache.put(key, Arc::clone(&arc));
     }
     Ok(arc)

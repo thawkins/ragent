@@ -200,10 +200,26 @@ pub fn build_evidence_digest(
         .unwrap_or_default();
 
     let mut claims: Vec<DigestClaim> = Vec::new();
+
+    // Pre-lowercase every source body once instead of re-lowercasing per
+    // dimension (previously ~15x redundant work for the dimension scan plus
+    // the positive/negative token scans below).
+    let lowered_bodies: Vec<String> = sources
+        .iter()
+        .map(|s| source_body_text(s).to_lowercase())
+        .collect();
+    let positive_sources: Vec<bool> = lowered_bodies
+        .iter()
+        .map(|b| b.len() >= 20 && has_any_token(b, POSITIVE_TOKENS))
+        .collect();
+    let negative_sources: Vec<bool> = lowered_bodies
+        .iter()
+        .map(|b| b.len() >= 20 && has_any_token(b, NEGATIVE_TOKENS))
+        .collect();
+
     for (keyword, label) in DIGEST_DIMENSIONS {
         let mut indices: Vec<usize> = Vec::new();
-        for (idx, src) in sources.iter().enumerate() {
-            let body = source_body_text(src).to_lowercase();
+        for (idx, body) in lowered_bodies.iter().enumerate() {
             if body.len() < 20 {
                 continue;
             }
@@ -216,20 +232,6 @@ pub fn build_evidence_digest(
         if indices.is_empty() {
             continue;
         }
-        let positive_sources: Vec<bool> = sources
-            .iter()
-            .map(|s| {
-                let body = source_body_text(s).to_lowercase();
-                body.len() >= 20 && has_any_token(&body, POSITIVE_TOKENS)
-            })
-            .collect();
-        let negative_sources: Vec<bool> = sources
-            .iter()
-            .map(|s| {
-                let body = source_body_text(s).to_lowercase();
-                body.len() >= 20 && has_any_token(&body, NEGATIVE_TOKENS)
-            })
-            .collect();
         let has_positive = positive_sources.iter().any(|b| *b);
         let has_negative = negative_sources.iter().any(|b| *b);
         let contested = contested_dimensions.contains(keyword) || (has_positive && has_negative);

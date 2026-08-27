@@ -15,6 +15,7 @@ pub mod dir_lists;
 pub mod edit_log;
 pub mod finance;
 pub mod permission;
+pub mod runtime_flag;
 pub mod telemetry;
 pub mod trigger;
 pub mod yolo;

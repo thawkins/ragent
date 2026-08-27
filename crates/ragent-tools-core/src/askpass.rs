@@ -297,7 +297,7 @@ fn write_cancel(response_path: &Path) {
 ///
 /// Uses `/tmp` on Unix. Returns `None` if `/tmp` is not writable.
 fn temp_base_dir(session_id: &str) -> Option<PathBuf> {
-    let safe = safe_session_id(session_id);
+    let safe = crate::bash::safe_session_id(session_id);
     let dir = PathBuf::from("/tmp").join(format!("ragent_{safe}"));
     if std::fs::create_dir_all(&dir).is_err() {
         return None;
@@ -316,21 +316,6 @@ fn unique_stamp() -> String {
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     };
     format!("{micros}_{rand}")
-}
-
-/// Re-uses the bash module's session-id sanitizer so temp paths match the
-/// existing shell-state file naming.
-fn safe_session_id(session_id: &str) -> String {
-    session_id
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 /// Returns `true` when running on Windows (askpass is inert there).

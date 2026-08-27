@@ -391,11 +391,23 @@ async fn main() -> Result<()> {
         },
         Err(e) => tracing::warn!(error = %e, "Failed to open storage for FTS warmup"),
     });
+
     // Seed the secret registry from stored provider credentials so that
     // redact_secrets() can mask them by exact match in all log output.
+    //
+    // This is a full scan of the `provider_auth` table with per-row
+    // deobfuscation. It only feeds log redaction, so it is off-loaded to a
+    // background thread to keep it off the startup critical path. The
+    // well-known environment variables below are still seeded synchronously
+    // so the common credential sources are redacted from the first log line.
     let t0 = Instant::now();
-    if let Err(e) = storage.seed_secret_registry() {
-        tracing::warn!(error = %e, "Failed to seed secret registry from database");
+    {
+        let storage = Arc::clone(&storage);
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = storage.seed_secret_registry() {
+                tracing::warn!(error = %e, "Failed to seed secret registry from database");
+            }
+        });
     }
 
     // Also seed from well-known environment variables.
@@ -660,24 +672,37 @@ async fn main() -> Result<()> {
     // writes without unwiring the handle. A failure to open the log is
     // non-fatal — the agent loop simply skips recording (best-effort).
     //
+    // The open is off-loaded to a background thread: it opens a *separate*
+    // SQLite database (`activity_log.db`) and runs its schema migration, so
+    // doing it synchronously here would stall the TUI's first frame. The
+    // handle is wired via `OnceLock` (`set_activity_log`) once the open
+    // completes; recording only begins after the session starts, by which
+    // time the background open has finished.
+    //
     // This is intentionally placed *after* the `dry_run` early-return so a
     // readiness check does not open (or create) the activity-log database.
     let alog_path = ragent_agent::storage::ActivityLog::default_path(&db_path);
-    match ragent_agent::storage::ActivityLog::open(&alog_path) {
-        Ok(log) => {
-            session_processor.set_activity_log(Arc::new(log));
-            tracing::info!(
-                path = %alog_path.display(),
-                "Activity log store initialized"
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                path = %alog_path.display(),
-                "Failed to open activity log at startup; activity logging will be disabled"
-            );
-        }
+    {
+        let sp = Arc::clone(&session_processor);
+        let alog_path = alog_path.clone();
+        tokio::task::spawn_blocking(move || {
+            match ragent_agent::storage::ActivityLog::open(&alog_path) {
+                Ok(log) => {
+                    sp.set_activity_log(Arc::new(log));
+                    tracing::info!(
+                        path = %alog_path.display(),
+                        "Activity log store initialized"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        path = %alog_path.display(),
+                        "Failed to open activity log at startup; activity logging will be disabled"
+                    );
+                }
+            }
+        });
     }
 
     match cli.command {

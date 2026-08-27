@@ -16,5 +16,7 @@ Derived cache of every research item on disk. This file is regenerated on every 
 | test-research-routes-1787672562515073251 | test topic for post | draft | 2026-08-25T15:42:42.548492962+00:00 | 2026-08-25T15:42:42.549218235+00:00 |
 | test-research-routes-1787738714403904725 | test topic for post | draft | 2026-08-26T10:05:14.551574524+00:00 | 2026-08-26T10:05:14.556509986+00:00 |
 | test-research-routes-1787819547696900396 | test topic for post | draft | 2026-08-27T08:32:27.726912567+00:00 | 2026-08-27T08:32:27.727518021+00:00 |
+| test-research-routes-1787832042853775388 | test topic for post | draft | 2026-08-27T12:00:42.902053372+00:00 | 2026-08-27T12:00:42.903349778+00:00 |
+| test-research-routes-1787833520229657874 | test topic for post | draft | 2026-08-27T12:25:20.260416974+00:00 | 2026-08-27T12:25:20.261699016+00:00 |
 
-_Generated 2026-08-27T09:33:13.625400033+00:00 · 12 items._
+_Generated 2026-08-27T12:25:20.448047199+00:00 · 14 items._

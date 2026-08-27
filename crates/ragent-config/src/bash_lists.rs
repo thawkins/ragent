@@ -66,48 +66,70 @@ pub fn load_from_config() {
 /// Returns a snapshot of the current allowlist.
 #[must_use]
 pub fn get_allowlist() -> Vec<String> {
-    global()
-        .read()
-        .map(|g| g.allowlist.clone())
-        .unwrap_or_default()
+    match global().read() {
+        Ok(g) => g.allowlist.clone(),
+        Err(_) => {
+            tracing::warn!("bash_lists: allowlist lock poisoned; returning empty list");
+            Vec::new()
+        }
+    }
 }
 
 /// Returns a snapshot of the current denylist.
 #[must_use]
 pub fn get_denylist() -> Vec<String> {
-    global()
-        .read()
-        .map(|g| g.denylist.clone())
-        .unwrap_or_default()
+    match global().read() {
+        Ok(g) => g.denylist.clone(),
+        Err(_) => {
+            tracing::warn!("bash_lists: denylist lock poisoned; returning empty list");
+            Vec::new()
+        }
+    }
 }
 
 /// Returns the configured `nice` level for shell commands, or `None` if shell
 /// commands should run at normal priority.
 #[must_use]
 pub fn nice_level() -> Option<i32> {
-    global().read().ok().and_then(|g| g.nice)
+    match global().read() {
+        Ok(g) => g.nice,
+        Err(_) => {
+            tracing::warn!("bash_lists: nice lock poisoned; returning None");
+            None
+        }
+    }
 }
 
 /// Returns `true` if the command's first token matches any user-defined allowlist entry.
 #[must_use]
 pub fn is_allowlisted(command: &str) -> bool {
     let first_token = command.split_whitespace().next().unwrap_or("");
-    global().read().is_ok_and(|g| {
-        g.allowlist
+    match global().read() {
+        Ok(g) => g
+            .allowlist
             .iter()
-            .any(|entry| first_token == entry.as_str())
-    })
+            .any(|entry| first_token == entry.as_str()),
+        Err(_) => {
+            tracing::warn!("bash_lists: allowlist lock poisoned in is_allowlisted");
+            false
+        }
+    }
 }
 
 /// Returns the first user-defined denylist pattern that appears in `command`, if any.
 #[must_use]
 pub fn matches_denylist(command: &str) -> Option<String> {
-    global().read().ok().and_then(|g| {
-        g.denylist
+    match global().read() {
+        Ok(g) => g
+            .denylist
             .iter()
             .find(|p| command.contains(p.as_str()))
-            .cloned()
-    })
+            .cloned(),
+        Err(_) => {
+            tracing::warn!("bash_lists: denylist lock poisoned in matches_denylist");
+            None
+        }
+    }
 }
 
 // ── Mutation helpers ──────────────────────────────────────────────────────────
@@ -139,7 +161,7 @@ pub fn add_allowlist(entry: &str, scope: Scope) -> Result<()> {
         let mut g = global()
             .write()
             .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        if !g.allowlist.contains(&entry.to_string()) {
+        if !g.allowlist.iter().any(|e| e == entry) {
             g.allowlist.push(entry.to_string());
         }
     }
@@ -177,7 +199,7 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
         let mut g = global()
             .write()
             .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        if !g.denylist.contains(&pattern.to_string()) {
+        if !g.denylist.iter().any(|e| e == pattern) {
             g.denylist.push(pattern.to_string());
         }
     }

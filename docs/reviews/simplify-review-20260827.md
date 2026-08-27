@@ -1,204 +1,161 @@
-# Simplify Review — 2026-08-27
+# /simplify Review — 2026-08-27
 
-Review of recently changed Rust source files for substantive code quality issues.
+Scope: Rust source files changed in the last 3 commits (`git diff --name-only HEAD~3`),
+reviewed for substantive code-quality issues (performance, dead code, duplication,
+complexity, error handling). Style/formatting nits are excluded.
 
-## Summary
+Mode: default (safe/straightforward fixes applied). Verified with `cargo fmt --check`,
+`cargo check`, and `cargo clippy` (all pass; the only warnings are pre-existing in
+vendored `pdf-extract` and an external future-incompat crate, unrelated to these edits).
 
-6 background `explore` agents reviewed ~70 source files across 6 crate groups.
-Issues were triaged by impact. The `all` argument was supplied, so **every**
-identified fix was applied — including refactors, duplication extraction, and
-error-handling improvements.
+---
 
-All changes pass `cargo fmt --check`, `cargo check`, `cargo clippy` (no new
-warnings), and the full library test suites for `ragent-agent`, `ragent-config`,
-`ragent-tui`, and `ragent-server`.
+## Fixes applied
 
-## Fixes Applied
+### 1. `crates/ragent-agent/src/session/mod.rs` — `remove_session_state` was a silent no-op (bug, R-3)
 
-### 1. Dead code: `#![allow(dead_code)]` removed from `loop_steps.rs`
+**Problem:** `session_state_cache` and `remove_session_state` each declared their own
+function-local `static CACHE`. Function-local statics are distinct items per
+declaration site, so `remove_session_state` referenced a *different* empty map and
+never removed anything — the comment above it even warned about this exact hazard,
+yet the code did it anyway. The global session-state cache grew unbounded whenever a
+session was archived or a sub-agent completed (R-3 violation).
 
-**File:** `crates/ragent-agent/src/session/loop_steps.rs`, line 21
+**Fix:** Hoisted a single module-scope `static SESSION_STATE_CACHE: OnceLock<Mutex<HashMap<...>>>`
+and both methods now reference it, so eviction works.
 
-The module-level `#![allow(dead_code)]` suppressed all dead-code warnings across
-the entire 1,539-line file, hiding genuinely dead state (issue #3 below) and
-masking methods that are not yet called. Removed the broad attribute. Added
-targeted `#[allow(dead_code)]` to the two struct fields (`llm_request_start`,
-`should_break`) and the `finalize_assistant_message` method that are retained
-for future use, with comments explaining why.
+### 2. `crates/ragent-agent/src/orchestrator/coordinator.rs` — dead `JobEntry._id` field
 
-### 2. Dead state: `saw_completed_tool_call` IS used (verified)
+**Problem:** `JobEntry._id` was written (in `start_job_async`) but never read; it was
+underscored to silence the lint. The job id is already the `DashMap` key.
 
-**File:** `crates/ragent-agent/src/session/loop_steps.rs`, lines 851–1256
+**Fix:** Removed the field and its write site. Also collapsed a `match router.send().await {
+Ok(resp) => Ok((agent_id, resp)), Err(e) => Err(e) }` into `.map(|resp| (agent_id, resp))`.
 
-The explore agent reported `saw_completed_tool_call` as dead state. On
-verification, it IS read at line 1256 as a parameter to
-`stream_has_meaningful_partial_output()`. No change needed — false positive.
+### 3. `crates/ragent-tools-core/src/bash.rs` — allocation in hot `is_safe_command` path
 
-### 3. Duplication: `AbortOnDrop` struct extracted to shared module
+**Problem:** `trimmed.starts_with(&format!("{safe} "))` allocated a fresh `String` per
+allowlist entry per command validation (up to one allocation per safe-command per
+invocation on every bash call).
 
-**Files:** `session/loop_steps.rs` (line 941), `session/processor.rs` (line 646)
+**Fix:** Replaced with a non-allocating `strip_prefix(safe).is_some_and(|r| r.starts_with(' '))`.
 
-Both files independently defined an identical `AbortOnDrop(JoinHandle<()>)` struct
-with a `Drop` impl that calls `abort()`. Extracted a single
-`pub(crate) struct AbortOnDrop` into `session/mod.rs` and replaced both local
-definitions with `use crate::session::AbortOnDrop`.
+### 4. `crates/ragent-tools-core/src/askpass.rs` — duplicated `safe_session_id`
 
-### 4. Duplication: `is_token_overflow_error` / `is_permanent_api_error` in team/manager.rs
+**Problem:** `askpass.rs` re-implemented `bash::safe_session_id` character-for-character,
+even though its own doc comment said it "re-uses the bash module's sanitizer."
 
-**File:** `crates/ragent-agent/src/team/manager.rs`, lines 54–86
+**Fix:** Deleted the local copy and call `crate::bash::safe_session_id(session_id)`.
 
-Two private error-classification functions duplicated the canonical
-implementations in `session::history` (`is_token_overflow_error_message` and
-`is_permanent_llm_api_error`), risking pattern drift. Replaced the function bodies
-with thin delegation wrappers that call the canonical implementations.
+### 5. `crates/ragent-tui/src/layout_statusbar.rs` — identical `Compact`/`Minimal` match arms
 
-### 5. Dead code: `unwrap_or("task")` on guaranteed `Some`
+**Problem:** Both arms computed the exact same percentage string; they would drift if
+only one were edited.
 
-**File:** `crates/ragent-agent/src/task/mod.rs`, line 86
+**Fix:** Collapsed to `ResponsiveMode::Compact | ResponsiveMode::Minimal => { ... }`.
 
-`uuid::Uuid::new_v4().to_string().split('-').next()` always returns `Some`, so
-`unwrap_or("task")` was unreachable dead code. Replaced with `.expect("UUID
-always has a first segment")`.
+### 6. `crates/ragent-config/src/bash_lists.rs` — `to_string()` allocations for `contains`
 
-### 6. Dead code: redundant condition in `edit_log.rs` line-ending check
+**Problem:** `g.allowlist.contains(&entry.to_string())` and the denylist equivalent
+allocated a `String` just to look up an existing element.
 
-**File:** `crates/ragent-tools-core/src/edit_log.rs`, lines 304–306
+**Fix:** Replaced with `g.allowlist.iter().any(|e| e == entry)` (non-allocating).
 
-The condition `has_crlf && has_lf && old_str.contains('\n')` had a redundant
-third clause identical to `has_lf` (already required by `&& has_lf`). Removed
-the dead third condition.
+### 7. `crates/ragent-tools-core/src/read.rs` — `.expect()` on cache locks
 
-### 7. Duplication: `bytes_to_path` in `state.rs` (verified — false positive)
+**Problem:** `read_cache().lock().expect("cache poisoned")` would panic a tool call if
+the cache mutex were poisoned. `cached_read` already returns `Result`.
 
-**File:** `crates/ragent-tui/src/app/state.rs`, lines 135 and 141
+**Fix:** `.map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?` so a lock failure is a
+recoverable tool error.
 
-The explore agent reported `bytes_to_path` defined twice. On inspection, the
-two definitions are mutually exclusive `#[cfg(unix)]` / `#[cfg(not(unix))]` —
-this is correct conditional compilation, not duplication. No change needed.
+### 8. `crates/ragent-tui/src/app/event_handler.rs` — production `.expect("just pushed")`
 
-### 8. Misleading `# Errors` doc sections on infallible functions
+**Problem:** `self.research_progress.last_mut().expect("just pushed")` relied on the
+immediately-preceding `push`; a race would panic the TUI.
 
-**File:** `crates/ragent-agent/src/skill/bundled.rs`, lines 22–25 and 82–85
+**Fix:** Guarded with a `let Some(last) = ... else { error!; return }` that logs instead
+of panicking.
 
-`make_bundled_skill` and `bundled_skills` both had `# Errors` doc sections
-stating "This function does not return errors." `# Errors` is reserved for
-functions returning `Result`. Removed both misleading sections.
+### 9. `crates/ragent-tui/src/layout.rs` — production `.unwrap()` on link/image state
 
-### 9. Error handling: `unwrap_or_default()` on `spawn_blocking` in `loop_steps.rs`
+**Problem:** `link_state.as_mut().unwrap().1` / `image_state.as_mut().unwrap().1` assumed
+the `Option` was populated; a logic regression would crash the renderer.
 
-**File:** `crates/ragent-agent/src/session/loop_steps.rs`, lines 415–17 and 427–29
+**Fix:** Replaced with `if let Some(ls) = link_state.as_mut()` / `if let Some(is) = image_state.as_mut()`.
 
-Two `spawn_blocking` calls for memory/initiatives prompt sections used
-`.unwrap_or_default()`, silently swallowing JoinError (panic, cancellation).
-Replaced with `.unwrap_or_else(|e| { tracing::warn!(...); String::new() })` so
-failures are logged.
+### 10. `crates/ragent-tui/src/app/cron.rs` — `.expect()` on runtime parse + double `get_task`
 
-### 10. Code duplication: `Config::merge` tool_visibility boilerplate
+**Problem:** (a) `parse_from_rfc3339(...).expect("valid far-future timestamp")` sat in a
+production path; (b) the completion monitor called `agent_manager.get_task(&task_id)`
+twice for the same task (once to check `done`, once to read the result).
 
-**File:** `crates/ragent-config/src/config.rs`, lines 1856–1922
+**Fix:** (a) replaced the `.expect` with an `if let Ok(far_future)` guard; (b) kept the
+first `get_task` result, matched on `&task`, and reused the borrowed entry in the
+stateful branch — removing the redundant second query.
 
-10 consecutive `if overlay.tool_visibility.specified.X { ... }` blocks (40
-lines) were replaced with a `merge_specified` method on `ToolVisibilityConfig`
-using a `macro_rules!` helper. The merge call site is now a single line:
-`base.tool_visibility.merge_specified(&overlay.tool_visibility)`.
+### 11. `crates/ragent-tui/src/app/session_ops.rs` — `parse_refs` computed twice
 
-### 11. Performance: `load_all_agents` called per-event in cron tick
+**Problem:** `parse_refs(&text)` was called once to test emptiness and a second time to
+extract names — doubling tokenising work on every user send.
 
-**File:** `crates/ragent-tui/src/app/cron.rs`, line 281
+**Fix:** Parse once into `refs`, derive `has_refs` from it, and reuse for the name list.
 
-`load_all_agents()` (filesystem scan) was called inside `fire_cron_event` for
-every due event on every 30-second tick. Hoisted the call to `cron_tick` and
-passed the result as a `&[Arc<AgentInfo>]` parameter.
+### 12. `crates/ragent-tui/src/app/helpers.rs` — duplicated tail-8 helpers
 
-### 12. Magic number: `mpsc::channel(100)` in registry
+**Problem:** `short_session_id` and `short_run_id` shared identical "last 8 chars" logic.
 
-**File:** `crates/ragent-agent/src/orchestrator/registry.rs`, line 91
+**Fix:** Extracted a private `tail8(s: &str)` and have both call it.
 
-The hardcoded mailbox buffer size `100` was extracted to a named constant
-`MAILBOX_BUFFER_SIZE` with a doc comment.
+---
 
-### 13. Silent error swallowing: `persist_*` functions used `unwrap_or_default()`
+## Findings reviewed but not applied (default mode)
 
-**Files:** `crates/ragent-config/src/activity_log.rs`, `edit_log.rs`, `yolo.rs`
+These were larger refactors deferred per the default (safe-only) mode. **All items
+below have since been implemented** (2026-08-27) — see
+`docs/reviews/simplify-review-20260827-applied.md` for the details of each change
+and its verification:
 
-`persist_activity_log`, `persist_edit_log`, and `persist_yolo` all used
-`Config::load().unwrap_or_default()`, which could overwrite a user's entire
-config file with defaults if the load failed for a transient reason. Changed to
-`.context("failed to load config before persisting ...")?` so the error is
-propagated.
+- **`bash.rs:1193-1477`** — `execute` was a ~285-line function mixing validation, command
+  build, output truncation, and formatting. Extracted `build_shell_command` and
+  `truncate_output`.
+- **`bash.rs` shell-type match** — duplicated between `spawn_background_shell` and `execute`
+  is now a single `build_shell_command` helper shared by both.
+- **`activity_log.rs` / `edit_log.rs` / `yolo.rs`** — three near-identical toggle modules
+  deduplicated via a new shared `RuntimeFlag` helper in `ragent-config`.
+- **`bg.rs`** — ten identical `lock().expect("background inner lock poisoned")` sites
+  replaced with recoverable lock handling; the O(n²) `replace_range` trim in
+  `append_with_cap` switched to `drain(..overflow)`.
+- **`bash_lists.rs`** — poison handling now `tracing::warn!`s on the read paths that
+  previously returned an empty list silently.
+- **`coordinator.rs`** — `active_jobs` leak on the empty-match early-return fixed with an
+  `ActiveJobsGuard` (matching the async path).
+- **`task/mod.rs`** — `suspend_task`/`resume_task` stub docs tightened; model-override
+  resolution deduplicated into a shared `apply_model_override` helper.
+- **`research/`** — `digest.rs` now lowercases each source body once; a shared
+  `polarity::cited_indices` helper replaces the duplicated extraction in `verify.rs` /
+  `synthesis.rs` / `cite_checker.rs`.
+- **`session/loop_steps.rs`** — duplicated `spawn_blocking` + error-swallow pattern
+  extracted into `spawn_blocking_section`; the `generic_openai`/`azure_foundry` base_url
+  arms collapsed into a shared `resolve_api_base` helper.
 
-### 14. Pointless `Mutex` around `AtomicBool` in toggle modules
-
-**Files:** `crates/ragent-config/src/activity_log.rs`, `edit_log.rs`, `yolo.rs`
-
-All three toggle modules wrapped an `AtomicBool` in a `Mutex<()>`, acquiring the
-lock on every read/write/toggle. The `Mutex` provided no benefit because
-`AtomicBool` is already thread-safe with `Relaxed` ordering. Removed the
-`Mutex` entirely from all three modules.
-
-### 15. Performance: `Config::load()` called 4× during startup
-
-**File:** `src/main.rs`, lines 356–365
-
-`Config::load()` was called once in `main`, then re-loaded independently by
-`yolo::sync_from_config()`, `edit_log::sync_from_config()`, and
-`activity_log::sync_from_config()`. Added `sync_from_config_value(bool)` entry
-points to all three modules and updated `main.rs` to pass the already-loaded
-config values, eliminating 3 redundant disk reads from the startup path.
-
-### 16. Logic ordering: activity-log opened in `--dry-run` mode
-
-**File:** `src/main.rs`, lines 644–679
-
-The activity-log SQLite database was opened (and potentially created) before
-the `dry_run` early-return, meaning a readiness check had side effects. Moved
-the activity-log initialization block to after the `dry_run` check.
-
-### 17. Duplicated `error_response` in research routes
-
-**File:** `crates/ragent-server/src/routes/research.rs`, line 475
-
-`error_response` was defined locally in `research.rs` with a `&str` parameter,
-duplicating the `impl Into<String>` version in `routes/mod.rs`. Made the
-`mod.rs` version `pub(crate)` and delegated the local function to it.
-
-### 18. Silent error swallowing: SSE broadcast lag
-
-**File:** `crates/ragent-server/src/routes/research.rs`, line 542
-
-`BroadcastStream::Err` was silently converted to an empty `Event::default()`,
-making lag/dropped events invisible to clients. Changed to emit a visible
-`[LAGGED]` marker event.
-
-## Pre-existing issues noted but not fixed
-
-The following issues were identified but not applied because they require
-larger architectural changes that go beyond the scope of a simplify pass:
-
-- **8000-line `execute_slash_command_inner` god function** (slash.rs) — each
-  command should be extracted into its own handler method. Large mechanical
-  refactor; should be a dedicated task.
-- **600-field `App` struct** (state.rs) — should be grouped into sub-structs
-  (ScrollState, CacheState, etc.). Architectural change.
-- **Duplicated 7-layer bash security validation** between `validate_shell_command`
-  and `BashTool::execute` (bash.rs) — extraction requires careful async/sync
-  boundary handling; security-critical code, should be a focused PR.
-- **LLM provider files** — duplication across provider implementations is
-  inherent to the provider trait pattern and not easily DRY'd without an
-  abstraction layer.
-- **`test_activity_log_persist_helper_updates_config_file`** — this test was
-  failing **before** our changes (confirmed by stashing). It's a pre-existing
-  test issue related to `save_to_source` not respecting `RAGENT_CONFIG` env var
-  path. Not introduced by our changes.
+---
 
 ## Verification
 
-```
-cargo fmt --check   ✓
-cargo check         ✓ (0 errors, 2 pre-existing warnings)
-cargo clippy        ✓ (no new warnings)
-cargo test -p ragent-config --lib    ✓ (16/16)
-cargo test -p ragent-agent  --lib    ✓ (316/316)
-cargo test -p ragent-tui     --lib    ✓ (83/83)
-cargo test -p ragent-server  --lib    ✓ (0 tests)
-```
+- `cargo fmt --check` — passes
+- `cargo check -p ragent-agent -p ragent-tools-core -p ragent-config -p ragent-tui` — passes
+- `cargo clippy` (same crates) — no new warnings from these changes
+
+## Applied-follow-up verification (2026-08-27)
+
+After implementing the deferred findings (see above):
+
+- `cargo fmt --check` — passes
+- `cargo check -p ragent-config -p ragent-tools-core -p ragent-agent -p ragent-research` — passes
+- `cargo clippy` (same crates) — no new warnings (the only warnings are the pre-existing
+  vendored `pdf-extract` `NAN` deprecation and the external future-incompat crate)
+- `cargo test -p ragent-config` (activity_log + yolo persistence) — passes
+- `cargo test -p ragent-tools-core` — passes
+- `cargo test -p ragent-agent --lib` (orchestrator + task) — passes
+- `cargo test -p ragent-research --lib` (606 tests) — passes

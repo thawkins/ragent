@@ -3920,53 +3920,58 @@ impl Storage {
     /// let storage = Storage::open_in_memory().unwrap();
     /// storage.create_session("sess-1", "/tmp/project").unwrap();
     /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// // `create_message` already maintains `messages_fts` incrementally, so a
+    /// // warm-up finds zero missing rows (PERF-013).
     /// let count = storage.warm_message_search_index().unwrap();
-    /// assert!(count >= 1);
+    /// assert_eq!(count, 0);
     /// ```
     pub fn warm_message_search_index(&self) -> Result<usize> {
+        // PERF-013: only index messages that are not already in `messages_fts`.
+        // The FTS table is maintained incrementally on every message
+        // create/update/delete (see `create_message`), so on a warm start there
+        // are normally *zero* missing rows and this method is a fast no-op.
+        // The previous implementation always DELETE+rebuilt the whole table,
+        // which (a) rewrote every row on every launch and (b) held the SQLite
+        // write lock for the entire rebuild — serialising the main thread's own
+        // `create_session` write behind it and adding ~5s to startup.
+        //
+        // When rows ARE missing (first run after a schema change), the catch-up
+        // inserts run in a single transaction: FTS5 indexes are batch-oriented,
+        // so many small transactions trigger expensive incremental index merges.
         let mut conn = lock_conn!(self)?;
+        let missing: Vec<(String, String, String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT m.id, m.session_id, m.role, m.parts \
+                 FROM messages m \
+                 LEFT JOIN messages_fts f ON f.message_id = m.id \
+                 WHERE f.message_id IS NULL",
+            )?;
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+            rows
+        };
 
-        // Batch the rebuild in a single transaction.  Without an explicit
-        // transaction every INSERT commits independently, and with the
-        // default `journal_mode=delete` + `synchronous=FULL` each commit
-        // fsyncs the journal and the database file — ~4ms per row, so a
-        // 2,000+ message history takes ~9s at startup.  One transaction =
-        // one fsync, making the warm-up effectively free.
+        if missing.is_empty() {
+            return Ok(0);
+        }
+
         let tx = conn.transaction()?;
-
-        // Clear the existing index.
-        tx.execute("DELETE FROM messages_fts", [])?;
-
-        // Rebuild from the messages table.
-        // We extract text content from the JSON parts column.
-        let mut stmt = tx.prepare("SELECT id, session_id, role, parts FROM messages")?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                let id: String = row.get(0)?;
-                let session_id: String = row.get(1)?;
-                let role: String = row.get(2)?;
-                let parts_json: String = row.get(3)?;
-                Ok((id, session_id, role, parts_json))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(stmt);
-
-        let mut count = 0usize;
-        for (id, session_id, role, parts_json) in rows {
-            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
+        for (id, session_id, role, parts_json) in &missing {
+            let parts: Vec<MessagePart> = serde_json::from_str(parts_json).unwrap_or_default();
             let content = extract_message_text(&parts);
             tx.execute(
                 "INSERT INTO messages_fts (message_id, session_id, role, content) \
                  VALUES (?1, ?2, ?3, ?4)",
                 params![id, session_id, role, content],
             )?;
-            count += 1;
         }
-
         tx.commit()?;
 
-        Ok(count)
+        Ok(missing.len())
     }
 }
 

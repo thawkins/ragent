@@ -93,7 +93,13 @@ fn background_warmup_does_not_block_reader() {
     );
 
     let count = warmup.join().expect("warm-up joined");
-    assert_eq!(count, 2_000, "warm-up indexed all messages");
+    // PERF-013: `create_message` maintains `messages_fts` incrementally, so a
+    // warm-up on an already-synced database is a fast no-op and must report
+    // zero missing rows rather than re-indexing everything.
+    assert_eq!(
+        count, 0,
+        "warm-up should find zero missing rows (FTS kept in sync)"
+    );
 
     drop(main);
     let _ = std::fs::remove_file(&path);

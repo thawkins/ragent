@@ -13,7 +13,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdout};
 use tokio::sync::Notify;
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use crate::bash;
 use crate::event::{Event, EventBus};
@@ -62,6 +62,14 @@ pub struct BackgroundCommand {
 }
 
 impl BackgroundCommand {
+    /// Lock the shared inner state, returning a tool error if the mutex was
+    /// poisoned rather than panicking.
+    fn lock_inner(&self) -> anyhow::Result<std::sync::MutexGuard<'_, Inner>> {
+        self.inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("background inner lock poisoned"))
+    }
+
     /// Spawn a new background shell command.
     ///
     /// `id` is the caller-assigned task identifier (usually a UUID). `command`
@@ -166,29 +174,31 @@ impl BackgroundCommand {
     /// `cancelled`.
     #[must_use]
     pub fn status(&self) -> String {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
-        inner.status.clone()
+        self.lock_inner()
+            .map(|inner| inner.status.clone())
+            .unwrap_or_default()
     }
 
     /// Return the exit code, if the process has finished.
     #[must_use]
     pub fn exit_code(&self) -> Option<i32> {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
-        inner.exit_code
+        self.lock_inner().ok().and_then(|inner| inner.exit_code)
     }
 
     /// Return `true` once the process has exited (naturally or via cancel).
     #[must_use]
     pub fn is_done(&self) -> bool {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
-        inner.done
+        self.lock_inner()
+            .map(|inner| inner.done)
+            .unwrap_or_default()
     }
 
     /// Return the full captured stdout and stderr.
     #[must_use]
     pub fn output(&self) -> (String, String) {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
-        (inner.stdout.clone(), inner.stderr.clone())
+        self.lock_inner()
+            .map(|inner| (inner.stdout.clone(), inner.stderr.clone()))
+            .unwrap_or_default()
     }
 
     /// Return the last `n` lines of combined stdout/stderr.
@@ -197,7 +207,9 @@ impl BackgroundCommand {
     /// `n = 20` matches common `tail` usage.
     #[must_use]
     pub fn tail(&self, n: usize) -> String {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
+        let Ok(inner) = self.lock_inner() else {
+            return String::new();
+        };
         let combined = format!("{}{}", inner.stdout, inner.stderr);
         let lines: Vec<&str> = combined.lines().collect();
         let start = lines.len().saturating_sub(n);
@@ -207,8 +219,9 @@ impl BackgroundCommand {
     /// Return the merged `JCODE_PROGRESS` JSON object.
     #[must_use]
     pub fn progress(&self) -> Value {
-        let inner = self.inner.lock().expect("background inner lock poisoned");
-        inner.progress.clone()
+        self.lock_inner()
+            .map(|inner| inner.progress.clone())
+            .unwrap_or(Value::Null)
     }
 
     /// Request cancellation by killing the child process.
@@ -219,7 +232,7 @@ impl BackgroundCommand {
     /// task can reap it; we only signal `start_kill` here.
     pub async fn cancel(&self) -> Result<()> {
         {
-            let mut inner = self.inner.lock().expect("background inner lock poisoned");
+            let mut inner = self.lock_inner()?;
             inner.cancelled = true;
             if let Some(child) = inner.child.as_mut() {
                 // `start_kill` sends the signal without awaiting.
@@ -235,7 +248,7 @@ impl BackgroundCommand {
         // itself panicked and never sets `done`.
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
         let done_notify = {
-            let inner = self.inner.lock().expect("background inner lock poisoned");
+            let inner = self.lock_inner()?;
             Arc::clone(&inner.done_notify)
         };
         loop {
@@ -267,7 +280,7 @@ impl BackgroundCommand {
     pub async fn wait(&self, timeout_secs: u64) -> Result<()> {
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
         let done_notify = {
-            let inner = self.inner.lock().expect("background inner lock poisoned");
+            let inner = self.lock_inner()?;
             Arc::clone(&inner.done_notify)
         };
         loop {
@@ -381,7 +394,13 @@ impl BackgroundCommand {
             }
         }
 
-        let mut guard = inner.lock().expect("background inner lock poisoned");
+        let mut guard = match inner.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                warn!(%task_id, "background inner lock poisoned in append_line");
+                return;
+            }
+        };
         let dropped = guard.bytes_dropped;
 
         // T-022: successfully parsed `JCODE_PROGRESS` lines are consumed into
@@ -434,8 +453,12 @@ impl BackgroundCommand {
                 new_dropped = new_dropped.saturating_add(buffer.len());
                 buffer.clear();
             } else {
+                // Drop the oldest `overflow` bytes. Using `drain(..overflow)`
+                // is O(overflow) and shifts the remainder once, whereas
+                // `replace_range` was O(buffer.len()) per call (O(n²) overall
+                // when trimming repeatedly under a high-output command).
                 new_dropped = new_dropped.saturating_add(overflow);
-                buffer.replace_range(..overflow, "");
+                buffer.drain(..overflow);
             }
         }
         buffer.push_str(line);
@@ -456,9 +479,12 @@ impl BackgroundCommand {
         // `cancel()` path signals `cancel_notify`; we `select!` on both so
         // cancel wakes the waiter immediately rather than waiting for the
         // next poll tick.
-        let mut child = {
-            let mut guard = inner.lock().expect("background inner lock poisoned");
-            guard.child.take()
+        let mut child = match inner.lock() {
+            Ok(mut g) => g.child.take(),
+            Err(_) => {
+                warn!(%task_id, "background inner lock poisoned in waiter_task");
+                return;
+            }
         };
 
         let exit_status: Option<std::process::ExitStatus> = if let Some(ref mut child) = child {
@@ -489,7 +515,13 @@ impl BackgroundCommand {
             None => ("failed", None),
         };
 
-        let mut guard = inner.lock().expect("background inner lock poisoned");
+        let mut guard = match inner.lock() {
+            Ok(g) => g,
+            Err(_) => {
+                warn!(%task_id, "background inner lock poisoned finalising");
+                return;
+            }
+        };
         if guard.cancelled {
             guard.status = "cancelled".to_string();
         } else {

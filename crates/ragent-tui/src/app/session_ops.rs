@@ -211,13 +211,10 @@ impl App {
         self.stream_out_bytes = 0;
         // R-10: trim messages to bound memory.
         self.trim_messages_if_needed();
-
-        let has_refs = !ragent_agent::reference::parse::parse_refs(&text).is_empty();
+        let refs = ragent_agent::reference::parse::parse_refs(&text);
+        let has_refs = !refs.is_empty();
         if has_refs {
-            let ref_names: Vec<String> = ragent_agent::reference::parse::parse_refs(&text)
-                .iter()
-                .map(|r| r.raw.clone())
-                .collect();
+            let ref_names: Vec<String> = refs.iter().map(|r| r.raw.clone()).collect();
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!("resolving refs: {}", ref_names.join(", ")),

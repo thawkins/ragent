@@ -2805,10 +2805,10 @@ fn markdown_to_lines<'a>(
             MdEvent::Text(text) => {
                 if in_code_block.is_some() {
                     code_buffer.push_str(&text);
-                } else if link_state.is_some() {
-                    link_state.as_mut().unwrap().1.push_str(&text);
-                } else if image_state.is_some() {
-                    image_state.as_mut().unwrap().1.push_str(&text);
+                } else if let Some(ls) = link_state.as_mut() {
+                    ls.1.push_str(&text);
+                } else if let Some(is) = image_state.as_mut() {
+                    is.1.push_str(&text);
                 } else {
                     let prefix = list_prefix(&list_stack);
                     if !prefix.is_empty() && pending_text.is_empty() && current_spans.is_empty() {

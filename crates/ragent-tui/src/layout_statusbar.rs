@@ -422,15 +422,7 @@ fn build_line2_left(
     let (used, total) = app.token_usage;
     let ctx_label = match mode {
         ResponsiveMode::Full => format!("{}/{}", used, total),
-        ResponsiveMode::Compact => {
-            let pct = if total > 0 {
-                (used as f32 / total as f32 * 100.0) as u32
-            } else {
-                0
-            };
-            format!("{}%", pct)
-        }
-        ResponsiveMode::Minimal => {
+        ResponsiveMode::Compact | ResponsiveMode::Minimal => {
             let pct = if total > 0 {
                 (used as f32 / total as f32 * 100.0) as u32
             } else {

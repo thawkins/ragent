@@ -7,7 +7,7 @@
 //! with the finding's content.
 
 use crate::analysis::AnalysisResult;
-use crate::polarity::citation_re;
+use crate::polarity::cited_indices;
 use crate::source::Source;
 use crate::state::ResearchState;
 use async_trait::async_trait;
@@ -53,17 +53,6 @@ impl KeywordVerifier {
     #[must_use]
     pub const fn new() -> Self {
         Self
-    }
-    /// Extract citation indices from a finding body.
-    fn cited_indices(finding: &str) -> Vec<usize> {
-        let mut out: Vec<usize> = citation_re()
-            .captures_iter(finding)
-            .filter_map(|cap| cap[1].parse().ok())
-            .filter(|n| *n > 0)
-            .collect();
-        out.sort_unstable();
-        out.dedup();
-        out
     }
 
     /// Extract content words from a text, lowercased and deduplicated.
@@ -171,7 +160,7 @@ impl Verifier for KeywordVerifier {
         };
 
         for (idx, finding) in findings.iter().enumerate() {
-            let indices = Self::cited_indices(finding);
+            let indices = cited_indices(finding);
             if indices.is_empty() {
                 issues.push(format!("Finding {} has no citations", idx + 1));
                 continue;

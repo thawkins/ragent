@@ -70,7 +70,6 @@ pub enum JobEvent {
 
 /// Job entry stored in the coordinator job map.
 struct JobEntry {
-    _id: String,
     pub status: String,
     pub result: Option<String>,
     pub events_tx: broadcast::Sender<JobEvent>,
@@ -245,9 +244,11 @@ impl Coordinator {
         let span = tracing::info_span!("start_job_sync", job_id = %desc.id);
         let _enter = span.enter();
         tracing::info!(job_id = %desc.id, "start_job_sync");
-        self.metrics
-            .active_jobs
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // R-24: Guard ensures `active_jobs` is decremented on every exit path,
+        // including the empty-match early-return below.
+        let _active_guard = ActiveJobsGuard {
+            active_jobs: Arc::clone(&self.metrics.active_jobs),
+        };
         let matches = self
             .registry
             .match_agents(&desc.required_capabilities)
@@ -268,10 +269,10 @@ impl Coordinator {
                 payload: desc.payload.clone(),
             };
             let h = tokio::spawn(async move {
-                match router.send(&agent_id, msg).await {
-                    Ok(resp) => Ok((agent_id, resp)),
-                    Err(e) => Err(e),
-                }
+                router
+                    .send(&agent_id, msg)
+                    .await
+                    .map(|resp| (agent_id, resp))
             });
             handles.push(h);
         }
@@ -298,9 +299,6 @@ impl Coordinator {
             }
         }
 
-        self.metrics
-            .active_jobs
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         self.metrics
             .completed_jobs
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -341,9 +339,10 @@ impl Coordinator {
         let span = tracing::info_span!("start_job_first_success", job_id = %desc.id);
         let _enter = span.enter();
         tracing::info!(job_id = %desc.id, "start_job_first_success");
-        self.metrics
-            .active_jobs
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // R-24: Guard ensures `active_jobs` is decremented on every exit path.
+        let _active_guard = ActiveJobsGuard {
+            active_jobs: Arc::clone(&self.metrics.active_jobs),
+        };
         let matches = self
             .registry
             .match_agents(&desc.required_capabilities)
@@ -364,9 +363,6 @@ impl Coordinator {
             match self.router.send(&agent_id, msg).await {
                 Ok(resp) => {
                     if !resp.trim_start().to_lowercase().starts_with("error:") {
-                        self.metrics
-                            .active_jobs
-                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                         self.metrics
                             .completed_jobs
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -390,9 +386,6 @@ impl Coordinator {
             }
         }
 
-        self.metrics
-            .active_jobs
-            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         anyhow::bail!("no agent succeeded for job")
     }
 
@@ -404,7 +397,6 @@ impl Coordinator {
 
         let (tx, _rx) = broadcast::channel::<JobEvent>(16);
         let entry = JobEntry {
-            _id: job_id.clone(),
             status: "running".to_string(),
             result: None,
             events_tx: tx.clone(),

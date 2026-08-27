@@ -14,8 +14,6 @@
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
 
-use crate::polarity::citation_re;
-
 /// Outcome of the deterministic cite-check pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CitationCheckResult {
@@ -76,14 +74,8 @@ pub fn check_citations(
     let mut failed_claims: Vec<String> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
 
-    let citation_re = citation_re();
-
     let mut examine = |text: &str, context: &str| {
-        for cap in citation_re.captures_iter(text) {
-            let index: usize = match cap[1].parse() {
-                Ok(n) if n > 0 => n,
-                _ => continue,
-            };
+        for index in crate::polarity::cited_indices(text) {
             checked += 1;
 
             let source_label = format!("[#{}]", index);

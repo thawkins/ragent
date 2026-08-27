@@ -799,7 +799,11 @@ impl App {
                                 decoded.topic.clone(),
                             ),
                         );
-                        self.research_progress.last_mut().expect("just pushed")
+                        let Some(last) = self.research_progress.last_mut() else {
+                            tracing::error!("research progress list empty immediately after push");
+                            return;
+                        };
+                        last
                     };
                     progress.apply(decoded.phase, decoded.status, decoded.detail);
                     if let Some(total) = decoded.total_sources {

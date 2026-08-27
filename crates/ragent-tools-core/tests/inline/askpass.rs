@@ -2,6 +2,7 @@
 //! Compiled as a submodule of askpass via #[path].
 
 use super::*;
+use crate::bash::safe_session_id;
 
 use std::sync::Arc;
 

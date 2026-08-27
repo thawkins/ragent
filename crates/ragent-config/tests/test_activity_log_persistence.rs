@@ -64,7 +64,12 @@ fn test_activity_log_defaults_to_true() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_activity_log_runtime_defaults_to_true() {
+    // The flag is a process-wide static shared with the other (serial) tests,
+    // which may have left it disabled via `sync_from_config`. Restore the
+    // documented default before asserting so this test is order-independent.
+    ragent_config::activity_log::set_enabled(true);
     assert!(
         ragent_config::activity_log::is_enabled(),
         "runtime activity-log flag should default to true"

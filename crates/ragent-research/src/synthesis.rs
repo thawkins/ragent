@@ -23,7 +23,7 @@ use crate::source::Source;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::polarity::citation_re;
+use crate::polarity::cited_indices;
 
 /// A single critic subagent report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -260,35 +260,29 @@ fn evidence_critic(sources: &[Source], analysis: &AnalysisResult) -> CriticRepor
     let mut issues = Vec::new();
     let mut gaps = Vec::new();
 
-    let citation_re = citation_re();
     let mut total_findings = 0usize;
     let mut cited_findings = 0usize;
 
     for (idx, finding) in analysis.findings.iter().enumerate() {
         total_findings += 1;
         let display_idx = idx + 1;
-        let mut has_valid_citation = false;
-        let mut has_any_citation = false;
-        for cap in citation_re.captures_iter(finding) {
-            has_any_citation = true;
-            if let Ok(n) = cap[1].parse::<usize>() {
-                if n > 0 && n <= sources.len() {
-                    has_valid_citation = true;
-                } else {
-                    issues.push(format!(
-                        "Finding {display_idx} cites out-of-range source #{n} (only {} sources available)",
-                        sources.len()
-                    ));
-                }
-            }
-        }
-        if has_any_citation && has_valid_citation {
-            cited_findings += 1;
-        } else if !has_any_citation {
+        let indices = cited_indices(finding);
+        if indices.is_empty() {
             issues.push(format!("Finding {display_idx} does not cite any source"));
             gaps.push(format!(
                 "Add a supporting source citation to finding {display_idx}"
             ));
+            continue;
+        }
+        if indices.iter().any(|n| *n <= sources.len()) {
+            cited_findings += 1;
+        } else {
+            for n in indices.iter().filter(|n| **n > sources.len()) {
+                issues.push(format!(
+                    "Finding {display_idx} cites out-of-range source #{n} (only {} sources available)",
+                    sources.len()
+                ));
+            }
         }
     }
 
@@ -473,11 +467,8 @@ fn count_distinct_cited_sources(
             acc.push(' ');
             acc
         });
-    for cap in citation_re().captures_iter(&haystack) {
-        if let Ok(n) = cap[1].parse::<usize>()
-            && n > 0
-            && n <= source_count
-        {
+    for n in cited_indices(&haystack) {
+        if n <= source_count {
             set.insert(n);
         }
     }

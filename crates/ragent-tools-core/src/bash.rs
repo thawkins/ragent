@@ -472,9 +472,12 @@ const DENIED_PATTERNS: &[&str] = &[
 #[must_use]
 pub fn is_safe_command(cmd: &str) -> bool {
     let trimmed = cmd.trim();
-    SAFE_COMMANDS
-        .iter()
-        .any(|safe| trimmed == *safe || trimmed.starts_with(&format!("{safe} ")))
+    SAFE_COMMANDS.iter().any(|safe| {
+        trimmed == *safe
+            || trimmed
+                .strip_prefix(safe)
+                .is_some_and(|rest| rest.starts_with(' '))
+    })
 }
 
 /// Returns the built-in safe commands allowlist.
@@ -1078,6 +1081,88 @@ fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
     *cmd = rebuilt;
 }
 
+/// Build the argv + wrapper-script invocation for a shell, configured with the
+/// low-priority prefix (when enabled), the working directory, null stdin, and
+/// piped stdout/stderr. Callers then add the env vars / timeout / output as
+/// appropriate.
+///
+/// `wrapper` is the shell script that carries the user command plus any
+/// persistent-shell bookkeeping. For Git Bash and PowerShell this is a
+/// `.sh`/`.ps1` file written earlier; for native Bash it is also a script.
+fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path::Path) -> Command {
+    let mut cmd = match shell {
+        ShellType::Bash => {
+            let mut cmd = Command::new("bash");
+            cmd.arg("-c").arg(wrapper);
+            cmd
+        }
+        ShellType::GitBash(path) => {
+            let mut cmd = Command::new(path);
+            cmd.arg("-c").arg(wrapper);
+            cmd
+        }
+        ShellType::PowerShell(path) => {
+            let mut cmd = Command::new(path);
+            cmd.arg("-NoLogo")
+                .arg("-NoProfile")
+                .arg("-NonInteractive")
+                .arg("-Command")
+                .arg(wrapper);
+            cmd
+        }
+    };
+    // Apply the low-priority wrapper BEFORE configuring cwd/stdio: the wrapper
+    // rebuilds the command object wholesale, so anything configured before this
+    // call would be discarded.
+    prepend_low_priority(&mut cmd, shell);
+    cmd.current_dir(working_dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    cmd
+}
+
+/// Truncate very long command output, keeping the first 15k + last 15k chars
+/// (CC1-T7). Returns the input unchanged when it fits within the budget.
+fn truncate_output(content: String) -> String {
+    const FIRST_CHARS: usize = 15_000;
+    const LAST_CHARS: usize = 15_000;
+    const MAX_OUTPUT: usize = FIRST_CHARS + LAST_CHARS + 1000; // allow for separator
+
+    if content.len() <= MAX_OUTPUT {
+        return content;
+    }
+
+    // Find valid UTF-8 char boundaries near the target split points.
+    let first_end = {
+        let mut i = FIRST_CHARS.min(content.len());
+        while i > 0 && !content.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    };
+    let first_part = &content[..first_end];
+    let remainder_len = content.len() - first_end;
+    let last_part = if remainder_len > LAST_CHARS {
+        let mut j = content.len() - LAST_CHARS;
+        while j < content.len() && !content.is_char_boundary(j) {
+            j += 1;
+        }
+        &content[j..]
+    } else {
+        &content[first_end..]
+    };
+
+    let omitted = remainder_len.saturating_sub(LAST_CHARS);
+    format!(
+        "{}\n\n... ({} lines omitted) ...\n\n{}",
+        first_part,
+        omitted / content.lines().count().max(1), // rough line count
+        last_part
+    )
+}
+
 /// Spawn a long-running shell command for background execution.
 ///
 /// The returned [`tokio::process::Child`] has stdin closed, stdout/stderr
@@ -1091,51 +1176,8 @@ pub async fn spawn_background_shell(
     validate_shell_command(command, working_dir).await?;
     let _permit = crate::resource::acquire_process_permit().await?;
     let shell = get_shell();
-
-    let mut child = match shell {
-        ShellType::Bash => {
-            let mut cmd = Command::new("bash");
-            cmd.arg("-c").arg(command);
-            // Apply the low-priority wrapper BEFORE configuring cwd/stdio:
-            // the wrapper rebuilds the command object wholesale, so anything
-            // configured before this call would be discarded.
-            prepend_low_priority(&mut cmd, shell);
-            cmd.current_dir(working_dir)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            cmd
-        }
-        ShellType::GitBash(path) => {
-            let mut cmd = Command::new(path);
-            cmd.arg("-c").arg(command);
-            prepend_low_priority(&mut cmd, shell);
-            cmd.current_dir(working_dir)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            cmd
-        }
-        ShellType::PowerShell(path) => {
-            let mut cmd = Command::new(path);
-            cmd.arg("-NoLogo")
-                .arg("-NoProfile")
-                .arg("-NonInteractive")
-                .arg("-Command")
-                .arg(command);
-            prepend_low_priority(&mut cmd, shell);
-            cmd.current_dir(working_dir)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true);
-            cmd
-        }
-    };
-
-    Ok(child.spawn()?)
+    let mut cmd = build_shell_command(shell, command, working_dir);
+    Ok(cmd.spawn()?)
 }
 
 #[async_trait::async_trait]
@@ -1314,64 +1356,24 @@ impl Tool for BashTool {
         let start = Instant::now();
 
         let result = match shell {
-            ShellType::Bash => {
-                // Standard Unix bash execution
-                let mut cmd = Command::new("bash");
-                cmd.arg("-c").arg(&wrapper);
-                // Run at low CPU/IO priority so heavy commands do not make the
-                // host system unresponsive.  `nice -n <level>` lowers the CPU
-                // scheduling priority; `ionice -c 3` marks I/O as idle-class.
-                // Must be applied BEFORE current_dir/stdio/env below: the
-                // wrapper rebuilds the command object wholesale.
-                prepend_low_priority(&mut cmd, shell);
-                // Detach stdin from the tty so nothing can block on it; sudo
-                // is handled via SUDO_ASKPASS instead.
-                cmd.current_dir(&ctx.working_dir);
-                cmd.stdin(std::process::Stdio::null());
+            ShellType::Bash | ShellType::GitBash(_) | ShellType::PowerShell(_) => {
+                // Build the wrapper invocation. For the foreground tool the
+                // wrapper script carries the user command + persistent-shell
+                // bookkeeping; askpass env vars are added below.
+                let mut cmd = build_shell_command(shell, &wrapper, &ctx.working_dir);
+                // `build_shell_command` detaches stdin from the tty so nothing
+                // can block on it; sudo is handled via SUDO_ASKPASS instead.
                 // Kill the child process when the future is dropped (e.g.
                 // when `tokio::time::timeout` elapses).  Without this, a
                 // timed-out command becomes an orphan that keeps consuming
                 // CPU — the root cause of the "100% CPU stuck mid-run"
-                // bug.  The background shell path already sets this
-                // (see `spawn_background_shell`).
-                cmd.kill_on_drop(true);
+                // bug.
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
                     }
                     b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
                 }
-                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
-                    .await
-            }
-            ShellType::GitBash(path) => {
-                // Git Bash on Windows
-                let mut cmd = Command::new(path);
-                cmd.arg("-c").arg(&wrapper);
-                prepend_low_priority(&mut cmd, shell);
-                cmd.current_dir(&ctx.working_dir);
-                cmd.stdin(std::process::Stdio::null());
-                cmd.kill_on_drop(true);
-                if let Some(ref mut b) = broker {
-                    for (k, v) in b.env_vars() {
-                        cmd.env(k, v);
-                    }
-                    b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
-                }
-                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
-                    .await
-            }
-            ShellType::PowerShell(path) => {
-                // PowerShell on Windows — use -Command to pass inline command
-                let mut cmd = Command::new(path);
-                cmd.arg("-NoLogo")
-                    .arg("-NoProfile")
-                    .arg("-NonInteractive")
-                    .arg("-Command")
-                    .arg(&wrapper);
-                prepend_low_priority(&mut cmd, shell);
-                cmd.current_dir(&ctx.working_dir);
-                cmd.kill_on_drop(true);
                 tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
                     .await
             }
@@ -1416,41 +1418,7 @@ impl Tool for BashTool {
                     content = "(no output)".to_string();
                 }
 
-                // CC1-T7: Truncate very long output, keeping first 15k + last 15k chars
-                const FIRST_CHARS: usize = 15_000;
-                const LAST_CHARS: usize = 15_000;
-                const MAX_OUTPUT: usize = FIRST_CHARS + LAST_CHARS + 1000; // allow for separator
-
-                if content.len() > MAX_OUTPUT {
-                    // Find valid UTF-8 char boundaries near the target split points
-                    let first_end = {
-                        let mut i = FIRST_CHARS.min(content.len());
-                        while i > 0 && !content.is_char_boundary(i) {
-                            i -= 1;
-                        }
-                        i
-                    };
-                    let first_part = &content[..first_end];
-                    let remainder_len = content.len() - first_end;
-                    let last_part = if remainder_len > LAST_CHARS {
-                        let mut j = content.len() - LAST_CHARS;
-                        while j < content.len() && !content.is_char_boundary(j) {
-                            j += 1;
-                        }
-                        &content[j..]
-                    } else {
-                        &content[first_end..]
-                    };
-
-                    let omitted = remainder_len.saturating_sub(LAST_CHARS);
-                    content = format!(
-                        "{}\n\n... ({} lines omitted) ...\n\n{}",
-                        first_part,
-                        omitted / content.lines().count().max(1), // rough line count
-                        last_part
-                    );
-                }
-
+                let content = truncate_output(content);
                 let line_count = content.lines().count();
                 Ok(ToolOutput {
                     content: format!(

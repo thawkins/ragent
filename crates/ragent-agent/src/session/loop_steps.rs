@@ -188,38 +188,12 @@ impl SessionProcessor {
                 .ok()
                 .flatten(),
             "generic_openai" => {
-                let cfg = Some(cfg.clone());
-                self.storage_op(|s| Ok(s.get_setting("generic_openai_api_base").ok().flatten()))
+                self.resolve_api_base(&cfg, "generic_openai", "GENERIC_OPENAI_API_BASE")
                     .await
-                    .ok()
-                    .flatten()
-                    .filter(|s: &String| !s.trim().is_empty())
-                    .or_else(|| {
-                        cfg.and_then(|c| c.provider.get("generic_openai").cloned())
-                            .and_then(|p| p.api.and_then(|a| a.base_url))
-                    })
-                    .or_else(|| {
-                        std::env::var("GENERIC_OPENAI_API_BASE")
-                            .ok()
-                            .filter(|s| !s.trim().is_empty())
-                    })
             }
             "azure_foundry" => {
-                let cfg = Some(cfg.clone());
-                self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
+                self.resolve_api_base(&cfg, "azure_foundry", "AZURE_AI_FOUNDRY_BASE")
                     .await
-                    .ok()
-                    .flatten()
-                    .filter(|s: &String| !s.trim().is_empty())
-                    .or_else(|| {
-                        cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
-                            .and_then(|p| p.api.and_then(|a| a.base_url))
-                    })
-                    .or_else(|| {
-                        std::env::var("AZURE_AI_FOUNDRY_BASE")
-                            .ok()
-                            .filter(|s| !s.trim().is_empty())
-                    })
             }
             "azure_resource" => self
                 .storage_op(|s| {
@@ -407,14 +381,10 @@ impl SessionProcessor {
             let wd = working_dir.to_path_buf();
             let storage = Arc::clone(self.session_manager.storage());
             let memory_cfg = session_config.memory.clone();
-            tokio::task::spawn_blocking(move || {
+            spawn_blocking_section(move || {
                 crate::agent::build_memory_prompt_section(&wd, Some(&storage), Some(&memory_cfg))
             })
             .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "memory prompt section task failed");
-                String::new()
-            })
         };
         // JCODEPLAN M8 (T-070): surface active durable initiatives on every
         // turn so the agent stays aware of long-term goals across sessions.
@@ -422,14 +392,10 @@ impl SessionProcessor {
             let _scope = profiler.scope("prompt.build_initiatives_section");
             let wd = working_dir.to_path_buf();
             let storage = Arc::clone(self.session_manager.storage());
-            tokio::task::spawn_blocking(move || {
+            spawn_blocking_section(move || {
                 crate::tool::initiative::build_initiatives_prompt_section(&storage, &wd)
             })
             .await
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "initiatives prompt section task failed");
-                String::new()
-            })
         };
         let mut system_prompt = {
             let _scope = profiler.scope("prompt.build_system_prompt");
@@ -1553,4 +1519,46 @@ impl SessionProcessor {
 
         Ok(assistant_msg)
     }
+
+    /// Resolve the API base URL for a provider, falling back through the
+    /// persisted setting, the provider's config block, and an environment
+    /// variable. Shared by the `generic_openai` and `azure_foundry` arms so
+    /// the resolution order stays identical.
+    async fn resolve_api_base(
+        &self,
+        cfg: &Arc<crate::Config>,
+        provider_id: &str,
+        env_var: &str,
+    ) -> Option<String> {
+        let setting_key = format!("{provider_id}_api_base");
+        let provider_cfg = cfg.provider.get(provider_id).cloned();
+        self.storage_op(move |s| Ok(s.get_setting(&setting_key).ok().flatten()))
+            .await
+            .ok()
+            .flatten()
+            .filter(|s: &String| !s.trim().is_empty())
+            .or_else(|| {
+                provider_cfg
+                    .and_then(|p| p.api.and_then(|a| a.base_url))
+                    .filter(|s| !s.trim().is_empty())
+            })
+            .or_else(|| std::env::var(env_var).ok().filter(|s| !s.trim().is_empty()))
+    }
+}
+
+/// Run a blocking prompt-section builder on a dedicated thread, logging and
+/// swallowing the "task failed" JoinError so a background panic does not tear
+/// down the turn. Returns an empty section on failure.
+async fn spawn_blocking_section<F, T>(f: F) -> String
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: std::fmt::Display + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map(|t| t.to_string())
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "prompt section task failed");
+            String::new()
+        })
 }

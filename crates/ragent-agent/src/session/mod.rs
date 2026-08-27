@@ -33,11 +33,22 @@ pub fn finish_reason_label(reason: &FinishReason) -> &'static str {
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use crate::event::{Event, EventBus};
+
+/// Global cache of in-memory [`SessionState`] values keyed by session id.
+///
+/// Declared at module scope so `session_state_cache` (get-or-insert) and
+/// `remove_session_state` (evict) reference the SAME map. A function-local
+/// `static` would be a distinct item per declaration site, silently turning
+/// `remove_session_state` into a no-op.
+static SESSION_STATE_CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> =
+    OnceLock::new();
 use crate::message::Message;
 use crate::session::cache::SessionState;
 use crate::storage::Storage;
@@ -131,15 +142,9 @@ impl SessionManager {
     /// The cache is allocated on first use and held in a process-wide
     /// `Mutex<HashMap<String, Arc<Mutex<SessionState>>>>`.  It is used by
     /// the agent loop to skip redundant `Message -> ChatMessage` and
-    /// `ChatRequest` serialisation work between iterations of the
     /// tool-call loop.
     pub fn session_state_cache(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
-        use std::collections::HashMap;
-        use std::sync::OnceLock;
-
-        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> = OnceLock::new();
-
-        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let cache = SESSION_STATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let mut guard = cache.lock().expect("session_state_cache poisoned");
         if let Some(existing) = guard.get(session_id) {
             existing.clone()
@@ -154,17 +159,7 @@ impl SessionManager {
     /// session is archived or a sub-agent task completes so the cache does
     /// not grow without bound.
     pub fn remove_session_state(&self, session_id: &str) {
-        use std::collections::HashMap;
-        use std::sync::OnceLock;
-
-        // NOTE: this must be the SAME static item as the cache inside
-        // `session_state_cache` above. Function-local statics are
-        // per-declaration-site: a second `static CACHE` here would be a
-        // distinct item and `get()` would always return `None`, silently
-        // turning this into a no-op.
-        static CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> = OnceLock::new();
-
-        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let cache = SESSION_STATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let mut guard = cache.lock().expect("session_state_cache poisoned");
         guard.remove(session_id);
     }

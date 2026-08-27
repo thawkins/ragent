@@ -1,5 +1,59 @@
 # Changelog
 
+## Version: 1.0.62
+
+### Added
+
+- **Shared runtime-flag helper** — `crates/ragent-config/src/runtime_flag.rs`
+  consolidates the duplicated `AtomicBool` + persist/sync/toggle boilerplate
+  shared by the `activity_log`, `edit_log`, and `yolo` toggle modules
+  (`RuntimeFlag` with `persist`/`sync_from_config`/`toggle_persist`).
+- **Shared research citation helper** — `cited_indices` in `polarity.rs`
+  extracts the distinct, 1-based source indices cited by a text via `[#N]`
+  (sorted + deduplicated), reused by the verification, synthesis, and
+  cite-checking passes.
+- **`apply_model_override` helper** — extracted the duplicated model-override /
+  pinned-model resolution logic in the coordinator and task runner.
+
+### Fixed
+
+- **Session-state cache eviction was a no-op** — `remove_session_state` used a
+  function-local `static` distinct from the one inside `session_state_cache`,
+  so eviction silently never matched. The map now lives at module scope
+  (`SESSION_STATE_CACHE`) so both access the same store.
+- **Startup timing: `seed_secret_registry` off the critical path** — the full
+  `provider_auth` scan + per-row deobfuscation (which only feeds log
+  redaction) now runs on a background thread; well-known env-var secrets are
+  still seeded synchronously so common keys are redacted from the first log
+  line.
+- **Startup timing: `ActivityLog::open` off the critical path** — opening the
+  separate `activity_log.db` + schema migration now runs on a background
+  thread, wired via `OnceLock`, so it no longer stalls the TUI's first frame.
+  Recording stays best-effort and simply skips until the open finishes.
+- **Bash tool refactor** — extracted `build_shell_command` (single builder with
+  `kill_on_drop(true)` for Bash/GitBash/PowerShell) and `truncate_output`
+  (keeps head/tail of oversized output), plus `nice`/`ionice` scheduling.
+- **FTS warm-up is incremental (PERF-013)** — `warm_message_search_index` no
+  longer DELETE+rebuilds `messages_fts`; it only inserts missing rows, so on a
+  warm start it is a fast no-op. Test and doctest updated to assert zero
+  missing rows (the FTS table is maintained incrementally by `create_message`).
+- **Research polarity scan deduplicated** — source bodies are lowercased once
+  and the positive/negative token scans are precomputed instead of re-lowering
+  every body per dimension (~15x redundant work removed).
+- **TUI minor fixes** — `tail8` helper for run-id truncation, robust fallback
+  when parsing the cron `far_future` timestamp, single-pass `parse_refs`, and
+  `as_mut` link/image render-state handling.
+
+### Tests
+
+- `test_activity_log_runtime_defaults_to_true` made serial and order-
+  independent (the runtime flag is a process-wide static shared with the other
+  serial tests, which may leave it disabled); it restores the documented
+  default before asserting.
+- `background_warmup_does_not_block_reader` and the
+  `warm_message_search_index` doctest now assert zero missing rows, matching
+  the incremental FTS behaviour.
+
 ## Version: 1.0.61
 
 ### Added

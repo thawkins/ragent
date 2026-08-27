@@ -521,8 +521,7 @@ impl AgentManager {
 
             // Run the sub-agent logic in a nested task so that panics inside
             // process_message (or agent resolution) are caught as a JoinError
-            // rather than silently aborting this background task and leaving
-            // the parent wait_agents call stalled forever.
+            // rather than silently aborting this background task and leaving              // the parent wait_agents call stalled forever.
             let csid_inner = csid.clone();
             let inner = tokio::spawn(async move {
                 let config = processor.load_config_cached();
@@ -538,43 +537,12 @@ impl AgentManager {
                 agent_info.mode = AgentMode::Subagent;
                 agent_info.stall_timeout_secs = Some(background_timeout_secs);
 
-                // Apply explicit model override if provided.
-                if let Some(ref model_str) = model
-                    && let Some((provider, model_id)) = model_str
-                        .split_once('/')
-                        .or_else(|| model_str.split_once(':'))
-                {
-                    agent_info.model = Some(ModelRef {
-                        provider_id: provider.to_string(),
-                        model_id: model_id.to_string(),
-                    });
-                } else if !agent_info.model_pinned || agent_info.model.is_none() {
-                    // No explicit override: fall back to the user's persisted
-                    // `selected_model` setting (same path the TUI uses via
-                    // `apply_selected_model_and_thinking`). Without this, the
-                    // agent would get `resolve_default_model`'s first-provider
-                    // pick (Anthropic), which typically has no API key configured.
-                    if let Ok(Some(model_str)) = processor
-                        .session_manager
-                        .storage()
-                        .get_setting("selected_model")
-                    {
-                        if let Some((provider, model_id)) = model_str
-                            .split_once('/')
-                            .or_else(|| model_str.split_once(':'))
-                        {
-                            tracing::info!(
-                                agent = %agent_info.name,
-                                selected_model = %model_str,
-                                "Applied persisted selected_model to background agent"
-                            );
-                            agent_info.model = Some(ModelRef {
-                                provider_id: provider.to_string(),
-                                model_id: model_id.to_string(),
-                            });
-                        }
-                    }
-                }
+                apply_model_override(
+                    &mut agent_info,
+                    model.as_deref(),
+                    &processor,
+                    "background agent",
+                );
 
                 processor
                     .process_message(&csid_inner, &prompt, &agent_info, cancel_flag.clone())
@@ -687,34 +655,27 @@ impl AgentManager {
             anyhow::bail!("Task '{task_id}' not found or already completed")
         }
     }
-
     /// M7-T1: Suspend a running sub-agent task (pause its event loop without
     /// cancelling).
     ///
-    /// **Decision (M7-T1):** `suspend_task` / `resume_task` are **removed**
-    /// from the public API surface because the session processor's agent
-    /// loop does not honour `suspend_flags` — the loop keeps running and
-    /// consuming tokens. Rather than ship a misleading no-op, the methods
-    /// now return a clear error explaining that suspension is not
-    /// implemented, and the `SubagentSuspended` / `SubagentResumed` events
-    /// are no longer published. The TUI buttons that previously called
-    /// these methods should use `cancel_agent` instead.
+    /// **Decision (M7-T1):** suspension is not implemented because the session
+    /// processor's agent loop does not honour `suspend_flags` — the loop keeps
+    /// running and consuming tokens. Rather than ship a misleading no-op, the
+    /// method returns a clear error explaining that suspension is unavailable,
+    /// and the `SubagentSuspended` / `SubagentResumed` events are never
+    /// published. The TUI buttons that previously called these methods should
+    /// use [`AgentManager::cancel_agent`] instead.
     ///
     /// See `docs/team-unification-decision.md` for the rationale.
-    pub async fn suspend_task(&self, task_id: &str) -> anyhow::Result<()> {
-        // M7-T1: Suspend is not implemented in the processor agent loop.
-        // The suspend_flags map exists but is never checked by the loop.
-        // Rather than mislead callers, we return an explicit error.
-        let _ = task_id;
+    pub async fn suspend_task(&self, _task_id: &str) -> anyhow::Result<()> {
         anyhow::bail!(
             "suspend_task is not implemented — the agent loop does not honour \
                suspend flags. Use cancel_agent to stop a running sub-agent instead."
         )
     }
 
-    /// M7-T1: Resume a suspended task — not implemented (see `suspend_task`).
-    pub async fn resume_task(&self, task_id: &str) -> anyhow::Result<()> {
-        let _ = task_id;
+    /// M7-T1: Resume a suspended task — not implemented (see [`AgentManager::suspend_task`]).
+    pub async fn resume_task(&self, _task_id: &str) -> anyhow::Result<()> {
         anyhow::bail!(
             "resume_task is not implemented — the agent loop does not honour \
                suspend flags. Use cancel_agent and re-spawn instead."
@@ -973,42 +934,7 @@ impl AgentManager {
         let mut agent = Arc::unwrap_or_clone(agent);
         agent.mode = AgentMode::Subagent;
 
-        // Apply model override
-        if let Some(model_str) = model_override
-            && let Some((provider, model_id)) = model_str
-                .split_once('/')
-                .or_else(|| model_str.split_once(':'))
-        {
-            agent.model = Some(ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model_id.to_string(),
-            });
-        } else if !agent.model_pinned || agent.model.is_none() {
-            // No explicit override: fall back to the user's persisted
-            // `selected_model` setting so sub-agents use the same provider
-            // the user configured in the TUI.
-            if let Ok(Some(model_str)) = self
-                .processor
-                .session_manager
-                .storage()
-                .get_setting("selected_model")
-            {
-                if let Some((provider, model_id)) = model_str
-                    .split_once('/')
-                    .or_else(|| model_str.split_once(':'))
-                {
-                    tracing::info!(
-                        agent = %agent.name,
-                        selected_model = %model_str,
-                        "Applied persisted selected_model to sub-agent"
-                    );
-                    agent.model = Some(ModelRef {
-                        provider_id: provider.to_string(),
-                        model_id: model_id.to_string(),
-                    });
-                }
-            }
-        }
+        apply_model_override(&mut agent, model_override, &self.processor, "sub-agent");
 
         let response_msg = self
             .processor
@@ -1023,6 +949,56 @@ impl AgentManager {
     #[doc(hidden)]
     pub async fn seed_completed_for_test(&self, entry: TaskEntry) {
         self.tasks.insert(entry.id.clone(), entry);
+    }
+}
+
+/// Apply an explicit model override to an agent, falling back to the user's
+/// persisted `selected_model` setting when no override is given.
+///
+/// Shared by `spawn_background` and `run_subagent` so both paths resolve the
+/// effective model identically.
+fn apply_model_override(
+    agent: &mut crate::agent::AgentInfo,
+    model_override: Option<&str>,
+    processor: &SessionProcessor,
+    log_kind: &str,
+) {
+    // Apply explicit model override if provided.
+    if let Some(model_str) = model_override
+        && let Some((provider, model_id)) = model_str
+            .split_once('/')
+            .or_else(|| model_str.split_once(':'))
+    {
+        agent.model = Some(ModelRef {
+            provider_id: provider.to_string(),
+            model_id: model_id.to_string(),
+        });
+    } else if !agent.model_pinned || agent.model.is_none() {
+        // No explicit override: fall back to the user's persisted
+        // `selected_model` setting (same path the TUI uses via
+        // `apply_selected_model_and_thinking`). Without this, the
+        // agent would get `resolve_default_model`'s first-provider
+        // pick (Anthropic), which typically has no API key configured.
+        if let Ok(Some(model_str)) = processor
+            .session_manager
+            .storage()
+            .get_setting("selected_model")
+        {
+            if let Some((provider, model_id)) = model_str
+                .split_once('/')
+                .or_else(|| model_str.split_once(':'))
+            {
+                tracing::info!(
+                    agent = %agent.name,
+                    selected_model = %model_str,
+                    "Applied persisted selected_model to {log_kind}"
+                );
+                agent.model = Some(ModelRef {
+                    provider_id: provider.to_string(),
+                    model_id: model_id.to_string(),
+                });
+            }
+        }
     }
 }
 

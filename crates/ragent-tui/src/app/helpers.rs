@@ -53,8 +53,7 @@ pub(crate) fn parse_swarm_args(args: &str) -> (String, Option<String>) {
 }
 
 pub(crate) fn short_session_id(session_id: &str) -> String {
-    let start = session_id.len().saturating_sub(8);
-    session_id[start..].to_string()
+    tail8(session_id)
 }
 
 /// Truncate a [`RunId`] to a stable short prefix for compact display.
@@ -63,7 +62,11 @@ pub(crate) fn short_session_id(session_id: &str) -> String {
 /// [`short_session_id`]. If the run id is shorter than 8 characters the
 /// whole value is returned unchanged.
 pub(crate) fn short_run_id(run_id: &ragent_types::id::RunId) -> String {
-    let s = run_id.as_str();
+    tail8(run_id.as_str())
+}
+
+/// Return the last 8 characters of a string, or the whole string if shorter.
+fn tail8(s: &str) -> String {
     let start = s.len().saturating_sub(8);
     s[start..].to_string()
 }

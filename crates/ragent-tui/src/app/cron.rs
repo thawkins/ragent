@@ -452,11 +452,10 @@ fn spawn_completion_monitor(
             tokio::time::sleep(Duration::from_secs(5)).await;
 
             let task = agent_manager.get_task(&task_id).await;
-            let done = match task {
+            let done = match &task {
                 Some(entry) => entry.status != ragent_agent::task::TaskStatus::Running,
                 None => true, // task was removed — consider it done
             };
-
             if done {
                 if let Ok(mut set) = running_events.lock() {
                     set.remove(&event_id);
@@ -470,7 +469,7 @@ fn spawn_completion_monitor(
                 // FR-004: For stateful events, parse the completed task's
                 // output for `<loop-state>` and `<inbox>` tags.
                 if stateful {
-                    if let Some(entry) = agent_manager.get_task(&task_id).await {
+                    if let Some(entry) = &task {
                         if let Some(result) = &entry.result {
                             let parsed = ragent_agent::loop_state::parse_tags(result);
                             if !parsed.loop_state.is_empty() {
@@ -661,10 +660,13 @@ fn skip_disabled_event(
     } else {
         // Set next_due to far future so this disabled one-shot event is not
         // returned by list_disabled_due_cron_events on every tick.
-        let far_future = chrono::DateTime::parse_from_rfc3339("9999-12-31T23:59:59Z")
-            .expect("valid far-future timestamp")
-            .with_timezone(&Utc);
-        let _ = storage.update_cron_event_next_due(&event.id, &far_future, None);
+        if let Ok(far_future) = chrono::DateTime::parse_from_rfc3339("9999-12-31T23:59:59Z") {
+            let _ = storage.update_cron_event_next_due(
+                &event.id,
+                &far_future.with_timezone(&Utc),
+                None,
+            );
+        }
     }
 }
 
