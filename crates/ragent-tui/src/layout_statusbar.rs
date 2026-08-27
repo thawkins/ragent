@@ -584,6 +584,21 @@ fn build_line2_right(
     config: &StatusBarConfig,
     _mode: ResponsiveMode,
 ) -> Vec<Span<'static>> {
+    // Push one `Label:{icon} ` indicator span: HEALTHY when `enabled`,
+    // ERROR otherwise. Shared by every service indicator on this line.
+    fn push_indicator(spans: &mut Vec<Span<'static>>, label: &str, enabled: bool, bold: bool) {
+        let (icon, color) = if enabled {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        let mut style = Style::default().fg(color);
+        if bold {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        spans.push(Span::styled(format!("{label}:{icon} "), style));
+    }
+
     let mut spans = Vec::new();
 
     if !config.verbose {
@@ -591,84 +606,37 @@ fn build_line2_right(
     }
 
     // Code Index status
-    {
-        let (icon, color) = if app.code_index_enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("CodeIdx:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
+    push_indicator(&mut spans, "CodeIdx", app.code_index_enabled, false);
 
     // Activity-log status
-    {
-        let (icon, color) = if ragent_config::activity_log::is_enabled() {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("Alog:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
+    push_indicator(
+        &mut spans,
+        "Alog",
+        ragent_config::activity_log::is_enabled(),
+        false,
+    );
 
     // Autopilot status
-    {
-        let (icon, color) = if app.autopilot_enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("AutoPilot:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
+    push_indicator(&mut spans, "AutoPilot", app.autopilot_enabled, false);
 
     // Edit-log status
-    {
-        let enabled = ragent_tools_core::edit_log::is_edit_log_enabled();
-        let (icon, color) = if enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("EditLog:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
+    push_indicator(
+        &mut spans,
+        "EditLog",
+        ragent_tools_core::edit_log::is_edit_log_enabled(),
+        false,
+    );
 
     // Telemetry (OpenTelemetry metrics export) status
-    {
-        let (icon, color) = if app.session_processor.telemetry.is_enabled() {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("Telemetry:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
+    push_indicator(
+        &mut spans,
+        "Telemetry",
+        app.session_processor.telemetry.is_enabled(),
+        false,
+    );
 
-    // YOLO mode status
-    {
-        let enabled = ragent_config::yolo::is_enabled();
-        let (icon, color) = if enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-        spans.push(Span::styled(
-            format!("YOLO:{icon}"),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        ));
-    }
+    // YOLO mode status (bold — it changes command-validation behaviour)
+    push_indicator(&mut spans, "YOLO", ragent_config::yolo::is_enabled(), true);
 
     spans
 }

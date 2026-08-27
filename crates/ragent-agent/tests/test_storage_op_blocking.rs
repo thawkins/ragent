@@ -124,6 +124,7 @@ async fn storage_op_create_then_get_messages_round_trip() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let user_msg_clone = user_msg.clone();
     processor

@@ -149,6 +149,7 @@ fn test_messages_to_chat_messages_emits_tool_result_followup() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let chat = messages_to_chat_messages(&[msg]);
     // Assistant ToolUse message + user ToolResult follow-up.
@@ -181,6 +182,7 @@ fn test_compaction_role_maps_to_assistant_chat_role() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let chat = messages_to_chat_messages(&[msg]);
     assert_eq!(chat.len(), 1);

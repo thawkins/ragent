@@ -7,18 +7,11 @@
 //! with the finding's content.
 
 use crate::analysis::AnalysisResult;
+use crate::polarity::citation_re;
 use crate::source::Source;
 use crate::state::ResearchState;
 use async_trait::async_trait;
-use regex::Regex;
-use std::collections::HashSet;
-use std::sync::OnceLock;
-
-static CITATION_RE: OnceLock<Regex> = OnceLock::new();
-
-fn citation_re() -> &'static Regex {
-    CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
-}
+use std::collections::{HashMap, HashSet};
 
 /// Result of a verification pass.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -89,19 +82,21 @@ impl KeywordVerifier {
         words
     }
 
-    /// Check whether `finding` is supported by `source`.
+    /// Check whether `finding` is supported by pre-tokenized source words.
     /// Requires at least two non-trivial content-word overlaps so that a
     /// single shared common word does not cause a false pass (FUNC-ANL-07).
-    fn supported_by(finding: &str, source: &Source) -> bool {
-        let f_words = Self::words(finding);
-        let Some(body) = source.body() else {
-            return false;
-        };
-        let s_words: HashSet<String> = Self::words(body).into_iter().collect();
-        let overlap = f_words.iter().filter(|w| s_words.contains(*w)).count();
+    ///
+    /// Tokenization is hoisted to the caller ([`KeywordVerifier::verify`])
+    /// so each source body and finding is split once per verification pass
+    /// instead of once per (finding x citation) pair.
+    fn supported_by(finding_words: &[String], source_words: &HashSet<String>) -> bool {
+        let overlap = finding_words
+            .iter()
+            .filter(|w| source_words.contains(*w))
+            .count();
         // Require at least 2 shared content words, or 1 when the finding
         // has very few content words total (short findings).
-        let min_overlap = if f_words.len() <= 2 { 1 } else { 2 };
+        let min_overlap = if finding_words.len() <= 2 { 1 } else { 2 };
         overlap >= min_overlap
     }
 }
@@ -162,6 +157,19 @@ impl Verifier for KeywordVerifier {
         let mut checked = 0usize;
         let mut supported = 0usize;
 
+        // Tokenize each cited source body once (not once per finding that
+        // cites it) and each finding once per pass.
+        let mut source_words_cache: HashMap<usize, Option<HashSet<String>>> = HashMap::new();
+        let words_for = |source: &Source,
+                         cache: &mut HashMap<usize, Option<HashSet<String>>>,
+                         idx: usize|
+         -> Option<HashSet<String>> {
+            cache
+                .entry(idx)
+                .or_insert_with(|| source.body().map(|b| Self::words(b).into_iter().collect()))
+                .clone()
+        };
+
         for (idx, finding) in findings.iter().enumerate() {
             let indices = Self::cited_indices(finding);
             if indices.is_empty() {
@@ -169,6 +177,7 @@ impl Verifier for KeywordVerifier {
                 continue;
             }
             checked += 1;
+            let finding_words = Self::words(finding);
             let mut finding_supported = true;
             for n in indices {
                 let Some(source) = state.sources.get(n - 1) else {
@@ -179,7 +188,15 @@ impl Verifier for KeywordVerifier {
                     finding_supported = false;
                     continue;
                 };
-                if !Self::supported_by(finding, source) {
+                let Some(s_words) = words_for(source, &mut source_words_cache, n - 1) else {
+                    issues.push(format!(
+                        "Finding {} cites source [#{n}] but the source body does not support the claim",
+                        idx + 1
+                    ));
+                    finding_supported = false;
+                    continue;
+                };
+                if !Self::supported_by(&finding_words, &s_words) {
                     issues.push(format!(
                         "Finding {} cites source [#{n}] but the source body does not support the claim",
                         idx + 1

@@ -301,9 +301,11 @@ pub fn detect_old_str_risks(old_str: &str) -> Vec<OldStrRisk> {
         risks.push(OldStrRisk::ContainsBlankLines);
     }
 
+    // A bare LF not preceded by CR is implied by CRLF presence plus a lone-LF
+    // check; `has_lf` alone is implied by `has_crlf`, so only `has_crlf`
+    // matters for entering the mixed-line-endings scan.
     let has_crlf = old_str.contains("\r\n");
-    let has_lf = old_str.contains('\n');
-    if has_crlf && has_lf {
+    if has_crlf {
         // Confirm that there is at least one LF that is not part of a CRLF.
         let lf_not_crlf = old_str
             .chars()

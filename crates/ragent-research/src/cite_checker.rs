@@ -12,15 +12,9 @@
 //! sources, carries a non-empty captured body.
 
 use crate::source::Source;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
 
-static CITATION_RE: OnceLock<Regex> = OnceLock::new();
-
-fn citation_re() -> &'static Regex {
-    CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
-}
+use crate::polarity::citation_re;
 
 /// Outcome of the deterministic cite-check pass.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

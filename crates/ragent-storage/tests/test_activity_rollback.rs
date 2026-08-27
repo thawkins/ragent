@@ -13,7 +13,7 @@
 #![forbid(unsafe_code)]
 
 use ragent_storage::activity_log::ActivityLog;
-use ragent_types::activity::{EventKind, Projection, RunStatus, TerminationReason};
+use ragent_types::activity::{RunStatus, TerminationReason};
 use ragent_types::id::RunId;
 
 #[test]

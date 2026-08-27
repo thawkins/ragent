@@ -761,8 +761,15 @@ impl SessionProcessor {
                 match client.chat(init_request).await {
                     Ok(mut stream) => {
                         loop {
+                            // Per-event stall guard, matching the main loop's
+                            // stall detection (`stream_config.timeout_secs`)
+                            // instead of a fixed 60s: slow providers (e.g. a
+                            // local reasoning model that thinks for over a
+                            // minute before its first token) were aborted
+                            // mid-ack even though the stream was healthy.
+                            let stall_secs = self.stream_config.timeout_secs;
                             let ev = match tokio::time::timeout(
-                                std::time::Duration::from_secs(60),
+                                std::time::Duration::from_secs(stall_secs),
                                 stream.next(),
                             )
                             .await
@@ -772,7 +779,8 @@ impl SessionProcessor {
                                 Err(_) => {
                                     tracing::warn!(
                                         session_id = %session_id,
-                                        "AGENTS.md init exchange stream stalled — no data for 60s"
+                                        stall_secs,
+                                        "AGENTS.md init exchange stream stalled — no data"
                                     );
                                     break;
                                 }
@@ -1369,7 +1377,17 @@ impl SessionProcessor {
                             }
                         }
                         StreamEvent::Finish { reason } => {
-                            saw_finish_reason = Some(reason);
+                            // Providers may emit a second, generic
+                            // `Finish { Stop }` for the SSE `[DONE]` sentinel
+                            // after the real finish (e.g. `ToolUse`, `Length`)
+                            // already arrived. Keep the first specific reason;
+                            // only let a plain `Stop` fill an empty slot so the
+                            // caller can distinguish tool-use turns from clean
+                            // stops.
+                            match &saw_finish_reason {
+                                Some(existing) if !matches!(existing, FinishReason::Stop) => {}
+                                _ => saw_finish_reason = Some(reason),
+                            }
                         }
                     }
                 }

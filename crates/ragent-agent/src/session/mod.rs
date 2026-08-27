@@ -157,12 +157,16 @@ impl SessionManager {
         use std::collections::HashMap;
         use std::sync::OnceLock;
 
+        // NOTE: this must be the SAME static item as the cache inside
+        // `session_state_cache` above. Function-local statics are
+        // per-declaration-site: a second `static CACHE` here would be a
+        // distinct item and `get()` would always return `None`, silently
+        // turning this into a no-op.
         static CACHE: OnceLock<Mutex<HashMap<String, Arc<Mutex<SessionState>>>>> = OnceLock::new();
 
-        if let Some(cache) = CACHE.get() {
-            let mut guard = cache.lock().expect("session_state_cache poisoned");
-            guard.remove(session_id);
-        }
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = cache.lock().expect("session_state_cache poisoned");
+        guard.remove(session_id);
     }
 
     /// Returns a reference to the underlying storage backend.

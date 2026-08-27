@@ -3,9 +3,13 @@
 //! Exposes the `ragent-research` crate behind a thin REST surface:
 //!
 //! - `GET    /research`              — list every research item (FR-012)
-//! - `POST   /research`              — create + run a gathering session
-//! - `GET    /research/{name}`       — show one item
+//! - `POST   /research`              — create + run a gathering session in
+//!   the background; returns 202 Accepted with the events URL in `Location`
+//! - `GET    /research/{name}`       — show one item (`?full=true` includes
+//!   extended metadata)
 //! - `DELETE /research/{name}`       — remove an item (with confirmation)
+//! - `GET    /research/{name}/events` — SSE stream of live events for a
+//!   background run (subscribes to the broadcast channel registered by POST)
 //!
 //! All endpoints are mounted under the auth-protected router in
 //! `routes/mod.rs`.
@@ -33,6 +37,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use super::error_response;
 use crate::routes::AppState;
 
 use ragent_agent::research_adapter::build_research_session;
@@ -66,21 +71,7 @@ async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
         Ok(items) => {
             let rows: Vec<ResearchItemRow> = items
                 .into_iter()
-                .map(|i| {
-                    let sources = i.source_count();
-                    ResearchItemRow {
-                        name: i.name.to_string(),
-                        title: i.title,
-                        status: i.status.as_str().to_string(),
-                        created_at: i.created_at.to_rfc3339(),
-                        modified_at: i.modified_at.to_rfc3339(),
-                        sources,
-                        topic: None,
-                        queries: Vec::new(),
-                        output_format: None,
-                        model: None,
-                    }
-                })
+                .map(|i| ResearchItemRow::from_item(i, false))
                 .collect();
             (
                 StatusCode::OK,
@@ -90,7 +81,7 @@ async fn list_research(State(_state): State<AppState>) -> impl IntoResponse {
                 })),
             )
         }
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
@@ -110,6 +101,28 @@ struct ResearchItemRow {
     output_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+}
+
+impl ResearchItemRow {
+    /// Map a [`ragent_research::ResearchItem`] onto the API row shape.
+    ///
+    /// `full = false` (list view) omits the extended metadata fields;
+    /// `full = true` (show view) fills them in. Shared by `list_research`
+    /// and `show_research` so the field mapping exists in exactly one place.
+    fn from_item(item: ragent_research::ResearchItem, full: bool) -> Self {
+        Self {
+            name: item.name.to_string(),
+            title: item.title.clone(),
+            status: item.status.as_str().to_string(),
+            created_at: item.created_at.to_rfc3339(),
+            modified_at: item.modified_at.to_rfc3339(),
+            sources: item.source_count(),
+            topic: full.then_some(item.topic),
+            queries: if full { item.queries } else { Vec::new() },
+            output_format: full.then_some(item.output_format).flatten(),
+            model: full.then_some(item.model).flatten(),
+        }
+    }
 }
 
 // ── POST /research ───────────────────────────────────────────────────────
@@ -246,8 +259,21 @@ async fn create_research(
     State(state): State<AppState>,
     Json(req): Json<CreateResearchRequest>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     let manager = ResearchManager::new(research_root());
+
+    // Validate the name and check for duplicates BEFORE building the session
+    // config so rejected requests do not pay for config loading / cloning.
+    if let Err(e) = ragent_research::ResearchName::try_new(&req.name) {
+        return error_response(StatusCode::BAD_REQUEST, e.to_string()).into_response();
+    }
+    if manager.show(&req.name).await.is_ok() {
+        return error_response(
+            StatusCode::CONFLICT,
+            format!("research item '{}' already exists", req.name),
+        )
+        .into_response();
+    }
+
     let run_req = req.to_run_request();
     let cfg = state.config.read().await.clone();
     let config = ragent_research::build_session_config(&run_req, Some(&cfg));
@@ -259,31 +285,11 @@ async fn create_research(
         )
     });
 
-    // Validate name and check for duplicates synchronously so the caller
-    // gets immediate feedback on bad requests.
-    if let Err(e) = ragent_research::ResearchName::try_new(&req.name) {
-        return error_response(StatusCode::BAD_REQUEST, &e.to_string()).into_response();
-    }
-    if manager.show(&req.name).await.is_ok() {
-        return error_response(
-            StatusCode::CONFLICT,
-            &format!("research item '{}' already exists", req.name),
-        )
-        .into_response();
-    }
-
     // Create a broadcast channel for SSE streaming of research events.
     // Subscribers to GET /research/{name}/events will receive events through
-    // this channel.
-    let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
-
-    // Register the run in AppState so the SSE endpoint can find the channel.
-    {
-        let mut runs = state.research_runs.lock().await;
-        runs.insert(req.name.clone(), tx.clone());
-    }
-
-    // Build a broadcast-based observer that forwards events to the channel.
+    // this channel. The registry entry doubles as an in-flight guard: a
+    // concurrent POST with the same name is rejected here (the disk-based
+    // duplicate check above only sees completed items).
     struct BroadcastObserver(tokio::sync::broadcast::Sender<SessionEvent>);
     impl SessionObserver for BroadcastObserver {
         fn on_event(&self, event: SessionEvent) {
@@ -293,7 +299,20 @@ async fn create_research(
             let _ = self.0.send(event);
         }
     }
-    let observer = BroadcastObserver(tx);
+    let observer = {
+        let mut runs = state.research_runs.lock().await;
+        if runs.contains_key(&req.name) {
+            drop(runs);
+            return error_response(
+                StatusCode::CONFLICT,
+                format!("research run '{}' is already in progress", req.name),
+            )
+            .into_response();
+        }
+        let (tx, _rx) = tokio::sync::broadcast::channel::<SessionEvent>(256);
+        runs.insert(req.name.clone(), tx.clone());
+        BroadcastObserver(tx)
+    };
 
     // Wire the tool registry from the shared session processor.
     let project_root = research_root()
@@ -319,10 +338,14 @@ async fn create_research(
     );
 
     // Spawn the research run as a background task so the HTTP response
-    // returns immediately with 202 Accepted.
+    // returns immediately with 202 Accepted. The SSE sender is cloned so a
+    // failed run can still deliver a terminal RunStep event to subscribers —
+    // without it, the stream would simply close and look like a successful
+    // run that emitted no events.
     let name_clone = req.name.clone();
     let title_clone = title.clone();
     let runs_registry = state.research_runs.clone();
+    let err_tx = observer.0.clone();
     tokio::spawn(async move {
         match session
             .run(&name_clone, &title_clone, &config, Arc::new(observer))
@@ -340,6 +363,13 @@ async fn create_research(
                     error = %e,
                     "research: background run failed"
                 );
+                // Surface the failure to any SSE subscriber so the stream
+                // ends with an explicit terminal event.
+                let _ = err_tx.send(SessionEvent::RunStep {
+                    step: "run".to_string(),
+                    status: "failed".to_string(),
+                    detail: Some(e.to_string()),
+                });
             }
         }
         // Clean up the run registry entry.
@@ -382,32 +412,11 @@ async fn show_research(
     let manager = ResearchManager::new(research_root());
     match manager.show(&name).await {
         Ok(item) => {
-            let row = ResearchItemRow {
-                name: item.name.to_string(),
-                title: item.title.clone(),
-                status: item.status.as_str().to_string(),
-                created_at: item.created_at.to_rfc3339(),
-                modified_at: item.modified_at.to_rfc3339(),
-                sources: item.source_count(),
-                topic: if q.full {
-                    Some(item.topic.clone())
-                } else {
-                    None
-                },
-                queries: if q.full {
-                    item.queries.clone()
-                } else {
-                    Vec::new()
-                },
-                output_format: if q.full {
-                    item.output_format.clone()
-                } else {
-                    None
-                },
-                model: if q.full { item.model.clone() } else { None },
-            };
+            // Search before building the row so `item.title` can be moved
+            // into the row instead of cloned.
             let search_hits: Vec<SearchHit> =
                 manager.search(&item.title, 5).await.unwrap_or_default();
+            let row = ResearchItemRow::from_item(item, q.full);
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -425,12 +434,12 @@ async fn show_research(
         }
         Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
             StatusCode::NOT_FOUND,
-            &format!("research item '{name}' not found. Closest matches: {suggestions}"),
+            format!("research item '{name}' not found. Closest matches: {suggestions}"),
         ),
         Err(ragent_research::ResearchError::InvalidName(_)) => {
             error_response(StatusCode::BAD_REQUEST, "invalid research name")
         }
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
@@ -452,9 +461,7 @@ async fn delete_research(
     if confirm != format!("delete-{name}") {
         return error_response(
             StatusCode::PRECONDITION_FAILED,
-            &format!(
-                "refusing to delete research/{name}: pass `?confirm=delete-{name}` to confirm"
-            ),
+            format!("refusing to delete research/{name}: pass `?confirm=delete-{name}` to confirm"),
         );
     }
     match manager.delete(&name).await {
@@ -464,17 +471,14 @@ async fn delete_research(
         ),
         Err(ragent_research::ResearchError::NotFound(name, suggestions)) => error_response(
             StatusCode::NOT_FOUND,
-            &format!("research item '{name}' not found. Closest matches: {suggestions}"),
+            format!("research item '{name}' not found. Closest matches: {suggestions}"),
         ),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-fn error_response(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
-    super::error_response(status, message)
-}
 // ── GET /research/{name}/events ──────────────────────────────────────────
 //
 // SSE endpoint that streams live research events for a background research
@@ -489,7 +493,6 @@ async fn research_events_stream(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> axum::response::Response {
-    use axum::response::IntoResponse;
     use tokio_stream::StreamExt;
     use tokio_stream::wrappers::BroadcastStream;
 
@@ -505,9 +508,9 @@ async fn research_events_stream(
         match manager.show(&name).await {
             Ok(item) => {
                 // Item exists but no active run — return its current status.
+                // `Json` already sets the content-type header.
                 return (
                     StatusCode::OK,
-                    [("content-type", "application/json")],
                     Json(serde_json::json!({
                         "name": item.name,
                         "status": item.status.as_str(),
@@ -519,7 +522,7 @@ async fn research_events_stream(
             Err(_) => {
                 return error_response(
                     StatusCode::NOT_FOUND,
-                    &format!("no active research run for '{name}'"),
+                    format!("no active research run for '{name}'"),
                 )
                 .into_response();
             }

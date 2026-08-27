@@ -176,6 +176,20 @@ impl std::fmt::Debug for Coordinator {
     }
 }
 
+impl Drop for Coordinator {
+    // R-20: abort any still-running job tasks when the coordinator is
+    // dropped so spawned work does not outlive its owner.
+    fn drop(&mut self) {
+        for entry in self.jobs.iter() {
+            if entry.status == "running" {
+                if let Some(handle) = &entry.handle {
+                    handle.abort();
+                }
+            }
+        }
+    }
+}
+
 impl Coordinator {
     /// Default constructor using `InProcessRouter`.
     #[must_use]

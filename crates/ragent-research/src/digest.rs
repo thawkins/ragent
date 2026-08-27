@@ -13,6 +13,7 @@
 
 use crate::contradiction::ContradictionGraph;
 use crate::locus::{DepthInvestigation, DepthLevel, LocusSet};
+use crate::polarity::{has_any_token, source_body_text};
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -371,21 +372,6 @@ pub fn build_triple_draft(digest: &EvidenceDigest, topic: &str) -> TripleDraft {
         candidates: vec![a, b, c],
     }
 }
-/// Return true when `body` contains any of the supplied tokens.
-fn has_any_token(body: &str, tokens: &[&str]) -> bool {
-    tokens.iter().any(|t| body.contains(t))
-}
-
-/// Extract the searchable body text from a source.
-fn source_body_text(source: &Source) -> String {
-    match source {
-        Source::Web { body, .. } => body.clone(),
-        Source::Local { body, .. } => body.clone(),
-        Source::Spec { spec_id, .. } => spec_id.clone(),
-        Source::Other { body, .. } => body.clone(),
-    }
-}
-
 /// Look up the depth classification for a dimension keyword.
 fn depth_for(keyword: &str, depths: &[DepthInvestigation]) -> DepthLevel {
     depths

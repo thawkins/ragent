@@ -14,7 +14,7 @@
 //! - a monotonically increasing per-run sequence number [`ActivityEvent::seq`]
 //!   (FR-002),
 //! - the [`RunId`] it belongs to,
-//! - a [`schema_version`](ActivityEvent::schema_version) so logs remain
+//! - a `schema_version` field so logs remain
 //!   replayable across version upgrades (NFR-003),
 //! - a UTC timestamp,
 //! - a typed [`EventKind`] payload describing what happened.
@@ -78,6 +78,20 @@ pub enum TerminationReason {
     Aborted,
 }
 
+impl TerminationReason {
+    /// The [`RunStatus`] a run takes after terminating with this reason.
+    ///
+    /// Single source of truth for the reason-to-status mapping shared by
+    /// [`Projection::apply`] and the storage layer's status queries.
+    #[must_use]
+    pub fn derived_status(self) -> RunStatus {
+        match self {
+            Self::Completed => RunStatus::Completed,
+            Self::Interrupted | Self::Aborted => RunStatus::Interrupted,
+        }
+    }
+}
+
 /// A sandbox boundary crossed by a tool, recorded with a permission decision
 /// (FR-005).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,8 +139,8 @@ pub enum EventKind {
         /// The provider-assigned message identifier, if any.
         message_id: Option<String>,
     },
-    /// A tool was invoked (FR-004). Paired with a later [`ToolResult`] event
-    /// sharing the same `tool_call_id`.
+    /// A tool was invoked (FR-004). Paired with a later
+    /// [`EventKind::ToolResult`] event sharing the same `tool_call_id`.
     ToolCall {
         /// Identifier shared with the matching result event (FR-004).
         tool_call_id: String,
@@ -135,8 +149,8 @@ pub enum EventKind {
         /// Raw JSON arguments for the call.
         args: String,
     },
-    /// A tool call completed (FR-004). Paired with the preceding [`ToolCall`]
-    /// event sharing the same `tool_call_id`.
+    /// A tool call completed (FR-004). Paired with the preceding
+    /// [`EventKind::ToolCall`] event sharing the same `tool_call_id`.
     ToolResult {
         /// Identifier shared with the matching invocation event (FR-004).
         tool_call_id: String,
@@ -196,6 +210,14 @@ pub enum EventKind {
     },
 }
 
+/// Lifecycle marker appended when a run is resumed (FR-013).
+///
+/// The string is the shared vocabulary between the storage layer (which
+/// writes it) and the projection (which transitions a run back to
+/// [`RunStatus::Active`] on seeing it); keep them in sync through this
+/// constant rather than repeating the literal.
+pub const LIFECYCLE_RESUMED: &str = "resumed";
+
 /// An immutable, self-describing record of a single execution fact.
 ///
 /// Persisted to the append-only event log before being projected into any
@@ -234,12 +256,6 @@ impl ActivityEvent {
             timestamp: Utc::now(),
             kind,
         }
-    }
-
-    /// Returns the schema version this event was written with.
-    #[must_use]
-    pub const fn schema_version(&self) -> u32 {
-        self.schema_version
     }
 }
 
@@ -305,7 +321,7 @@ pub struct ProjectedCheckpoint {
 /// would see after replaying events up to a chosen point. It is computed by
 /// [`Projection::replay`] (or [`Projection::replay_upto`] for a partial
 /// replay up to a rollback/resume target). All fields are derived from the
-/// append-only event log �� the projection holds no independent truth.
+/// append-only event log — the projection holds no independent truth.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Projection {
     /// Model messages in replay order.
@@ -346,7 +362,7 @@ impl Projection {
     ///
     /// Events are applied in the given order. The caller is responsible for
     /// ensuring the slice is in ascending sequence-number order (e.g. from
-    /// [`ActivityLog::read_run`](crate::ActivityLog::read_run)).
+    /// the storage layer's `ActivityLog::read_run`).
     #[must_use]
     pub fn replay(events: &[ActivityEvent]) -> Self {
         Self::replay_upto(events, u64::MAX)
@@ -431,12 +447,12 @@ impl Projection {
             }
             EventKind::Termination { reason, seq } => {
                 self.termination = Some((*reason, *seq));
-                self.status = match reason {
-                    TerminationReason::Completed => RunStatus::Completed,
-                    TerminationReason::Interrupted | TerminationReason::Aborted => {
-                        RunStatus::Interrupted
-                    }
-                };
+                self.status = reason.derived_status();
+            }
+            // FR-013: a "resumed" lifecycle event transitions an interrupted
+            // run back to Active, matching [`crate::activity::LIFECYCLE_RESUMED`].
+            EventKind::Lifecycle { event } if event == LIFECYCLE_RESUMED => {
+                self.status = RunStatus::Active;
             }
             // Audit/meta events have no direct projection effect.
             EventKind::BranchOrigin { .. }

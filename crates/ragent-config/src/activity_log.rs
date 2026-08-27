@@ -19,13 +19,6 @@ pub fn set_enabled(enabled: bool) {
     ACTIVITY_LOG_MODE.store(enabled, Ordering::Relaxed);
 }
 
-/// Toggle activity logging and return the new state.
-#[must_use]
-pub fn toggle() -> bool {
-    let was = ACTIVITY_LOG_MODE.fetch_xor(true, Ordering::Relaxed);
-    !was
-}
-
 /// Persist the requested activity-log state to the config file and update the
 /// runtime flag.
 ///

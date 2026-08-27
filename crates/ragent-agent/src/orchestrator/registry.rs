@@ -50,6 +50,18 @@ impl AgentEntry {
             mailbox_handle: None,
         }
     }
+
+    /// Return a copy of this entry with the (non-`Clone`) mailbox
+    /// `JoinHandle` cleared. Used when handing entries out to callers.
+    fn view_without_handle(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            capabilities: self.capabilities.clone(),
+            mailbox: self.mailbox.clone(),
+            last_heartbeat: self.last_heartbeat,
+            mailbox_handle: None,
+        }
+    }
 }
 
 /// Maximum pending orchestration requests per agent mailbox.
@@ -132,25 +144,17 @@ impl AgentRegistry {
             .read()
             .await
             .values()
-            .map(|e| AgentEntry {
-                id: e.id.clone(),
-                capabilities: e.capabilities.clone(),
-                mailbox: e.mailbox.clone(),
-                last_heartbeat: e.last_heartbeat,
-                mailbox_handle: None,
-            })
+            .map(AgentEntry::view_without_handle)
             .collect()
     }
 
     /// Get a specific agent by id.
     pub async fn get(&self, id: &str) -> Option<AgentEntry> {
-        self.inner.read().await.get(id).map(|e| AgentEntry {
-            id: e.id.clone(),
-            capabilities: e.capabilities.clone(),
-            mailbox: e.mailbox.clone(),
-            last_heartbeat: e.last_heartbeat,
-            mailbox_handle: None,
-        })
+        self.inner
+            .read()
+            .await
+            .get(id)
+            .map(AgentEntry::view_without_handle)
     }
 
     /// Update heartbeat for an agent (mark it as alive now).
@@ -177,7 +181,14 @@ impl AgentRegistry {
             })
             .collect();
         for k in keys {
-            map.remove(&k);
+            // Abort the mailbox loop exactly as `unregister` does; a pruned
+            // agent whose mailbox sender is still cloned elsewhere must not
+            // leave an orphaned loop behind (see R-14).
+            if let Some(entry) = map.remove(&k) {
+                if let Some(handle) = entry.mailbox_handle {
+                    handle.abort();
+                }
+            }
         }
     }
 
@@ -192,13 +203,7 @@ impl AgentRegistry {
                     .iter()
                     .all(|req| entry.capabilities.iter().any(|c| c.contains(req)))
             })
-            .map(|e| AgentEntry {
-                id: e.id.clone(),
-                capabilities: e.capabilities.clone(),
-                mailbox: e.mailbox.clone(),
-                last_heartbeat: e.last_heartbeat,
-                mailbox_handle: None,
-            })
+            .map(AgentEntry::view_without_handle)
             .collect()
     }
 }

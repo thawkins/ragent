@@ -97,6 +97,7 @@ pub(crate) fn chat_messages_to_messages(chat_messages: &[LlmChatMessage]) -> Vec
             parts,
             created_at: now,
             updated_at: now,
+            edit_seq: 0,
         });
     }
     messages

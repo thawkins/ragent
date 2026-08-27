@@ -15,6 +15,7 @@ fn test_compaction_message_roundtrip() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     storage.create_message(&msg).unwrap();
 
@@ -39,6 +40,7 @@ fn test_has_assistant_messages_includes_compaction() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     storage.create_message(&msg).unwrap();
     assert!(storage.has_assistant_messages("s2").unwrap());

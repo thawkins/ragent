@@ -1038,6 +1038,9 @@ impl App {
         self.sid_to_display_name
             .insert(short_sid, self.agent_name.clone());
         self.messages = messages;
+        // Structural change: restored messages replace the current timeline,
+        // so the per-message render cache must be rebuilt from scratch.
+        self.message_line_cache.clear();
         self.current_screen = ScreenMode::Chat;
         self.status = format!("resumed ({} messages)", msg_count);
 
@@ -1719,11 +1722,10 @@ impl App {
         if self.messages.len() > MAX_TUI_MESSAGES {
             let drop_count = self.messages.len() - MAX_TUI_MESSAGES;
             self.messages.drain(0..drop_count);
-            // Trim the line cache to match.
-            if self.message_line_cache.len() > MAX_TUI_MESSAGES {
-                let drop_cache = self.message_line_cache.len() - MAX_TUI_MESSAGES;
-                self.message_line_cache.drain(0..drop_cache);
-            }
+            // Trim the cache by the same count so cache slots stay aligned
+            // with their messages (both vectors drop from the front).
+            let drop_cache = drop_count.min(self.message_line_cache.len());
+            self.message_line_cache.drain(0..drop_cache);
             self.messages_version = self.messages_version.wrapping_add(1);
         }
     }

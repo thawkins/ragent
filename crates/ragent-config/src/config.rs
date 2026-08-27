@@ -1266,7 +1266,14 @@ impl Config {
     /// println!("default agent: {}", config.default_agent);
     /// ```
     pub fn load() -> anyhow::Result<Self> {
-        let mut config = Self::default();
+        // Derived `Default` zeroes all bools, but `activity_log`'s intended
+        // default is `true` (serde `default_true`). Keep the load-time seed
+        // consistent with the serde default so a fresh install never writes
+        // `activity_log: false` to the generated default config.
+        let mut config = Self {
+            activity_log: true,
+            ..Self::default()
+        };
         let mut loaded = false;
 
         // Global config: ~/.config/ragent/ragent.json
@@ -1822,6 +1829,13 @@ impl Config {
             if !base.bash.denylist.contains(&entry) {
                 base.bash.denylist.push(entry);
             }
+        }
+        // bash.nice is a value field (not an OR-flag boolean), so the overlay
+        // takes precedence over the compiled default of the base. The sentinel
+        // comparison cannot distinguish "explicitly set to the default" from
+        // "unset", but 10 is both the default and a sane level either way.
+        if overlay.bash.nice != default_nice_level() {
+            base.bash.nice = overlay.bash.nice;
         }
 
         // GitLab: overlay fields override base

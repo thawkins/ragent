@@ -25,7 +25,10 @@ use crate::app::state::{
 };
 
 // Helpers
-use crate::app::helpers::{activity_log_db_path, parse_swarm_args, short_run_id, short_session_id};
+use crate::app::helpers::{
+    activity_log_db_path, open_verified_alog, parse_alog_run_id_yes, parse_swarm_args,
+    short_run_id, short_session_id,
+};
 
 // Redaction patterns for bug reports
 use regex::Regex;
@@ -858,87 +861,22 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// removed (FR-014).  The storage operation runs on a blocking thread
     /// (FR-008, FR-015).
     fn handle_alog_delete(&mut self, args: &str) {
-        use ragent_storage::activity_log::ActivityLog;
         use ragent_types::id::RunId;
 
-        // Parse arguments: extract run-id and check for --yes flag (FR-011).
-        let parts: Vec<&str> = args.split_whitespace().collect();
-        let has_yes = parts.contains(&"--yes");
-        let run_id = parts.iter().find(|p| **p != "--yes").copied();
-
-        // FR-012: validate <run-id> argument presence.  If the user
-        // omits the run-id (or supplies only `--yes`), show a usage
-        // error with the expected syntax and abort before any storage
-        // access.  RunId is a plain string newtype (no additional
-        // syntax validation is required beyond non-emptiness); the
-        // existence check happens later against list_runs() (FR-013).
-        let run_id = match run_id {
-            Some(id) => id.to_string(),
-            None => {
-                self.append_assistant_text(
-                    "From: /alog delete\n\n\
-                     \u{26a0} Missing <run-id> argument.\n\n\
-                     Usage: `/alog delete <run-id> --yes`",
-                );
-                self.status = "alog: error".to_string();
-                return;
-            }
-        };
-
-        // FR-011/NFR-001: --yes flag is mandatory.  No code path past
-        // this point can reach the storage operation without --yes.
-        if !has_yes {
-            // NFR-002: warn that the operation is irreversible.
-            self.append_assistant_text(
-                "From: /alog delete\n\n\
-                 \u{26a0} The `--yes` flag is required to confirm this destructive operation.\n\n\
-                 This action is irreversible \u{2014} deleted events cannot be recovered.\n\
-                 To proceed, re-run:\n\
-                 `/alog delete <run-id> --yes`",
-            );
+        // Parse + validate arguments with the shared alog helpers (FR-011).
+        let Some(run_id) =
+            parse_alog_run_id_yes(args, "delete", |text| self.append_assistant_text(text))
+        else {
             self.status = "alog: error".to_string();
             return;
-        }
-
+        };
         let alog_path = activity_log_db_path(&self.db_path);
         let run_id_for_block = RunId::from(run_id);
 
         // FR-008/FR-015: perform the storage operation on a blocking thread.
         // Return either a success message (with event count) or an error.
         let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
-            let log = match ActivityLog::open(&alog_path) {
-                Ok(log) => log,
-                Err(e) => {
-                    return Err(format!(
-                        "From: /alog delete\n\n\
-                         \u{26a0} Failed to open activity log at `{}`: {e}",
-                        alog_path.display(),
-                    ));
-                }
-            };
-
-            // FR-013: verify the run-id exists before attempting deletion.
-            let runs = match log.list_runs() {
-                Ok(runs) => runs,
-                Err(e) => {
-                    return Err(format!(
-                        "From: /alog delete\n\n\
-                         \u{26a0} Failed to list activity-log runs: {e}",
-                    ));
-                }
-            };
-
-            if !runs.iter().any(|r| r == &run_id_for_block) {
-                return Err(format!(
-                    "From: /alog delete\n\n\
-                     \u{26a0} No run with id `{}` was found in the activity log.",
-                    run_id_for_block.as_str(),
-                ));
-            }
-
-            // Capture the event count before deletion for the confirmation
-            // message (FR-014).
-            let count = log.count(&run_id_for_block).unwrap_or(0);
+            let (log, count) = open_verified_alog(&alog_path, &run_id_for_block, "delete")?;
 
             // FR-015: delete all events for the run via `expire_run`.
             match log.expire_run(&run_id_for_block, "deleted via /alog delete --yes") {
@@ -980,47 +918,15 @@ Usage: `/telemetry help|on|off|setup|counters`",
     /// number of events exported, and the file path (FR-022).  The storage
     /// operation runs on a blocking thread (FR-008, FR-023).
     fn handle_alog_export(&mut self, args: &str) {
-        use ragent_storage::activity_log::ActivityLog;
         use ragent_types::id::RunId;
 
-        // Parse arguments: extract run-id and check for --yes flag (FR-018).
-        let parts: Vec<&str> = args.split_whitespace().collect();
-        let has_yes = parts.contains(&"--yes");
-        let run_id = parts.iter().find(|p| **p != "--yes").copied();
-
-        // FR-019: validate <run-id> argument presence.  If the user
-        // omits the run-id (or supplies only `--yes`), show a usage
-        // error with the expected syntax and abort before any storage
-        // access.  RunId is a plain string newtype (no additional
-        // syntax validation is required beyond non-emptiness); the
-        // existence check happens later against list_runs() (FR-020).
-        let run_id = match run_id {
-            Some(id) => id.to_string(),
-            None => {
-                self.append_assistant_text(
-                    "From: /alog export\n\n\
-                     \u{26a0} Missing <run-id> argument.\n\n\
-                     Usage: `/alog export <run-id> --yes`",
-                );
-                self.status = "alog: error".to_string();
-                return;
-            }
-        };
-
-        // FR-018/NFR-003: --yes flag is mandatory.  No code path past
-        // this point can reach the storage operation or file write
-        // without --yes.
-        if !has_yes {
-            self.append_assistant_text(
-                "From: /alog export\n\n\
-                 \u{26a0} The `--yes` flag is required to confirm this operation.\n\n\
-                 To proceed, re-run:\n\
-                 `/alog export <run-id> --yes`",
-            );
+        // Parse + validate arguments with the shared alog helpers (FR-018).
+        let Some(run_id) =
+            parse_alog_run_id_yes(args, "export", |text| self.append_assistant_text(text))
+        else {
             self.status = "alog: error".to_string();
             return;
-        }
-
+        };
         let alog_path = activity_log_db_path(&self.db_path);
         let run_id_for_block = RunId::from(run_id);
 
@@ -1028,38 +934,7 @@ Usage: `/telemetry help|on|off|setup|counters`",
         // Return either a success tuple (events count, file path string) or
         // an error message.
         let result = tokio::task::block_in_place(|| -> Result<(u64, String), String> {
-            let log = match ActivityLog::open(&alog_path) {
-                Ok(log) => log,
-                Err(e) => {
-                    return Err(format!(
-                        "From: /alog export\n\n\
-                         \u{26a0} Failed to open activity log at `{}`: {e}",
-                        alog_path.display(),
-                    ));
-                }
-            };
-
-            // FR-020: verify the run-id exists before attempting export.
-            let runs = match log.list_runs() {
-                Ok(runs) => runs,
-                Err(e) => {
-                    return Err(format!(
-                        "From: /alog export\n\n\
-                         \u{26a0} Failed to list activity-log runs: {e}",
-                    ));
-                }
-            };
-
-            if !runs.iter().any(|r| r == &run_id_for_block) {
-                return Err(format!(
-                    "From: /alog export\n\n\
-                     \u{26a0} No run with id `{}` was found in the activity log.",
-                    run_id_for_block.as_str(),
-                ));
-            }
-
-            // Capture the event count for the confirmation message (FR-022).
-            let count = log.count(&run_id_for_block).unwrap_or(0);
+            let (log, count) = open_verified_alog(&alog_path, &run_id_for_block, "export")?;
 
             // FR-021: export the run as JSONL.
             let jsonl = match log.export_jsonl(&run_id_for_block) {
@@ -1226,10 +1101,12 @@ Usage: `/telemetry help|on|off|setup|counters`",
 
             for run_id in &runs {
                 let status = log.run_status(run_id).unwrap_or(RunStatus::Active);
-                let total = log.count(run_id).unwrap_or(0);
 
-                // Per-kind breakdown via a single read_run pass (FR-005).
+                // Per-kind breakdown via a single read_run pass (FR-005); the
+                // total comes from the same pass instead of a second count()
+                // query.
                 let events = log.read_run(run_id).unwrap_or_default();
+                let total = events.len() as u64;
                 let (mut model_msgs, mut tool_calls, mut tool_results, mut permissions) =
                     (0u64, 0u64, 0u64, 0u64);
                 let (mut checkpoints, mut terminations, mut branch_origins, mut mutation_rej) =
@@ -2435,6 +2312,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             },
             "clear" => {
                 self.messages.clear();
+                self.message_line_cache.clear();
                 self.messages_version = self.messages_version.wrapping_add(1);
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();

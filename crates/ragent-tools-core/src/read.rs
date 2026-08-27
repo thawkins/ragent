@@ -322,15 +322,17 @@ fn record_read_timestamp(path: &Path, ctx: &ToolContext) {
         if let Ok(mut map) = ctx.read_timestamps.write() {
             // R-13: Cap the read-timestamps map so a code-reading session
             // touching thousands of files does not accumulate thousands of
-            // entries. When the cap is reached, evict roughly the oldest
-            // quarter (simple random-ish eviction by draining the front).
+            // entries. When the cap is reached, evict the genuinely oldest
+            // quarter by mtime: `HashMap` iteration order is arbitrary, so
+            // draining "the front" would evict a random quarter, possibly
+            // including files read seconds ago (which would disable the
+            // stale-file guard for those paths).
             const MAX_READ_TIMESTAMPS: usize = 2000;
             if map.len() >= MAX_READ_TIMESTAMPS {
-                let to_remove: Vec<PathBuf> =
-                    map.keys().take(MAX_READ_TIMESTAMPS / 4).cloned().collect();
-                for k in to_remove {
-                    map.remove(&k);
-                }
+                let keep_from = MAX_READ_TIMESTAMPS - MAX_READ_TIMESTAMPS / 4;
+                let mut entries: Vec<(PathBuf, u64)> = map.drain().collect();
+                entries.sort_unstable_by_key(|(_, ts)| *ts);
+                map.extend(entries.into_iter().skip(keep_from));
             }
             map.insert(path.to_path_buf(), millis);
         }

@@ -465,6 +465,7 @@ pub async fn import_session_archive(
             parts: msg.parts.clone(),
             created_at: msg.created_at,
             updated_at: msg.updated_at,
+            edit_seq: 0,
         };
         storage.create_message(&imported_msg)?;
         imported_count += 1;

@@ -7,6 +7,8 @@
 
 use crate::locus::DepthLevel;
 use crate::source::Source;
+use regex::Regex;
+use std::sync::OnceLock;
 
 /// Extract searchable body text from a source.
 ///
@@ -31,4 +33,18 @@ pub(crate) fn depth_from_count(n: usize) -> DepthLevel {
         2 | 3 => DepthLevel::Moderate,
         _ => DepthLevel::Deep,
     }
+}
+
+/// Return true when `body` contains any of the supplied tokens.
+pub(crate) fn has_any_token(body: &str, tokens: &[&str]) -> bool {
+    tokens.iter().any(|t| body.contains(t))
+}
+
+/// The shared `[#N]` citation-reference regex, compiled once.
+///
+/// Used by synthesis, verification, cite-checking, and document rendering;
+/// a single definition keeps the citation syntax consistent everywhere.
+pub(crate) fn citation_re() -> &'static Regex {
+    static CITATION_RE: OnceLock<Regex> = OnceLock::new();
+    CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
 }

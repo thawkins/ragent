@@ -68,8 +68,8 @@ impl StartupTimings {
 
     /// Sum of all recorded stage durations.
     ///
-    /// Compared with [`total_elapsed_ms`], the difference reveals time spent
-    /// in uninstrumented sections of the startup pipeline.
+    /// Compared with [`Self::total_elapsed_ms`], the difference reveals time
+    /// spent in uninstrumented sections of the startup pipeline.
     #[must_use]
     pub fn sum_stages_ms(&self) -> u128 {
         self.stages.iter().map(|s| s.duration_ms).sum()
@@ -120,13 +120,16 @@ impl StartupTimings {
             .max(5);
 
         // Time column: width of the longest formatted time ("NNN ms"), but at
-        // least 4 ("Time").
+        // least 4 ("Time"). The Sum and Untracked rows can exceed the total
+        // (double-counted merged stages), so include their widths too.
         let time_w = self
             .stages
             .iter()
             .map(|s| format!("{} ms", s.duration_ms).len())
             .chain([4usize]) // "Time" header
             .chain([format!("{} ms", self.total_elapsed_ms()).len()])
+            .chain([format!("{} ms", self.sum_stages_ms()).len()])
+            .chain([format!("{} ms", self.untracked_ms()).len()])
             .max()
             .unwrap_or(4)
             .max(4);
@@ -140,51 +143,34 @@ impl StartupTimings {
         // (`try_extract_research_code_block`) preserves the preformatted layout
         // verbatim instead of collapsing soft-wrapped lines into one paragraph.
         out.push_str("```\n");
-        out.push_str(&format!(
-            "{:<name_w$}  {:>time_w$}\n",
-            "Stage",
-            "Time",
-            name_w = name_w,
-            time_w = time_w
-        ));
-        out.push_str(&rule);
-        out.push('\n');
-        for stage in &self.stages {
+        // Row formatter shared by the header, stage, Sum, Untracked, and Total
+        // rows: right-align the ms value under the "Time" header.
+        let row = |out: &mut String, name: &str, ms: u128| {
             out.push_str(&format!(
                 "{:<name_w$}  {:>time_w$}\n",
-                stage.name,
-                format!("{} ms", stage.duration_ms),
+                name,
+                format!("{ms} ms"),
                 name_w = name_w,
                 time_w = time_w
             ));
+        };
+        row(&mut out, "Stage", 0);
+        out.replace_range(
+            out.len() - 7..out.len(),
+            &format!("{:>time_w$}\n", "Time", time_w = time_w),
+        );
+        out.push_str(&rule);
+        out.push('\n');
+        for stage in &self.stages {
+            row(&mut out, &stage.name, stage.duration_ms);
         }
         out.push_str(&rule);
         out.push('\n');
         // Show the sum of instrumented stages alongside the wall-clock total
         // so the uninstrumented gap is immediately visible.
-        let sum_ms = self.sum_stages_ms();
-        out.push_str(&format!(
-            "{:<name_w$}  {:>time_w$}\n",
-            "Sum",
-            format!("{} ms", sum_ms),
-            name_w = name_w,
-            time_w = time_w
-        ));
-        let untracked = self.untracked_ms();
-        out.push_str(&format!(
-            "{:<name_w$}  {:>time_w$}\n",
-            "Untracked",
-            format!("{} ms", untracked),
-            name_w = name_w,
-            time_w = time_w
-        ));
-        out.push_str(&format!(
-            "{:<name_w$}  {:>time_w$}\n",
-            "Total",
-            format!("{} ms", self.total_elapsed_ms()),
-            name_w = name_w,
-            time_w = time_w
-        ));
+        row(&mut out, "Sum", self.sum_stages_ms());
+        row(&mut out, "Untracked", self.untracked_ms());
+        row(&mut out, "Total", self.total_elapsed_ms());
         out.push_str("```\n");
         out
     }

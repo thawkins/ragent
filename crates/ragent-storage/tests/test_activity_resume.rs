@@ -208,7 +208,7 @@ fn resumed_run_can_complete() {
     log.record_interruption(&run).expect("interrupt");
 
     // Resume and complete the pending tool call.
-    let result = log.resume_run(&run).expect("resume");
+    log.resume_run(&run).expect("resume");
     log.record_tool_result(&run, "c1", "read", true, "# ragent")
         .expect("result");
     log.record_model_message(&run, "assistant", "Done.", None)
@@ -242,4 +242,26 @@ fn resume_run_projection_excludes_resumed_event() {
     assert_eq!(result.projection.messages.len(), 1);
     // last_seq is 1 (the interruption event), not 2 (the resumed event).
     assert_eq!(result.projection.last_seq, 1);
+}
+#[test]
+fn run_status_active_after_resume() {
+    // FR-013: after a resume, the run's status must read back as Active —
+    // both from the point query and from a full-log projection replay — so
+    // the run is no longer reported as resumable.
+    let log = ActivityLog::open_in_memory().expect("open");
+    let run = RunId::from("run-1");
+    log.record_model_message(&run, "user", "hi", None)
+        .expect("msg");
+    log.record_interruption(&run).expect("interrupt");
+
+    assert_eq!(log.run_status(&run).unwrap(), RunStatus::Interrupted);
+
+    log.resume_run(&run).expect("resume");
+
+    assert_eq!(log.run_status(&run).unwrap(), RunStatus::Active);
+
+    // A full-log replay (as done by external inspectors) must agree.
+    let events = log.read_run(&run).expect("read");
+    let projection = ragent_types::activity::Projection::replay(&events);
+    assert_eq!(projection.status, RunStatus::Active);
 }

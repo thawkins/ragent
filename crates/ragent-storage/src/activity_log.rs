@@ -325,7 +325,7 @@ impl ActivityLog {
             // FR-010: a mutation of a committed event (reusing its immutable id)
             // is rejected, and the rejected mutation is recorded as a separate
             // audit event.
-            let _ = Self::append_mutation_rejected_locked(
+            Self::append_mutation_rejected_locked(
                 &conn,
                 &event.run_id,
                 event.seq,
@@ -340,7 +340,7 @@ impl ActivityLog {
             // FR-010: a mutation of a committed event (overwriting its seq)
             // is rejected, and the rejected mutation is recorded as a
             // separate audit event.
-            let _ = Self::append_mutation_rejected_locked(
+            Self::append_mutation_rejected_locked(
                 &conn,
                 &event.run_id,
                 event.seq,
@@ -395,8 +395,13 @@ impl ActivityLog {
         kind: EventKind,
     ) -> std::result::Result<ActivityEvent, AppendError> {
         let mut conn = self.lock()?;
+        // IMMEDIATE transaction: the write lock is taken at BEGIN so the
+        // next-seq read + insert are atomic even with multiple handles on
+        // the same file (the TUI opens a fresh handle per slash command).
+        // A DEFERRED transaction would let two handles read the same
+        // MAX(seq) and race at INSERT time.
         let tx = conn
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| AppendError::Storage(anyhow::anyhow!("begin tx: {e}")))?;
         // FR-006: reject appends to interrupted runs (before a resume).
         if Self::is_interrupted_locked(&tx, run_id)? {
@@ -429,7 +434,18 @@ impl ActivityLog {
                 kind_json,
             ],
         )
-        .map_err(|e| AppendError::Storage(anyhow::anyhow!("insert failed: {e}")))?;
+        .map_err(|e| {
+            if e.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
+                // A UNIQUE violation on (run_id, seq) means a concurrent
+                // appender won the race; surface it as the typed error.
+                AppendError::DuplicateSeq {
+                    run_id: run_id.clone(),
+                    seq,
+                }
+            } else {
+                AppendError::Storage(anyhow::anyhow!("insert failed: {e}"))
+            }
+        })?;
         tx.commit()
             .map_err(|e| AppendError::Storage(anyhow::anyhow!("commit: {e}")))?;
         Ok(event)
@@ -742,28 +758,10 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable or a stored row cannot be
     /// deserialised (FR-017).
     pub fn run_status(&self, run_id: &RunId) -> Result<ragent_types::activity::RunStatus> {
-        use ragent_types::activity::{RunStatus, TerminationReason};
+        // Delegate to the projection so replay and point queries share one
+        // status derivation (including the FR-013 "resumed" transition).
         let events = self.read_run(run_id)?;
-        let mut status = RunStatus::Active;
-        for event in &events {
-            match &event.kind {
-                EventKind::Termination { reason, .. } => {
-                    status = match reason {
-                        TerminationReason::Completed => RunStatus::Completed,
-                        TerminationReason::Interrupted | TerminationReason::Aborted => {
-                            RunStatus::Interrupted
-                        }
-                    };
-                }
-                // FR-013: a "resumed" lifecycle event transitions an
-                // interrupted run back to Active.
-                EventKind::Lifecycle { event } if event == "resumed" => {
-                    status = RunStatus::Active;
-                }
-                _ => {}
-            }
-        }
-        Ok(status)
+        Ok(ragent_types::activity::Projection::replay(&events).status)
     }
 
     /// Returns the current `journal_mode` (e.g. `"wal"`, `"delete"`) for the
@@ -811,14 +809,9 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable, a stored row cannot be
     /// deserialised (FR-017), or an event cannot be re-serialised to JSON.
     pub fn export_jsonl(&self, run_id: &RunId) -> Result<String> {
-        let events = self.read_run(run_id)?;
-        let mut out = String::new();
-        for event in &events {
-            let line = serde_json::to_string(event).context("Failed to serialise event to JSON")?;
-            out.push_str(&line);
-            out.push('\n');
-        }
-        Ok(out)
+        let mut buf = Vec::new();
+        self.export_jsonl_to(run_id, &mut buf)?;
+        String::from_utf8(buf).context("JSONL export is not valid UTF-8")
     }
 
     /// Writes the complete event log for `run_id` as JSON Lines to `writer`
@@ -890,28 +883,7 @@ impl ActivityLog {
 
     fn read_run_range(&self, run_id: &RunId, upto: Option<u64>) -> Result<Vec<ActivityEvent>> {
         let conn = self.lock()?;
-        let mut sql = String::from(
-            "SELECT run_id, seq, id, schema_version, timestamp, kind
-             FROM activity_events
-             WHERE run_id = ?1",
-        );
-        if upto.is_some() {
-            sql.push_str(" AND seq <= ?2");
-        }
-        sql.push_str(" ORDER BY seq ASC");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = if let Some(seq) = upto {
-            stmt.query_map(params![run_id.as_str(), seq as i64], row_to_event)
-                .context("Failed to query activity events")?
-        } else {
-            stmt.query_map(params![run_id.as_str()], row_to_event)
-                .context("Failed to query activity events")?
-        };
-        let mut events = Vec::new();
-        for row in rows {
-            events.push(row?);
-        }
-        Ok(events)
+        Self::read_run_range_locked(&conn, run_id, upto)
     }
 
     /// Returns the highest committed sequence number for `run_id`, or `None`
@@ -1273,7 +1245,7 @@ impl ActivityLog {
             .unwrap_or(false);
         if exists {
             // FR-010: record the rejected mutation as a separate audit event.
-            let _ = Self::append_mutation_rejected_locked(
+            Self::append_mutation_rejected_locked(
                 &conn,
                 run_id,
                 seq,
@@ -1324,7 +1296,7 @@ impl ActivityLog {
                     .to_string()
             });
             // FR-010: record the rejected mutation as a separate audit event.
-            let _ = Self::append_mutation_rejected_locked(&conn, run_id, seq, attempted.clone());
+            Self::append_mutation_rejected_locked(&conn, run_id, seq, attempted.clone());
             return Err(AppendError::MutationRejected {
                 run_id: run_id.clone(),
                 target_seq: seq,
@@ -1353,12 +1325,12 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable (FR-017).
     pub fn rollback_to_seq(&self, run_id: &RunId, target_seq: u64) -> Result<RollbackResult> {
         let conn = self.lock()?;
+        // A single read serves both the projection and the ignored-count;
+        // reading the full range twice deserialises the whole log twice.
         let all_events = Self::read_run_range_locked(&conn, run_id, None)?;
-        let total = all_events.len() as u64;
-        let upto_events = Self::read_run_range_locked(&conn, run_id, Some(target_seq))?;
-        let projection = Projection::replay_upto(&upto_events, target_seq);
-        let included = upto_events.len() as u64;
-        let ignored_count = total.saturating_sub(included);
+        let projection = Projection::replay_upto(&all_events, target_seq);
+        let included = all_events.iter().filter(|e| e.seq <= target_seq).count() as u64;
+        let ignored_count = (all_events.len() as u64).saturating_sub(included);
         Ok(RollbackResult {
             projection,
             target_seq,
@@ -1379,16 +1351,27 @@ impl ActivityLog {
     /// Returns an error if the checkpoint is not found or storage is
     /// unavailable (FR-017).
     pub fn rollback_to_checkpoint(&self, run_id: &RunId, name: &str) -> Result<RollbackResult> {
-        let checkpoint = self
-            .find_checkpoint(run_id, name)?
+        // Read the log once and locate the checkpoint in memory; the previous
+        // shape (find_checkpoint → read_run → rollback_to_seq) deserialised
+        // the full event log three times per rollback.
+        let conn = self.lock()?;
+        let events = Self::read_run_range_locked(&conn, run_id, None)?;
+        let target_seq = events
+            .iter()
+            .rev()
+            .find_map(|e| match &e.kind {
+                EventKind::Checkpoint { name: n, seq } if n == name => Some(*seq),
+                _ => None,
+            })
             .ok_or_else(|| anyhow::anyhow!("checkpoint '{name}' not found"))?;
-        let target_seq = match &checkpoint.kind {
-            EventKind::Checkpoint { seq, .. } => *seq,
-            _ => anyhow::bail!(
-                "checkpoint '{name}' in run {run_id} resolved to a non-checkpoint event"
-            ),
-        };
-        self.rollback_to_seq(run_id, target_seq)
+        let projection = Projection::replay_upto(&events, target_seq);
+        let included = events.iter().filter(|e| e.seq <= target_seq).count() as u64;
+        let ignored_count = (events.len() as u64).saturating_sub(included);
+        Ok(RollbackResult {
+            projection,
+            target_seq,
+            ignored_count,
+        })
     }
 
     /// Resumes an interrupted run (FR-006, FR-013).
@@ -1429,7 +1412,7 @@ impl ActivityLog {
         let resumed_seq = Self::next_seq_locked(&conn, run_id)?;
         let resumed_id = EventId::new();
         let resumed_kind = EventKind::Lifecycle {
-            event: "resumed".into(),
+            event: ragent_types::activity::LIFECYCLE_RESUMED.into(),
         };
         let resumed_kind_json =
             serde_json::to_string(&resumed_kind).context("Failed to serialise resumed event")?;
@@ -1489,38 +1472,49 @@ impl ActivityLog {
     /// Appends a [`EventKind::MutationRejected`] audit event for `run_id`
     /// targeting `target_seq`, inside an already-held lock (FR-010).
     ///
-    /// Errors are swallowed (logged via tracing) so that a failure to record
-    /// the audit event never masks the original rejection error. The audit
-    /// event records the sequence number of the committed event that was the
-    /// target of the rejected mutation and a description of what was
-    /// attempted.
+    /// Best-effort: a failure to record the audit event is logged via
+    /// `tracing::warn!` (never `panic!`d on) so that it never masks the
+    /// original rejection error. The audit event records the sequence number
+    /// of the committed event that was the target of the rejected mutation
+    /// and a description of what was attempted.
     fn append_mutation_rejected_locked(
         conn: &Connection,
         run_id: &RunId,
         target_seq: u64,
         attempted: String,
-    ) -> Result<()> {
-        let seq = Self::next_seq_locked(conn, run_id)?;
-        let id = EventId::new();
-        let kind = EventKind::MutationRejected {
-            target_seq,
-            attempted,
-        };
-        let kind_json = serde_json::to_string(&kind).context("Failed to serialise audit event")?;
-        conn.execute(
-            "INSERT INTO activity_events
-                (run_id, seq, id, schema_version, timestamp, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                run_id.as_str(),
-                seq as i64,
-                id.as_str(),
-                ACTIVITY_EVENT_SCHEMA_VERSION as i64,
-                Utc::now().to_rfc3339(),
-                kind_json,
-            ],
-        )?;
-        Ok(())
+    ) {
+        let result = (|| -> Result<()> {
+            let seq = Self::next_seq_locked(conn, run_id)?;
+            let id = EventId::new();
+            let kind = EventKind::MutationRejected {
+                target_seq,
+                attempted,
+            };
+            let kind_json =
+                serde_json::to_string(&kind).context("Failed to serialise audit event")?;
+            conn.execute(
+                "INSERT INTO activity_events
+                    (run_id, seq, id, schema_version, timestamp, kind)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    run_id.as_str(),
+                    seq as i64,
+                    id.as_str(),
+                    ACTIVITY_EVENT_SCHEMA_VERSION as i64,
+                    Utc::now().to_rfc3339(),
+                    kind_json,
+                ],
+            )?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            tracing::warn!(
+                run = %run_id,
+                target_seq,
+                error = %e,
+                "failed to record MutationRejected audit event"
+            );
+        }
     }
 }
 

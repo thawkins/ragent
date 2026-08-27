@@ -10,8 +10,7 @@
 
 use ragent_storage::activity_log::ActivityLog;
 use ragent_types::activity::{
-    ActivityEvent, ConsistencyError, EventKind, RunStatus, TerminationReason,
-    validate_event_log_consistency,
+    ActivityEvent, ConsistencyError, EventKind, TerminationReason, validate_event_log_consistency,
 };
 use ragent_types::id::RunId;
 
@@ -334,4 +333,33 @@ fn store_enforced_logs_are_always_consistent() {
         validate_event_log_consistency(&events).is_ok(),
         "store-written log is consistent"
     );
+}
+#[test]
+fn append_new_immediate_tx_two_handles_no_seq_theft() {
+    // Two handles on the same file each append via `append_new`. With the
+    // IMMEDIATE transaction the read-next-seq + insert is atomic, so no
+    // duplicate seq can be committed and every append succeeds (or surfaces
+    // the typed DuplicateSeq error, never a raw constraint Storage error).
+    // The directory is unique per process so leftovers from a previous test
+    // run cannot be counted by `read_run`.
+    let dir = format!(
+        "target/temp/activity_log_concurrent_test_{}_{}",
+        std::process::id(),
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    );
+    let path = std::path::PathBuf::from(&dir).join("log.db");
+    let log_a = ActivityLog::open(&path).expect("open a");
+    let log_b = ActivityLog::open(&path).expect("open b");
+    let run = RunId::from("run-1");
+
+    let a = log_a.record_model_message(&run, "user", "from a", None);
+    let b = log_b.record_model_message(&run, "user", "from b", None);
+    assert!(a.is_ok(), "handle A append failed: {a:?}");
+    assert!(b.is_ok(), "handle B append failed: {b:?}");
+
+    // Both events must exist with distinct sequence numbers.
+    let events = log_a.read_run(&run).expect("read");
+    assert_eq!(events.len(), 2);
+    assert_ne!(events[0].seq, events[1].seq, "seq collision across handles");
+    let _ = std::fs::remove_dir_all(&dir);
 }

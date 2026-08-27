@@ -298,8 +298,8 @@ pub struct MessageLineGroup {
     pub content_lines: Vec<String>,
     /// Number of wrapped lines this message occupies at the cached width.
     pub wrapped_count: u16,
-    /// `messages_version` when this group was last rendered.
-    pub version: u64,
+    /// `Message::edit_seq` of the message this group was rendered from.
+    pub edit_seq: u64,
 }
 
 /// Cached rendered lines for a single log entry.
@@ -1614,7 +1614,7 @@ pub struct App {
     pub message_cache_width: u16,
     /// Monotonically increasing version counter incremented whenever
     /// `self.messages` is mutated.  Compared against
-    /// [`MessageLineGroup::version`] to detect which messages need
+    /// [`MessageLineGroup::edit_seq`] to detect which messages need
     /// re-rendering.
     pub messages_version: u64,
 

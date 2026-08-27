@@ -15,6 +15,7 @@ fn user_message(text: &str) -> Message {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     }
 }
 
@@ -28,6 +29,7 @@ fn assistant_text_message(text: &str) -> Message {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     }
 }
 
@@ -56,6 +58,7 @@ fn test_serialize_system() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let result = serialize_system(&message, TOOL_OUTPUT_MAX_CHARS);
     assert_eq!(result, "[System update]: Be concise.");
@@ -80,6 +83,7 @@ fn test_serialize_assistant_tool_call_completed() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let result = serialize_message(&message, TOOL_OUTPUT_MAX_CHARS);
     assert!(result.contains("[Assistant tool call]: bash(ls -la)"));
@@ -105,6 +109,7 @@ fn test_serialize_assistant_tool_call_error() {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     };
     let result = serialize_message(&message, TOOL_OUTPUT_MAX_CHARS);
     assert!(result.contains("[Assistant tool call]: bash(bad)"));

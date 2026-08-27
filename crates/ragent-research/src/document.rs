@@ -1559,8 +1559,7 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
 /// Extract 1-based source indices from `[#N]` citations in a finding body.
 /// Returns a sorted, deduplicated list suitable for rendering a Sources list.
 fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"));
+    let re = crate::polarity::citation_re();
     let mut indices: Vec<usize> = re
         .captures_iter(finding)
         .filter_map(|cap| cap[1].parse::<usize>().ok())

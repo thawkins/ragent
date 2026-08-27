@@ -12,6 +12,7 @@
 //! can replace or augment the keyword lists while keeping the same output
 //! structures.
 
+use crate::polarity::source_body_text;
 use crate::source::Source;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -251,16 +252,6 @@ fn dimension_label(keyword: &str) -> &'static str {
         .find(|(kw, _)| *kw == keyword)
         .map(|(_, label)| *label)
         .unwrap_or("Unknown")
-}
-
-/// Extract searchable body text from a source.
-fn source_body_text(source: &Source) -> String {
-    match source {
-        Source::Web { body, .. } => body.clone(),
-        Source::Local { body, .. } => body.clone(),
-        Source::Spec { spec_id, .. } => spec_id.clone(),
-        Source::Other { body, .. } => body.clone(),
-    }
 }
 
 #[cfg(test)]

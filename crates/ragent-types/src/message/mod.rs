@@ -177,6 +177,13 @@ pub struct Message {
     pub created_at: DateTime<Utc>,
     /// Timestamp when the message was last modified (UTC).
     pub updated_at: DateTime<Utc>,
+    /// Monotonic edit counter bumped every time the message content is
+    /// mutated in place.  Render caches key their per-message staleness
+    /// checks on this value instead of a global version counter so that
+    /// editing one message does not invalidate every cached render.
+    /// Defaults to 0 when deserialising older persisted sessions.
+    #[serde(default)]
+    pub edit_seq: u64,
 }
 
 impl Message {
@@ -204,7 +211,17 @@ impl Message {
             parts,
             created_at: now,
             updated_at: now,
+            edit_seq: 0,
         }
+    }
+
+    /// Bumps the edit counter and refreshes `updated_at`.
+    ///
+    /// Call this after mutating the message content in place so render
+    /// caches can detect the change (see [`Message::edit_seq`]).
+    pub fn touch(&mut self) {
+        self.edit_seq = self.edit_seq.wrapping_add(1);
+        self.updated_at = Utc::now();
     }
 
     /// Convenience constructor for a simple user text message.

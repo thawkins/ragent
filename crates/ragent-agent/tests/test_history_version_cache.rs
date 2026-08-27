@@ -17,6 +17,7 @@ fn user_message(id: &str, text: &str) -> Message {
         }],
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        edit_seq: 0,
     }
 }
 

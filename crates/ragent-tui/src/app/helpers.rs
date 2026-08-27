@@ -76,6 +76,83 @@ pub(crate) fn activity_log_db_path(db_path: &std::path::Path) -> std::path::Path
     ragent_storage::ActivityLog::default_path(db_path)
 }
 
+/// Parse the `<run-id> [--yes]` arguments shared by the destructive `/alog`
+/// subcommands (`delete`, `export`).
+///
+/// On a validation failure the formatted usage / confirmation warning is
+/// appended to the UI through `append` and the status bar is set, then
+/// `None` is returned so the caller can simply abort.
+pub(crate) fn parse_alog_run_id_yes(
+    args: &str,
+    subcmd: &str,
+    mut append: impl FnMut(&str),
+) -> Option<String> {
+    let parts: Vec<&str> = args.split_whitespace().collect();
+    let has_yes = parts.contains(&"--yes");
+    let run_id = parts.iter().find(|p| **p != "--yes").copied();
+
+    let Some(run_id) = run_id else {
+        append(&format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} Missing <run-id> argument.\n\n\
+             Usage: `/alog {subcmd} <run-id> --yes`"
+        ));
+        return None;
+    };
+
+    if !has_yes {
+        append(&format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} The `--yes` flag is required to confirm this operation.\n\n\
+             To proceed, re-run:\n\
+             `/alog {subcmd} <run-id> --yes`"
+        ));
+        return None;
+    }
+
+    Some(run_id.to_string())
+}
+
+/// Open the activity log and verify `run_id` exists (via `list_runs`),
+/// returning the log handle and the run's event count.
+///
+/// On failure an error message prefixed `From: /alog {subcmd}` is returned
+/// so the caller can surface it directly. Used by the `/alog delete` and
+/// `/alog export` handlers, which share this open → verify → count scaffold.
+pub(crate) fn open_verified_alog(
+    alog_path: &std::path::Path,
+    run_id: &ragent_types::id::RunId,
+    subcmd: &str,
+) -> Result<(ragent_storage::activity_log::ActivityLog, u64), String> {
+    use ragent_storage::activity_log::ActivityLog;
+
+    let log = ActivityLog::open(alog_path).map_err(|e| {
+        format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} Failed to open activity log at `{}`: {e}",
+            alog_path.display(),
+        )
+    })?;
+
+    let runs = log.list_runs().map_err(|e| {
+        format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} Failed to list activity-log runs: {e}",
+        )
+    })?;
+
+    if !runs.iter().any(|r| r == run_id) {
+        return Err(format!(
+            "From: /alog {subcmd}\n\n\
+             \u{26a0} No run with id `{}` was found in the activity log.",
+            run_id.as_str(),
+        ));
+    }
+
+    let count = log.count(run_id).unwrap_or(0);
+    Ok((log, count))
+}
+
 pub(crate) fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"

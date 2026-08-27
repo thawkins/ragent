@@ -162,6 +162,9 @@ impl App {
             return false;
         }
         self.messages = vec![summary_msg];
+        // Structural change: the cache must be rebuilt from scratch because
+        // the whole timeline was replaced by the summary message.
+        self.message_line_cache.clear();
         self.push_log_no_agent(
             LogLevel::Info,
             "Compaction: session history replaced with summary".to_string(),

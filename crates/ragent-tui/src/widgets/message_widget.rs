@@ -1355,7 +1355,12 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "agent_complete" => {
             let summary = get_str(&["summary"]).unwrap_or_default();
-            format!("🏁 {}", trunc120(&summary))
+            // Only the first line goes in the compact header; embedding a
+            // multi-line summary here joins its words when rendered (ratatui
+            // strips '\n' graphemes inside a Span).  The full summary is
+            // rendered line-by-line in the result section below.
+            let first_line = summary.lines().next().unwrap_or_default();
+            format!("🏁 {}", trunc120(first_line))
         }
 
         // ���══════════════════════════════════════════════════════════════════

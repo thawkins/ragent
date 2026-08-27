@@ -755,10 +755,9 @@ impl TeamManager {
 
         // Create isolated child session.
         tracing::info!(team = %self.team_name, agent_id = %agent_id, "Creating child session for teammate");
-        let processor = self
-            .processor
-            .upgrade()
-            .expect("SessionProcessor dropped while TeamManager still alive");
+        let processor = self.processor.upgrade().ok_or_else(|| {
+            anyhow::anyhow!("session processor unavailable (dropped); cannot spawn teammate")
+        })?;
         let child_session = processor
             .session_manager
             .create_session(working_dir.to_path_buf())?;
@@ -834,10 +833,9 @@ impl TeamManager {
             memory_scope
         };
         if effective_scope != super::config::MemoryScope::None {
-            let processor = self
-                .processor
-                .upgrade()
-                .expect("SessionProcessor dropped while TeamManager still alive");
+            let processor = self.processor.upgrade().ok_or_else(|| {
+                anyhow::anyhow!("session processor unavailable (dropped); cannot load team memory")
+            })?;
             let storage = processor.session_manager.storage();
             let memory_block = load_team_memory_block(storage, &self.team_name, teammate_name);
             let current = agent.prompt.as_deref().unwrap_or("");
@@ -868,10 +866,9 @@ impl TeamManager {
             },
         );
         // Start agent loop in background. Capture agent_id and team_dir for error persistence.
-        let proc = self
-            .processor
-            .upgrade()
-            .expect("SessionProcessor dropped while TeamManager still alive");
+        let proc = self.processor.upgrade().ok_or_else(|| {
+            anyhow::anyhow!("session processor unavailable (dropped); cannot start agent loop")
+        })?;
         let proc = Arc::clone(&proc);
         let child_sid_clone = child_sid.clone();
         let agent_clone = agent.clone();

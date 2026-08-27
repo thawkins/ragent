@@ -381,7 +381,7 @@ impl Storage {
     /// back to zero size. Call on graceful shutdown to keep the WAL file
     /// small.
     pub fn checkpoint_wal(&self) -> Result<()> {
-        let conn = self.conn.lock().expect("storage conn lock poisoned");
+        let conn = lock_conn!(self)?;
         conn.pragma_update(None, "wal_checkpoint", "TRUNCATE")?;
         Ok(())
     }
@@ -1110,6 +1110,7 @@ impl Storage {
                 parts,
                 created_at,
                 updated_at,
+                edit_seq: 0,
             });
         }
         Ok(messages)

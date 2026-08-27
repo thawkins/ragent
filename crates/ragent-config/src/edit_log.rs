@@ -18,13 +18,6 @@ pub fn set_enabled(enabled: bool) {
     EDIT_LOG_MODE.store(enabled, Ordering::Relaxed);
 }
 
-/// Toggle edit logging and return the new state.
-#[must_use]
-pub fn toggle() -> bool {
-    let was = EDIT_LOG_MODE.fetch_xor(true, Ordering::Relaxed);
-    !was
-}
-
 /// Persist the requested edit-log state to the config file and update the
 /// runtime flag.
 ///
@@ -62,7 +55,8 @@ pub fn sync_from_config_value(enabled: bool) {
 ///
 /// This is the recommended path for UI toggles (`Alt+E`, `/editlog`) because
 /// `Config::load()` no longer syncs the runtime flag automatically. Using
-/// plain [`toggle()`] would change the flag only until the next explicit sync
+/// plain [`set_enabled(false)` followed by a later `sync_from_config`] would
+/// change the flag only until the next explicit sync
 /// or persistence call.
 pub fn toggle_persist() -> anyhow::Result<bool> {
     let new_state = !is_enabled();

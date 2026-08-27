@@ -1,5 +1,99 @@
 # Changelog
 
+## Version: 1.0.61
+
+### Added
+
+- **Per-message render cache (`edit_seq`)** — `Message` gains an `edit_seq`
+  counter bumped by `Message::touch()` on every in-place mutation, and the TUI
+  `MessageLineGroup` cache keys staleness on this per-message counter instead
+  of the global `messages_version`, so streaming into one message no longer
+  invalidates the cached renders of every other message. The cache is cleared
+  on structural changes (compaction, session restore) and cache trimming stays
+  aligned with message trimming. Covered by
+  `crates/ragent-tui/tests/test_message_edit_seq_cache.rs`.
+- **Multi-line `agent_complete` summaries in the transcript** — task-completion
+  summaries render one output line per line (ratatui strips `\n` inside a
+  Span), with the compact header showing only the first line.
+- **Status-bar indicator helper** — shared `push_indicator` deduplicates the
+  `Label:{icon}` service-indicator spans on status-bar line 2.
+- **Shared `/alog` argument helpers** — `parse_alog_run_id_yes` and
+  `open_verified_alog` centralise the parse/validate/open/verify scaffold used
+  by the destructive `/alog delete` and `/alog export` handlers.
+- **Activity-log race regression test** —
+  `append_new_immediate_tx_two_handles_no_seq_theft` pins the two-handle
+  append contract, and `run_status_active_after_resume` pins the FR-013
+  resumed-run status transition.
+
+### Fixed
+
+- **Activity-log concurrent-append race** — `append_new` now uses an IMMEDIATE
+  transaction so the next-seq read + insert are atomic across handles, and a
+  `UNIQUE(run_id, seq)` constraint violation surfaces as the typed
+  `AppendError::DuplicateSeq` instead of a raw storage error.
+- **`bash.nice` wrapper ordering** — `prepend_low_priority` rebuilds the
+  command object wholesale, so it must run before `current_dir`/stdio/env
+  configuration; previously the working directory (and other settings applied
+  first) were silently discarded. Also replaced an `unwrap()` with
+  `split_first`.
+- **Double finish-reason handling** — the SSE `[DONE]` sentinel's generic
+  `Finish { Stop }` no longer overwrites an earlier specific finish reason
+  (`ToolUse`, `Length`), keeping tool-use turns distinguishable from clean
+  stops.
+- **AGENTS.md init stream stall guard** — the init-exchange loop now uses the
+  configured `stream_config.timeout_secs` instead of a fixed 60 s, so slow
+  reasoning models are not aborted mid-ack while streaming healthily.
+- **Session-state cache removal** — `invalidate_session_state` could silently
+  no-op because function-local `static` items are per-declaration-site; it now
+  initialises and locks the shared cache unconditionally.
+- **Gemini malformed-SSE head-of-line blocking** — a line that stays
+  unparseable after more data arrives is retried a bounded number of times and
+  then dropped with a warning, instead of being re-queued forever and blocking
+  every event behind it.
+- **Orphaned mailbox loops on registry prune** — pruning timed-out orchestrator
+  agents now aborts their mailbox `JoinHandle`s exactly as `unregister` does.
+- **`Coordinator` job-task leak** — dropping the coordinator aborts any
+  still-running job tasks so spawned work does not outlive its owner (R-20).
+- **Random eviction of the read-timestamp guard** — when the 2000-entry
+  read-timestamps cap is hit, the genuinely oldest quarter (by mtime) is
+  evicted; the previous `keys().take(...)` drained an arbitrary `HashMap`
+  sample that could evict files read seconds ago, disabling the stale-file
+  guard for them.
+- **Team manager panics on dropped processor** — `expect()` on the weak
+  `SessionProcessor` upgrade is replaced with typed errors on the user-facing
+  teammate-spawn, team-memory, and agent-loop paths.
+- **Fresh-install `activity_log` default** — `Config::load()` seeds the
+  runtime flag from `true` (matching the serde default) so a generated default
+  config never records `activity_log: false`.
+- **`bash.nice` config overlay** — the overlay value now takes precedence over
+  the compiled default during config merging.
+- **Compaction cache desync** — replacing the timeline with the summary
+  message clears the per-message render cache.
+
+### Changed
+
+- **Research verifier tokenisation hoisted** — `KeywordVerifier` splits each
+  finding and source body once per verification pass instead of once per
+  (finding x citation) pair.
+- **Research `--from-url`/`--from-file` seeding borrows page bodies** — the
+  (potentially hundreds-of-KB) fetched body is borrowed for preview, topic
+  derivation, and summarisation instead of being cloned, with shared
+  `is_placeholder_title`/`body_preview` helpers keeping both seed paths
+  consistent.
+- **Shared citation regex** — the `[#N]` citation regex is defined once in
+  `polarity::citation_re()` and reused by synthesis, verification,
+  cite-checking, and document rendering.
+- **Research HTTP routes** — `ResearchItemRow::from_item` unifies the list and
+  show mappings; `POST /research` validates the name (and duplicate) before
+  building the session config; error responses pass owned strings.
+- **Startup timings table** — the Sum/Untracked row widths are included in the
+  time column calculation so wide values no longer break alignment; rows share
+  one formatter.
+- **Config hygiene** — unused `toggle()` helpers removed from the `yolo`,
+  `edit_log`, and `activity_log` config modules; the mixed-line-endings scan
+  drops a redundant `has_lf` check; `checkpoint_wal` uses the `lock_conn!`
+  macro; a stale `t0` timing in `main.rs` was removed.
+
 ## Version: 1.0.60
 
 ### Added

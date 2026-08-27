@@ -1052,9 +1052,10 @@ fn low_priority_prefix(shell: &ShellType) -> Vec<std::ffi::OsString> {
 ///
 /// This rewrites `cmd` to run `nice ... <original program> <original args>`.
 /// `kill_on_drop` is carried over from the original command. Callers should
-/// invoke this after configuring cwd/stdio on the command; the wrapper inherits
-/// the parent's stdio (which matches the wrapped shell's needs in every call
-/// site here).
+/// invoke this immediately after `Command::new(..)` + program/args and BEFORE
+/// configuring `current_dir`/stdio/env: the rebuild replaces the command
+/// object wholesale, so anything configured before this call is lost.
+/// Configuration applied after this call survives untouched.
 fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
     let prefix = low_priority_prefix(shell);
     if prefix.is_empty() {
@@ -1065,8 +1066,11 @@ fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
     let original_args: Vec<std::ffi::OsString> = cmd.as_std().get_args().map(Into::into).collect();
     let kill_on_drop = cmd.get_kill_on_drop();
 
-    let mut rebuilt = Command::new(prefix.first().unwrap());
-    rebuilt.args(&prefix[1..]);
+    let Some((prog, rest)) = prefix.split_first() else {
+        return;
+    };
+    let mut rebuilt = Command::new(prog);
+    rebuilt.args(rest);
     rebuilt.args([original_program]);
     rebuilt.args(original_args);
     rebuilt.kill_on_drop(kill_on_drop);
@@ -1091,26 +1095,27 @@ pub async fn spawn_background_shell(
     let mut child = match shell {
         ShellType::Bash => {
             let mut cmd = Command::new("bash");
-            cmd.arg("-c")
-                .arg(command)
-                .current_dir(working_dir)
+            cmd.arg("-c").arg(command);
+            // Apply the low-priority wrapper BEFORE configuring cwd/stdio:
+            // the wrapper rebuilds the command object wholesale, so anything
+            // configured before this call would be discarded.
+            prepend_low_priority(&mut cmd, shell);
+            cmd.current_dir(working_dir)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
-            prepend_low_priority(&mut cmd, shell);
             cmd
         }
         ShellType::GitBash(path) => {
             let mut cmd = Command::new(path);
-            cmd.arg("-c")
-                .arg(command)
-                .current_dir(working_dir)
+            cmd.arg("-c").arg(command);
+            prepend_low_priority(&mut cmd, shell);
+            cmd.current_dir(working_dir)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
-            prepend_low_priority(&mut cmd, shell);
             cmd
         }
         ShellType::PowerShell(path) => {
@@ -1119,13 +1124,13 @@ pub async fn spawn_background_shell(
                 .arg("-NoProfile")
                 .arg("-NonInteractive")
                 .arg("-Command")
-                .arg(command)
-                .current_dir(working_dir)
+                .arg(command);
+            prepend_low_priority(&mut cmd, shell);
+            cmd.current_dir(working_dir)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
-            prepend_low_priority(&mut cmd, shell);
             cmd
         }
     };
@@ -1312,9 +1317,16 @@ impl Tool for BashTool {
             ShellType::Bash => {
                 // Standard Unix bash execution
                 let mut cmd = Command::new("bash");
-                cmd.arg("-c").arg(&wrapper).current_dir(&ctx.working_dir);
+                cmd.arg("-c").arg(&wrapper);
+                // Run at low CPU/IO priority so heavy commands do not make the
+                // host system unresponsive.  `nice -n <level>` lowers the CPU
+                // scheduling priority; `ionice -c 3` marks I/O as idle-class.
+                // Must be applied BEFORE current_dir/stdio/env below: the
+                // wrapper rebuilds the command object wholesale.
+                prepend_low_priority(&mut cmd, shell);
                 // Detach stdin from the tty so nothing can block on it; sudo
                 // is handled via SUDO_ASKPASS instead.
+                cmd.current_dir(&ctx.working_dir);
                 cmd.stdin(std::process::Stdio::null());
                 // Kill the child process when the future is dropped (e.g.
                 // when `tokio::time::timeout` elapses).  Without this, a
@@ -1323,10 +1335,6 @@ impl Tool for BashTool {
                 // bug.  The background shell path already sets this
                 // (see `spawn_background_shell`).
                 cmd.kill_on_drop(true);
-                // Run at low CPU/IO priority so heavy commands do not make the
-                // host system unresponsive.  `nice -n <level>` lowers the CPU
-                // scheduling priority; `ionice -c 3` marks I/O as idle-class.
-                prepend_low_priority(&mut cmd, shell);
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
@@ -1339,10 +1347,11 @@ impl Tool for BashTool {
             ShellType::GitBash(path) => {
                 // Git Bash on Windows
                 let mut cmd = Command::new(path);
-                cmd.arg("-c").arg(&wrapper).current_dir(&ctx.working_dir);
+                cmd.arg("-c").arg(&wrapper);
+                prepend_low_priority(&mut cmd, shell);
+                cmd.current_dir(&ctx.working_dir);
                 cmd.stdin(std::process::Stdio::null());
                 cmd.kill_on_drop(true);
-                prepend_low_priority(&mut cmd, shell);
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
@@ -1359,10 +1368,10 @@ impl Tool for BashTool {
                     .arg("-NoProfile")
                     .arg("-NonInteractive")
                     .arg("-Command")
-                    .arg(&wrapper)
-                    .current_dir(&ctx.working_dir)
-                    .kill_on_drop(true);
+                    .arg(&wrapper);
                 prepend_low_priority(&mut cmd, shell);
+                cmd.current_dir(&ctx.working_dir);
+                cmd.kill_on_drop(true);
                 tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
                     .await
             }

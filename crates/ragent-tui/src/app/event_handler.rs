@@ -2136,6 +2136,7 @@ impl App {
                     .unwrap_or(false)
             {
                 *text = rendered;
+                msg.touch();
                 self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
@@ -2172,6 +2173,7 @@ impl App {
                         text: rendered.clone(),
                     });
                 }
+                last.touch();
                 self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
@@ -2200,6 +2202,7 @@ impl App {
                     text: text.to_string(),
                 });
             }
+            last.touch();
             self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
@@ -2234,6 +2237,7 @@ impl App {
                     duration_ms: None,
                 },
             });
+            last.touch();
             self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
@@ -2286,6 +2290,7 @@ impl App {
                         state.error = Some(err.to_string());
                     }
                     state.duration_ms = Some(duration_ms);
+                    msg.touch();
                     self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }
@@ -2311,6 +2316,7 @@ impl App {
                         // older code paths may carry a placeholder `{}`.
                         if state.input.is_null() {
                             state.input = input;
+                            msg.touch();
                             self.messages_version = self.messages_version.wrapping_add(1);
                         }
                         return true;
@@ -2367,6 +2373,7 @@ impl App {
                             if let Ok(input) = serde_json::from_str::<serde_json::Value>(&args_json)
                             {
                                 state.input = input;
+                                msg.touch();
                                 self.messages_version = self.messages_version.wrapping_add(1);
                             }
                         }
@@ -2407,6 +2414,7 @@ impl App {
                     && cid == call_id
                 {
                     state.output = Some(value);
+                    msg.touch();
                     self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }

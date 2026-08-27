@@ -1716,6 +1716,28 @@ impl ResearchSession {
 }
 
 impl ResearchSession {
+    /// True when `title` is still an unset/URL/path placeholder that should be
+    /// replaced by a derived title. The URL and file seed paths share this
+    /// predicate so the two seed helpers stay consistent; the file path is a
+    /// subset of the URL checks (`path_str` can never start with a scheme).
+    fn is_placeholder_title(title: &str, seed: &str) -> bool {
+        title.is_empty()
+            || title == seed
+            || title.starts_with("http://")
+            || title.starts_with("https://")
+    }
+
+    /// Strip fenced code blocks and take the first 200 characters as a
+    /// preview. Shared by the `--from-url` and `--from-file` seed helpers.
+    fn body_preview(body: &str) -> String {
+        body.lines()
+            .filter(|l| !l.trim_start().starts_with("```"))
+            .collect::<String>()
+            .chars()
+            .take(200)
+            .collect()
+    }
+
     /// Fetch each `--from-url` seed page and capture it as a web source.
     ///
     /// When no explicit topic was provided, the topic and item title are
@@ -1739,30 +1761,28 @@ impl ResearchSession {
             };
             match web.fetch_url_as_source(url).await {
                 Ok((src, page)) => {
-                    let (src_url, src_title, src_body) = match &src {
+                    // Borrow instead of cloning: the body can be hundreds of
+                    // KB and is only read (preview, topic derivation, LLM
+                    // summariser) before `src` is pushed.
+                    let (src_url, src_title, src_body): (&str, &str, &str) = match &src {
                         Source::Web {
                             url, title, body, ..
-                        } => (url.clone(), title.clone(), body.clone()),
-                        _ => (url.to_string(), String::new(), String::new()),
+                        } => (url.as_str(), title.as_str(), body.as_str()),
+                        _ => (url.as_str(), "", ""),
                     };
                     let src_language = page
                         .language
                         .as_deref()
                         .map(str::to_uppercase)
                         .unwrap_or_else(|| "UNKNOWN".to_string());
-                    let preview_src: String = src_body
-                        .lines()
-                        .filter(|l| !l.trim_start().starts_with("```"))
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    let body_preview: String = preview_src.chars().take(200).collect();
+                    let body_preview = Self::body_preview(src_body);
                     observer.on_event(SessionEvent::FromUrlBodyPreview {
-                        url: src_url.clone(),
+                        url: src_url.to_string(),
                         body_preview,
                     });
                     observer.on_event(SessionEvent::WebCaptured {
-                        url: src_url.clone(),
-                        title: src_title.clone(),
+                        url: src_url.to_string(),
+                        title: src_title.to_string(),
                         search_tool: String::new(),
                         search_engine: String::new(),
                         body_preview: String::new(),
@@ -1775,7 +1795,7 @@ impl ResearchSession {
                     if idx == 0 && topic.trim().is_empty() {
                         let mut llm_title: Option<String> = None;
                         if let Some(sum) = &self.summarizer {
-                            if let Some((t, ttl)) = sum.summarize_subject(&src_body).await {
+                            if let Some((t, ttl)) = sum.summarize_subject(src_body).await {
                                 *topic = t;
                                 llm_title = Some(ttl);
                                 tracing::info!(
@@ -1792,7 +1812,7 @@ impl ResearchSession {
                         }
                         if topic.trim().is_empty() {
                             if let Some(derived) =
-                                derive_topic_from_url_body(&src_body, &src_title, &src_url)
+                                derive_topic_from_url_body(src_body, src_title, src_url)
                             {
                                 *topic = derived;
                                 tracing::info!(
@@ -1805,26 +1825,22 @@ impl ResearchSession {
                                     "fetched page body for '{src_url}' contained no usable article text to derive a topic"
                                 );
                                 observer.on_event(SessionEvent::WebFetchFailed {
-                                    url: src_url.clone(),
+                                    url: src_url.to_string(),
                                     error: message,
                                 });
-                                return Err(ResearchError::FromUrlNoUsableBody { url: src_url });
+                                return Err(ResearchError::FromUrlNoUsableBody {
+                                    url: src_url.to_string(),
+                                });
                             }
                         }
                         if let Some(new_title) = llm_title
-                            && (item_title.is_empty()
-                                || *item_title == src_url
-                                || item_title.starts_with("http://")
-                                || item_title.starts_with("https://"))
+                            && Self::is_placeholder_title(item_title, src_url)
                         {
                             *item_title = crate::item::truncate_title(&new_title);
                         }
                     }
-                    if (item_title.is_empty()
-                        || *item_title == src_url
-                        || item_title.starts_with("http://")
-                        || item_title.starts_with("https://"))
-                        && let Some(clean_title) = clean_site_title(&src_title)
+                    if Self::is_placeholder_title(item_title, src_url)
+                        && let Some(clean_title) = clean_site_title(src_title)
                     {
                         *item_title = clean_title;
                     }
@@ -1885,12 +1901,7 @@ impl ResearchSession {
                 .unwrap_or("document")
                 .to_string();
 
-            let preview_src: String = src_body
-                .lines()
-                .filter(|l| !l.trim_start().starts_with("```"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let body_preview: String = preview_src.chars().take(200).collect();
+            let body_preview = Self::body_preview(&src_body);
             observer.on_event(SessionEvent::FromFileBodyPreview {
                 path: path_str.clone(),
                 body_preview,
@@ -1936,13 +1947,13 @@ impl ResearchSession {
                     }
                 }
                 if let Some(new_title) = llm_title
-                    && (item_title.is_empty() || *item_title == path_str)
+                    && Self::is_placeholder_title(item_title, &path_str)
                 {
                     *item_title = crate::item::truncate_title(&new_title);
                 }
             }
 
-            if item_title.is_empty() || *item_title == path_str {
+            if Self::is_placeholder_title(item_title, &path_str) {
                 *item_title = src_title;
             }
 

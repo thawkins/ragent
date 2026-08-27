@@ -549,6 +549,17 @@ impl LlmClient for GeminiClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut pending_tool_calls: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
+            // Bounded retries for a line that stays unparseable even after more
+            // data arrives. A genuinely malformed line (e.g. truncated garbage
+            // from a proxy) would otherwise be re-queued on every chunk and
+            // head-of-line block every event behind it until the connection
+            // closes. After `MAX_MALFORMED_RETRIES` attempts the line is
+            // dropped with a warning so the rest of the stream can proceed.
+            const MAX_MALFORMED_RETRIES: u32 = 3;
+            // Persists across chunks while the same line sits at the head of
+            // the buffer; reset only when a line parses successfully so the
+            // retry budget belongs to the line, not the chunk.
+            let mut malformed_retries: u32 = 0;
 
             futures::pin_mut!(stream);
 
@@ -588,18 +599,37 @@ impl LlmClient for GeminiClient {
                     let parsed: Value = match serde_json::from_str(line) {
                         Ok(v) => v,
                         Err(_) => {
-                            // Put the unparseable line back and wait for more
-                            // data from the outer stream loop. Using `break`
-                            // exits this inner buffer-parsing loop so the outer
-                            // `stream.next().await` can fetch the next chunk
-                            // to complete the partial JSON object. Using
-                            // `continue` here would re-enter this inner loop
-                            // and find the same `\n` we just re-inserted,
-                            // spinning at 100% CPU forever.
-                            buffer = format!("{}\n{}", line, buffer);
-                            break;
+                            if malformed_retries < MAX_MALFORMED_RETRIES {
+                                // Put the unparseable line back and wait for more
+                                // data from the outer stream loop. Using `break`
+                                // exits this inner buffer-parsing loop so the outer
+                                // `stream.next().await` can fetch the next chunk
+                                // to complete the partial JSON object. Using
+                                // `continue` here would re-enter this inner loop
+                                // and find the same `\n` we just re-inserted,
+                                // spinning at 100% CPU forever. The retry counter
+                                // persists across chunks so a permanently broken
+                                // line is eventually dropped below.
+                                buffer = format!("{}\n{}", line, buffer);
+                                malformed_retries += 1;
+                                break;
+                            }
+                            // Permanently malformed: drop the line so events
+                            // behind it are not blocked for the rest of the
+                            // stream.
+                            tracing::warn!(
+                                line_len = line.len(),
+                                retries = malformed_retries,
+                                "Gemini stream: dropping malformed line after retries"
+                            );
+                            malformed_retries = 0;
+                            continue;
                         }
                     };
+
+                    // Parsed cleanly: the retry budget applies to the next
+                    // line, not this one.
+                    malformed_retries = 0;
 
                     // Handle usage metadata (usually in the last chunk)
                     if let Some(usage) = parsed.get("usageMetadata") {

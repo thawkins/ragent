@@ -4176,6 +4176,31 @@ fn messages_to_lines(
                                     Style::default().fg(Color::DarkGray),
                                 )));
                             }
+                        } else if tool == "agent_complete" {
+                            // Render the full task-completion summary one output line
+                            // per ratatui Line. Embedding a multi-line summary in a
+                            // single Line does not work: ratatui strips '\n'
+                            // graphemes inside a Span, so the summary would render
+                            // as one continuous paragraph.
+                            let summary = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("summary"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+                            if summary.is_empty() {
+                                lines.push(Line::from(Span::styled(
+                                    "  └ ✅ Task complete",
+                                    Style::default().fg(Color::Green),
+                                )));
+                            } else {
+                                for line in summary.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  └ ✅ {line}"),
+                                        Style::default().fg(Color::Green),
+                                    )));
+                                }
+                            }
                         } else if tool != "edit"
                             && let Some(result) =
                                 tool_result_summary(tool, &state.output, &state.input, cwd)
@@ -4241,7 +4266,6 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // This is a placeholder for future multi-session message handling.
     let messages_to_show = &app.messages;
     let inner_width = area.width.saturating_sub(2);
-    let cur_version = app.messages_version;
 
     // ── Per-message line cache (FR-003, FR-006) ──────────────────────────
     //
@@ -4251,11 +4275,16 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     //
     // On every render we:
     //   1. Reconcile the cache length with `messages.len()`.
-    //   2. Re-render any group whose `version` is stale (message content
+    //   2. Re-render any group whose `edit_seq` is stale (message content
     //      changed).  When only the last message changed (the common streaming
     //      case), only that one group is re-rendered (FR-006).
     //   3. Re-wrap all groups when the terminal width changed.
     //   4. Flatten the cached lines and sum the wrapped counts.
+    //
+    // Staleness is tracked per message via `Message::edit_seq` (bumped by
+    // `Message::touch()` on every in-place mutation) rather than a global
+    // version counter, so mutating one message never invalidates the cached
+    // renders of the others.
 
     let need_rewrap = app.message_cache_width != inner_width;
 
@@ -4270,21 +4299,22 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
-            version: 0, // stale — will be re-rendered below
+            edit_seq: 0, // rendered on the first pass below
         });
     }
 
-    // Re-render stale groups (version mismatch).  When the cache length
-    // matches messages length but the version changed, only the last
-    // message could have been modified by streaming (append_assistant_text,
-    // update_tool_call_status, etc.).  Re-render only those that differ.
+    // Re-render stale groups.  A group is stale when its cached `edit_seq`
+    // no longer matches the message's current `edit_seq`, or when the slot
+    // was just created and has no lines yet.  When only the last message
+    // was modified by streaming (append_assistant_text,
+    // update_tool_call_status, etc.) only that one group is re-rendered.
     let w = inner_width.max(1) as usize;
     for (i, msg) in messages_to_show.iter().enumerate() {
         let group = &mut app.message_line_cache[i];
-        if group.version != cur_version {
+        if group.edit_seq != msg.edit_seq || group.lines.is_empty() {
             group.lines =
                 message_to_lines(msg, &app.tool_step_map, &app.sid_to_display_name, &app.cwd);
-            group.version = cur_version;
+            group.edit_seq = msg.edit_seq;
             // Recompute the wrapped line count and content lines for this
             // group at the current width.  Without this, newly-streamed
             // messages keep `wrapped_count: 0` and the total height never
@@ -5266,6 +5296,54 @@ mod tests {
         assert!(
             rendered.iter().any(|line| line == "  💭 Second line."),
             "Expected second thought line in rendered output: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn test_messages_to_lines_renders_full_agent_complete_output_multiline() {
+        let message = Message::new(
+            "s1",
+            Role::Assistant,
+            vec![MessagePart::ToolCall {
+                tool: "agent_complete".to_string(),
+                call_id: "call-1".to_string(),
+                state: ToolCallState {
+                    status: ToolCallStatus::Completed,
+                    input: json!({"summary": "First line.\nSecond line."}),
+                    output: Some(json!({
+                        "agent_complete": true,
+                        "summary": "First line.\nSecond line."
+                    })),
+                    error: None,
+                    duration_ms: Some(42),
+                },
+            }],
+        );
+
+        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
+        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
+
+        // Each summary line must be rendered as its own ratatui Line. A single
+        // Line containing the whole summary would lose the '\n' graphemes
+        // (ratatui filters them out of Spans), collapsing the summary into one
+        // visual paragraph.
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("  └ ✅ First line.")),
+            "Expected first summary line on its own rendered line: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("  └ ✅ Second line.")),
+            "Expected second summary line on its own rendered line: {rendered:?}"
+        );
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| { line.contains("First line.") && line.contains("Second line.") }),
+            "Summary lines must not be joined into a single Line: {rendered:?}"
         );
     }
 }
