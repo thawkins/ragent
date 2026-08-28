@@ -30,7 +30,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::llm::LlmClient;
@@ -40,7 +40,7 @@ use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
 
 /// A single Azure resource entry parsed from `azureresources.json`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AzureResourceEntry {
     /// Unique identifier for this resource (used as model ID).
     pub id: String,
@@ -100,7 +100,7 @@ pub fn parse_azure_resources(path: &Path) -> Result<Vec<AzureResourceEntry>> {
         );
     }
 
-    let mut seen_ids = HashMap::new();
+    let mut seen_ids = HashSet::new();
     let mut entries = Vec::new();
 
     for entry in file.resources {
@@ -136,14 +136,13 @@ pub fn parse_azure_resources(path: &Path) -> Result<Vec<AzureResourceEntry>> {
         }
 
         // Deduplicate IDs
-        if seen_ids.contains_key(&entry.id) {
+        if !seen_ids.insert(entry.id.clone()) {
             tracing::warn!(
                 resource_id = %entry.id,
                 "Skipping duplicate Azure resource entry"
             );
             continue;
         }
-        seen_ids.insert(entry.id.clone(), ());
         entries.push(entry);
     }
 
@@ -238,11 +237,11 @@ impl Default for AzureResourceProvider {
 
 #[async_trait::async_trait]
 impl Provider for AzureResourceProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "azure_resource"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Azure Resource (File)"
     }
 
@@ -427,21 +426,35 @@ impl LlmClient for AzureAnthropicClient {
 
             futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        yield StreamEvent::Error { message: e.to_string() };
+            loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(r)) => match r {
+                        Ok(c) => c,
+                        Err(e) => {
+                            yield StreamEvent::Error { message: e.to_string() };
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: format!(
+                                "Azure Resource: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
+                        };
                         break;
                     }
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;

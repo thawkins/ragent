@@ -215,10 +215,9 @@ impl ContentCache {
     /// cannot be initialised.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
-            .with_context(|| format!("opening cache at {:?}", path.as_ref()))?;
+            .with_context(|| format!("opening cache at {}", path.as_ref().display()))?;
         Self::init(conn, ContentCacheConfig::default())
     }
-
     /// Open or create a cache at the given path with a custom configuration.
     ///
     /// # Errors
@@ -230,10 +229,9 @@ impl ContentCache {
         config: ContentCacheConfig,
     ) -> Result<Self> {
         let conn = Connection::open(path.as_ref())
-            .with_context(|| format!("opening cache at {:?}", path.as_ref()))?;
+            .with_context(|| format!("opening cache at {}", path.as_ref().display()))?;
         Self::init(conn, config)
     }
-
     /// Create an in-memory cache (for tests and ephemeral use).
     ///
     /// # Errors

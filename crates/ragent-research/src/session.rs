@@ -883,18 +883,21 @@ impl ResearchSession {
     /// or extracted body. When unset, those steps fall back to the local
     /// heuristic (`derive_topic_from_url_body`) so behaviour degrades
     /// gracefully without an LLM.
+    #[must_use]
     pub fn with_summarizer(mut self, summarizer: Arc<LlmAnalysisEngine>) -> Self {
         self.summarizer = Some(summarizer);
         self
     }
 
     /// Attach a planner for the iterative research branch.
+    #[must_use]
     pub fn with_planner(mut self, planner: Arc<dyn Planner>) -> Self {
         self.planner = Some(planner);
         self
     }
 
     /// Attach a critic for the iterative research branch.
+    #[must_use]
     pub fn with_critic(mut self, critic: Arc<dyn Critic>) -> Self {
         self.critic = Some(critic);
         self

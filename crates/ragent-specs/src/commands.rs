@@ -606,7 +606,7 @@ impl SpecCommand {
         let research_frontmatter = Self::build_research_frontmatter_instruction(from_research);
         let research_section = Self::build_research_section_instruction(from_research);
         format!(
-            r#"You are an expert specification writer. Create a SPECIFICATION ONLY (no implementation plan) for the following feature.
+            r"You are an expert specification writer. Create a SPECIFICATION ONLY (no implementation plan) for the following feature.
 
 **Feature:** {feature}
 
@@ -623,7 +623,7 @@ Write the following file:
 
 Do NOT create `PLAN.md`, `TESTPLAN.md`, or any other file. Only write `specs/{specname}/SPEC.md`.
 
-Use the `write` tool to create the file. Ensure the spec is clear, testable, and complete."#
+Use the `write` tool to create the file. Ensure the spec is clear, testable, and complete."
         )
     }
 
@@ -855,7 +855,7 @@ Use the `write` tool to create the file. Ensure the spec is clear, testable, and
             String::new()
         };
         format!(
-            r#"You are an expert software architect. Generate an implementation plan from an existing specification and a technology context.
+            r"You are an expert software architect. Generate an implementation plan from an existing specification and a technology context.
 
 **Spec ID:** {spec_id}
 
@@ -878,7 +878,7 @@ Write `specs/{spec_id}/PLAN.md` with:
 
 Do NOT modify `SPEC.md` or any other file. Only write `specs/{spec_id}/PLAN.md`.{data_model_instruction}{contracts_instruction}{feedback_instruction}
 
-Use the `write` tool to create the file. Ensure the plan is clear, actionable, and complete."#
+Use the `write` tool to create the file. Ensure the plan is clear, actionable, and complete."
         )
     }
 
@@ -1211,7 +1211,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
         next_task: u32,
     ) -> String {
         format!(
-            r#"You are an expert specification writer. Incrementally add new requirements to an existing spec.
+            r"You are an expert specification writer. Incrementally add new requirements to an existing spec.
 
 **Feature to add:** {feature}
 
@@ -1242,7 +1242,7 @@ Use the `write` tool to create the file. Ensure the plan is clear, actionable, a
 
 {plan_md}
 
-Use the `read` and `edit` tools to make all changes directly to the files. Ensure the spec is clear, testable, and complete."#,
+Use the `read` and `edit` tools to make all changes directly to the files. Ensure the spec is clear, testable, and complete.",
         )
     }
 
@@ -1371,7 +1371,7 @@ Use the `write` tool to create `specs/{spec_id}/JTBD.md`. Ensure the markdown is
     #[must_use]
     pub fn build_update_prompt(spec_id: &str, plan_md: &str) -> String {
         format!(
-            r#"You are an expert specification writer. An existing spec has been updated.
+            r"You are an expert specification writer. An existing spec has been updated.
 Re-read the current `specs/{spec_id}/SPEC.md` and regenerate `specs/{spec_id}/PLAN.md` and `specs/{spec_id}/TESTPLAN.md` to match.
 
 **Spec ID:** {spec_id}
@@ -1402,7 +1402,7 @@ Then write the following files using the `write` tool:
 
 {plan_md}
 
-Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete."#,
+Use the `write` tool to overwrite `PLAN.md` and `TESTPLAN.md`. Ensure the plan and test plan are clear, testable, and complete.",
         )
     }
 

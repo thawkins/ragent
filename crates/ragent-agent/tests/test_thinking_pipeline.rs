@@ -144,6 +144,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
         activity_log: std::sync::OnceLock::new(),
+        skill_registry_cache: parking_lot::Mutex::new(None),
     };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager

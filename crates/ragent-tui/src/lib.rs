@@ -558,6 +558,7 @@ pub async fn run_tui(
     startup.record("Spec mgr & resume & backfill", t0.elapsed());
 
     // -- Startup complete --
+    startup.finish(); // Freeze the wall-clock total so /startup stays stable.
     app.startup_timings = Some(startup);
     app.append_assistant_text("\n✅ **Ready**\n");
     app.status = "ready".to_string();

@@ -48,27 +48,92 @@ pub struct CustomAgentDef {
 /// appears in both directories the project-local definition replaces the
 /// global one.
 ///
+/// H-002: the result is cached per working directory and invalidated when the
+/// mtime of either discovery directory changes, so the per-turn prompt build
+/// does not re-walk the filesystem on every turn. The `OnceLock` also avoids
+/// the race where two threads populate the cache concurrently.
+///
 /// Returns `(agents, diagnostics)`.  Diagnostics are non-fatal human-readable
 /// strings describing why individual files were skipped or renamed.
 #[must_use]
 pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<String>) {
+    use std::sync::OnceLock;
+    use std::time::SystemTime;
+
+    static CACHE: OnceLock<std::sync::RwLock<HashMap<PathBuf, CustomAgentCache>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::RwLock::new(HashMap::new()));
+
+    // Compute the discovery directories + their mtimes.
+    let global_dir = global_agents_dir();
+    let project_dir = find_project_agents_dir(working_dir);
+    let dir_mtimes: Vec<(PathBuf, SystemTime)> = [&global_dir, &project_dir]
+        .into_iter()
+        .flatten()
+        .filter_map(|d| {
+            std::fs::metadata(d)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|mt| (d.clone(), mt))
+        })
+        .collect();
+
+    // Fast path: cached for this working dir and every directory unchanged.
+    {
+        let guard = cache.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = guard.get(working_dir)
+            && entry.dir_mtimes.iter().all(|(d, mt)| {
+                std::fs::metadata(d)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map_or(false, |current| current == *mt)
+            })
+        {
+            return (entry.agents.clone(), entry.diagnostics.clone());
+        }
+    }
+
+    // Cache miss / invalid: re-scan from disk.
     let mut agents: HashMap<String, CustomAgentDef> = HashMap::new();
     let mut diagnostics: Vec<String> = Vec::new();
 
     // Load user-global agents first (lowest priority).
-    if let Some(global_dir) = global_agents_dir() {
+    if let Some(global_dir) = global_dir {
         scan_dir(&global_dir, false, &mut agents, &mut diagnostics);
     }
 
     // Load project-local agents (highest priority — overrides global).
-    if let Some(project_dir) = find_project_agents_dir(working_dir) {
+    if let Some(project_dir) = project_dir {
         scan_dir(&project_dir, true, &mut agents, &mut diagnostics);
     }
 
     // Return in a stable order (alphabetical by name).
     let mut result: Vec<CustomAgentDef> = agents.into_values().collect();
     result.sort_by(|a, b| a.agent_info.name.cmp(&b.agent_info.name));
+
+    {
+        let mut guard = cache.write().unwrap_or_else(|e| e.into_inner());
+        guard.insert(
+            working_dir.to_path_buf(),
+            CustomAgentCache {
+                agents: result.clone(),
+                diagnostics: diagnostics.clone(),
+                dir_mtimes,
+            },
+        );
+    }
+
     (result, diagnostics)
+}
+
+/// H-002: cached [`load_custom_agents`] result keyed by the mtimes of the
+/// discovery directories.
+struct CustomAgentCache {
+    /// Cached agents.
+    agents: Vec<CustomAgentDef>,
+    /// Cached diagnostics.
+    diagnostics: Vec<String>,
+    /// `(directory, mtime)` pairs for the discovery directories.
+    dir_mtimes: Vec<(PathBuf, std::time::SystemTime)>,
 }
 
 /// Return the user-global agents directory: `~/.ragent/agents/`.

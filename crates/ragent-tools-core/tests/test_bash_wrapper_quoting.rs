@@ -17,6 +17,14 @@ mod shim {
     pub struct ToolOutput {
         pub content: String,
         pub metadata: Option<serde_json::Value>,
+    } // Stub the canonical path cache used by the tool context.
+    #[derive(Clone, Copy, Default)]
+    pub struct CanonicalPathCache;
+
+    impl CanonicalPathCache {
+        pub fn new() -> Self {
+            CanonicalPathCache
+        }
     }
 
     // Stub the tool context type.
@@ -27,6 +35,7 @@ mod shim {
         pub event_bus: std::sync::Arc<crate::shim::event::EventBus>,
         pub read_timestamps:
             std::sync::Arc<std::sync::RwLock<std::collections::HashMap<std::path::PathBuf, u64>>>,
+        pub canonical_cache: std::sync::Arc<crate::shim::CanonicalPathCache>,
     }
 
     // Stub the tool trait. Only the type signature matters here; the actual
@@ -42,13 +51,14 @@ mod shim {
             input: serde_json::Value,
             ctx: &ToolContext,
         ) -> anyhow::Result<ToolOutput>;
-    }
-
-    // Stub event bus and event enum used by the bash module.
+    } // Stub event bus and event enum used by the bash module.
     pub mod event {
         #[derive(Clone)]
         pub struct EventBus;
         impl EventBus {
+            pub fn new(_capacity: usize) -> EventBus {
+                EventBus
+            }
             pub fn publish(&self, _event: Event) {}
         }
 
@@ -100,7 +110,7 @@ mod shim {
 // Re-export the shim items into the crate root so that the bash module's
 // `super::{Tool, ToolContext, ToolOutput}` and `crate::{event, resource,
 // sanitize, askpass}` imports resolve.
-pub use shim::{Tool, ToolContext, ToolOutput};
+pub use shim::{CanonicalPathCache, Tool, ToolContext, ToolOutput};
 pub mod event {
     pub use crate::shim::event::*;
 }

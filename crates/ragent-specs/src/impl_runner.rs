@@ -37,6 +37,7 @@ impl ImplOptions {
     }
 
     /// Set the `--task` target.
+    #[must_use]
     pub fn with_task(mut self, task_id: impl Into<String>) -> Self {
         self.task_id = Some(task_id.into());
         self

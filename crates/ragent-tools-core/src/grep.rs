@@ -127,6 +127,25 @@ impl Tool for GrepTool {
             .build(pattern)
             .with_context(|| format!("Invalid regex pattern: '{pattern}'"))?;
 
+        // Validate and build the include/exclude glob overrides up front so an
+        // invalid user-supplied glob is surfaced as an error instead of being
+        // silently ignored (which would search unfiltered).
+        let override_opt = if include_glob.is_some() || exclude_glob.is_some() {
+            let mut ob = ignore::overrides::OverrideBuilder::new(&search_path);
+            if let Some(ref inc) = include_glob {
+                ob.add(inc)
+                    .with_context(|| format!("invalid include glob `{inc}`"))?;
+            }
+            if let Some(ref exc) = exclude_glob {
+                let neg = format!("!{exc}");
+                ob.add(&neg)
+                    .with_context(|| format!("invalid exclude glob `{exc}`"))?;
+            }
+            Some(ob.build().context("failed to build glob overrides")?)
+        } else {
+            None
+        };
+
         // Shared accumulators used from the Sink callback on the blocking thread
         let results: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let files_searched: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
@@ -149,71 +168,95 @@ impl Tool for GrepTool {
                 .ignore(true)
                 .filter_entry(|e| e.file_name() != ".git");
 
-            // Apply include/exclude glob overrides
-            if include_glob.is_some() || exclude_glob.is_some() {
-                let mut ob = ignore::overrides::OverrideBuilder::new(&search_path_bg);
-                if let Some(ref inc) = include_glob {
-                    // Positive glob — only match these files
-                    let _ = ob.add(inc);
-                }
-                if let Some(ref exc) = exclude_glob {
-                    // Negative glob — exclude matching files
-                    let neg = format!("!{exc}");
-                    let _ = ob.add(&neg);
-                }
-                if let Ok(ov) = ob.build() {
-                    walk_builder.overrides(ov);
-                }
+            // Apply the pre-validated include/exclude glob overrides
+            if let Some(ov) = override_opt {
+                walk_builder.overrides(ov);
             }
 
-            let mut searcher = SearcherBuilder::new()
-                .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
-                .line_number(true)
-                .build();
-
-            for entry in walk_builder.build().flatten() {
-                // Stop walking if already at limit
-                {
-                    let r = results_bg
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if r.len() >= max_results {
-                        *truncated_bg
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
-                        break;
-                    }
-                }
-
-                // Only search regular files
-                if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                    continue;
-                }
-
-                let path = entry.path().to_path_buf();
-                *files_bg
+            // M-020: walk and search in parallel (the `ignore` crate's
+            // parallel walker) so large trees use all cores instead of a
+            // single thread. Each visited path is searched with a fresh
+            // per-file `Searcher` clone (they are cheap to build) and the
+            // shared capped sink.
+            let should_stop = || {
+                let r = results_bg
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if r.len() >= max_results {
+                    *truncated_bg
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+                    true
+                } else {
+                    false
+                }
+            };
 
-                let sink = CollectSink {
-                    path: &path,
-                    base: &search_path_bg,
-                    results: &results_bg,
-                    truncated: &truncated_bg,
-                    max_results,
-                };
+            // Clone the shared handles into the closure so the outer Arcs can
+            // be unwrapped after the walk completes.
+            let results_par = Arc::clone(&results_bg);
+            let files_par = Arc::clone(&files_bg);
+            let truncated_par = Arc::clone(&truncated_bg);
+            let search_path_par = search_path_bg.clone();
+            let matcher_par = matcher.clone();
 
-                // Per-file errors (binary, permission denied) are silently ignored
-                let _ = searcher.search_path(&matcher, &path, sink);
-            }
+            walk_builder.build_parallel().run(|| {
+                let results_par = Arc::clone(&results_par);
+                let files_par = Arc::clone(&files_par);
+                let truncated_par = Arc::clone(&truncated_par);
+                let search_path_par = search_path_par.clone();
+                let matcher_par = matcher_par.clone();
+                let mut searcher = SearcherBuilder::new()
+                    .binary_detection(grep_searcher::BinaryDetection::quit(b'\x00'))
+                    .line_number(true)
+                    .build();
+                Box::new(move |entry_result| {
+                    if should_stop() {
+                        return ignore::WalkState::Quit;
+                    }
+                    let Ok(entry) = entry_result else {
+                        return ignore::WalkState::Continue;
+                    };
+                    if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+                        return ignore::WalkState::Continue;
+                    }
+                    let path = entry.path().to_path_buf();
+                    *files_par
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+
+                    let sink = CollectSink {
+                        path: &path,
+                        base: &search_path_par,
+                        results: &results_par,
+                        truncated: &truncated_par,
+                        max_results,
+                    };
+
+                    // Per-file errors (binary, permission denied) are silently ignored
+                    let _ = searcher.search_path(&matcher_par, &path, sink);
+                    ignore::WalkState::Continue
+                })
+            });
         })
         .await
         .context("Grep search task panicked")?;
 
+        // The walker's parallel closure holds clones of `results`; after
+        // `spawn_blocking` returns those are dropped, so unwrap normally
+        // succeeds. Fall back to locking+cloning the inner value if a stray
+        // owner lingers (a benign, timing-dependent condition) rather than
+        // failing the whole grep call.
         let results = Arc::try_unwrap(results)
-            .map_err(|_| anyhow::anyhow!("results Arc still has other owners"))?
-            .into_inner()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+            .map(|m| {
+                m.into_inner()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+            })
+            .unwrap_or_else(|arc| {
+                arc.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+            });
         let files_searched = *files_searched
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

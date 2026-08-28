@@ -21,7 +21,12 @@ pub enum SpecError {
 
     /// A status transition is not allowed.
     #[error("invalid status transition from {from} to {to}")]
-    InvalidStatusTransition { from: String, to: String },
+    InvalidStatusTransition {
+        /// The source status.
+        from: String,
+        /// The destination status.
+        to: String,
+    },
 
     /// Validation of a spec failed.
     #[error("validation failed: {0}")]

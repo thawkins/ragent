@@ -167,16 +167,22 @@ pub(crate) fn summarise_error(raw: &str) -> String {
         return "Selected model is not available for chat/completions; use /model and pick a non-Codex chat model".to_string();
     }
 
-    // Truncate to a reasonable length for the status bar
-    if cleaned.len() > 120 {
-        let mut end = 120;
-        while end > 0 && !cleaned.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}…", &cleaned[..end])
-    } else {
-        cleaned.to_string()
+    // Truncate to a reasonable length for the status bar.
+    truncate_to_char_boundary(cleaned, 120)
+}
+
+/// Truncate `s` to at most `max` characters, always ending on a UTF-8 char
+/// boundary so a multi-byte sequence at the cut point cannot panic. Appends a
+/// single ellipsis when truncation occurred.
+pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
     }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 /// Remove control characters (except newlines and tabs) and ANSI escape

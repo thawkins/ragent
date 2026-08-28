@@ -4,7 +4,7 @@
 //! These helpers were previously inline in `web_gatherer.rs`.
 
 #[allow(dead_code)]
-pub(crate) fn compute_relevance_label(
+pub fn compute_relevance_label(
     query: &str,
     title: &str,
     snippet: &str,
@@ -61,7 +61,7 @@ pub(crate) fn compute_relevance_label(
 ///
 /// This is intentionally exposed at module scope so benchmarks and unit tests
 /// can measure it in isolation (Milestone B-003).
-pub(crate) fn normalize_query_terms(query: &str) -> Vec<String> {
+pub fn normalize_query_terms(query: &str) -> Vec<String> {
     let query_lc = query.to_lowercase();
     query_lc
         .split_whitespace()

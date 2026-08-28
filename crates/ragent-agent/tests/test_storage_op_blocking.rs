@@ -63,6 +63,7 @@ fn test_processor() -> (SessionProcessor, Arc<Storage>) {
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         bg_service: std::sync::OnceLock::new(),
         activity_log: std::sync::OnceLock::new(),
+        skill_registry_cache: parking_lot::Mutex::new(None),
     };
     (processor, storage)
 }

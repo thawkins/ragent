@@ -15,11 +15,11 @@ pub struct StockSearchTool;
 
 #[async_trait::async_trait]
 impl Tool for StockSearchTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "stock_search"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Search for ticker symbols matching a company or asset name."
     }
 
@@ -33,7 +33,7 @@ impl Tool for StockSearchTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

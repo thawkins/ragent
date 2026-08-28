@@ -482,7 +482,6 @@ impl LlmClient for CopilotClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut tool_call_names: HashMap<u64, String> = HashMap::new();
 
             if let Some(ev) = rate_limit_event {
                 yield ev;
@@ -490,21 +489,35 @@ impl LlmClient for CopilotClient {
 
             futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        yield StreamEvent::Error { message: e.to_string() };
+            loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(r)) => match r {
+                        Ok(c) => c,
+                        Err(e) => {
+                            yield StreamEvent::Error { message: e.to_string() };
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: format!(
+                                "Copilot: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
+                        };
                         break;
                     }
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
@@ -513,15 +526,16 @@ impl LlmClient for CopilotClient {
                     let data = match line.strip_prefix("data: ") {
                         Some(d) => d.trim(),
                         None => continue,
-                    };                      if data == "[DONE]" {
-                          yield StreamEvent::Finish { reason: FinishReason::Stop };
-                          return;
-                      }
+                    };
+                    if data == "[DONE]" {
+                        yield StreamEvent::Finish { reason: FinishReason::Stop };
+                        return;
+                    }
 
-                      let parsed: Value = match serde_json::from_str(data) {
-                          Ok(v) => v,
-                          Err(_) => continue,
-                      };
+                    let parsed: Value = match serde_json::from_str(data) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
 
                     // Usage info
                     if let Some(usage) = parsed.get("usage")
@@ -563,7 +577,6 @@ impl LlmClient for CopilotClient {
                                         let tc_id = tool_call_ids.get(&index)
                                             .cloned()
                                             .unwrap_or_else(|| format!("tc_{index}"));
-                                        tool_call_names.insert(index, name.to_string());
                                         yield StreamEvent::ToolCallStart {
                                             id: tc_id,
                                             name: name.to_string(),
@@ -590,7 +603,6 @@ impl LlmClient for CopilotClient {
                             for (_idx, id) in tool_call_ids.drain() {
                                 yield StreamEvent::ToolCallEnd { id };
                             }
-                            tool_call_names.clear();
 
                             let reason = match finish_reason {
                                 "tool_calls" => FinishReason::ToolUse,

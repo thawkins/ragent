@@ -31,7 +31,7 @@ fn normalize_levels(levels: impl IntoIterator<Item = ThinkingLevel>) -> Vec<Thin
 
 /// Returns the canonical full reasoning-level set for providers that support
 /// explicit effort selection.
-pub(crate) fn full_reasoning_levels() -> Vec<ThinkingLevel> {
+pub fn full_reasoning_levels() -> Vec<ThinkingLevel> {
     normalize_levels([
         ThinkingLevel::Auto,
         ThinkingLevel::Off,
@@ -43,13 +43,13 @@ pub(crate) fn full_reasoning_levels() -> Vec<ThinkingLevel> {
 
 /// Returns the canonical two-state thinking-level set for boolean-thinking
 /// providers such as Ollama.
-pub(crate) fn binary_thinking_levels() -> Vec<ThinkingLevel> {
+pub fn binary_thinking_levels() -> Vec<ThinkingLevel> {
     normalize_levels([ThinkingLevel::Auto, ThinkingLevel::Off])
 }
 
 /// Returns the thinking levels supported by Anthropic models known to expose
 /// extended thinking.
-pub(crate) fn anthropic_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
+pub fn anthropic_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
     let model_id = model_id.to_ascii_lowercase();
     if model_id.contains("claude-sonnet-4")
         || model_id.contains("claude-opus-4")
@@ -62,7 +62,7 @@ pub(crate) fn anthropic_thinking_levels_for_model(model_id: &str) -> Vec<Thinkin
 }
 
 /// Returns the thinking levels supported by OpenAI-compatible reasoning models.
-pub(crate) fn openai_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
+pub fn openai_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
     let model_id = model_id.to_ascii_lowercase();
     if model_id.contains("gpt-5") || model_id.contains("o1") || model_id.contains("o3") {
         full_reasoning_levels()
@@ -73,7 +73,7 @@ pub(crate) fn openai_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLe
 
 /// Returns the thinking levels supported by Gemini models with configurable
 /// thinking.
-pub(crate) fn gemini_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
+pub fn gemini_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
     let model_id = model_id.to_ascii_lowercase();
     if model_id.contains("gemini-2.5")
         || model_id.contains("gemini-3")
@@ -91,7 +91,7 @@ pub(crate) fn gemini_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLe
 /// Ollama models that support the `think` parameter include those with
 /// `{{--think}}` tags in their Modelfile template. Since we cannot inspect
 /// the template at discovery time, we match known model name patterns.
-pub(crate) fn model_supports_binary_thinking(model_id: &str) -> bool {
+pub fn model_supports_binary_thinking(model_id: &str) -> bool {
     let model_id = model_id.to_ascii_lowercase();
     model_id.contains("deepseek-r1")
         || model_id.contains("qwen3")
@@ -105,7 +105,7 @@ pub(crate) fn model_supports_binary_thinking(model_id: &str) -> bool {
 }
 
 /// Returns the thinking levels supported by an Ollama-family model.
-pub(crate) fn binary_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
+pub fn binary_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLevel> {
     if model_supports_binary_thinking(model_id) {
         binary_thinking_levels()
     } else {
@@ -164,7 +164,7 @@ fn map_openai_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str
 
 /// Resolves an OpenAI-style `reasoning_effort` value from a typed request or
 /// legacy options.
-pub(crate) fn reasoning_effort_from_request(request: &ChatRequest) -> Option<&'static str> {
+pub fn reasoning_effort_from_request(request: &ChatRequest) -> Option<&'static str> {
     request
         .thinking
         .as_ref()
@@ -186,9 +186,7 @@ pub(crate) fn reasoning_effort_from_request(request: &ChatRequest) -> Option<&'s
 
 /// Resolves Copilot-discovered reasoning effort values into user-facing
 /// thinking levels.
-pub(crate) fn reasoning_levels_from_supported_efforts(
-    efforts: Option<&[String]>,
-) -> Vec<ThinkingLevel> {
+pub fn reasoning_levels_from_supported_efforts(efforts: Option<&[String]>) -> Vec<ThinkingLevel> {
     let Some(efforts) = efforts else {
         return Vec::new();
     };
@@ -212,11 +210,10 @@ pub(crate) fn reasoning_levels_from_supported_efforts(
 
 /// Builds Anthropic's `thinking` payload from a typed request or legacy
 /// options.
-pub(crate) fn anthropic_thinking_payload_from_request(request: &ChatRequest) -> Option<Value> {
+pub fn anthropic_thinking_payload_from_request(request: &ChatRequest) -> Option<Value> {
     let thinking = request
         .thinking
-        .as_ref()
-        .cloned()
+        .clone()
         .or_else(|| parse_legacy_thinking_option(&request.options))?;
 
     if matches!(thinking.display, Some(ThinkingDisplay::Omitted))
@@ -250,7 +247,7 @@ pub(crate) fn anthropic_thinking_payload_from_request(request: &ChatRequest) -> 
 
 /// Returns `true` when the request asks Anthropic for a summarized thinking
 /// display mode that the current adapter cannot faithfully encode.
-pub(crate) fn request_uses_unsupported_anthropic_display(request: &ChatRequest) -> bool {
+pub fn request_uses_unsupported_anthropic_display(request: &ChatRequest) -> bool {
     request
         .thinking
         .as_ref()
@@ -259,11 +256,10 @@ pub(crate) fn request_uses_unsupported_anthropic_display(request: &ChatRequest) 
 
 /// Builds Gemini's `thinkingConfig` payload from a typed request or legacy
 /// options.
-pub(crate) fn gemini_thinking_config_from_request(request: &ChatRequest) -> Option<Value> {
+pub fn gemini_thinking_config_from_request(request: &ChatRequest) -> Option<Value> {
     let thinking = request
         .thinking
-        .as_ref()
-        .cloned()
+        .clone()
         .or_else(|| parse_legacy_thinking_option(&request.options));
 
     let include_thoughts = request
@@ -305,7 +301,7 @@ pub(crate) fn gemini_thinking_config_from_request(request: &ChatRequest) -> Opti
 }
 
 /// Resolves Ollama-style `think` state from a typed request or legacy options.
-pub(crate) fn think_flag_from_request(request: &ChatRequest) -> Option<bool> {
+pub fn think_flag_from_request(request: &ChatRequest) -> Option<bool> {
     request
         .thinking
         .as_ref()
@@ -319,7 +315,7 @@ pub(crate) fn think_flag_from_request(request: &ChatRequest) -> Option<bool> {
 
 /// Returns `true` when HuggingFace should warn that a thinking request will be
 /// ignored because the provider has no standard parameter.
-pub(crate) fn should_warn_unsupported_thinking(request: &ChatRequest) -> bool {
+pub fn should_warn_unsupported_thinking(request: &ChatRequest) -> bool {
     request.thinking.as_ref().map_or_else(
         || {
             parse_legacy_thinking_option(&request.options)

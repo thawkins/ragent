@@ -505,9 +505,9 @@ pub fn path_matches(pattern: &str, path: &str) -> bool {
 /// Uses a standard two-pointer dynamic-programming approach for glob-style
 /// matching with a single wildcard character.
 fn wildcard_match(pattern: &str, path: &str) -> bool {
-    let p: Vec<char> = pattern.chars().collect();
+    let pat: Vec<char> = pattern.chars().collect();
     let s: Vec<char> = path.chars().collect();
-    let (m, n) = (p.len(), s.len());
+    let (m, n) = (pat.len(), s.len());
 
     // dp[i][j] = true if pattern[0..i] matches path[0..j].
     let mut dp = vec![vec![false; n + 1]; m + 1];
@@ -515,7 +515,7 @@ fn wildcard_match(pattern: &str, path: &str) -> bool {
 
     // Pattern prefixes that are all `*` match empty string.
     for i in 1..=m {
-        if p[i - 1] == '*' {
+        if pat[i - 1] == '*' {
             dp[i][0] = dp[i - 1][0];
         } else {
             break;
@@ -524,7 +524,7 @@ fn wildcard_match(pattern: &str, path: &str) -> bool {
 
     for i in 1..=m {
         for j in 1..=n {
-            match p[i - 1] {
+            match pat[i - 1] {
                 '*' => {
                     // `*` matches zero chars (dp[i-1][j]) or more (dp[i][j-1]).
                     dp[i][j] = dp[i - 1][j] || dp[i][j - 1];

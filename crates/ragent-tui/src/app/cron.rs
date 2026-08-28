@@ -56,6 +56,12 @@ const CRON_TICK_INTERVAL_SECS: u64 = 30;
 /// Synthetic parent session ID used for cron-spawned agent runs.
 const CRON_PARENT_SESSION_ID: &str = "cron-scheduler";
 
+/// Whether a cron event repeats (FR-012): it has a repeat duration and is
+/// not a one-shot schedule.
+fn is_repeating_event(event: &ragent_storage::CronEventRow) -> bool {
+    event.duration_secs.is_some() && event.schedule_form != "one_shot"
+}
+
 /// Handle to the background cron scheduler task.
 ///
 /// Created by [`start_cron_scheduler`] and used to stop the scheduler
@@ -193,8 +199,7 @@ async fn cron_tick(
                     // FR-012: no-double-fire guard for repeating events.
                     // If this repeating event's previous execution is still
                     // running, skip this cycle and log "skipped".
-                    let is_repeating =
-                        event.duration_secs.is_some() && event.schedule_form != "one_shot";
+                    let is_repeating = is_repeating_event(event);
                     if is_repeating {
                         let already_running = running_events
                             .lock()
@@ -309,7 +314,7 @@ async fn fire_cron_event(
     }
 
     // Determine if this is a repeating or one-shot event.
-    let is_repeating = event.duration_secs.is_some() && event.schedule_form != "one_shot";
+    let is_repeating = is_repeating_event(event);
 
     // Attempt to spawn a background agent run via the new_agent path.
     // For stateful events, load the cross-run loop state and inject it
@@ -608,7 +613,7 @@ fn advance_or_disable_after_error(
     event: &ragent_storage::CronEventRow,
     now: chrono::DateTime<Utc>,
 ) {
-    let is_repeating = event.duration_secs.is_some() && event.schedule_form != "one_shot";
+    let is_repeating = is_repeating_event(event);
     if is_repeating {
         advance_repeating_event(storage, event, now);
     } else if let Err(e) = storage.set_cron_event_enabled(&event.id, false) {
@@ -654,7 +659,7 @@ fn skip_disabled_event(
     );
 
     // Advance next_due to prevent re-logging on every tick.
-    let is_repeating = event.duration_secs.is_some() && event.schedule_form != "one_shot";
+    let is_repeating = is_repeating_event(event);
     if is_repeating {
         advance_repeating_event(storage, event, now);
     } else {
@@ -1581,6 +1586,7 @@ mod tests {
                 std::collections::HashMap::new(),
             )),
             activity_log: std::sync::OnceLock::new(),
+            skill_registry_cache: parking_lot::Mutex::new(None),
         }
     }
 

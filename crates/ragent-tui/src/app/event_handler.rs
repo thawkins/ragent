@@ -1038,29 +1038,29 @@ impl App {
                         format!("[{display}:{step}.{substep}] ")
                     })
                     .unwrap_or_default();
-                // Pretty-print JSON args across multiple log lines
+                // Pretty-print JSON args as a single truncated log entry
+                // (H-009) rather than one entry per line, which both avoided
+                // dozens of `format!` allocations for a large payload and
+                // (previously) bumped the global log version per line.
                 let pretty = serde_json::from_str::<serde_json::Value>(args)
                     .ok()
-                    .and_then(|v| serde_json::to_string_pretty(&v).ok());
-                if let Some(formatted) = pretty {
-                    let mut first = true;
-                    for line in formatted.lines() {
-                        if first {
-                            self.push_log_no_agent(
-                                LogLevel::Tool,
-                                format!("{}→ {} {}", step_tag, tool, line),
-                            );
-                            first = false;
-                        } else {
-                            self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
-                        }
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .unwrap_or_else(|| args.to_string());
+                // Cap at ~200 chars so a single tool call cannot flood the log.
+                let preview: String = {
+                    let trimmed = pretty.trim();
+                    if trimmed.chars().count() > 200 {
+                        let mut out: String = trimmed.chars().take(200).collect();
+                        out.push_str("…");
+                        out
+                    } else {
+                        trimmed.to_string()
                     }
-                } else {
-                    self.push_log_no_agent(
-                        LogLevel::Tool,
-                        format!("{}→ {}({})", step_tag, tool, args),
-                    );
-                }
+                };
+                self.push_log_no_agent(
+                    LogLevel::Tool,
+                    format!("{}→ {}({})", step_tag, tool, preview),
+                );
                 self.needs_redraw = true;
             }
             Event::ToolResult {

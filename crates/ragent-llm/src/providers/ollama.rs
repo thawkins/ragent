@@ -446,14 +446,12 @@ impl LlmClient for OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
-            let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
             tracing::warn!(
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %error_body,
-                request_body = %body_str,
-                "Ollama API error — full request logged"
+                "Ollama API error"
             );
             bail!("Ollama API error ({status}): {error_body}");
         }
@@ -470,7 +468,6 @@ impl LlmClient for OllamaClient {
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut tool_call_names: HashMap<u64, String> = HashMap::new();
             let mut stream_done = false;
             let mut yielded_event = false;
 
@@ -478,7 +475,9 @@ impl LlmClient for OllamaClient {
 
             while !stream_done {
                 let chunk_result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
+                    std::time::Duration::from_secs(
+                        super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS,
+                    ),
                     stream.next(),
                 )
                 .await
@@ -487,7 +486,10 @@ impl LlmClient for OllamaClient {
                     Ok(None) => break,
                     Err(_) => {
                         yield StreamEvent::Error {
-                            message: format!("Ollama: stream stalled — no data received for {timeout_secs}s"),
+                            message: format!(
+                                "Ollama: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
                         };
                         break;
                     }
@@ -513,10 +515,7 @@ impl LlmClient for OllamaClient {
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
@@ -566,74 +565,75 @@ impl LlmClient for OllamaClient {
                             .as_array()
                             .is_some_and(|a| !a.is_empty());
 
-                      // Text content
-                      if !has_tool_calls
-                          && let Some(content) = delta["content"].as_str()
-                          && !content.is_empty()
-                      {
-                          yield StreamEvent::TextDelta { text: content.to_string() };
-                          yielded_event = true;
-                      }
+                        // Text content
+                        if !has_tool_calls
+                            && let Some(content) = delta["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            yield StreamEvent::TextDelta {
+                                text: content.to_string(),
+                            };
+                            yielded_event = true;
+                        }
 
-                      // Reasoning / thinking content (Ollama emits this in the
-                      // OpenAI-compatible stream under `delta.reasoning`).
-                      // We treat it as reasoning so it does not pollute the
-                      // assistant text buffer and the model's subsequent
-                      // tool_calls are still parsed and executed.
-                      if let Some(reasoning) = delta["reasoning"].as_str() {
-                          yield StreamEvent::ReasoningDelta {
-                              text: reasoning.to_string(),
-                          };
-                          yielded_event = true;
-                      }
+                        // Reasoning / thinking content (Ollama emits this in the
+                        // OpenAI-compatible stream under `delta.reasoning`).
+                        // We treat it as reasoning so it does not pollute the
+                        // assistant text buffer and the model's subsequent
+                        // tool_calls are still parsed and executed.
+                        if let Some(reasoning) = delta["reasoning"].as_str() {
+                            yield StreamEvent::ReasoningDelta {
+                                text: reasoning.to_string(),
+                            };
+                            yielded_event = true;
+                        }
 
-                      // Tool calls
-                      if has_tool_calls
-                          && let Some(tool_calls) = delta["tool_calls"].as_array()
-                      {
-                          for tc in tool_calls {
-                              let index = tc["index"].as_u64().unwrap_or(0);
+                        // Tool calls
+                        if has_tool_calls
+                            && let Some(tool_calls) = delta["tool_calls"].as_array()
+                        {
+                            for tc in tool_calls {
+                                let index = tc["index"].as_u64().unwrap_or(0);
 
-                              if let Some(id) = tc["id"].as_str() {
-                                  tool_call_ids.insert(index, id.to_string());
-                              }
+                                if let Some(id) = tc["id"].as_str() {
+                                    tool_call_ids.insert(index, id.to_string());
+                                }
 
-                              if let Some(function) = tc.get("function") {
-                                  if let Some(name) = function["name"].as_str() {
-                                      let tc_id = tool_call_ids
-                                          .get(&index)
-                                          .cloned()
-                                          .unwrap_or_else(|| format!("tc_{index}"));
-                                      tool_call_names.insert(index, name.to_string());
-                                      yield StreamEvent::ToolCallStart {
-                                          id: tc_id,
-                                          name: name.to_string(),
-                                      };
-                                      yielded_event = true;
-                                  }
+                                if let Some(function) = tc.get("function") {
+                                    if let Some(name) = function["name"].as_str() {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallStart {
+                                            id: tc_id,
+                                            name: name.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
 
-                                  if let Some(args) = function["arguments"].as_str()
-                                      && !args.is_empty()
-                                  {
-                                      let tc_id = tool_call_ids
-                                          .get(&index)
-                                          .cloned()
-                                          .unwrap_or_else(|| format!("tc_{index}"));
-                                      yield StreamEvent::ToolCallDelta {
-                                          id: tc_id,
-                                          args_json: args.to_string(),
-                                      };
-                                      yielded_event = true;
-                                  }
-                              }
-                          }
-                                              }
+                                    if let Some(args) = function["arguments"].as_str()
+                                        && !args.is_empty()
+                                    {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallDelta {
+                                            id: tc_id,
+                                            args_json: args.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
+                                }
+                            }
+                        }
 
-                                              // Finish reason
-                                              if let Some(finish_reason) = choice["finish_reason"].as_str() {                            for (_idx, id) in tool_call_ids.drain() {
+                        // Finish reason
+                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
+                            for (_idx, id) in tool_call_ids.drain() {
                                 yield StreamEvent::ToolCallEnd { id };
                             }
-                            tool_call_names.clear();
 
                             let reason = match finish_reason {
                                 "tool_calls" => FinishReason::ToolUse,

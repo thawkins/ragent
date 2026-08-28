@@ -215,6 +215,30 @@ pub struct SessionProcessor {
     /// [`ragent_config::activity_log::is_enabled`] so that `/alog off`
     /// suppresses all writes without unwiring the handle.
     pub activity_log: std::sync::OnceLock<Arc<ragent_storage::ActivityLog>>,
+    /// C-001: cached skill registry keyed by the mtimes of the scanned
+    /// skill directories plus the `extra_dirs` list. `SkillRegistry::load`
+    /// does synchronous `std::fs` walks + `serde_yaml` parses across up to
+    /// 7 directories on every turn; caching it here (invalidated when any
+    /// contributing directory's mtime changes) eliminates that per-turn
+    /// disk I/O.
+    pub skill_registry_cache: parking_lot::Mutex<Option<CachedSkillRegistry>>,
+}
+
+/// C-001: a cached [`crate::skill::SkillRegistry`] plus the inputs used to
+/// build it. `working_dir`, `extra_dirs`, and the mtimes of every skill
+/// directory are recorded so the cache reloads only when a skill directory
+/// changes on disk (a new `SKILL.md` or subdirectory updates its parent's
+/// mtime).
+#[derive(Clone)]
+pub struct CachedSkillRegistry {
+    /// The loaded registry.
+    pub registry: crate::skill::SkillRegistry,
+    /// `(directory, mtime)` pairs for every scanned skill directory.
+    pub dir_mtimes: Vec<(PathBuf, std::time::SystemTime)>,
+    /// The `extra_dirs` config list used to build the registry.
+    pub extra_dirs: Vec<String>,
+    /// The working directory the registry was built for.
+    pub working_dir: PathBuf,
 }
 
 /// P-2: the cached resolved config plus the inputs used to build it.
@@ -393,7 +417,7 @@ impl SessionProcessor {
     /// Return the cached total serialised byte size of the tool definitions
     /// (P-7). Populated alongside [`get_cached_tool_definitions`]; returns
     /// `None` when the cache is empty or invalidated.
-    fn get_cached_tool_definition_bytes(&self) -> Option<u64> {
+    pub(crate) fn get_cached_tool_definition_bytes(&self) -> Option<u64> {
         self.cached_tool_definition_bytes.read().as_ref().copied()
     }
 
@@ -493,6 +517,82 @@ impl SessionProcessor {
             env_overrides_present,
         });
         arc
+    }
+
+    /// C-001: load (and cache) the skill registry for a working directory,
+    /// invalidating when any scanned skill directory's mtime changes.
+    ///
+    /// Returns `None` when no skill directories exist and no skills would be
+    /// discovered, so callers can cheaply skip the system-prompt skill section.
+    pub(crate) fn skill_registry(
+        &self,
+        working_dir: &std::path::Path,
+        extra_dirs: &[String],
+    ) -> Option<crate::skill::SkillRegistry> {
+        // Collect the candidate skill directories exactly as `discover_skills`
+        // does so the cache is invalidated precisely when the scan inputs change.
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        if let Some(home) = dirs::home_dir() {
+            for dir_name in [".agent", ".claude"] {
+                dirs.push(home.join(dir_name).join("skills"));
+            }
+            dirs.push(home.join(".ragent").join("skills"));
+        }
+        for dir in extra_dirs {
+            dirs.push(PathBuf::from(dir));
+        }
+        for dir_name in [".agent", ".claude"] {
+            dirs.push(working_dir.join(dir_name).join("skills"));
+        }
+        dirs.push(working_dir.join(".ragent").join("skills"));
+        // Monorepo: first-level subdirectories of `working_dir`.
+        if let Ok(entries) = std::fs::read_dir(working_dir) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path.join(".ragent").join("skills"));
+                }
+            }
+        }
+
+        // Record mtimes of the directories that actually exist.
+        let dir_mtimes: Vec<(PathBuf, std::time::SystemTime)> = dirs
+            .into_iter()
+            .filter_map(|d| {
+                std::fs::metadata(&d)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|mt| (d, mt))
+            })
+            .collect();
+
+        // Fast path: cached registry still valid.
+        {
+            let guard = self.skill_registry_cache.lock();
+            if let Some(cached) = guard.as_ref()
+                && cached.working_dir == working_dir
+                && cached.extra_dirs == extra_dirs
+                && cached.dir_mtimes.iter().all(|(d, mt)| {
+                    std::fs::metadata(d)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .map_or(false, |current| current == *mt)
+                })
+            {
+                return Some(cached.registry.clone());
+            }
+        }
+
+        // Cache miss or invalid: reload from disk.
+        let registry = crate::skill::SkillRegistry::load(working_dir, extra_dirs);
+        let mut guard = self.skill_registry_cache.lock();
+        *guard = Some(CachedSkillRegistry {
+            registry: registry.clone(),
+            dir_mtimes,
+            extra_dirs: extra_dirs.to_vec(),
+            working_dir: working_dir.to_path_buf(),
+        });
+        Some(registry)
     }
     /// Run a blocking storage operation on a dedicated thread to avoid
     /// stalling the Tokio runtime.
@@ -775,6 +875,10 @@ impl SessionProcessor {
         // nudge once per run. See [`SUBAGENT_SUMMARY_NUDGE`].
         let mut subagent_summary_nudged = false;
         let mut last_interim_hash: Option<u64> = None;
+        // M-008: count of non-tool-call assistant parts at the last interim
+        // save, so a step that only appended tool-call parts skips the interim
+        // rewrite.
+        let mut last_interim_significant_count: Option<usize> = None;
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
         let mut compaction_attempted_this_turn = false;
@@ -1262,7 +1366,21 @@ impl SessionProcessor {
                                 .and_then(|m| m.get("lines"))
                                 .and_then(serde_json::Value::as_u64)
                                 .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                            let batch_content = result_content.clone();
+                            // M-007: the batch event carries a truncated display
+                            // preview too (the full content is preserved in
+                            // `assistant_parts` and the activity log).
+                            const BATCH_PREVIEW_CHARS: usize = 2000;
+                            let batch_content: String = {
+                                let trimmed = result_content.trim();
+                                if trimmed.chars().count() > BATCH_PREVIEW_CHARS {
+                                    let mut s: String =
+                                        trimmed.chars().take(BATCH_PREVIEW_CHARS).collect();
+                                    s.push_str("…");
+                                    s
+                                } else {
+                                    trimmed.to_string()
+                                }
+                            };
                             batch_entries.push(ragent_types::event::ToolCallBatchEntry {
                                 call_id: tc.id.clone(),
                                 tool: tc.name.clone(),
@@ -1670,7 +1788,25 @@ impl SessionProcessor {
                             .and_then(|m| m.get("lines"))
                             .and_then(serde_json::Value::as_u64)
                             .map_or_else(|| result_content.lines().count(), |n| n as usize);
-                        let result_preview = result_content.clone();
+                        // M-007: publish only a short display preview on the
+                        // event (the TUI logs ~2500 chars and the LLM gets the
+                        // full content via `tool_result_content_for_llm`), so a
+                        // large result is not cloned in full into the event and
+                        // the activity-log records.
+                        const TOOL_RESULT_EVENT_PREVIEW_CHARS: usize = 2000;
+                        let result_preview: String = {
+                            let trimmed = result_content.trim();
+                            if trimmed.chars().count() > TOOL_RESULT_EVENT_PREVIEW_CHARS {
+                                let mut s: String = trimmed
+                                    .chars()
+                                    .take(TOOL_RESULT_EVENT_PREVIEW_CHARS)
+                                    .collect();
+                                s.push_str("…");
+                                s
+                            } else {
+                                trimmed.to_string()
+                            }
+                        };
                         let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
                         event_bus.publish(Event::ToolResult {
                             session_id: session_id_str.clone(),
@@ -2048,19 +2184,33 @@ impl SessionProcessor {
                     hasher.finish()
                 };
                 if last_interim_hash != Some(current_hash) {
-                    let mut interim =
-                        Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
-                    interim.id = assistant_msg_id.clone();
-                    // H3: use the FTS-skip variant for the interim save. The
-                    // searchable text content of the interim message is either
-                    // unchanged (only a tool-call status transition) or the
-                    // message is still accumulating deltas and will be
-                    // re-synced wholesale on the final save. Rewriting the FTS
-                    // index on every stream event (DELETE + re-INSERT) was the
-                    // dominant cost of `storage.assistant_interim.update`.
-                    let _ = self
-                        .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
-                        .await;
+                    // M-008: avoid cloning the entire `assistant_parts` Vec and
+                    // rewriting the full SQLite row when the only change is that
+                    // tool-call parts were appended. Tool-call parts are carried
+                    // in the transcript (`chat_messages`) and finalised on the
+                    // final save, so an interim rewrite that only adds them is
+                    // wasted work. Track the count of *non-tool-call* parts since
+                    // the last save; skip the interim write when it is unchanged.
+                    let significant_count = assistant_parts
+                        .iter()
+                        .filter(|p| !matches!(p, MessagePart::ToolCall { .. }))
+                        .count();
+                    if last_interim_significant_count != Some(significant_count) {
+                        let mut interim =
+                            Message::new(session_id, Role::Assistant, (*assistant_parts).clone());
+                        interim.id = assistant_msg_id.clone();
+                        // H3: use the FTS-skip variant for the interim save. The
+                        // searchable text content of the interim message is either
+                        // unchanged (only a tool-call status transition) or the
+                        // message is still accumulating deltas and will be
+                        // re-synced wholesale on the final save. Rewriting the FTS
+                        // index on every stream event (DELETE + re-INSERT) was the
+                        // dominant cost of `storage.assistant_interim.update`.
+                        let _ = self
+                            .storage_op(move |s| s.update_message_parts_skip_fts(&interim))
+                            .await;
+                        last_interim_significant_count = Some(significant_count);
+                    }
                     last_interim_hash = Some(current_hash);
                 }
             }

@@ -395,9 +395,6 @@ Recent highlights:
 - **Activity-log slash commands** — `/alog on|off|list|show|stats` with config
   persistence, a status-bar indicator, and best-effort async recording wired
   into the session processor (v1.0.60)
-- **Low-priority shell execution** — `bash.nice` config runs shell commands as
-  children of `nice -n <level>` (and `ionice -c 3` on Linux) so heavy agent
-  workloads keep the host responsive (v1.0.60)
 - **CPU-spin fixes** — Gemini SSE parser infinite loop fixed (`continue` to
   `break`), timed-out bash children now killed via `kill_on_drop`, and the
   TUI idle redraw interval raised from 250 ms to 2 s with dirty-flag gating

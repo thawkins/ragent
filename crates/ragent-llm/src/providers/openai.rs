@@ -396,175 +396,198 @@ impl OpenAiClient {
         );
 
         let event_stream = async_stream::stream! {
-        let mut buffer = String::new();
-        let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-        let mut tool_call_names: HashMap<u64, String> = HashMap::new();
-        let mut yielded_event = false;
+            let mut buffer = String::new();
+            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
+            let mut yielded_event = false;
 
-        if let Some(ev) = rate_limit_event {
-            yield ev;
-            yielded_event = true;
-        }
+            if let Some(ev) = rate_limit_event {
+                yield ev;
+                yielded_event = true;
+            }
 
-        futures::pin_mut!(stream);
+            futures::pin_mut!(stream);
 
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = match chunk_result {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(
-                        provider = %provider_name,
-                        status = %status,
-                        content_type = %content_type,
-                        yielded_events = yielded_event,
-                        error = %e,
-                        "SSE stream decode error"
-                    );
-                    let err_text = e.to_string();
-                    let is_decode_failure = err_text.to_lowercase().contains("error decoding response body");
-                    // A successful HTTP status with an immediate decode failure
-                    // almost always means the endpoint returned an empty or
-                    // non-stream body (e.g. a local model that is not loaded).
-                    // Surface that as a clear, non-retryable error instead of
-                    // the raw reqwest diagnostic.
-                    let message = if is_decode_failure && !yielded_event && status.is_success() {
-                        format!(
-                            "{} returned an empty/malformed event stream (status {}, content-type {}). \
-                             For local OpenAI-compatible providers this usually means the requested model is not loaded.",
-                            provider_name, status, content_type
-                        )
-                    } else {
-                        err_text
-                    };
-                    yield StreamEvent::Error { message };
-                    break;
-                }
-            };
-
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
-
-            while let Some(newline_pos) = buffer.find('\n') {
-                let line = buffer[..newline_pos].to_string();
-                buffer = buffer[newline_pos + 1..].to_string();                  let line = line.trim();
-                  if line.is_empty() {
-                      continue;
-                  }
-
-                  let data = match line.strip_prefix("data: ") {
-                      Some(d) => d.trim(),
-                      None => continue,
-                  };
-
-                  if data == "[DONE]" {
-                      yield StreamEvent::Finish { reason: FinishReason::Stop };
-                      return;
-                  }
-
-                  let parsed: Value = match serde_json::from_str(data) {
-                      Ok(v) => v,
-                      Err(_) => continue,
-                  };
-
-                // Handle usage info (sent with stream_options.include_usage)
-                if let Some(usage) = parsed.get("usage")
-                    && !usage.is_null()
+            loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(
+                        super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS,
+                    ),
+                    stream.next(),
+                )
+                .await
                 {
-                    let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
-                    let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
-                    if input_tokens > 0 || output_tokens > 0 {
-                        yield StreamEvent::Usage { input_tokens, output_tokens };
+                    Ok(Some(r)) => match r {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::warn!(
+                                provider = %provider_name,
+                                status = %status,
+                                content_type = %content_type,
+                                yielded_events = yielded_event,
+                                error = %e,
+                                "SSE stream decode error"
+                            );
+                            let err_text = e.to_string();
+                            let is_decode_failure =
+                                err_text.to_lowercase().contains("error decoding response body");
+                            // A successful HTTP status with an immediate decode failure
+                            // almost always means the endpoint returned an empty or
+                            // non-stream body (e.g. a local model that is not loaded).
+                            // Surface that as a clear, non-retryable error instead of
+                            // the raw reqwest diagnostic.
+                            let message = if is_decode_failure
+                                && !yielded_event
+                                && status.is_success()
+                            {
+                                format!(
+                                    "{} returned an empty/malformed event stream (status {}, content-type {}). \
+                                     For local OpenAI-compatible providers this usually means the requested model is not loaded.",
+                                    provider_name, status, content_type
+                                )
+                            } else {
+                                err_text
+                            };
+                            yield StreamEvent::Error { message };
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: format!(
+                                "{}: stream stalled — no data received for {}s",
+                                provider_name,
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
+                        };
+                        break;
                     }
-                }
-
-                let choices = match parsed["choices"].as_array() {
-                    Some(c) => c,
-                    None => continue,
                 };
 
-                for choice in choices {
-                    let delta = &choice["delta"];
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                                              // Text content
-                                              if let Some(content) = delta["content"].as_str()
-                                                  && !content.is_empty()
-                                              {
-                                                  yield StreamEvent::TextDelta { text: content.to_string() };
-                                                  yielded_event = true;
-                                              }
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
 
-                                              // Tool calls
-                                              if let Some(tool_calls) = delta["tool_calls"].as_array() {
-                                                  for tc in tool_calls {
-                                                      let index = tc["index"].as_u64().unwrap_or(0);
+                    let data = match line.strip_prefix("data: ") {
+                        Some(d) => d.trim(),
+                        None => continue,
+                    };
 
-                                                      if let Some(id) = tc["id"].as_str() {
-                                                          tool_call_ids.insert(index, id.to_string());
-                                                      }
+                    if data == "[DONE]" {
+                        yield StreamEvent::Finish { reason: FinishReason::Stop };
+                        return;
+                    }
 
-                                                      if let Some(function) = tc.get("function") {
-                                                          if let Some(name) = function["name"].as_str() {
-                                                              let tc_id = tool_call_ids.get(&index)
-                                                                  .cloned()
-                                                                  .unwrap_or_else(|| format!("tc_{index}"));
-                                                              tool_call_names.insert(index, name.to_string());
-                                                              yield StreamEvent::ToolCallStart {
-                                                                  id: tc_id,
-                                                                  name: name.to_string(),
-                                                              };
-                                                              yielded_event = true;
-                                                          }
+                    let parsed: Value = match serde_json::from_str(data) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
 
-                                                          if let Some(args) = function["arguments"].as_str()
-                                                              && !args.is_empty()
-                                                          {
-                                                              let tc_id = tool_call_ids.get(&index)
-                                                                  .cloned()
-                                                                  .unwrap_or_else(|| format!("tc_{index}"));
-                                                              yield StreamEvent::ToolCallDelta {
-                                                                  id: tc_id,
-                                                                  args_json: args.to_string(),
-                                                              };
-                                                              yielded_event = true;
-                                                          }
-                                                      }
-                                                  }
-                                              }
+                    // Handle usage info (sent with stream_options.include_usage)
+                    if let Some(usage) = parsed.get("usage")
+                        && !usage.is_null()
+                    {
+                        let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
+                        let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
+                        if input_tokens > 0 || output_tokens > 0 {
+                            yield StreamEvent::Usage { input_tokens, output_tokens };
+                        }
+                    }
 
-                                              // Finish reason
-                                              if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                                                  // End any pending tool calls
-                                                  for (_idx, id) in tool_call_ids.drain() {
-                                                      yield StreamEvent::ToolCallEnd { id };
-                                                  }
-                                                  tool_call_names.clear();
+                    let choices = match parsed["choices"].as_array() {
+                        Some(c) => c,
+                        None => continue,
+                    };
 
-                                                  let reason = match finish_reason {
-                                                      "tool_calls" => FinishReason::ToolUse,
-                                                      "length" => FinishReason::Length,
-                                                      "content_filter" => FinishReason::ContentFilter,
-                                                      _ => FinishReason::Stop,
-                                                  };
-                                                  yield StreamEvent::Finish { reason };
-                                                  yielded_event = true;
-                                              }
-                                          }
-                                      }
-                                  }
+                    for choice in choices {
+                        let delta = &choice["delta"];
 
-                                  if !yielded_event {
-                                      tracing::warn!(
-                                          provider = %provider_name,
-                                          status = %status,
-                                          content_type = %content_type,
-                                          "SSE stream ended without yielding any events"
-                                      );
-                                                                              let message = format!(
-                                                                                  "{} response stream ended without producing any events (status {}, content-type {}). \
-                                                                                  For local OpenAI-compatible providers this usually means the requested model is not loaded or the service returned an empty body.",
-                                                                                  provider_name, status, content_type
-                                                                              );                                      yield StreamEvent::Error { message };
-                                  }
-                              };
+                        // Text content
+                        if let Some(content) = delta["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            yield StreamEvent::TextDelta { text: content.to_string() };
+                            yielded_event = true;
+                        }
+
+                        // Tool calls
+                        if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                            for tc in tool_calls {
+                                let index = tc["index"].as_u64().unwrap_or(0);
+
+                                if let Some(id) = tc["id"].as_str() {
+                                    tool_call_ids.insert(index, id.to_string());
+                                }
+
+                                if let Some(function) = tc.get("function") {
+                                    if let Some(name) = function["name"].as_str() {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallStart {
+                                            id: tc_id,
+                                            name: name.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
+
+                                    if let Some(args) = function["arguments"].as_str()
+                                        && !args.is_empty()
+                                    {
+                                        let tc_id = tool_call_ids
+                                            .get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{index}"));
+                                        yield StreamEvent::ToolCallDelta {
+                                            id: tc_id,
+                                            args_json: args.to_string(),
+                                        };
+                                        yielded_event = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Finish reason
+                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
+                            // End any pending tool calls
+                            for (_idx, id) in tool_call_ids.drain() {
+                                yield StreamEvent::ToolCallEnd { id };
+                            }
+
+                            let reason = match finish_reason {
+                                "tool_calls" => FinishReason::ToolUse,
+                                "length" => FinishReason::Length,
+                                "content_filter" => FinishReason::ContentFilter,
+                                _ => FinishReason::Stop,
+                            };
+                            yield StreamEvent::Finish { reason };
+                            yielded_event = true;
+                        }
+                    }
+                }
+            }
+
+            if !yielded_event {
+                tracing::warn!(
+                    provider = %provider_name,
+                    status = %status,
+                    content_type = %content_type,
+                    "SSE stream ended without yielding any events"
+                );
+                let message = format!(
+                    "{} response stream ended without producing any events (status {}, content-type {}). \
+                     For local OpenAI-compatible providers this usually means the requested model is not loaded or the service returned an empty body.",
+                    provider_name, status, content_type
+                );
+                yield StreamEvent::Error { message };
+            }
+        };
         Ok(Box::pin(event_stream))
     }
 }

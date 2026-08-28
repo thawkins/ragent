@@ -267,6 +267,7 @@ pub fn derive_edges_for_file(store: &IndexStore, file_id: i64) -> Result<()> {
     }
 
     // Load all symbols for name resolution (cross-file targets).
+    // H-005: build the NameResolution map from a single symbol load here.
     let all_symbols = store.query_symbols(&crate::types::SymbolFilter::default())?;
     let nr = NameResolution::from_symbols(&all_symbols);
 

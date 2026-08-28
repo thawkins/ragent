@@ -243,10 +243,10 @@ fn truncate_chars(s: &str, max: usize) -> String {
 /// hash, just a dedup key.
 fn compute_dedup_hash(source_id: &str, summary: &str, action_prompt: &str) -> u64 {
     fn fnv1a(data: &str, mut hash: u64) -> u64 {
-        hash ^= 0xcbf29ce484222325; // FNV offset basis (re-seed per segment)
+        hash ^= 0xcbf2_9ce4_8422_2325; // FNV offset basis (re-seed per segment)
         for byte in data.as_bytes() {
             hash ^= *byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3); // FNV prime
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
         }
         hash
     }

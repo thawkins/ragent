@@ -105,7 +105,7 @@ impl RunStep {
 
     /// Return the ordered list of steps required for the given tier.
     #[must_use]
-    pub fn steps_for_tier(tier: Tier) -> Vec<RunStep> {
+    pub fn steps_for_tier(tier: Tier) -> Vec<Self> {
         match tier {
             Tier::Light => vec![
                 Self::Decompose,

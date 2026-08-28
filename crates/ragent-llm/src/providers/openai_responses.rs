@@ -16,6 +16,7 @@
 //! - Tracks `cache_write_tokens` separately in usage
 
 use anyhow::{Context, Result, bail};
+use futures::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -182,7 +183,7 @@ impl Provider for ResponsesApiProvider {
         for model_value in models_array {
             if let Some(model_id) = model_value.get("id").and_then(|v| v.as_str()) {
                 // Only include reasoning models
-                if model_id.starts_with("gpt-5") || model_id.starts_with("o") {
+                if model_id.starts_with("gpt-5") || model_id.starts_with('o') {
                     let base_models = responses_api_default_models("openai_responses");
                     if let Some(base) = base_models.iter().find(|m| m.id == model_id) {
                         models.push(base.clone());
@@ -382,8 +383,6 @@ impl ResponsesApiClient {
         &self,
         response: reqwest::Response,
     ) -> Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>> {
-        use futures::stream::StreamExt;
-
         let status = response.status();
 
         Box::pin(async_stream::stream! {
@@ -411,21 +410,35 @@ impl ResponsesApiClient {
             let mut buffer = String::new();
             futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        yield StreamEvent::Error { message: format!("Stream error: {}", e) };
+            loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(r)) => match r {
+                        Ok(c) => c,
+                        Err(e) => {
+                            yield StreamEvent::Error { message: format!("Stream error: {}", e) };
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: format!(
+                                "OpenAI Responses: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
+                        };
                         break;
                     }
                 };
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() || !line.starts_with("data: ") {
                         continue;

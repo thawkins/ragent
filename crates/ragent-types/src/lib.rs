@@ -23,6 +23,7 @@ pub mod message;
 pub mod panic_guard;
 pub mod permission;
 pub mod resource;
+/// Secret-redaction helpers for scrubbing sensitive patterns from text.
 pub mod sanitize;
 pub mod startup;
 pub mod strutil;

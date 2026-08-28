@@ -225,7 +225,7 @@ pub struct Task {
     pub title: String,
     /// Detailed description.
     pub description: String,
-    /// Linked requirement IDs (e.g. ["FR-007"]).
+    /// Linked requirement IDs (e.g. `["FR-007"]`).
     pub linked_requirements: Vec<String>,
     /// Current status.
     pub status: TaskStatus,

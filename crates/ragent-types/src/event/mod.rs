@@ -1161,6 +1161,36 @@ impl EventBus {
     /// });
     /// ```
     pub fn publish(&self, event: Event) {
+        // M-006: skip the work entirely when no subscribers exist. Previously
+        // every event (including per-TextDelta events carrying session_id +
+        // text Strings) was cloned purely so the n==0 branch could log its
+        // type name. When the count is zero we skip the clone/send and only
+        // log once we have a concrete event to inspect.
+        if self.sender.receiver_count() == 0 {
+            let tag = event.session_id().and_then(|sid| {
+                let step = self.current_step(sid);
+                if step > 0 {
+                    let short_id = &sid[sid.len().saturating_sub(8)..];
+                    Some(format!("[{short_id}:{step}]"))
+                } else {
+                    None
+                }
+            });
+            if let Some(tag) = tag {
+                tracing::warn!(
+                    "Event dropped (no active subscribers) {}: {}",
+                    tag,
+                    event.type_name()
+                );
+            } else {
+                tracing::warn!(
+                    "Event dropped (no active subscribers): {}",
+                    event.type_name()
+                );
+            }
+            return;
+        }
+
         match self.sender.send(event.clone()) {
             Ok(n) => {
                 // n = number of receivers that got the event

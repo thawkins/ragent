@@ -74,3 +74,6 @@ optional = true
 [features]
 default = []
 embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+
+[lints]
+workspace = true

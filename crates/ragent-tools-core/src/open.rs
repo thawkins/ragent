@@ -158,7 +158,7 @@ fn platform_open_command(target: &str) -> (String, Vec<String>) {
             vec![
                 "/c".to_string(),
                 "start".to_string(),
-                "".to_string(),
+                String::new(),
                 target.to_string(),
             ],
         )

@@ -885,7 +885,7 @@ pub fn render_show_output(
             "  #{i:>2}  [{kind:<11}] {path:<32}  {title}  ({captured})\n",
         ));
         if let Some(note) = oa_note {
-            out.push_str(&format!("        [OA recovery] {note}\n",));
+            out.push_str(&format!("        [OA recovery] {note}\n"));
         }
     }
     out

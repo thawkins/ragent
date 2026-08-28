@@ -23,6 +23,30 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 /// Request timeout in seconds.
 const REQUEST_TIMEOUT_SECS: u64 = 120;
 
+/// Idle per-chunk timeout applied to every streaming provider's `stream.next()`
+/// so a mid-stream stall cannot hang the agent forever (C-004). Providers that
+/// deliberately wait longer between chunks (e.g. a reasoning model thinking for
+/// over a minute before its first token) rely on the *initial* response not
+/// timing out here because this helper only guards each *subsequent* chunk once
+/// the stream is already producing data.
+pub const STREAM_CHUNK_IDLE_TIMEOUT_SECS: u64 = 120;
+
+/// Yield one complete line (without the trailing `\n`) from an SSE / NDJSON
+/// accumulation `buffer`, consuming it in place.
+///
+/// Unlike `buffer = buffer[pos + 1..].to_string()` (which re-allocates and
+/// copies the entire unconsumed remainder on every line — quadratic for long
+/// streams), this drains the consumed prefix in place so the remaining bytes
+/// are reused without an allocation per line (C-003).
+///
+/// Returns `None` when no complete line is present yet.
+pub fn take_sse_line(buffer: &mut String) -> Option<String> {
+    let newline_pos = buffer.find('\n')?;
+    let line = buffer[..newline_pos].to_string();
+    buffer.drain(..=newline_pos);
+    Some(line)
+}
+
 /// Creates a properly configured HTTP client for LLM provider communication.
 ///
 /// The client is configured with:

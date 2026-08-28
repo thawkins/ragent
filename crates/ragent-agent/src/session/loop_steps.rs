@@ -34,8 +34,9 @@ use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role};
 use crate::session::history::{
-    PendingToolCall, chat_request_payload_bytes, history_to_chat_messages, history_version_of,
-    is_permanent_llm_api_error, is_token_overflow_error_message, should_retry_stream_error,
+    PendingToolCall, chat_request_payload_bytes, estimate_request_bytes_with_tool_bytes,
+    history_to_chat_messages, history_version_of, is_permanent_llm_api_error,
+    is_token_overflow_error_message, should_retry_stream_error,
     stream_has_meaningful_partial_output,
 };
 use crate::session::processor::SessionProcessor;
@@ -366,11 +367,13 @@ impl SessionProcessor {
         team_context: Option<&Arc<TeamContext>>,
         profiler: &Arc<crate::session::profiler::AgentLoopProfiler>,
     ) -> Result<Arc<str>> {
-        // Load skill registry for system prompt injection
+        // Load skill registry for system prompt injection. C-001: the
+        // registry is cached keyed by skill-directory mtimes, so this only
+        // touches disk on the first turn (or when a skill directory changes).
         let skill_dirs = session_config.skill_dirs.clone();
         let skill_registry = {
             let _scope = profiler.scope("skills.load_registry");
-            crate::skill::SkillRegistry::load(working_dir, &skill_dirs)
+            self.skill_registry(working_dir, &skill_dirs)
         };
         let (git_status, readme, agents_md, file_tree) = {
             let _scope = profiler.scope("prompt.collect_context");
@@ -399,17 +402,18 @@ impl SessionProcessor {
         };
         let mut system_prompt = {
             let _scope = profiler.scope("prompt.build_system_prompt");
-            crate::agent::build_system_prompt_with_storage_and_memory(
+            crate::agent::build_system_prompt_with_storage_and_memory_and_config(
                 agent,
                 working_dir,
                 &file_tree,
-                Some(&skill_registry),
+                skill_registry.as_ref(),
                 Some(&git_status),
                 Some(&readme),
                 Some(&agents_md),
                 Some(self.session_manager.storage()),
                 Some(&session_config.memory),
                 Some(&memory_section),
+                Some(&session_config),
             )
         };
 
@@ -905,7 +909,10 @@ impl SessionProcessor {
             };
             self.event_bus.publish(Event::RequestStarted {
                 session_id: session_id.to_string(),
-                outbound_bytes: chat_request_payload_bytes(&attempt_request),
+                outbound_bytes: estimate_request_bytes_with_tool_bytes(
+                    &attempt_request,
+                    self.get_cached_tool_definition_bytes(),
+                ),
             });
             llm_recorder.record_request(&turn.model_ref.model_id, &turn.model_ref.provider_id);
             // H4: surface provider progress so long `create_stream` waits do not

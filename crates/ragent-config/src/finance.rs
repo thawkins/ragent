@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Finance provider selection and credentials.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FinanceProviderConfig {
     /// Selected provider: "yahoo" (default) or "alpha_vantage".
     #[serde(default = "default_provider")]

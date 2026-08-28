@@ -251,12 +251,11 @@ fn find_symbol(store: &IndexStore, name: &str) -> Result<Option<crate::types::Sy
 }
 
 /// Look up a symbol's name by its ID.
+///
+/// H-003: uses a single keyed `SELECT name FROM symbols WHERE id = ?` instead
+/// of loading *all* symbols and linearly searching (which was O(N) per call —
+/// quadratic when reconstructing a path or explaining a symbol with many
+/// connections).
 fn symbol_name(store: &IndexStore, sym_id: i64) -> Result<Option<String>> {
-    // Query all symbols and find by ID.  This is O(N) but sufficient for
-    // path reconstruction (which has at most a few dozen hops).
-    let symbols = store.query_symbols(&SymbolFilter::default())?;
-    Ok(symbols
-        .iter()
-        .find(|s| s.id == sym_id)
-        .map(|s| s.name.clone()))
+    store.get_symbol_name(sym_id)
 }

@@ -80,13 +80,24 @@ pub fn build_qname(scope: &[String], name: &str, sep: &str) -> String {
 macro_rules! tree_sitter_parser {
     ($lang:expr, $grammar_err:expr, $parse_err:expr) => {
         /// Create a tree-sitter parser configured for this language.
-        fn create_parser() -> Result<tree_sitter::Parser> {
-            let mut parser = tree_sitter::Parser::new();
-            let language = $lang;
-            parser
-                .set_language(&language.into())
-                .context($grammar_err)?;
-            Ok(parser)
+        ///
+        /// M-027: the parser is cached in a per-language `OnceLock<Mutex<Parser>>`
+        /// so re-parsing a file does not construct a fresh parser (and re-set the
+        /// grammar) every time. `tree_sitter::Parser` is cheap to reuse across
+        /// parses (only the tree is per-file), so a single cached instance per
+        /// language avoids repeated setup.
+        fn create_parser() -> Result<std::sync::MutexGuard<'static, tree_sitter::Parser>> {
+            static CACHE: std::sync::OnceLock<std::sync::Mutex<tree_sitter::Parser>> =
+                std::sync::OnceLock::new();
+            let mutex = CACHE.get_or_init(|| {
+                let mut parser = tree_sitter::Parser::new();
+                let language = $lang;
+                parser.set_language(&language.into()).expect($grammar_err);
+                std::sync::Mutex::new(parser)
+            });
+            Ok(mutex
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner))
         }
 
         /// Parse source code into a tree-sitter Tree.

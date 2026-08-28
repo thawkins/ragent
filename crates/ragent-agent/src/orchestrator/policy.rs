@@ -133,12 +133,16 @@ impl ConflictResolver {
                     }
                 }
                 // All were errors — return last as Err.
-                let (_, last) = responses.last().unwrap();
+                let (_, last) = responses
+                    .last()
+                    .ok_or_else(|| anyhow::anyhow!("no responses to report"))?;
                 Err(anyhow::anyhow!("all agents returned errors; last: {last}"))
             }
 
             ConflictPolicy::LastResponse => {
-                let (id, resp) = responses.last().unwrap();
+                let (id, resp) = responses
+                    .last()
+                    .ok_or_else(|| anyhow::anyhow!("no responses to report"))?;
                 Ok(format!("--- agent: {id} ---\n{resp}"))
             }
 

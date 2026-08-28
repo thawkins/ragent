@@ -406,7 +406,7 @@ impl GeminiClient {
                                         .and_then(|s| s.split(';').next())
                                         .unwrap_or("image/jpeg");
                                     let base64_data =
-                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
+                                        url.find(',').map(|i| &url[i + 1..]).unwrap_or(url);
                                     json!({
                                         "inlineData": {
                                             "mimeType": mime,
@@ -563,11 +563,28 @@ impl LlmClient for GeminiClient {
 
             futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        yield StreamEvent::Error { message: e.to_string() };
+            loop {
+                let chunk = match tokio::time::timeout(
+                    std::time::Duration::from_secs(super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(r)) => match r {
+                        Ok(c) => c,
+                        Err(e) => {
+                            yield StreamEvent::Error { message: e.to_string() };
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: format!(
+                                "Gemini: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
+                        };
                         break;
                     }
                 };
@@ -577,9 +594,8 @@ impl LlmClient for GeminiClient {
 
                 // Try to parse complete JSON objects from buffer
                 // Gemini returns a stream of JSON objects, each on its own line or as NDJSON
-                while let Some(line_end) = buffer.find('\n') {
-                    let line = buffer[..line_end].trim().to_string();
-                    buffer = buffer[line_end + 1..].to_string();
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
+                    let line = line.trim();
 
                     if line.is_empty() || line == "[,]" {
                         continue;

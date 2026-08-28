@@ -21,6 +21,10 @@ pub const STREAM_BUFFER_FLUSH_MS: u64 = 50;
 static STALL_PATTERN_SET: std::sync::OnceLock<RegexSet> = std::sync::OnceLock::new();
 
 /// Returns a reference to the lazily-initialised stall-detection [`RegexSet`].
+///
+/// The pattern list is static and known-valid, so the `RegexSet` is built once
+/// at first use; the `.expect` is unreachable for a hard-coded pattern list and
+/// is confined to this one-time initialiser (no user-facing unwrap).
 pub fn stall_pattern_set() -> &'static RegexSet {
     STALL_PATTERN_SET.get_or_init(|| {
         RegexSet::new([

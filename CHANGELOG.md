@@ -1,5 +1,74 @@
 # Changelog
 
+## Version: 1.0.63
+
+### Added
+
+- **Bash output-capture hardening** — `run_with_output` now drains stdout/stderr
+  concurrently into a capped buffer and waits only for the direct child, then
+  gives readers a bounded post-exit drain window before returning. This fixes
+  the hang where `cargo test --workspace` spawns test binaries that inherit the
+  pipe write-ends (EOF never arrives) and bounds memory via a per-stream capture
+  cap so a huge-output command cannot drive the OOM killer.
+- **Parallel grep walker (M-020)** — the `ignore` crate's parallel walker now
+  searches large trees on all cores; per-file `Searcher` clones keep each visit
+  independent. Include/exclude glob overrides are validated up front so an
+  invalid glob is surfaced as an error instead of silently searching unfiltered.
+- **Streaming SSE line helper (C-003)** — `take_sse_line` drains the consumed
+  prefix in place (reusing the remaining bytes) instead of re-allocating the
+  whole unconsumed buffer per line, removing quadratic behaviour on long
+  streams. Shared `STREAM_CHUNK_IDLE_TIMEOUT_SECS` (120 s) now applies across
+  providers so a mid-stream stall cannot hang the agent forever (C-004).
+- **Skill-registry caching (C-001)** — the session processor caches the loaded
+  `SkillRegistry` keyed by the mtimes of every scanned skill directory plus
+  `extra_dirs`, eliminating the per-turn synchronous disk walk + YAML parse.
+- **Custom-agent caching (H-002)** — `load_custom_agents` results are cached per
+  working directory and invalidated only when a discovery directory's mtime
+  changes, so the per-turn system-prompt build no longer re-walks the
+  filesystem.
+- **Codeindex graph + search optimisations** — community upserts wrapped in a
+  single transaction (M-028); name resolution built from one symbol load
+  (H-005); dependent file-ID→path resolved with a single map query (H-004);
+  `explain`/`path` use a keyed `SELECT name FROM symbols WHERE id = ?` instead
+  of loading all symbols (H-003); FTS documents truncated on a UTF-8 char
+  boundary; cached on-disk index size refreshed only on full reindex (M-029).
+
+### Fixed
+
+- **`nice`/`ionice` low-priority wrapper removed** — the `bash.nice` config and
+  `low_priority_prefix`/`prepend_low_priority` helpers were removed; the
+  `build_shell_command` builder now applies `kill_on_drop(true)` uniformly.
+  README no longer advertises low-priority shell execution.
+- **Codeindex lock poisoning recovery** — `store_guard`/`fts_guard`/
+  `tree_cache_guard` helpers replace ~36 `lock().unwrap()` sites so a panicking
+  indexing thread cannot cascade panics into subsequent user calls.
+- **Activity-log query and locking cleanup** — `expire_runs_older_than` uses a
+  single `GROUP BY` query; `branch_from_checkpoint` wrapped in an immediate
+  transaction; extracted `insert_lifecycle_event_locked` (dedupes
+  expiry/archive) and `append_new_at_locked` (no double-lock); event lookup
+  uses `prepare_cached` (`find_event_locked`).
+- **LLM provider cleanup** — removed dead `tool_call_names` maps across
+  OpenAI/Copilot/HuggingFace/Ollama, dead `_idx` bindings, and full request-body
+  logging on error; fixed severe indentation corruption in the OpenAI
+  `parse_sse_stream`; Ollama/Ollama-Cloud now share the 120 s per-chunk timeout.
+- **Config error reporting** — `format_report` replaces the magic-number
+  `replace_range` hack with a direct header row and ASCII-only borders.
+- **Missing-docs / clippy hygiene pass** — documented public items across
+  `ragent-types` (activity/event/trigger derives), `ragent-specs` (error
+  variants, modules), `ragent-tools-core`, `ragent-tools-extended` (finance
+  model fields, Tool/ToolContext/StorageBackend items), `ragent-tools-vcs`,
+  `ragent-llm` (ToolFormat variants, tool_cache/router_client), and
+  `ragent-research`; `#[must_use]` on builder helpers; FNV literal separators;
+  backtick and path `Display` fixes.
+
+### Tests
+
+- Bash timeout now surfaces partial stdout/stderr captured before cancellation
+  (`PartialOutput`) with a regression test.
+- `test_activity_log_runtime_defaults_to_true` made serial and
+  order-independent; FTS warm-up tests assert zero missing rows for the
+  incremental behaviour.
+
 ## Version: 1.0.62
 
 ### Added
@@ -32,7 +101,7 @@
   Recording stays best-effort and simply skips until the open finishes.
 - **Bash tool refactor** — extracted `build_shell_command` (single builder with
   `kill_on_drop(true)` for Bash/GitBash/PowerShell) and `truncate_output`
-  (keeps head/tail of oversized output), plus `nice`/`ionice` scheduling.
+  (keeps head/tail of oversized output).
 - **FTS warm-up is incremental (PERF-013)** — `warm_message_search_index` no
   longer DELETE+rebuilds `messages_fts`; it only inserts missing rows, so on a
   warm start it is a fast no-op. Test and doctest updated to assert zero
@@ -89,7 +158,7 @@
   command object wholesale, so it must run before `current_dir`/stdio/env
   configuration; previously the working directory (and other settings applied
   first) were silently discarded. Also replaced an `unwrap()` with
-  `split_first`.
+  `split_first`. *(Feature later removed.)*
 - **Double finish-reason handling** — the SSE `[DONE]` sentinel's generic
   `Finish { Stop }` no longer overwrites an earlier specific finish reason
   (`ToolUse`, `Length`), keeping tool-use turns distinguishable from clean
@@ -120,7 +189,7 @@
   runtime flag from `true` (matching the serde default) so a generated default
   config never records `activity_log: false`.
 - **`bash.nice` config overlay** — the overlay value now takes precedence over
-  the compiled default during config merging.
+  the compiled default during config merging. *(Feature later removed.)*
 - **Compaction cache desync** — replacing the timeline with the summary
   message clears the per-message render cache.
 
@@ -168,12 +237,11 @@
   of `nice -n <level>` (default 10) and, on Linux, `ionice -c 3`, so heavy
   agent workloads keep the host responsive. PowerShell/Git Bash and Windows
   are excluded (POSIX wrappers only). Documented in `docs/howtos/bash.md`.
+  *(Feature later removed.)*
 - **`/simplify all`** — the simplify skill now accepts `all` (apply every
   issue, not just safe ones) or an output-path argument, and gained the
-  `edit`/`multi_edit` tools so it can apply fixes directly.
-- **`docs/howtos/bash.md`** — full bash-tool documentation covering the
-  seven-layer security model, nice/ionice priority management, and the
-  `/bash` slash commands.
+  `edit`/`multi_edit` tools so it can apply fixes directly.  - **`docs/howtos/bash.md`** — full bash-tool documentation covering the
+    seven-layer security model and the `/bash` slash commands.
 
 ### Fixed
 

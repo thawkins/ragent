@@ -569,7 +569,8 @@ pub fn classify_source_type(url: &str) -> (SourceType, bool) {
     };
 
     // Government (.gov).
-    if host.ends_with(".gov") || host == "gov" {
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    if host.eq_ignore_ascii_case("gov") || host.ends_with(".gov") {
         return (SourceType::Gov, true);
     }
     // UK government.
@@ -582,7 +583,8 @@ pub fn classify_source_type(url: &str) -> (SourceType, bool) {
     }
 
     // Education (.edu).
-    if host.ends_with(".edu") || host == "edu" {
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    if host.eq_ignore_ascii_case("edu") || host.ends_with(".edu") {
         return (SourceType::Edu, true);
     }
     if host.ends_with(".edu.cn") || host.ends_with(".edu.au") || host.ends_with(".ac.uk") {

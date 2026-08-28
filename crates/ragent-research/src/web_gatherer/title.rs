@@ -10,7 +10,7 @@
 /// title and frequently contain nav chrome ("Skip to main content") or consent
 /// banners ("We use essential cookies to make our site work..."); see
 /// [`clean_web_source_title`].
-pub(crate) const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
+pub const MAX_WEB_SOURCE_TITLE_CHARS: usize = 120;
 
 /// Leading phrases that mark a captured title as page chrome rather than
 /// article content. When the cleaned title starts with one of these it is
@@ -51,7 +51,7 @@ const TITLE_NOISE_PHRASES: &[&str] = &[
 ///    empty/noise, return the raw fallback so the title is never blank.
 #[must_use]
 #[allow(dead_code)]
-pub(crate) fn clean_web_source_title(primary: &str, fallback: &str) -> String {
+pub fn clean_web_source_title(primary: &str, fallback: &str) -> String {
     let cleaned = clean_title_text(primary);
     if !cleaned.is_empty() {
         return cleaned;
@@ -67,7 +67,7 @@ pub(crate) fn clean_web_source_title(primary: &str, fallback: &str) -> String {
 
 /// Strip markdown link syntax, leading nav/consent noise, collapse whitespace,
 /// and truncate to [`MAX_WEB_SOURCE_TITLE_CHARS`] at a word boundary.
-pub(crate) fn clean_title_text(s: &str) -> String {
+pub fn clean_title_text(s: &str) -> String {
     let stripped = strip_markdown_link_text(s);
     let stripped = strip_leading_noise(&stripped);
     let collapsed = collapse_title_ws(&stripped);
@@ -110,7 +110,7 @@ fn collapse_title_ws(s: &str) -> String {
 /// Truncate `s` to at most `max_chars` Unicode scalar values, cutting at the
 /// last whitespace boundary at or before the limit so words are not split. An
 /// ellipsis is appended when truncation occurs.
-pub(crate) fn truncate_title_words(s: &str, max_chars: usize) -> String {
+pub fn truncate_title_words(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
     }

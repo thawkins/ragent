@@ -457,7 +457,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                         {
                             raw
                         } else {
-                            entry.trigger.clone()
+                            format!("/{}", entry.trigger)
                         }
                     } else {
                         menu.filter.clone()

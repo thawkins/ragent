@@ -13,3 +13,6 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lib]
 path = "src/lib.rs"
+
+[lints]
+workspace = true

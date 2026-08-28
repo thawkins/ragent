@@ -92,6 +92,7 @@ impl SddFlags {
     /// );
     /// ```
     #[must_use]
+    #[allow(clippy::fn_params_excessive_bools)]
     pub const fn from_bools(
         clarification_markers: bool,
         quality_checklists: bool,
@@ -263,6 +264,7 @@ impl Issue {
     }
 
     /// Set the related ID.
+    #[must_use]
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
         self

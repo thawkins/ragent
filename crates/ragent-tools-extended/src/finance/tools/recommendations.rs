@@ -18,11 +18,11 @@ pub struct StockRecommendationsTool;
 
 #[async_trait::async_trait]
 impl Tool for StockRecommendationsTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "stock_recommendations"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch analyst recommendation trends for a ticker symbol (strong buy, buy, hold, sell, strong sell counts by period)."
     }
 
@@ -36,7 +36,7 @@ impl Tool for StockRecommendationsTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

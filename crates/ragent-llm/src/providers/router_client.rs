@@ -58,6 +58,7 @@ impl RouterClient {
 
     /// Attach an event bus so the router can publish classification events
     /// visible in the TUI log panel.
+    #[must_use]
     pub fn with_event_bus(mut self, event_bus: Option<Arc<ragent_types::event::EventBus>>) -> Self {
         self.event_bus = event_bus;
         self
@@ -136,6 +137,7 @@ pub fn extract_attachments(request: &ChatRequest) -> AttachmentInfo {
                 // Distinguish video URLs from image URLs by MIME type
                 // in data URIs or known video extensions.
                 let lower = url.to_lowercase();
+                #[allow(clippy::case_sensitive_file_extension_comparisons)]
                 let is_video = lower.starts_with("data:video/")
                     || lower.ends_with(".mp4")
                     || lower.ends_with(".webm")
@@ -656,13 +658,10 @@ fn select_tier_entry_with_fallback(
         }
     }
 
-    candidates
-        .into_iter()
-        .filter_map(|fallback_tier| {
-            let tier_config = config.tier_config(fallback_tier);
-            select_tier_entry(&tier_config, requires_vision, registry)
-                .cloned()
-                .map(|entry| (entry, fallback_tier))
-        })
-        .next()
+    candidates.into_iter().find_map(|fallback_tier| {
+        let tier_config = config.tier_config(fallback_tier);
+        select_tier_entry(&tier_config, requires_vision, registry)
+            .cloned()
+            .map(|entry| (entry, fallback_tier))
+    })
 }

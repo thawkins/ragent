@@ -254,7 +254,7 @@ impl FinanceProvider for PaidProvider {
                 low: get_f64("04. low"),
                 close: get_f64("05. price"),
                 volume: get_str("06. volume")
-                    .and_then(|s| s.replace(",", "").parse::<u64>().ok())
+                    .and_then(|s| s.replace(',', "").parse::<u64>().ok())
                     .unwrap_or(0),
                 change: get_f64("09. change"),
                 change_percent: get_pct("10. change percent"),
@@ -326,7 +326,7 @@ impl FinanceProvider for PaidProvider {
                     let volume = value
                         .get("5. volume")
                         .and_then(|v| v.as_str())
-                        .and_then(|s| s.replace(",", "").parse::<u64>().ok())
+                        .and_then(|s| s.replace(',', "").parse::<u64>().ok())
                         .unwrap_or(0);
                     Some(OhlcvBar {
                         timestamp,

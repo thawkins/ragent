@@ -221,15 +221,7 @@ impl App {
             );
         }
 
-        let truncated = if text.len() > 120 {
-            let mut end = 120;
-            while end > 0 && !text.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}…", &text[..end])
-        } else {
-            text.clone()
-        };
+        let truncated = crate::app::helpers::truncate_to_char_boundary(&text, 120);
         let model_tag = if let Some(ref model_str) = self.selected_model {
             format!(" [{}]", model_str)
         } else {
@@ -901,8 +893,10 @@ impl App {
     ) -> Result<String, String> {
         use ragent_agent::Config;
 
-        // Load (or default-construct) the current config.
-        let config = Config::load().unwrap_or_default();
+        // Load the current config, surfacing a parse error so a malformed
+        // ragent.json is not silently replaced by an empty default (which
+        // could clobber the user's real settings on save).
+        let config = Config::load().map_err(|e| format!("failed to load config: {e}"))?;
 
         if config.mcp.contains_key(&server.id) {
             return Err(format!(
@@ -1691,6 +1685,9 @@ impl App {
     /// also appended to the log-window spool file under the project's `log/`
     /// directory.
     pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
+        // C-008: stamp each entry with its own monotonic sequence number so a
+        // new log line only invalidates the *new* group in `log_line_cache`,
+        // not the whole cache.
         let entry = LogEntry {
             timestamp: chrono::Utc::now(),
             level,
@@ -1699,7 +1696,15 @@ impl App {
             agent_id,
         };
         self.log_entries.push(entry);
-        self.log_version = self.log_version.wrapping_add(1);
+        self.log_seq = self.log_seq.wrapping_add(1);
+        // Keep the per-entry cache in lockstep: push a fresh (stale) group
+        // now so the render path never has to reconcile a length mismatch.
+        self.log_line_cache.push(crate::app::LogLineGroup {
+            lines: Vec::new(),
+            content_lines: Vec::new(),
+            wrapped_count: 0,
+            version: 0, // stale → rendered on next frame
+        });
         // R-11: Cap log entries with FIFO eviction so the Vec (and its
         // mirror `log_line_cache`) do not grow without bound over a long
         // session.

@@ -12,6 +12,20 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// M-025: a cached resolved [`Config`] plus the mtimes of the on-disk config
+/// files that contributed to it. The cache is valid while none of those
+/// mtimes change; the env-var overrides (`RAGENT_CONFIG` /
+/// `RAGENT_CONFIG_CONTENT`) bypass the cache entirely because env vars have
+/// no mtime to track.
+struct CachedConfigFile {
+    /// The resolved config.
+    config: Config,
+    /// `(path, mtime)` for each on-disk config file that contributed.
+    mtimes: Vec<(PathBuf, std::time::SystemTime)>,
+    /// The cwd the cache was built for (the project config path is relative).
+    cwd: PathBuf,
+}
+
 /// Top-level ragent configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -420,7 +434,7 @@ impl Serialize for ToolVisibilityConfig {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentPerfConfig {
     /// Master switch for the entire perf subsystem.
     /// When `false`, every performance optimisation short-circuits.
@@ -709,7 +723,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StreamConfig {
     /// Seconds the HTTP client will wait for the provider to return the
     /// **first byte** of a streaming response (default: 300).
@@ -1080,7 +1094,7 @@ pub struct AgentConfig {
 /// `denylist` are substring patterns that always reject a command (e.g.
 /// `"git push --force"`).  Both global and project configs are merged —
 /// the union of all entries is used.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BashConfig {
     /// Command prefixes exempted from the banned-command check.
     #[serde(default)]
@@ -1088,28 +1102,6 @@ pub struct BashConfig {
     /// Patterns that unconditionally reject a command.
     #[serde(default)]
     pub denylist: Vec<String>,
-    /// Run shell commands at low CPU/IO priority (`nice -n <nice_level>` and,
-    /// on Linux, `ionice -c 3`) so that heavy agent workloads do not make the
-    /// host system unresponsive.  When `Some(level)` the `nice` wrapper is
-    /// applied with that niceness; when `None` commands run at normal priority.
-    #[serde(default = "default_nice_level")]
-    pub nice: Option<i32>,
-}
-
-/// Default `nice` level for the bash tool: `10` (clearly lower than normal
-/// priority but not so low that interactive shells become sluggish).
-const fn default_nice_level() -> Option<i32> {
-    Some(10)
-}
-
-impl Default for BashConfig {
-    fn default() -> Self {
-        Self {
-            allowlist: Vec::new(),
-            denylist: Vec::new(),
-            nice: default_nice_level(),
-        }
-    }
 }
 
 /// Configuration for directory/file path allow and deny lists.
@@ -1266,6 +1258,74 @@ impl Config {
     /// println!("default agent: {}", config.default_agent);
     /// ```
     pub fn load() -> anyhow::Result<Self> {
+        // M-025: cache the resolved config keyed by the mtimes of the on-disk
+        // config files (and the project cwd, since the project config path is
+        // relative) so hot uncached callers (per-turn prompt build, gitlab
+        // tool auth, slash-menu) do not re-read/re-parse on every call. The
+        // cache is bypassed when either env-var override is present.
+        let env_overrides = std::env::var_os("RAGENT_CONFIG").is_some()
+            || std::env::var_os("RAGENT_CONFIG_CONTENT").is_some();
+
+        if !env_overrides {
+            use std::sync::OnceLock;
+            static CACHE: OnceLock<std::sync::Mutex<Option<CachedConfigFile>>> = OnceLock::new();
+            let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+            // The project config path (`.ragent/ragent.json`) is relative to
+            // the current working directory, which can change (e.g. in tests);
+            // include it in the cache key so a stale entry is never returned.
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let global_path = dirs::config_dir().map(|d| d.join("ragent").join("ragent.json"));
+            let project_path = PathBuf::from(".ragent").join("ragent.json");
+            let candidates: Vec<PathBuf> = [global_path.clone(), Some(project_path.clone())]
+                .into_iter()
+                .flatten()
+                .collect();
+
+            // Fast path: cached, same cwd, and every file mtime unchanged.
+            {
+                let guard = cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if let Some(cached) = guard.as_ref()
+                    && cached.cwd == cwd
+                    && cached.mtimes.iter().all(|(path, mt)| {
+                        std::fs::metadata(path)
+                            .and_then(|m| m.modified())
+                            .is_ok_and(|current| current == *mt)
+                    })
+                {
+                    return Ok(cached.config.clone());
+                }
+            }
+
+            // Cache miss / invalid: read each candidate that exists.
+            let mut mtimes: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+            for path in &candidates {
+                if path.exists()
+                    && let Ok(mt) = std::fs::metadata(path).and_then(|m| m.modified())
+                {
+                    mtimes.push((path.clone(), mt));
+                }
+            }
+            let cfg = Self::load_uncached();
+            if let Ok(cfg) = &cfg {
+                let mut guard = cache
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                *guard = Some(CachedConfigFile {
+                    config: cfg.clone(),
+                    mtimes,
+                    cwd,
+                });
+            }
+            cfg
+        } else {
+            Self::load_uncached()
+        }
+    }
+
+    /// The uncached config loader (the real work behind [`Config::load`]).
+    fn load_uncached() -> anyhow::Result<Self> {
         // Derived `Default` zeroes all bools, but `activity_log`'s intended
         // default is `true` (serde `default_true`). Keep the load-time seed
         // consistent with the serde default so a fresh install never writes
@@ -1368,8 +1428,14 @@ impl Config {
         let content = std::fs::read_to_string(path).map_err(|e| {
             anyhow::anyhow!("Failed to read config file '{}': {}", path.display(), e)
         })?;
+        Self::parse_file(path, &content)
+    }
 
-        let mut config: Self = serde_json::from_str(&content).map_err(|e| {
+    /// M-025: parse a config file's content into a [`Config`], computing
+    /// `specified_default_agent` from the already-read bytes so the file is
+    /// not read and JSON-parsed twice.
+    pub(crate) fn parse_file(path: &Path, content: &str) -> anyhow::Result<Self> {
+        let mut config: Self = serde_json::from_str(content).map_err(|e| {
             // Extract line and column from serde_json error
             let line = e.line();
             let column = e.column();
@@ -1398,7 +1464,7 @@ impl Config {
             )
         })?;
         let config_value: serde_json::Value =
-            serde_json::from_str(&content).expect("valid JSON already parsed into Config");
+            serde_json::from_str(content).expect("valid JSON already parsed into Config");
         config.specified_default_agent = config_value.get("defaultAgent").is_some()
             || config_value.get("default_agent").is_some();
 
@@ -1829,13 +1895,6 @@ impl Config {
             if !base.bash.denylist.contains(&entry) {
                 base.bash.denylist.push(entry);
             }
-        }
-        // bash.nice is a value field (not an OR-flag boolean), so the overlay
-        // takes precedence over the compiled default of the base. The sentinel
-        // comparison cannot distinguish "explicitly set to the default" from
-        // "unset", but 10 is both the default and a sane level either way.
-        if overlay.bash.nice != default_nice_level() {
-            base.bash.nice = overlay.bash.nice;
         }
 
         // GitLab: overlay fields override base
@@ -2590,7 +2649,7 @@ impl GmailConfig {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SddConfig {
     /// Enable `[NEEDS CLARIFICATION]` marker detection and reporting (FR-002).
     #[serde(default, skip_serializing_if = "is_false")]
@@ -2696,7 +2755,7 @@ impl SddConfig {
 ///   }
 /// }
 /// ```
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PieGapConfig {
     /// Enable dynamic trigger rules (G-01, FR-002).
     #[serde(default, skip_serializing_if = "is_false")]
@@ -2788,7 +2847,7 @@ impl PieGapConfig {
 /// required by Unpaywall's terms of service when OA recovery is enabled.
 /// `oa_min_full_text_chars` defaults to the value used by the open-access
 /// recovery layer (`ragent_research::open_access::DEFAULT_OA_MIN_FULL_TEXT_CHARS`).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResearchConfig {
     /// Enable open-access recovery via Unpaywall and Europe PMC for short
     /// scholarly sources (FR-011).

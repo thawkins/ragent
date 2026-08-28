@@ -106,25 +106,38 @@ impl FtsIndex {
         Self::from_index(index, schema)
     }
 
+    /// Build a document from a [`FtsSymbol`] for the writer.
+    fn document_from_symbol(&self, sym: &FtsSymbol<'_>) -> TantivyDocument {
+        let mut doc = TantivyDocument::default();
+        doc.add_text(self.fields.name, sym.name);
+        doc.add_text(self.fields.qualified_name, sym.qualified_name.unwrap_or(""));
+        doc.add_text(self.fields.kind, sym.kind);
+        doc.add_text(self.fields.file_path, sym.file_path);
+        doc.add_text(self.fields.signature, sym.signature.unwrap_or(""));
+        doc.add_text(self.fields.doc_comment, sym.doc_comment.unwrap_or(""));
+        let snippet = sym.body_snippet.unwrap_or("");
+        // Truncate on a UTF-8 char boundary so a multi-byte sequence at the
+        // cut point cannot panic with "byte index is not a char boundary".
+        let end = {
+            let mut i = snippet.len().min(BODY_SNIPPET_LEN);
+            while i > 0 && !snippet.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
+        doc.add_text(self.fields.body_snippet, &snippet[..end]);
+        doc.add_i64(self.fields.start_line, i64::from(sym.start_line));
+        doc.add_i64(self.fields.end_line, i64::from(sym.end_line));
+        doc
+    }
+
     /// Add symbols to the FTS index. Each element is `(Symbol-like fields, file_path)`.
     ///
     /// Call `commit()` afterwards to make them searchable.
     pub fn add_symbols(&self, symbols: &[FtsSymbol<'_>]) -> Result<()> {
         let mut writer = self.writer()?;
         for sym in symbols {
-            let mut doc = TantivyDocument::default();
-            doc.add_text(self.fields.name, sym.name);
-            doc.add_text(self.fields.qualified_name, sym.qualified_name.unwrap_or(""));
-            doc.add_text(self.fields.kind, sym.kind);
-            doc.add_text(self.fields.file_path, sym.file_path);
-            doc.add_text(self.fields.signature, sym.signature.unwrap_or(""));
-            doc.add_text(self.fields.doc_comment, sym.doc_comment.unwrap_or(""));
-            let snippet = sym.body_snippet.unwrap_or("");
-            let truncated = &snippet[..snippet.len().min(BODY_SNIPPET_LEN)];
-            doc.add_text(self.fields.body_snippet, truncated);
-            doc.add_i64(self.fields.start_line, i64::from(sym.start_line));
-            doc.add_i64(self.fields.end_line, i64::from(sym.end_line));
-            writer.add_document(doc)?;
+            writer.add_document(self.document_from_symbol(sym))?;
         }
         writer.commit()?;
         Ok(())
@@ -153,19 +166,7 @@ impl FtsIndex {
         }
 
         for sym in symbols {
-            let mut doc = TantivyDocument::default();
-            doc.add_text(self.fields.name, sym.name);
-            doc.add_text(self.fields.qualified_name, sym.qualified_name.unwrap_or(""));
-            doc.add_text(self.fields.kind, sym.kind);
-            doc.add_text(self.fields.file_path, sym.file_path);
-            doc.add_text(self.fields.signature, sym.signature.unwrap_or(""));
-            doc.add_text(self.fields.doc_comment, sym.doc_comment.unwrap_or(""));
-            let snippet = sym.body_snippet.unwrap_or("");
-            let truncated = &snippet[..snippet.len().min(BODY_SNIPPET_LEN)];
-            doc.add_text(self.fields.body_snippet, truncated);
-            doc.add_i64(self.fields.start_line, i64::from(sym.start_line));
-            doc.add_i64(self.fields.end_line, i64::from(sym.end_line));
-            writer.add_document(doc)?;
+            writer.add_document(self.document_from_symbol(sym))?;
         }
 
         writer.commit()?;

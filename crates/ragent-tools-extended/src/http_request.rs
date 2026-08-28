@@ -82,12 +82,15 @@ impl Tool for HttpRequestTool {
         let method = reqwest::Method::from_str(&method_str)
             .with_context(|| format!("Invalid HTTP method: {method_str}"))?;
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .build()
-            .context("Failed to build HTTP client")?;
+        // M-014: reuse the shared reqwest client singleton (connection pool +
+        // TLS session cache) instead of building a fresh client per call. The
+        // per-request timeout is applied via `RequestBuilder`.
+        let client = crate::masterfetch::http::shared_client()
+            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
 
-        let mut request = client.request(method, url);
+        let mut request = client
+            .request(method, url)
+            .timeout(Duration::from_secs(timeout_secs));
 
         // Apply custom headers
         if let Some(headers_obj) = input["headers"].as_object() {

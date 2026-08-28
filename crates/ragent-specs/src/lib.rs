@@ -8,13 +8,16 @@
 
 pub mod commands;
 pub mod constitution;
+/// Typed errors for the spec management system.
 pub mod error;
 pub mod git;
 pub mod id_scanner;
 pub mod impl_runner;
 pub mod io;
+/// Spec lifecycle management: discovery, persistence, and state transitions.
 pub mod manager;
 pub mod plan_parser;
+/// Spec data structures, templates, and validation.
 pub mod spec;
 pub mod templates;
 pub mod validate;

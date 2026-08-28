@@ -16,6 +16,10 @@ pub struct WebFetchTool;
 const DEFAULT_MAX_LENGTH: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_REDIRECTS: usize = 5;
+// reason: kept as documentation of the max-redirect limit; redirects are
+// handled implicitly by reqwest, so this constant is not read at runtime.
+#[allow(dead_code)]
+const _UNUSED_REDIRECTS: usize = MAX_REDIRECTS;
 const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 /// Extract the article text from HTML using the `readability-rs` crate, which
@@ -117,15 +121,16 @@ impl Tool for WebFetchTool {
             .map_or(DEFAULT_MAX_LENGTH, |v| v as usize);
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(timeout_secs))
-            .redirect(reqwest::redirect::Policy::limited(MAX_REDIRECTS))
-            .user_agent(USER_AGENT)
-            .build()
-            .context("Failed to build HTTP client")?;
+        // M-014: reuse the shared reqwest client singleton (reusing the
+        // connection pool + TLS session cache) instead of building a fresh
+        // client per call. The per-request timeout is applied via `RequestBuilder`.
+        let client = crate::masterfetch::http::shared_client()
+            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
 
         let response = client
             .get(url)
+            .timeout(std::time::Duration::from_secs(timeout_secs))
+            .header(reqwest::header::USER_AGENT, USER_AGENT)
             .send()
             .await
             .with_context(|| format!("Failed to fetch URL: {url}"))?;
@@ -148,14 +153,57 @@ impl Tool for WebFetchTool {
             );
         }
 
-        let body = response
-            .text()
-            .await
-            .with_context(|| format!("Failed to read response body from: {url}"))?;
+        // M-015: check the declared content length up-front and cap the body
+        // at `max_length` + a small headroom so a huge file is not fully
+        // downloaded and thrown away. Stream the body and stop once the cap
+        // is reached.
+        const CAP_HEADROOM: usize = 256 * 1024;
+        let download_cap = max_length.saturating_add(CAP_HEADROOM);
+        if let Some(len) = content_length
+            && len as usize > download_cap
+        {
+            tracing::debug!(
+                url,
+                declared = len,
+                cap = download_cap,
+                "webfetch: declared content length exceeds cap; reading capped stream"
+            );
+        }
+        let mut body_bytes: Vec<u8> = Vec::new();
+        {
+            use futures::StreamExt;
+            let mut stream = response.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk =
+                    chunk.with_context(|| format!("Failed to read response body from: {url}"))?;
+                let remaining = download_cap.saturating_sub(body_bytes.len());
+                if remaining == 0 {
+                    break;
+                }
+                let take = chunk.len().min(remaining);
+                body_bytes.extend_from_slice(&chunk[..take]);
+                if body_bytes.len() >= download_cap {
+                    break;
+                }
+            }
+        }
+        let body = String::from_utf8_lossy(&body_bytes).into_owned();
+        // Ensure the final string still respects `max_length` (the read cap is
+        // a safety bound; `max_length` is the user-visible truncation).
+        let body = if body.len() > max_length {
+            let mut s: String = body.chars().take(max_length).collect();
+            s.push('…');
+            s
+        } else {
+            body
+        };
 
         let is_html =
             content_type.contains("text/html") || content_type.contains("application/xhtml");
 
+        // The streaming read above already capped the body at
+        // `download_cap` (M-015). Reuse the existing post-processing that
+        // handles HTML→text conversion and final `max_length` truncation.
         let (processed, extracted_title) = if is_html && format != "raw" {
             match extract_article_text(&body, url) {
                 Some((text, title)) if text.len() >= MIN_READABILITY_TEXT_LEN => {

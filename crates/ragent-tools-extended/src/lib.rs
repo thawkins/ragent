@@ -73,12 +73,19 @@ pub mod storage {
     /// ensures legacy JSON rows deserialize without error — FR-002.)
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct TaskRow {
+        /// The unique task identifier.
         pub id: String,
+        /// The session that owns the task.
         pub session_id: String,
+        /// The task's display title.
         pub title: String,
+        /// The task's current status.
         pub status: String,
+        /// Free-text description carrying acceptance criteria.
         pub description: String,
+        /// When the task was created.
         pub created_at: String,
+        /// When the task was last updated.
         pub updated_at: String,
         /// Present-continuous phrase shown in progress indicators (FR-007).
         #[serde(default)]
@@ -102,28 +109,42 @@ pub mod storage {
     /// Row representation of a structured memory.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct MemoryRow {
+        /// The unique memory identifier.
         pub id: i64,
+        /// The memory's stored content.
         pub content: String,
+        /// The memory's category.
         pub category: String,
+        /// Where the memory came from.
         pub source: String,
+        /// The confidence score of the memory.
         pub confidence: f64,
+        /// The project the memory belongs to.
         pub project: String,
+        /// The session that stored the memory.
         pub session_id: String,
+        /// When the memory was created.
         pub created_at: String,
+        /// When the memory was last updated.
         pub updated_at: String,
+        /// How many times the memory has been accessed.
         pub access_count: i64,
+        /// When the memory was last accessed.
         pub last_accessed: Option<String>,
     }
 
     /// Result row for embedding-based memory search.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct EmbeddingMatch {
+        /// The matching row identifier.
         pub row_id: i64,
+        /// The similarity score of the match.
         pub score: f32,
     }
 
     /// Storage backend abstraction used by session-scoped tools.
     pub trait StorageBackend: Send + Sync {
+        /// List tasks for a session, optionally filtered by status.
         fn list_tasks(&self, session_id: &str, status: Option<&str>) -> Result<Vec<TaskRow>>;
 
         /// Creates a task row with a simplified, legacy-compatible set
@@ -240,11 +261,16 @@ pub mod storage {
             let _ = (active_form, owner, metadata, blocked_by);
             self.update_task_simple(id, session_id, subject, status, description)
         }
+        /// Delete a task row, returning whether it existed.
         fn delete_task(&self, id: &str, session_id: &str) -> Result<bool>;
+        /// Remove all tasks for a session, returning how many were removed.
         fn clear_tasks(&self, session_id: &str) -> Result<usize>;
 
+        /// Fetch a single memory row by identifier.
         fn get_memory(&self, id: i64) -> Result<Option<MemoryRow>>;
+        /// Fetch the tags associated with a memory row.
         fn get_memory_tags(&self, id: i64) -> Result<Vec<String>>;
+        /// Search memory rows by keyword across optional filters.
         fn search_memories(
             &self,
             query: &str,
@@ -253,9 +279,13 @@ pub mod storage {
             limit: usize,
             min_confidence: f64,
         ) -> Result<Vec<MemoryRow>>;
+        /// List the most recent memories for a project.
         fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>>;
+        /// Store an embedding blob for a memory row.
         fn store_memory_embedding(&self, id: i64, embedding_blob: &[u8]) -> Result<bool>;
+        /// List all memory embeddings as (id, blob) pairs.
         fn list_memory_embeddings(&self) -> Result<Vec<(i64, Vec<u8>)>>;
+        /// Search memories by embedding similarity.
         fn search_memories_by_embedding(
             &self,
             query_embedding: &[f32],
@@ -272,17 +302,24 @@ pub mod storage {
 /// The result of a tool execution, including optional structured metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolOutput {
+    /// The textual result of the tool execution.
     pub content: String,
+    /// Optional structured metadata associated with the result.
     pub metadata: Option<Value>,
 }
 
 /// Execution context passed to each tool invocation.
 #[derive(Clone)]
 pub struct ToolContext {
+    /// Identifier of the session running the tool.
     pub session_id: String,
+    /// Base directory tools should operate within.
     pub working_dir: PathBuf,
+    /// Shared event bus for emitting tool events.
     pub event_bus: Arc<EventBus>,
+    /// Optional storage backend for persistence.
     pub storage: Option<Arc<dyn storage::StorageBackend>>,
+    /// Optional codebase index for code-intelligence tools.
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
     /// Optional ragent configuration loaded from config files.
     /// Provides tools access to settings like API keys, permissions, etc.
@@ -296,10 +333,15 @@ pub struct ToolContext {
 /// A tool that an agent can invoke to perform actions.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
+    /// The unique name used to invoke the tool.
     fn name(&self) -> &str;
+    /// A human-readable description of what the tool does.
     fn description(&self) -> &str;
+    /// The JSON schema describing the tool's input parameters.
     fn parameters_schema(&self) -> Value;
+    /// The permission category the tool belongs to.
     fn permission_category(&self) -> &str;
+    /// Execute the tool with the given input and context.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput>;
 }
 
@@ -312,6 +354,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Create an empty tool registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -320,6 +363,7 @@ impl ToolRegistry {
         }
     }
 
+    /// Register a tool, replacing any existing tool with the same name.
     pub fn register(&self, tool: Arc<dyn Tool>) {
         self.tools
             .write()
@@ -327,6 +371,7 @@ impl ToolRegistry {
             .insert(tool.name().to_string(), tool);
     }
 
+    /// Fetch a registered tool by name.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
@@ -336,6 +381,7 @@ impl ToolRegistry {
             .cloned()
     }
 
+    /// Return whether a tool with the given name is registered.
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.tools
@@ -344,11 +390,13 @@ impl ToolRegistry {
             .contains_key(name)
     }
 
+    /// Replace the set of hidden (invisible) tool names.
     pub fn set_hidden(&self, names: &[String]) {
         let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
         *hidden = names.iter().cloned().collect();
     }
 
+    /// Return the definitions of all registered, non-hidden tools.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let tools = self.tools.read().expect("tool registry lock poisoned");

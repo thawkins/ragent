@@ -76,15 +76,9 @@ fn sanitize_for_id(name: &str) -> String {
 /// D4 fix: Generate a human-readable task ID based on agent name.
 /// e.g., "explore-a1b2c3d4" instead of full UUID.
 fn make_task_id(agent_name: &str) -> String {
-    format!(
-        "{}-{}",
-        sanitize_for_id(agent_name),
-        uuid::Uuid::new_v4()
-            .to_string()
-            .split('-')
-            .next()
-            .expect("UUID always has a first segment")
-    )
+    let uuid_str = uuid::Uuid::new_v4().to_string();
+    let short = uuid_str.split('-').next().unwrap_or("00000000");
+    format!("{}-{}", sanitize_for_id(agent_name), short)
 }
 
 /// Build a `TaskEntry` for a newly spawned sub-agent task.

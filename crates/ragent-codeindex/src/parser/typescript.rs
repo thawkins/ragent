@@ -33,23 +33,43 @@ impl TypeScriptParser {
         Self { variant }
     }
 
-    fn create_parser(&self) -> Result<Parser> {
-        let mut parser = Parser::new();
-        match self.variant {
-            TsVariant::TypeScript => {
-                let lang = tree_sitter_typescript::LANGUAGE_TYPESCRIPT;
-                parser.set_language(&lang.into()).context("TS grammar")?;
-            }
-            TsVariant::Tsx => {
-                let lang = tree_sitter_typescript::LANGUAGE_TSX;
-                parser.set_language(&lang.into()).context("TSX grammar")?;
-            }
-            TsVariant::JavaScript | TsVariant::Jsx => {
-                let lang = tree_sitter_javascript::LANGUAGE;
-                parser.set_language(&lang.into()).context("JS grammar")?;
-            }
-        }
-        Ok(parser)
+    /// Create a cached tree-sitter parser configured for this variant.
+    ///
+    /// M-027: a per-variant `OnceLock<Mutex<Parser>>` avoids re-constructing
+    /// the parser (and re-setting the grammar) on every `parse` call.
+    fn create_parser(&self) -> Result<std::sync::MutexGuard<'static, Parser>> {
+        static CACHE_TYPESCRIPT: std::sync::OnceLock<std::sync::Mutex<Parser>> =
+            std::sync::OnceLock::new();
+        static CACHE_TSX: std::sync::OnceLock<std::sync::Mutex<Parser>> =
+            std::sync::OnceLock::new();
+        static CACHE_JS: std::sync::OnceLock<std::sync::Mutex<Parser>> = std::sync::OnceLock::new();
+
+        let mutex = match self.variant {
+            TsVariant::TypeScript => CACHE_TYPESCRIPT.get_or_init(|| {
+                let mut parser = Parser::new();
+                parser
+                    .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+                    .expect("TS grammar is a statically-linked tree-sitter grammar");
+                std::sync::Mutex::new(parser)
+            }),
+            TsVariant::Tsx => CACHE_TSX.get_or_init(|| {
+                let mut parser = Parser::new();
+                parser
+                    .set_language(&tree_sitter_typescript::LANGUAGE_TSX.into())
+                    .expect("TSX grammar is a statically-linked tree-sitter grammar");
+                std::sync::Mutex::new(parser)
+            }),
+            TsVariant::JavaScript | TsVariant::Jsx => CACHE_JS.get_or_init(|| {
+                let mut parser = Parser::new();
+                parser
+                    .set_language(&tree_sitter_javascript::LANGUAGE.into())
+                    .expect("JS grammar is a statically-linked tree-sitter grammar");
+                std::sync::Mutex::new(parser)
+            }),
+        };
+        Ok(mutex
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }
 

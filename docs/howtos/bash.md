@@ -1,21 +1,18 @@
-# The Bash Tool: Configuration, Security, and nice/ionice Priority Management
+# The Bash Tool: Configuration and Security
 
 The `bash` tool is the workhorse of ragent. It executes shell commands from the agent's
-working directory, applies a seven-layer security model, and by default runs every
-command at a deliberately **lowered CPU and I/O priority** so that heavy agent workloads
-do not make the host machine unresponsive.
+working directory and applies a seven-layer security model.
 
 This document covers:
 
 1. [Overview](#overview)
 2. [Configuration](#configuration) — the `bash` block in `ragent.json`
 3. [The seven-layer security model](#the-seven-layer-security-model)
-4. [nice / ionice priority management](#nice--ionice-priority-management)
-5. [The `/bash` slash commands](#the-bash-slash-commands)
-6. [Runtime behaviour](#runtime-behaviour) — timeout, output truncation, process limits
-7. [YOLO mode](#yolo-mode)
-8. [Platform notes](#platform-notes)
-9. [Reference](#reference)
+4. [The `/bash` slash commands](#the-bash-slash-commands)
+5. [Runtime behaviour](#runtime-behaviour) — timeout, output truncation, process limits
+6. [YOLO mode](#yolo-mode)
+7. [Platform notes](#platform-notes)
+8. [Reference](#reference)
 
 ---
 
@@ -42,12 +39,7 @@ command string
                         └──────────┬───────────┘
                                    ▼
                         ┌──────────────────────┐
-                        │ 4. nice / ionice     │   (low CPU/IO priority)
-                        │    wrapper           │
-                        └──────────┬───────────┘
-                                   ▼
-                        ┌──────────────────────┐
-                        │ 5. run via shell     │   (timeout, kill_on_drop)
+                        │ 4. run via shell     │   (timeout, kill_on_drop)
                         │    with askpass      │
                         └──────────┬───────────┘
                                    ▼
@@ -68,19 +60,17 @@ The bash tool is configured via the top-level `bash` block in `ragent.json` (glo
 {
   "bash": {
     "allowlist": ["curl", "wget"],
-    "denylist": ["git push --force", "systemctl disable"],
-    "nice": 10
+    "denylist": ["git push --force", "systemctl disable"]
   }
 }
 ```
 
-| Key         | Type             | Default       | Purpose                                                            |
-| ----------- | ---------------- | ------------- | ------------------------------------------------------------------ |
-| `allowlist` | `string[]`       | `[]`          | Command prefixes exempted from the built-in banned-command check   |
-| `denylist`  | `string[]`       | `[]`          | Substring patterns that unconditionally reject a command           |
-| `nice`      | `integer` or null | `10`         | CPU niceness applied to every shell command (`-20` … `19`); `null` disables priority wrapping |
+| Key         | Type       | Default | Purpose                                                            |
+| ----------- | ---------- | ------- | ------------------------------------------------------------------ |
+| `allowlist` | `string[]` | `[]`    | Command prefixes exempted from the built-in banned-command check   |
+| `denylist`  | `string[]` | `[]`    | Substring patterns that unconditionally reject a command           |
 
-The underlying Rust struct (`crates/ragent-config/src/config.rs`, lines 1076–1113):
+The underlying Rust struct (`crates/ragent-config/src/config.rs`):
 
 ```rust
 pub struct BashConfig {
@@ -88,18 +78,6 @@ pub struct BashConfig {
     pub allowlist: Vec<String>,
     /// Patterns that unconditionally reject a command.
     pub denylist: Vec<String>,
-    /// Run shell commands at low CPU/IO priority (`nice -n <nice_level>` and,
-    /// on Linux, `ionice -c 3`) so that heavy agent workloads do not make the
-    /// host system unresponsive.
-    pub nice: Option<i32>,
-}
-```
-
-The `nice` field defaults to `Some(10)` via `default_nice_level()`:
-
-```rust
-const fn default_nice_level() -> Option<i32> {
-    Some(10)
 }
 ```
 
@@ -109,8 +87,6 @@ When both a global and a project config exist, ragent merges them:
 
 - **allowlist** and **denylist** entries are **unioned** (deduplicated). An entry added
   in either config applies everywhere.
-- The **`nice` field is not merged** from the project overlay — the base (global) value,
-  or the `10` default, wins. Set it explicitly in the global config to change it.
 
 ### Config flow
 
@@ -127,7 +103,6 @@ pub fn load_from_config() {
         Ok(cfg) => BashLists {
             allowlist: cfg.bash.allowlist,
             denylist: cfg.bash.denylist,
-            nice: cfg.bash.nice,
         },
         ...
     };
@@ -135,7 +110,7 @@ pub fn load_from_config() {
 ```
 
 The tool reads from this snapshot at execution time through helpers such as
-`nice_level()`, `is_allowlisted()`, and `matches_denylist()`.
+`is_allowlisted()` and `matches_denylist()`.
 
 ---
 
@@ -319,119 +294,6 @@ Bypassed in YOLO mode only.
 
 ---
 
-## nice / ionice priority management
-
-This is the heart of the question "how does the bash tool use nice/ionice". By default,
-**every** shell command ragent executes runs at a lowered CPU and I/O priority so that
-long agent jobs (compiles, tests, large grep runs) do not starve the interactive host.
-
-### The wrapper
-
-When a POSIX shell is used on a non-Windows host, and `nice` is configured (default
-`10`), the command is prepended with a low-priority argv prefix:
-
-- **Linux:** `nice -n 10 ionice -c 3`
-- **Other Unix (macOS/BSD):** `nice -n 10`
-- **Windows (Git Bash / PowerShell):** no prefix (see [Platform notes](#platform-notes))
-
-So a command like `cargo build` is actually executed as:
-
-```bash
-nice -n 10 ionice -c 3 bash -c '<wrapper>'
-```
-
-- `nice -n 10` lowers the **CPU scheduling priority** of the command and all its children
-  (niceness `10` is clearly below normal priority `0`, but not so low that the shell
-  becomes sluggish).
-- `ionice -c 3` sets the I/O class to **idle** — the process only touches the disk when
-  no other process needs it, preventing heavy I/O from blocking interactive work.
-
-### Where the prefix is built
-
-`low_priority_prefix()` in `crates/ragent-tools-core/src/bash.rs` (lines 1028–1048):
-
-```rust
-fn low_priority_prefix(shell: &ShellType) -> Vec<std::ffi::OsString> {
-    // POSIX wrappers only; Git Bash on Windows also understands them but the
-    // shell executable may not be a standard `nice`/`ionice`, so restrict the
-    // wrappers to native POSIX shells.
-    if matches!(shell, ShellType::PowerShell(_)) || is_windows() {
-        return Vec::new();
-    }
-
-    let Some(level) = ragent_config::bash_lists::nice_level() else {
-        return Vec::new();
-    };
-
-    let mut prefix: Vec<std::ffi::OsString> =
-        vec!["nice".into(), "-n".into(), level.to_string().into()];
-    if cfg!(target_os = "linux") {
-        prefix.push("ionice".into());
-        prefix.push("-c".into());
-        prefix.push("3".into());
-    }
-    prefix
-}
-```
-
-If `nice` is set to `null` in config, `nice_level()` returns `None` and no prefix is
-added — commands run at **normal priority**.
-
-### Where the prefix is applied
-
-`prepend_low_priority()` (lines 1058–1075) rewrites the `tokio::process::Command` so the
-original program becomes a **child** of the `nice ... ionice ...` prefix, carefully
-carrying over `kill_on_drop`:
-
-```rust
-fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
-    let prefix = low_priority_prefix(shell);
-    if prefix.is_empty() { return; }
-
-    let original_program = cmd.as_std().get_program().to_os_string();
-    let original_args: Vec<std::ffi::OsString> = cmd.as_std().get_args().map(Into::into).collect();
-    let kill_on_drop = cmd.get_kill_on_drop();
-
-    let mut rebuilt = Command::new(prefix.first().unwrap());
-    rebuilt.args(&prefix[1..]);
-    rebuilt.args([original_program]);
-    rebuilt.args(original_args);
-    rebuilt.kill_on_drop(kill_on_drop);
-
-    *cmd = rebuilt;
-}
-```
-
-It is applied to **all four** process-spawn paths:
-
-| Path                                   | Call site (bash.rs) |
-| -------------------------------------- | ------------------- |
-| Foreground `bash` in `execute()`       | line 1329           |
-| Foreground Git Bash in `execute()`     | line 1345           |
-| Foreground PowerShell in `execute()`   | line 1365           |
-| Background shell (`spawn_background_shell`) | lines 1101, 1113, 1128 |
-
-So **background commands launched via the `bg` tool receive the same low-priority
-treatment** as foreground commands.
-
-### How to change or disable it
-
-```jsonc
-// Lower niceness → less impact on the host, but agent jobs may be slower
-{ "bash": { "nice": 5 } }
-
-// Push as low as allowed
-{ "bash": { "nice": 19 } }
-
-// Disable priority wrapping entirely — commands run at normal priority
-{ "bash": { "nice": null } }
-```
-
-> Because `nice` is not merged across config layers, set it in the global config if you
-> want a consistent value everywhere.
-
----
-
 ## The `/bash` slash commands
 
 The TUI exposes interactive management of the allowlist/denylist via `/bash`:
@@ -511,12 +373,6 @@ either the global or project config it stays enabled (OR merge semantics).
 
 ## Platform notes
 
-- **Linux:** full treatment — `nice -n 10` **and** `ionice -c 3`.
-- **macOS / other POSIX:** `nice -n 10` only (no `ionice`).
-- **Windows (Git Bash / PowerShell):** no priority prefix is applied. The reason is
-  documented in the source: Git Bash's `nice`/`ionice` may not be standard utilities, and
-  the shell executable may not support them. Heavy commands on Windows therefore run at
-  normal priority.
 - **PowerShell:** syntax pre-validation (Layer 5) is skipped; the runtime parser inside
   the wrapper handles it. All other layers apply.
 
@@ -531,7 +387,7 @@ either the global or project config it stays enabled (OR merge semantics).
 | `crates/ragent-tools-core/src/bash.rs`                      | The `BashTool` implementation               |
 | `crates/ragent-tools-core/src/bg.rs`                        | Background shell integration                |
 | `crates/ragent-config/src/config.rs`                        | `BashConfig` struct and defaults            |
-| `crates/ragent-config/src/bash_lists.rs`                    | Runtime allowlist/denylist/nice snapshot    |
+| `crates/ragent-config/src/bash_lists.rs`                    | Runtime allowlist/denylist snapshot         |
 | `crates/ragent-config/src/yolo.rs`                          | YOLO mode                                   |
 | `crates/ragent-tui/src/app/slash.rs`                        | `/bash` slash commands                      |
 | `crates/ragent-tui/src/app/init.rs`                         | `load_from_config()` at startup             |
@@ -543,20 +399,9 @@ either the global or project config it stays enabled (OR merge semantics).
 | ----------------------- | ------------------- | -------- | ----------------------------------------------------------- |
 | `bash.allowlist`        | `string[]`          | `[]`     | Command prefixes that bypass the banned-command check        |
 | `bash.denylist`         | `string[]`          | `[]`     | Substring patterns that always reject a command              |
-| `bash.nice`             | `integer`/`null`    | `10`     | CPU niceness for all shell commands (`null` = normal priority) |
 | `yolo`                  | `bool`              | `false`  | Master switch that bypasses security layers 2, 3, 6, 7       |
 
 ### Examples
-
-**Tune priority to be friendlier to the host:**
-
-```jsonc
-{
-  "bash": {
-    "nice": 15
-  }
-}
-```
 
 **Re-enable `curl` (without YOLO) but keep it out of `rm` destructive forms:**
 
@@ -569,18 +414,6 @@ either the global or project config it stays enabled (OR merge semantics).
 }
 ```
 
-**Run commands at normal priority (disable nice/ionice wrapping):**
-
-```jsonc
-{
-  "bash": {
-    "nice": null
-  }
-}
-```
-
 ---
 
-*This document describes the bash tool as implemented across ragent v1.0.59. The priority
-management (`nice -n 10` / `ionice -c 3`) is active on Linux by default and is applied to
-both foreground and background shell commands.*
+*This document describes the bash tool as implemented across ragent v1.0.59.*

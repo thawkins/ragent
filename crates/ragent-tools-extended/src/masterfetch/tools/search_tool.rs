@@ -420,7 +420,7 @@ impl Tool for MfSearchTool {
         }
 
         // Build the orchestrator from the tool context.
-        let orchestrator = MfSearchTool::build_orchestrator(ctx);
+        let orchestrator = Self::build_orchestrator(ctx);
 
         // If the `engine` parameter is specified, restrict to that single
         // backend. Otherwise run all configured engines in parallel.

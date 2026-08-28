@@ -234,12 +234,17 @@ impl App {
                     }
                 })
                 .collect();
-            // Collect user-invocable skill matches
-            let working_dir = std::env::current_dir().unwrap_or_default();
-            let skill_dirs = ragent_agent::Config::load()
-                .map(|c| c.skill_dirs)
-                .unwrap_or_default();
-            let registry = ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+            // Collect user-invocable skill matches. C-007: the skill registry
+            // is cached in `App` (loaded once at startup or first menu open),
+            // so typing a `/` prefix does not re-run `current_dir()` +
+            // `Config::load()` + `SkillRegistry::load()` per keystroke.
+            let registry = self.cached_skill_registry.get_or_insert_with(|| {
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                let skill_dirs = ragent_agent::Config::load()
+                    .map(|c| c.skill_dirs)
+                    .unwrap_or_default();
+                ragent_agent::skill::SkillRegistry::load(&working_dir, &skill_dirs)
+            });
             for skill in registry.list_user_invocable() {
                 let desc = skill
                     .description

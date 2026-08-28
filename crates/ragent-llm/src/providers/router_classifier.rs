@@ -216,7 +216,7 @@ impl PromptClassifier {
         for (i, score) in scores.iter().enumerate().take(15) {
             let w = weights.weight_by_index(i);
             if *score > MIN_SIGNAL {
-                weighted_sum += *score * w;
+                weighted_sum = f64::mul_add(*score, w, weighted_sum);
                 active_weight_sum += w;
                 active_count += 1;
             }
@@ -299,7 +299,7 @@ impl PromptClassifier {
 
         // Weight long-word ratio and type-token ratio equally.
         let long_ratio = long_words / total;
-        let raw = long_ratio * 0.5 + type_token_ratio * 0.5;
+        let raw = type_token_ratio.mul_add(0.5, long_ratio * 0.5);
 
         // Short prompts naturally have high type-token ratios; scale down.
         let length_penalty = if total < 10.0 {
@@ -342,7 +342,11 @@ impl PromptClassifier {
         let paren_score = (paren_depth / 3.0).min(1.0);
         let cond_score = (conditional_count / 2.0).min(1.0);
 
-        (comma_score * 0.3 + semi_score * 0.2 + paren_score * 0.2 + cond_score * 0.3)
+        cond_score
+            .mul_add(
+                0.3,
+                paren_score.mul_add(0.2, semi_score.mul_add(0.2, comma_score * 0.3)),
+            )
             .clamp(0.0, 1.0)
     }
 
@@ -525,7 +529,7 @@ impl PromptClassifier {
         let pronoun_density = pronoun_count / words.len() as f64;
         let history_factor = if lower_history.is_empty() { 0.0 } else { 0.15 };
 
-        (pronoun_density * 3.0 + history_factor).clamp(0.0, 1.0)
+        pronoun_density.mul_add(3.0, history_factor).clamp(0.0, 1.0)
     }
 
     /// Dimension 6: Context dependency — reliance on prior conversation.
@@ -684,7 +688,9 @@ impl PromptClassifier {
         let steps_score = ((numbered + bullets) as f64 / 5.0).min(1.0);
         let constraint_score = (constraints / 4.0).min(1.0);
 
-        (steps_score * 0.6 + constraint_score * 0.4).clamp(0.0, 1.0)
+        constraint_score
+            .mul_add(0.4, steps_score * 0.6)
+            .clamp(0.0, 1.0)
     }
 
     /// Dimension 12: Knowledge recency (pre-lowered input).
@@ -763,7 +769,9 @@ impl PromptClassifier {
         let arch_count = count_keywords_lower(lower, &arch_markers) as f64;
         let arch_score = (arch_count / 1.5).min(1.0);
 
-        (fence_score * 0.25 + prog_score * 0.5 + arch_score * 0.25).clamp(0.0, 1.0)
+        arch_score
+            .mul_add(0.25, prog_score.mul_add(0.5, fence_score * 0.25))
+            .clamp(0.0, 1.0)
     }
 
     /// Dimension 14: Mathematical complexity (pre-lowered input).
@@ -823,7 +831,9 @@ impl PromptClassifier {
         let proof_count = count_keywords_lower(lower, &proof_markers) as f64;
         let proof_score = (proof_count / 2.0).min(1.0);
 
-        (latex_score * 0.35 + eq_score * 0.35 + proof_score * 0.3).clamp(0.0, 1.0)
+        proof_score
+            .mul_add(0.3, eq_score.mul_add(0.35, latex_score * 0.35))
+            .clamp(0.0, 1.0)
     }
 
     /// Dimension 14: Mathematical complexity — formal mathematics, proofs, calculations.

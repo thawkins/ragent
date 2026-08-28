@@ -24,18 +24,25 @@ use crate::path_util::resolve_path;
 
 /// Maximum number of cached file entries (each entry is an `Arc<String>`).
 const CACHE_MAX_ENTRIES: usize = 256;
+/// M-019: total-byte budget for the read cache. Files are evicted oldest-first
+/// once the combined size of cached contents exceeds this, so a burst of large
+/// files (logs, lockfiles, generated artifacts) cannot pin unbounded memory.
+const CACHE_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+/// M-019: files larger than this are never cached (read directly from disk),
+/// so a single huge file does not blow through the byte budget.
+const CACHE_MAX_FILE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Cache key: absolute path + last-modified timestamp.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey(PathBuf, SystemTime);
 
-/// Global LRU cache for file contents.
+/// Global LRU cache for file contents (M-019: entry-count AND total-byte
+/// bounded).
 fn read_cache() -> &'static Mutex<LruCache<CacheKey, Arc<String>>> {
     static CACHE: OnceLock<Mutex<LruCache<CacheKey, Arc<String>>>> = OnceLock::new();
     CACHE.get_or_init(|| {
-        Mutex::new(LruCache::new(
-            NonZeroUsize::new(CACHE_MAX_ENTRIES).expect("cache size > 0"),
-        ))
+        let cap = NonZeroUsize::new(CACHE_MAX_ENTRIES).unwrap_or(NonZeroUsize::new(1).unwrap());
+        Mutex::new(LruCache::new(cap))
     })
 }
 
@@ -66,12 +73,31 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
             path.display()
         )
     })?;
+
+    // M-019: bypass caching for files above the per-file threshold so a single
+    // huge file cannot dominate the cache.
+    if raw.len() > CACHE_MAX_FILE_BYTES {
+        return Ok(Arc::new(raw));
+    }
+
     let arc = Arc::new(raw);
     {
         let mut cache = read_cache()
             .lock()
             .map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?;
+        // Enforce the total-byte budget: pop oldest entries while the cached
+        // contents (excluding the new entry) exceed the budget.
         cache.put(key, Arc::clone(&arc));
+        let mut total: usize = cache.iter().map(|(_k, v)| v.len()).sum::<usize>();
+        // `put` may evict the LRU entry if the cache is at capacity; if the
+        // total still exceeds the budget, pop entries until it fits.
+        while total > CACHE_MAX_TOTAL_BYTES && cache.len() > 1 {
+            if let Some((_evicted_key, evicted)) = cache.pop_lru() {
+                total = total.saturating_sub(evicted.len());
+            } else {
+                break;
+            }
+        }
     }
     Ok(arc)
 }

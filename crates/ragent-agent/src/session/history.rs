@@ -480,6 +480,20 @@ fn persist_exempt_batch(content: &str) -> Option<std::path::PathBuf> {
 /// because each schema is a nested JSON object; caching the per-definition
 /// byte size on the registry avoids paying that cost on every estimate.
 pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
+    estimate_request_bytes_with_tool_bytes(request, None)
+}
+
+/// Variant of [`estimate_request_bytes`] that reuses a pre-computed total
+/// tool-definition byte size (C-002).
+///
+/// When `tool_definition_bytes` is `Some`, the per-tool
+/// `parameters.to_string()` serialisation is skipped entirely and the cached
+/// sum (computed once via [`estimate_tool_definition_bytes`]) is used
+/// instead. The message/tool-call content estimation is unchanged.
+pub fn estimate_request_bytes_with_tool_bytes(
+    request: &ChatRequest,
+    tool_definition_bytes: Option<u64>,
+) -> u64 {
     let mut total: u64 = 80; // fixed JSON wrapper overhead
     total += request.model.len() as u64;
     total += request
@@ -510,16 +524,19 @@ pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
             content_len + m.role.len() + 40
         })
         .sum::<usize>() as u64;
-    // PERF-014: if the caller pre-computed the total tool-definition byte
-    // size (via `estimate_tool_definition_bytes`), use it directly instead
-    // of re-serialising every schema here. When the field is `None` we fall
-    // back to the legacy per-call serialisation so behaviour is unchanged
-    // for callers that haven't migrated.
-    total += request
-        .tools
-        .iter()
-        .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len() + 60)
-        .sum::<usize>() as u64;
+    // PERF-014 / C-002: when the caller pre-computed the total
+    // tool-definition byte size (via `estimate_tool_definition_bytes`), use
+    // it directly instead of re-serialising every schema here. When the
+    // field is `None` we fall back to the legacy per-call serialisation so
+    // behaviour is unchanged for callers that haven't migrated.
+    total += match tool_definition_bytes {
+        Some(cached) => cached,
+        None => request
+            .tools
+            .iter()
+            .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len() + 60)
+            .sum::<usize>() as u64,
+    };
     if let Some(sys) = &request.system {
         total += sys.len() as u64;
     }

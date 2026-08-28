@@ -2138,8 +2138,14 @@ pub fn build_memory_prompt_section(
             && !memories.is_empty()
         {
             out.push_str("## Relevant Memories\n");
+            // M-002: fetch all tags for these memories in one batched query
+            // instead of one `get_memory_tags` SQLite round-trip per memory.
+            let ids: Vec<i64> = memories.iter().map(|m| m.id).collect();
+            let tags_map = sqlite_storage
+                .get_memory_tags_batched(&ids)
+                .unwrap_or_default();
             for mem in &memories {
-                let mem_tags = sqlite_storage.get_memory_tags(mem.id).unwrap_or_default();
+                let mem_tags: Vec<String> = tags_map.get(&mem.id).cloned().unwrap_or_default();
                 out.push_str(&format!(
                     "- [{}] {} (confidence: {:.2})\n",
                     mem.category, mem.content, mem.confidence,
@@ -2289,6 +2295,7 @@ pub fn build_system_prompt_with_storage(
         storage,
         memory_config,
         None,
+        None,
     )
 }
 
@@ -2320,6 +2327,42 @@ pub fn build_system_prompt_with_storage_and_memory(
         storage,
         memory_config,
         memory_section,
+        None,
+    )
+}
+
+/// Variant of [`build_system_prompt_with_storage_and_memory`] that accepts a
+/// pre-resolved config (H-001). The per-turn prompt builder already holds the
+/// cached `Arc<Config>` (via `load_config_cached`), so passing it down avoids
+/// a second uncached `Config::load()` disk read on every prompt build. When
+/// `None`, the builder falls back to `Config::load()` for callers that have
+/// not migrated.
+#[must_use]
+pub fn build_system_prompt_with_storage_and_memory_and_config(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+    git_status: Option<&str>,
+    readme: Option<&str>,
+    agents_md: Option<&str>,
+    storage: Option<&crate::storage::Storage>,
+    memory_config: Option<&crate::MemoryConfig>,
+    memory_section: Option<&str>,
+    config: Option<&ragent_config::Config>,
+) -> String {
+    build_system_prompt_with_storage_inner(
+        agent,
+        working_dir,
+        file_tree,
+        skills,
+        git_status,
+        readme,
+        agents_md,
+        storage,
+        memory_config,
+        memory_section,
+        config,
     )
 }
 
@@ -2334,6 +2377,7 @@ fn build_system_prompt_with_storage_inner(
     storage: Option<&crate::storage::Storage>,
     memory_config: Option<&crate::MemoryConfig>,
     memory_section: Option<&str>,
+    config: Option<&ragent_config::Config>,
 ) -> String {
     let mut prompt = String::new();
 
@@ -2501,9 +2545,13 @@ fn build_system_prompt_with_storage_inner(
             .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
             .map(|a| a.as_ref())
             .collect();
-        let max_background_agents = crate::Config::load()
+        let max_background_agents = config
             .map(|c| c.experimental.max_background_agents)
-            .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS);
+            .unwrap_or_else(|| {
+                crate::Config::load()
+                    .map(|c| c.experimental.max_background_agents)
+                    .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS)
+            });
 
         // Load custom agents and collect the spawnable ones
         let (custom_defs, _) = custom::load_custom_agents(working_dir);

@@ -342,7 +342,6 @@ fn build_session_config_oa_disabled_when_no_app_config() {
 #[test]
 fn session_event_json_returns_pure_json_without_prefix() {
     use ragent_research::cli::session_event_json;
-    use ragent_research::run_config::OutputFormat;
     use ragent_research::session::SessionEvent;
 
     let event = SessionEvent::Phase {

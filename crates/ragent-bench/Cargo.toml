@@ -37,5 +37,5 @@ criterion = { workspace = true }
 name = "agent_loop"
 harness = false
 
-[lints.rust]
-missing_docs = "allow"
+[lints]
+workspace = true

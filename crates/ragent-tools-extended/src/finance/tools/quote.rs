@@ -34,11 +34,11 @@ impl Default for StockQuoteTool {
 
 #[async_trait::async_trait]
 impl Tool for StockQuoteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "stock_quote"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch the latest stock quote for a ticker symbol (price, open, high, low, close, volume, change)."
     }
 
@@ -55,7 +55,7 @@ impl Tool for StockQuoteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

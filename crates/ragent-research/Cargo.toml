@@ -52,3 +52,6 @@ harness = false
 [[bench]]
 name = "gatherer_bench"
 harness = false
+
+[lints]
+workspace = true

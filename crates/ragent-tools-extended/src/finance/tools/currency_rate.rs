@@ -16,11 +16,11 @@ pub struct CurrencyRateTool;
 
 #[async_trait::async_trait]
 impl Tool for CurrencyRateTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "currency_rate"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch the current exchange rate between two currencies."
     }
 
@@ -35,7 +35,7 @@ impl Tool for CurrencyRateTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

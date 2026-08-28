@@ -317,7 +317,7 @@ pub struct LogLineGroup {
     pub content_lines: Vec<String>,
     /// Number of wrapped lines this entry occupies at the cached width.
     pub wrapped_count: u16,
-    /// `log_version` when this group was last rendered.
+    /// `log_seq` when this group was last rendered.
     pub version: u64,
 }
 
@@ -1219,6 +1219,12 @@ pub struct App {
     pub provider_registry: Arc<ProviderRegistry>,
     /// Currently selected model in `"provider/model"` format, if any.
     pub selected_model: Option<String>,
+    /// C-006: cached status-bar model label. Recomputed only when
+    /// `selected_model` / `configured_provider` / thinking level changes
+    /// (invalidated in `refresh_provider`, `finalize_model_selection`,
+    /// `try_restore_provider_model`, `select_router_as_active`, and the
+    /// thinking-level setter). `None` means "not yet computed".
+    pub cached_provider_model_label: Option<String>,
     /// Context window size (tokens) for the currently selected model.
     /// Set during model selection; used when `resolve_model()` cannot find the model
     /// (e.g. dynamically discovered ollama/ollama_cloud models).
@@ -1238,6 +1244,12 @@ pub struct App {
     pub provider_health: Arc<AtomicU8>,
     /// Slash-command autocomplete menu, shown when the input starts with `/`.
     pub slash_menu: Option<SlashMenuState>,
+    /// C-007: lazily-loaded skill registry for slash-menu autocomplete. Loaded
+    /// on first `/`-menu open (not per keystroke) so typing a prefix does not
+    /// re-run `current_dir()` + `Config::load()` + `SkillRegistry::load()`
+    /// for every character. The working directory and skill directories do
+    /// not change at runtime.
+    pub cached_skill_registry: Option<ragent_agent::skill::SkillRegistry>,
     /// File reference autocomplete menu, shown when `@` is typed.
     pub file_menu: Option<FileMenuState>,
     /// Optional spec manager for reading and updating specifications.
@@ -1289,9 +1301,11 @@ pub struct App {
     /// `wrapped_count` fields were last computed.  When the width changes
     /// all log entries need re-wrapping.
     pub log_cache_width: u16,
-    /// Monotonically increasing version counter incremented whenever
-    /// `self.log_entries` is mutated (new entries pushed).
-    pub log_version: u64,
+    /// Monotonically increasing counter incremented whenever a log entry is
+    /// pushed. Each entry's `LogLineGroup.version` records the counter value
+    /// when it was last rendered, so a new entry only invalidates the newly
+    /// added group rather than the entire cache (C-008).
+    pub log_seq: u64,
     /// Optional file path used to spool log-panel contents when it is visible.
     pub log_window_path: Option<std::path::PathBuf>,
     /// Scroll offset for the log panel (lines from bottom).

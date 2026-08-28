@@ -262,6 +262,20 @@ impl IndexStore {
         }
     }
 
+    /// Look up a symbol's name by its ID with a single indexed query
+    /// (H-003). Previously this loaded *all* symbols and linearly searched,
+    /// which is O(N) per call — quadratic when reconstructing a path or
+    /// explaining a symbol with many connections.
+    pub fn get_symbol_name(&self, sym_id: i64) -> Result<Option<String>> {
+        let name: Option<String> = self
+            .conn
+            .query_row("SELECT name FROM symbols WHERE id = ?1", [sym_id], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        Ok(name)
+    }
+
     /// Get a file entry by its ID.
     pub fn get_file_by_id(&self, file_id: i64) -> Result<Option<FileEntry>> {
         let row = self.conn.query_row(
@@ -289,7 +303,7 @@ impl IndexStore {
 
     /// List all indexed files.
     pub fn list_files(&self) -> Result<Vec<FileEntry>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT path, content_hash, byte_size, language, last_indexed, mtime_ns, line_count
              FROM indexed_files ORDER BY path",
         )?;
@@ -311,6 +325,22 @@ impl IndexStore {
             files.push(raw_to_file_entry(r?)?);
         }
         Ok(files)
+    }
+
+    /// List files with their row IDs. Used by the dependency-resolution path
+    /// (H-004) to build a single `id → path` map without a per-row query.
+    pub fn list_files_with_ids(&self) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, path FROM indexed_files ORDER BY path")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Delete a file entry by path.
@@ -341,7 +371,7 @@ impl IndexStore {
 
     /// Count of files per language.
     pub fn language_counts(&self) -> Result<Vec<(String, u64)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT COALESCE(language, 'unknown'), COUNT(*)
              FROM indexed_files
              GROUP BY language
@@ -483,7 +513,7 @@ impl IndexStore {
         self.conn
             .execute("DELETE FROM symbols WHERE file_id = ?1", [file_id])?;
 
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "INSERT INTO symbols (file_id, name, qualified_name, kind, visibility,
                 start_line, end_line, start_col, end_col, parent_id,
                 signature, doc_comment, body_hash)
@@ -605,7 +635,7 @@ impl IndexStore {
             .map(|v| v as &dyn rusqlite::types::ToSql)
             .collect();
 
-        let mut stmt = self.conn.prepare(&sql)?;
+        let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(bind_refs.as_slice(), |row| {
             Ok(RawSymbolRow {
                 id: row.get(0)?,
@@ -637,7 +667,7 @@ impl IndexStore {
     /// Queries directly by `file_id` for efficiency — this avoids loading
     /// all symbols into memory and filtering in Rust (O(N) per call).
     pub fn get_file_symbols(&self, file_id: i64) -> Result<Vec<Symbol>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT s.id, s.file_id, s.name, s.qualified_name, s.kind, s.visibility,
                     s.start_line, s.end_line, s.start_col, s.end_col,
                     s.parent_id, s.signature, s.doc_comment, s.body_hash
@@ -695,7 +725,7 @@ impl IndexStore {
         self.conn
             .execute("DELETE FROM imports WHERE file_id = ?1", [file_id])?;
 
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "INSERT INTO imports (file_id, imported_name, source_module, alias, line, kind)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
@@ -716,7 +746,7 @@ impl IndexStore {
 
     /// Get all imports for a specific file.
     pub fn get_file_imports(&self, file_id: i64) -> Result<Vec<ImportEntry>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT file_id, imported_name, source_module, alias, line, kind
              FROM imports WHERE file_id = ?1 ORDER BY line",
         )?;
@@ -741,7 +771,7 @@ impl IndexStore {
 
     /// Search imports by imported name.
     pub fn query_imports(&self, name_substring: &str) -> Result<Vec<ImportEntry>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT file_id, imported_name, source_module, alias, line, kind
              FROM imports
              WHERE imported_name LIKE '%' || ?1 || '%' COLLATE NOCASE
@@ -773,7 +803,7 @@ impl IndexStore {
         self.conn
             .execute("DELETE FROM symbol_refs WHERE file_id = ?1", [file_id])?;
 
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "INSERT INTO symbol_refs (symbol_name, file_id, line, col, kind)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
@@ -793,7 +823,7 @@ impl IndexStore {
 
     /// Find all references to a symbol by name.
     pub fn find_references(&self, symbol_name: &str) -> Result<Vec<SymbolRef>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
                     COALESCE(f.path, '') as file_path
              FROM symbol_refs r
@@ -822,7 +852,7 @@ impl IndexStore {
 
     /// Return all references across all files.
     pub fn query_all_refs(&self) -> Result<Vec<SymbolRef>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
                     COALESCE(f.path, '') as file_path
              FROM symbol_refs r
@@ -853,7 +883,7 @@ impl IndexStore {
     /// This avoids loading the entire `symbol_refs` table when only one
     /// file's refs are needed (the incremental `index_file` path).
     pub fn get_file_refs(&self, file_id: i64) -> Result<Vec<SymbolRef>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
                     COALESCE(f.path, '') as file_path
              FROM symbol_refs r
@@ -893,7 +923,7 @@ impl IndexStore {
             [source_file_id],
         )?;
 
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "INSERT OR IGNORE INTO file_deps (source_file_id, target_path, kind)
              VALUES (?1, ?2, ?3)",
         )?;
@@ -923,7 +953,7 @@ impl IndexStore {
     /// Read-only accessor for the `file_deps` table; used by the graph-layer
     /// read-only verification (spec graphCI, T-030, FR-025).
     pub fn get_file_deps(&self, source_file_id: i64) -> Result<Vec<(String, String)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT target_path, kind FROM file_deps WHERE source_file_id = ?1
              ORDER BY target_path, kind",
         )?;
@@ -1007,7 +1037,7 @@ impl IndexStore {
     /// [`begin_transaction`]: IndexStore::begin_transaction
     /// [`commit_transaction`]: IndexStore::commit_transaction
     pub fn upsert_edges_batch(&self, edges: &[GraphEdge]) -> Result<()> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "INSERT INTO graph_edges (source_sym, target_sym, kind, confidence, source_file, line)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(source_sym, target_sym, kind) DO UPDATE SET
@@ -1155,7 +1185,7 @@ impl IndexStore {
         &self,
         symbol_id: i64,
     ) -> Result<Vec<(i64, i64, String, String, Option<i64>, Option<i64>)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT source_sym, target_sym, kind, confidence, source_file, line
              FROM graph_edges
              WHERE source_sym = ?1 OR target_sym = ?1",
@@ -1182,7 +1212,7 @@ impl IndexStore {
     pub fn query_all_edges(
         &self,
     ) -> Result<Vec<(i64, i64, String, String, Option<i64>, Option<i64>)>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare_cached(
             "SELECT source_sym, target_sym, kind, confidence, source_file, line
              FROM graph_edges",
         )?;

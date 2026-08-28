@@ -15,11 +15,11 @@ pub struct StockFundamentalsTool;
 
 #[async_trait::async_trait]
 impl Tool for StockFundamentalsTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "stock_fundamentals"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch fundamental data for a ticker (market cap, P/E, EPS, dividend yield, 52-week range, sector)."
     }
 
@@ -33,7 +33,7 @@ impl Tool for StockFundamentalsTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

@@ -188,9 +188,7 @@ impl BackgroundCommand {
     /// Return `true` once the process has exited (naturally or via cancel).
     #[must_use]
     pub fn is_done(&self) -> bool {
-        self.lock_inner()
-            .map(|inner| inner.done)
-            .unwrap_or_default()
+        self.lock_inner().is_ok_and(|inner| inner.done)
     }
 
     /// Return the full captured stdout and stderr.

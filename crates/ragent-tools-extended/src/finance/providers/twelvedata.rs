@@ -192,7 +192,7 @@ impl FinanceProvider for TwelveDataProvider {
             parsed
                 .get(k)
                 .and_then(|v| v.as_str())
-                .and_then(|s| s.replace(",", "").parse::<u64>().ok())
+                .and_then(|s| s.replace(',', "").parse::<u64>().ok())
                 .unwrap_or(0)
         };
 
@@ -301,7 +301,7 @@ impl FinanceProvider for TwelveDataProvider {
                 let volume = value
                     .get("volume")
                     .and_then(|v| v.as_str())
-                    .and_then(|s| s.replace(",", "").parse::<u64>().ok())
+                    .and_then(|s| s.replace(',', "").parse::<u64>().ok())
                     .unwrap_or(0);
                 Some(OhlcvBar {
                     timestamp,
@@ -479,7 +479,7 @@ fn nested_u64(root: &Value, path: &[&str]) -> Option<u64> {
         .or_else(|| {
             current
                 .as_str()
-                .and_then(|s| s.replace(",", "").parse().ok())
+                .and_then(|s| s.replace(',', "").parse().ok())
         })
 }
 

@@ -24,3 +24,6 @@ chrono = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 serial_test = "3.2"
+
+[lints]
+workspace = true

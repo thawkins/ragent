@@ -118,7 +118,8 @@ impl CanonicalPathCache {
     /// (does not exist or IO error); the failure is also cached so we
     /// don't repeat the syscall.
     pub fn get_or_canonicalize(&self, path: &Path) -> Option<PathBuf> {
-        if let Some(cached) = self.inner.lock().ok()?.get(path).cloned() {
+        let cached = self.inner.lock().ok()?.get(path).cloned();
+        if let Some(cached) = cached {
             return cached;
         }
         let result = path.canonicalize().ok();

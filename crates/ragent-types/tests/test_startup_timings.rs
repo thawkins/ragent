@@ -73,3 +73,45 @@ fn test_empty_timings_report() {
     assert!(report.contains("Total"));
     assert_eq!(timings.sum_stages_ms(), 0);
 }
+
+#[test]
+fn test_finish_freezes_total_and_untracked() {
+    let mut timings = StartupTimings::new();
+    timings.record("Stage A", Duration::from_millis(10));
+
+    // Finish after a short delay so the live total has advanced.
+    thread::sleep(Duration::from_millis(20));
+    timings.finish();
+    let frozen_total = timings.total_elapsed_ms();
+    let frozen_untracked = timings.untracked_ms();
+
+    // A further delay must not change the reported total or untracked.
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(
+        timings.total_elapsed_ms(),
+        frozen_total,
+        "total_elapsed_ms must stay frozen after finish()"
+    );
+    assert_eq!(
+        timings.untracked_ms(),
+        frozen_untracked,
+        "untracked_ms must stay frozen after finish()"
+    );
+
+    // finish() is idempotent.
+    let total_before_second_finish = timings.total_elapsed_ms();
+    timings.finish();
+    assert_eq!(timings.total_elapsed_ms(), total_before_second_finish);
+}
+
+#[test]
+fn test_total_still_live_before_finish() {
+    let timings = StartupTimings::new();
+    let before = timings.total_elapsed_ms();
+    thread::sleep(Duration::from_millis(30));
+    let after = timings.total_elapsed_ms();
+    assert!(
+        after > before,
+        "total should advance before finish(), {before} -> {after}"
+    );
+}

@@ -105,6 +105,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         read_timestamps: std::sync::Arc::new(std::sync::RwLock::new(HashMap::new())),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        skill_registry_cache: parking_lot::Mutex::new(None),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

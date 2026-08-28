@@ -22,6 +22,7 @@ use axum::{
 };
 use ragent_agent::event::Event;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use super::AppState;
 
@@ -60,7 +61,7 @@ pub struct MemoryResponse {
 // ── Request types ─────────────────────────────────────────────────────
 
 /// Request body for `POST /memory/store`.
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct StoreMemoryRequest {
     /// The memory content.
     pub content: String,
@@ -151,23 +152,47 @@ pub async fn search_memories(
         .as_ref()
         .map(|t| t.split(',').map(|s| s.trim().to_string()).collect());
 
-    let results = state.storage.search_memories(
-        &query.q,
-        categories.as_deref(),
-        tags.as_deref(),
-        query.limit,
-        query.min_confidence,
-    );
+    // M-005: run the SQLite search off the async executor (FTS5 can be slow).
+    let storage = Arc::clone(&state.storage);
+    let q = query.q.clone();
+    let results = tokio::task::spawn_blocking(move || {
+        storage.search_memories(
+            &q,
+            categories.as_deref(),
+            tags.as_deref(),
+            query.limit,
+            query.min_confidence,
+        )
+    })
+    .await;
+
+    let results = match results {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Search task panicked: {e}"),
+            );
+        }
+    };
 
     match results {
         Ok(rows) => {
-            let responses: Vec<MemoryResponse> = rows
-                .iter()
-                .map(|row| {
-                    let tags = state.storage.get_memory_tags(row.id).unwrap_or_default();
-                    memory_row_to_response(row, tags)
-                })
-                .collect();
+            // M-002/M-005: batch the per-row tag lookups into a single query,
+            // run off the async executor.
+            let storage = Arc::clone(&state.storage);
+            let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+            let responses: Vec<MemoryResponse> = tokio::task::spawn_blocking(move || {
+                let tags_map = storage.get_memory_tags_batched(&ids).unwrap_or_default();
+                rows.iter()
+                    .map(|row| {
+                        let tags: Vec<String> = tags_map.get(&row.id).cloned().unwrap_or_default();
+                        memory_row_to_response(row, tags)
+                    })
+                    .collect()
+            })
+            .await
+            .unwrap_or_default();
 
             state.event_bus.publish(Event::MemorySearched {
                 session_id: "api".to_string(),
@@ -218,15 +243,33 @@ pub async fn store_memory(
         );
     }
 
-    match state.storage.create_memory(
-        &body.content,
-        &body.category,
-        &body.source,
-        body.confidence,
-        &body.project,
-        &body.session_id,
-        &body.tags,
-    ) {
+    // M-005: run the SQLite write + reads off the async executor.
+    let storage = Arc::clone(&state.storage);
+    let body_for_write = body.clone();
+    let create_result = tokio::task::spawn_blocking(move || {
+        storage.create_memory(
+            &body_for_write.content,
+            &body_for_write.category,
+            &body_for_write.source,
+            body_for_write.confidence,
+            &body_for_write.project,
+            &body_for_write.session_id,
+            &body_for_write.tags,
+        )
+    })
+    .await;
+
+    let create_result = match create_result {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Store task panicked: {e}"),
+            );
+        }
+    };
+
+    match create_result {
         Ok(id) => {
             state.event_bus.publish(Event::MemoryStored {
                 session_id: body.session_id.clone(),
@@ -235,8 +278,15 @@ pub async fn store_memory(
             });
 
             // Fetch the created memory to return full response
-            let row = state.storage.get_memory(id).ok().flatten();
-            let tags = state.storage.get_memory_tags(id).unwrap_or_default();
+            let storage = Arc::clone(&state.storage);
+            let (row, tags) = tokio::task::spawn_blocking(move || {
+                (
+                    storage.get_memory(id).ok().flatten(),
+                    storage.get_memory_tags(id).unwrap_or_default(),
+                )
+            })
+            .await
+            .unwrap_or((None, Vec::new()));
 
             match row {
                 Some(r) => (
@@ -260,22 +310,43 @@ pub async fn forget_memory(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // Check existence first
-    match state.storage.get_memory(id) {
-        Ok(Some(_)) => match state.storage.delete_memory(id) {
-            Ok(true) => {
-                state.event_bus.publish(Event::MemoryForgotten {
-                    session_id: "api".to_string(),
-                    count: 1,
-                });
-                (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
-            }
-            Ok(false) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
-            Err(e) => error_response(
+    // M-005: run the SQLite lookups/deletes off the async executor.
+    let storage = Arc::clone(&state.storage);
+    let exists = tokio::task::spawn_blocking(move || storage.get_memory(id)).await;
+
+    let exists = match exists {
+        Ok(r) => r,
+        Err(e) => {
+            return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Delete failed: {e}"),
-            ),
-        },
+                format!("Lookup task panicked: {e}"),
+            );
+        }
+    };
+
+    match exists {
+        Ok(Some(_)) => {
+            let storage = Arc::clone(&state.storage);
+            let deleted = tokio::task::spawn_blocking(move || storage.delete_memory(id)).await;
+            match deleted {
+                Ok(Ok(true)) => {
+                    state.event_bus.publish(Event::MemoryForgotten {
+                        session_id: "api".to_string(),
+                        count: 1,
+                    });
+                    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+                }
+                Ok(Ok(false)) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
+                Ok(Err(e)) => error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Delete failed: {e}"),
+                ),
+                Err(e) => error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Delete task panicked: {e}"),
+                ),
+            }
+        }
         Ok(None) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -325,11 +396,21 @@ pub fn memory_routes() -> axum::Router<AppState> {
 pub async fn get_visualisation(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_agent::memory::generate_visualisation(&state.storage) {
-        Ok(data) => serialize_response(data, "visualisation"),
-        Err(e) => error_response(
+    // M-005: `generate_visualisation` runs blocking SQLite reads; off-load it.
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || {
+        ragent_agent::memory::generate_visualisation(&storage)
+    })
+    .await
+    {
+        Ok(Ok(data)) => serialize_response(data, "visualisation"),
+        Ok(Err(e)) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to generate visualisation: {e}"),
+        ),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Visualisation task panicked: {e}"),
         ),
     }
 }
@@ -339,15 +420,28 @@ pub async fn get_visualisation_graph(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // FR-010: fetch memories and tags in batch queries rather than per-row.
-    let (memories, all_tags) = match (
-        state.storage.list_memories("", 10_000),
-        state.storage.get_all_memory_tags(),
-    ) {
-        (Ok(m), Ok(t)) => (m, t),
-        (Err(e), _) | (_, Err(e)) => {
+    // M-005: run the SQLite reads off the async executor.
+    let storage = Arc::clone(&state.storage);
+    let loaded = tokio::task::spawn_blocking(move || {
+        (
+            storage.list_memories("", 10_000),
+            storage.get_all_memory_tags(),
+        )
+    })
+    .await;
+
+    let (memories, all_tags) = match loaded {
+        Ok((Ok(m), Ok(t))) => (m, t),
+        Ok((Err(e), _)) | Ok((_, Err(e))) => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to load memories for graph: {e}"),
+            );
+        }
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Graph task panicked: {e}"),
             );
         }
     };
@@ -360,15 +454,28 @@ pub async fn get_visualisation_tags(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
     // FR-010: fetch memories and tags in batch queries rather than per-row.
-    let (memories, all_tags) = match (
-        state.storage.list_memories("", 10_000),
-        state.storage.get_all_memory_tags(),
-    ) {
-        (Ok(m), Ok(t)) => (m, t),
-        (Err(e), _) | (_, Err(e)) => {
+    // M-005: run the SQLite reads off the async executor.
+    let storage = Arc::clone(&state.storage);
+    let loaded = tokio::task::spawn_blocking(move || {
+        (
+            storage.list_memories("", 10_000),
+            storage.get_all_memory_tags(),
+        )
+    })
+    .await;
+
+    let (memories, all_tags) = match loaded {
+        Ok((Ok(m), Ok(t))) => (m, t),
+        Ok((Err(e), _)) | Ok((_, Err(e))) => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to load memories for tag cloud: {e}"),
+            );
+        }
+        Err(e) => {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Tag cloud task panicked: {e}"),
             );
         }
     };
@@ -380,14 +487,20 @@ pub async fn get_visualisation_tags(
 pub async fn get_visualisation_heatmap(
     State(state): State<AppState>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.list_memories("", 10_000) {
-        Ok(memories) => {
+    // M-005: `list_memories("", 10_000)` is a blocking SQLite read; off-load it.
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || storage.list_memories("", 10_000)).await {
+        Ok(Ok(memories)) => {
             let heatmap = ragent_agent::memory::generate_heatmap(&memories);
             serialize_response(heatmap, "heatmap")
         }
-        Err(e) => error_response(
+        Ok(Err(e)) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to generate heatmap: {e}"),
+        ),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Heatmap task panicked: {e}"),
         ),
     }
 }

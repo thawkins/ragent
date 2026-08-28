@@ -252,8 +252,13 @@ fn load_team_memory_block(
         String::new(),
     ];
 
+    // M-002: fetch all tags for these memories in one batched query instead of
+    // one `get_memory_tags` SQLite round-trip per memory.
+    let ids: Vec<i64> = memories.iter().map(|m| m.id).collect();
+    let tags_map = storage.get_memory_tags_batched(&ids).unwrap_or_default();
+
     for mem in &memories {
-        let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
+        let tags: Vec<String> = tags_map.get(&mem.id).cloned().unwrap_or_default();
         let tag_str = if tags.is_empty() {
             String::new()
         } else {

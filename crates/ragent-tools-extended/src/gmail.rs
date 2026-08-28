@@ -217,7 +217,7 @@ struct GmailPart {
     #[serde(default)]
     body: Option<GmailBody>,
     #[serde(default)]
-    parts: Vec<GmailPart>,
+    parts: Vec<Self>,
 }
 
 #[derive(Debug, Deserialize)]

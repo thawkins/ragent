@@ -428,8 +428,8 @@ fn validate_run_tag(run_tag: &str) -> Result<()> {
             std::path::Component::Normal(_) => {}
             other => {
                 return Err(SourceVaultError::InvalidRunTag(format!(
-                    "traversal or separator component: {:?}",
-                    other.as_os_str()
+                    "traversal or separator component: {}",
+                    other.as_os_str().display()
                 )));
             }
         }

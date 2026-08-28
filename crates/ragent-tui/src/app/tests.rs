@@ -54,6 +54,7 @@ mod app_tests {
             )),
             telemetry: std::sync::Arc::new(TelemetrySubsystem::disabled()),
             activity_log: std::sync::OnceLock::new(),
+            skill_registry_cache: parking_lot::Mutex::new(None),
         });
         let agent_info =
             agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

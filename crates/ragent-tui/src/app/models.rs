@@ -407,6 +407,9 @@ impl App {
 
     pub(crate) fn persist_selected_thinking_level(&mut self, level: ThinkingLevel) {
         self.selected_thinking_level = Some(level);
+        // C-006: the status-bar label includes the thinking level, so the
+        // cached label is stale once the level changes.
+        self.cached_provider_model_label = None;
         let _ = self
             .storage
             .set_setting("thinking_level", Self::thinking_level_setting_value(level));
@@ -478,6 +481,8 @@ impl App {
             name: provider_name,
             source: ProviderSource::Database,
         });
+        // C-006: invalidate the cached status-bar model label.
+        self.cached_provider_model_label = None;
         entry.name.clone()
     }
 
@@ -523,6 +528,8 @@ impl App {
                 name: provider_name.to_string(),
                 source: ProviderSource::Database,
             });
+            // C-006: invalidate the cached status-bar model label.
+            self.cached_provider_model_label = None;
             return Some(entry.clone());
         }
 
@@ -928,6 +935,9 @@ impl App {
     /// Re-detect the configured provider and update `configured_provider`.
     pub(crate) fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
+        // C-006: the cached status-bar model label is stale once the provider
+        // or model changes; clear it so the next render recomputes it.
+        self.cached_provider_model_label = None;
     }
 
     /// Make the Model Router the active provider/model selection.
@@ -948,6 +958,8 @@ impl App {
             name: "Model Router".to_string(),
             source: ProviderSource::Database,
         });
+        // C-006: invalidate the cached status-bar model label.
+        self.cached_provider_model_label = None;
     }
 
     /// Restore router state when the persisted active model is the router.
@@ -1430,6 +1442,18 @@ impl App {
     /// label falls back to that provider so the displayed name matches the
     /// provider actually handling the request.
     pub fn provider_model_label(&self) -> Option<String> {
+        self.cached_provider_model_label
+            .clone()
+            .or_else(|| self.compute_provider_model_label())
+    }
+
+    /// Populate the cached status-bar model label (C-006). Called from the
+    /// render path where `&mut self` is available.
+    pub(crate) fn update_cached_provider_model_label(&mut self, label: Option<String>) {
+        self.cached_provider_model_label = label;
+    }
+
+    pub(crate) fn compute_provider_model_label(&self) -> Option<String> {
         let model_ref = self.active_model_ref_string()?;
         let (provider_id, model_id) = model_ref
             .split_once('/')

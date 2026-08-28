@@ -127,7 +127,7 @@ pub enum Principal {
 /// Each variant corresponds to one category of execution fact captured by
 /// the append-only log. Variants are intentionally exhaustive: future event
 /// kinds add new variants and bump [`ACTIVITY_EVENT_SCHEMA_VERSION`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EventKind {
     /// A model message was produced or received (FR-001).
@@ -224,7 +224,7 @@ pub const LIFECYCLE_RESUMED: &str = "resumed";
 /// derived state (FR-001). Every event carries its type, schema version, and
 /// run identifier so the log remains replayable across version upgrades
 /// (NFR-003).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActivityEvent {
     /// Immutable identifier for this event (FR-002).
     pub id: EventId,
@@ -256,6 +256,48 @@ impl ActivityEvent {
             timestamp: Utc::now(),
             kind,
         }
+    }
+}
+
+impl EventKind {
+    /// JSON discriminator for [`EventKind::ToolCall`] (the `kind` tag value in
+    /// the serialised form, `"tool_call"`), used by the activity store's
+    /// targeted lookup (M-003).
+    #[must_use]
+    pub fn tool_call_discriminator() -> &'static str {
+        "tool_call"
+    }
+
+    /// JSON discriminator for [`EventKind::ToolResult`] (the `kind` tag value
+    /// in the serialised form, `"tool_result"`), used by the activity store's
+    /// targeted lookup (M-003).
+    #[must_use]
+    pub fn tool_result_discriminator() -> &'static str {
+        "tool_result"
+    }
+
+    /// JSON discriminator for [`EventKind::Checkpoint`] (the `kind` tag value
+    /// in the serialised form, `"checkpoint"`), used by the activity store's
+    /// targeted lookup (M-003).
+    #[must_use]
+    pub fn checkpoint_discriminator() -> &'static str {
+        "checkpoint"
+    }
+
+    /// JSON discriminator for [`EventKind::Termination`] (the `kind` tag value
+    /// in the serialised form, `"termination"`), used by the activity store's
+    /// targeted lookup (M-003).
+    #[must_use]
+    pub fn termination_discriminator() -> &'static str {
+        "termination"
+    }
+
+    /// JSON discriminator for the `"resumed"` lifecycle event (the `kind` tag
+    /// value in the serialised form, `"lifecycle"`), used by the activity
+    /// store's targeted status lookup (M-003 / FR-013).
+    #[must_use]
+    pub fn lifecycle_resumed_discriminator() -> &'static str {
+        "lifecycle"
     }
 }
 
@@ -322,7 +364,7 @@ pub struct ProjectedCheckpoint {
 /// [`Projection::replay`] (or [`Projection::replay_upto`] for a partial
 /// replay up to a rollback/resume target). All fields are derived from the
 /// append-only event log — the projection holds no independent truth.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Projection {
     /// Model messages in replay order.
     pub messages: Vec<ProjectedMessage>,
@@ -548,8 +590,7 @@ impl Projection {
 ///
 /// Contains the rebuilt [`Projection`] (events up to and including the target,
 /// per FR-012) and the number of events *after* the target that were ignored
-/// for this projection but **preserved in the log** for audit (FR-007).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// for this projection but **preserved in the log** for audit (FR-007).  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RollbackResult {
     /// The rebuilt projection (events up to and including the target).
     pub projection: Projection,
@@ -564,8 +605,7 @@ pub struct RollbackResult {
 ///
 /// Contains the reconstructed active-context [`Projection`] (replayed from the
 /// event log) and the sequence number from which execution should continue
-/// (the event following the resume marker).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// (the event following the resume marker).  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResumeResult {
     /// The reconstructed active context (replayed from the event log, FR-013).
     pub projection: Projection,
@@ -576,7 +616,7 @@ pub struct ResumeResult {
 
 /// An inconsistency found in a run's event log during resume validation
 /// (FR-011).
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConsistencyError {
     /// A gap in the sequence numbers (e.g. 0, 1, 3 — missing 2).
     #[error("sequence gap: expected {expected}, found {found}")]

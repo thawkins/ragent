@@ -993,6 +993,7 @@ pub fn render_document_for(
 /// by a PLAN.md plus any names present in `existing`. Useful for surfacing
 /// research links in `/spec list` (T-043).
 #[must_use]
+#[allow(clippy::implicit_hasher)]
 pub fn union_with_existing(referenced: &[String], existing: &HashSet<String>) -> Vec<String> {
     let mut set: HashSet<String> = existing.clone();
     for n in referenced {

@@ -165,17 +165,30 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
     }
 
     let mut communities: Vec<CommunityInfo> = Vec::new();
-    for (&comm_id, members) in &community_members {
-        let label = label_for_community(&comm_id, members, &sym_name);
-        for &(sym_id, _) in members {
-            store.upsert_community(sym_id, comm_id, label.as_deref())?;
+    // M-028: wrap the per-member `upsert_community` calls in a single
+    // transaction so a community with many members commits once instead of
+    // once per row (each was an implicit autocommit).
+    store.begin_transaction()?;
+    let tx_result = (|| -> anyhow::Result<()> {
+        for (&comm_id, members) in &community_members {
+            let label = label_for_community(&comm_id, members, &sym_name);
+            for &(sym_id, _) in members {
+                store.upsert_community(sym_id, comm_id, label.as_deref())?;
+            }
+            communities.push(CommunityInfo {
+                id: comm_id,
+                label,
+                member_count: members.len(),
+            });
         }
-        communities.push(CommunityInfo {
-            id: comm_id,
-            label,
-            member_count: members.len(),
-        });
+        Ok(())
+    })();
+    if tx_result.is_ok() {
+        store.commit_transaction()?;
+    } else {
+        let _ = store.conn.execute_batch("ROLLBACK");
     }
+    tx_result?;
 
     // Sort by member count descending for stable display.
     communities.sort_by(|a, b| {

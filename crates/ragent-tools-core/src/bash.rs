@@ -18,8 +18,9 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -285,6 +286,27 @@ pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+/// How long to keep draining stdout/stderr after the direct child has exited.
+///
+/// A command such as `cargo test --workspace` spawns test binaries that
+/// inherit the pipe write-ends. When the direct child exits but a grandchild
+/// still holds a pipe open, EOF never arrives. We wait this long for the
+/// readers to flush any tail output that was still in flight, then return
+/// whatever was captured rather than hanging forever.
+const POST_EXIT_DRAIN_TIMEOUT_SECS: u64 = 5;
+
+/// Upper bound on how many bytes of stdout/stderr are buffered in memory per
+/// stream while a command runs.
+///
+/// A long-running command such as `cargo test --workspace` can emit a huge
+/// volume of output. Buffering it all unboundedly drives memory pressure and
+/// can trigger the OOM killer (`systemd-oomd`), which kills the very process we
+/// are waiting on. We cap each stream at this size; once the cap is reached the
+/// reader keeps draining the pipe (so the child never blocks on a full pipe)
+/// but discards the excess. The final result is still truncated to ~31 KB by
+/// [`truncate_output`], so the cap only bounds intermediate memory use.
+const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
+
 // Safe commands: only these exact prefixes are auto-approved without user prompting.
 // The check is prefix-based: a command is safe if it equals the entry exactly OR starts
 // with the entry followed by a space (so "ls" matches "ls -la", "git" matches "git status", etc.).
@@ -484,6 +506,9 @@ pub fn is_safe_command(cmd: &str) -> bool {
 ///
 /// These commands are auto-approved without user prompting (Layer 1).
 #[must_use]
+// reason: used by ragent-tui via the public crate; flagged dead only when
+// bash.rs is re-included into the test crate via #[path], where it is not called.
+#[allow(dead_code)]
 pub fn get_safe_commands() -> Vec<&'static str> {
     SAFE_COMMANDS.to_vec()
 }
@@ -493,6 +518,9 @@ pub fn get_safe_commands() -> Vec<&'static str> {
 /// Used by the TUI to display the complete security policy in `/bash show`.
 /// Returns: (`banned_commands`, `denied_commands`, `denied_command_patterns`, `denied_patterns`)
 #[must_use]
+// reason: used by ragent-tui via the public crate; flagged dead only when
+// bash.rs is re-included into the test crate via #[path], where it is not called.
+#[allow(dead_code)]
 pub fn get_builtin_lists() -> (
     Vec<&'static str>,
     Vec<&'static str>,
@@ -569,9 +597,9 @@ fn strip_heredoc_bodies(cmd: &str) -> String {
 /// token after each operator (or at the start). Returns a list of command names.
 ///
 /// Examples:
-/// - "mkfs /dev/sda" → ["mkfs"]
-/// - "ls | grep foo" → ["ls", "grep"]
-/// - "cd tmp && mkfs" → ["cd", "mkfs"]
+/// - `"mkfs /dev/sda"` -> `["mkfs"]`
+/// - `"ls | grep foo"` -> `["ls", "grep"]`
+/// - `"cd tmp && mkfs"` -> `["cd", "mkfs"]`
 fn extract_command_names(cmd: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut current = String::new();
@@ -946,6 +974,10 @@ pub(crate) fn build_powershell_wrapper(state_file: &str, script_file: &str) -> S
 /// the same banned/denied/directory-escape/syntax/obfuscation checks without
 /// executing the command. It is used by the `bg` background task manager
 /// before spawning a long-running process.
+// reason: used by the `bg` tool via `spawn_background_shell` in the lib;
+// flagged dead only when bash.rs is re-included into the test crate via
+// #[path], where the bg path is not exercised.
+#[allow(dead_code)]
 pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path) -> Result<()> {
     let shell = get_shell();
 
@@ -1017,74 +1049,9 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
     Ok(())
 }
 
-/// Build the argv prefix that runs a shell command at low CPU/IO priority so
-/// heavy agent workloads do not make the host system unresponsive.
-///
-/// Returns `["nice", "-n", "<level>", "ionice", "-c", "3"]` on Linux (or
-/// `["nice", "-n", "<level>"]` elsewhere) when a `nice` level is configured via
-/// `bash.nice` in `ragent.json` (default `10`). Returns an empty vector when no
-/// level is configured or on Windows (the wrappers are POSIX utilities).
-///
-/// Callers prepend the returned argv to their program invocation so the actual
-/// program runs as a child of `nice`, lowering its CPU scheduling priority, and
-/// (on Linux) of `ionice -c 3`, marking its I/O as idle-class.
-fn low_priority_prefix(shell: &ShellType) -> Vec<std::ffi::OsString> {
-    // POSIX wrappers only; Git Bash and PowerShell on Windows also understand
-    // them but the shell executable may not be a standard `nice`/`ionice`, so
-    // restrict the wrappers to native POSIX shells.
-    if matches!(shell, ShellType::PowerShell(_) | ShellType::GitBash(_)) || is_windows() {
-        return Vec::new();
-    }
-
-    let Some(level) = ragent_config::bash_lists::nice_level() else {
-        return Vec::new();
-    };
-
-    let mut prefix: Vec<std::ffi::OsString> =
-        vec!["nice".into(), "-n".into(), level.to_string().into()];
-    if cfg!(target_os = "linux") {
-        prefix.push("ionice".into());
-        prefix.push("-c".into());
-        prefix.push("3".into());
-    }
-    prefix
-}
-
-/// Prepend the low-priority argv prefix (see [`low_priority_prefix`]) to a
-/// command so the real program runs as a child of `nice` / `ionice`.
-///
-/// This rewrites `cmd` to run `nice ... <original program> <original args>`.
-/// `kill_on_drop` is carried over from the original command. Callers should
-/// invoke this immediately after `Command::new(..)` + program/args and BEFORE
-/// configuring `current_dir`/stdio/env: the rebuild replaces the command
-/// object wholesale, so anything configured before this call is lost.
-/// Configuration applied after this call survives untouched.
-fn prepend_low_priority(cmd: &mut Command, shell: &ShellType) {
-    let prefix = low_priority_prefix(shell);
-    if prefix.is_empty() {
-        return;
-    }
-
-    let original_program = cmd.as_std().get_program().to_os_string();
-    let original_args: Vec<std::ffi::OsString> = cmd.as_std().get_args().map(Into::into).collect();
-    let kill_on_drop = cmd.get_kill_on_drop();
-
-    let Some((prog, rest)) = prefix.split_first() else {
-        return;
-    };
-    let mut rebuilt = Command::new(prog);
-    rebuilt.args(rest);
-    rebuilt.args([original_program]);
-    rebuilt.args(original_args);
-    rebuilt.kill_on_drop(kill_on_drop);
-
-    *cmd = rebuilt;
-}
-
 /// Build the argv + wrapper-script invocation for a shell, configured with the
-/// low-priority prefix (when enabled), the working directory, null stdin, and
-/// piped stdout/stderr. Callers then add the env vars / timeout / output as
-/// appropriate.
+/// working directory, null stdin, and piped stdout/stderr. Callers then add the
+/// env vars / timeout / output as appropriate.
 ///
 /// `wrapper` is the shell script that carries the user command plus any
 /// persistent-shell bookkeeping. For Git Bash and PowerShell this is a
@@ -1111,16 +1078,60 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
             cmd
         }
     };
-    // Apply the low-priority wrapper BEFORE configuring cwd/stdio: the wrapper
-    // rebuilds the command object wholesale, so anything configured before this
-    // call would be discarded.
-    prepend_low_priority(&mut cmd, shell);
     cmd.current_dir(working_dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+    // Run the direct child in its own process group so that a timeout can
+    // SIGKILL the entire group (`killpg`). Without this, `kill_on_drop` only
+    // terminates the direct `bash`, leaving orphaned grandchildren (e.g. a
+    // deadlocked `cargo test` binary that holds a mutex) alive and still
+    // consuming CPU / holding locks after the timeout fires.
+    #[cfg(unix)]
+    cmd.process_group(0);
     cmd
+}
+
+/// SIGKILL every process in the process group whose leader is `pgid`.
+///
+/// The direct child is spawned in its own process group (see
+/// [`build_shell_command`]). When a foreground command times out, killing the
+/// whole group guarantees that orphaned grandchildren — most importantly a
+/// deadlocked `cargo test --workspace` binary that inherited the pipe
+/// write-ends and is stuck holding a mutex — are terminated too, not just the
+/// direct `bash`. Returns the number of processes signalled (for logging),
+/// or an error if the group no longer exists.
+#[cfg(unix)]
+#[allow(unsafe_code)] // approved: killpg has no safe std alternative (see AGENTS-RUST.md)
+fn kill_process_group(pgid: i32) -> std::io::Result<i32> {
+    // SAFETY: libc::killpg takes a plain C int and has no pointer arguments; no
+    // invariants are required of the caller beyond a valid process-group id.
+    let ret = unsafe { libc::killpg(pgid, libc::SIGKILL) };
+    if ret == 0 {
+        Ok(0)
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+/// Describe a process exit status for the tool result.
+///
+/// Returns the numeric exit code for a normal exit, or a human-readable
+/// description for an abnormal termination (e.g. killed by a signal such as
+/// SIGKILL from the OOM killer). This ensures the tool always reports *why* a
+/// command ended, whether it completed normally or was terminated.
+fn describe_exit_status(status: &std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return code.to_string();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            return format!("killed by signal {sig}");
+        }
+    }
+    "abnormal termination".to_string()
 }
 
 /// Truncate very long command output, keeping the first 15k + last 15k chars
@@ -1143,24 +1154,176 @@ fn truncate_output(content: String) -> String {
         i
     };
     let first_part = &content[..first_end];
-    let remainder_len = content.len() - first_end;
-    let last_part = if remainder_len > LAST_CHARS {
+    let last_start = if content.len() - first_end > LAST_CHARS {
         let mut j = content.len() - LAST_CHARS;
         while j < content.len() && !content.is_char_boundary(j) {
             j += 1;
         }
-        &content[j..]
+        j
     } else {
-        &content[first_end..]
+        content.len()
     };
+    let last_part = &content[last_start..];
 
-    let omitted = remainder_len.saturating_sub(LAST_CHARS);
+    let omitted_lines = content[first_end..last_start].lines().count();
     format!(
         "{}\n\n... ({} lines omitted) ...\n\n{}",
-        first_part,
-        omitted / content.lines().count().max(1), // rough line count
-        last_part
+        first_part, omitted_lines, last_part
     )
+}
+
+/// Run a foreground command to completion, capturing bounded stdout/stderr.
+///
+/// `tokio::process::Command::output()` waits for EOF on both stdout and stderr
+/// pipes in addition to child exit. A long-running command such as
+/// `cargo test --workspace` spawns test binaries that inherit those pipe
+/// write-ends; when the direct child exits but a grandchild still holds a pipe
+/// open, EOF never arrives and `output()` blocks forever even though the
+/// command has finished.
+///
+/// This helper instead:
+/// 1. Spawns the child and takes its stdout/stderr.
+/// 2. Drains both pipes concurrently into bounded buffers for the whole run, so
+///    heavy output is captured incrementally rather than discarded.
+/// 3. Waits for the *direct child* to exit via [`tokio::process::Child::wait`],
+///    which does not wait for pipe EOF.
+/// 4. Gives the readers a short bounded window to flush any tail output that
+///    was still in flight, then returns whatever was captured. If a grandchild
+///    still holds a pipe open, the window expires and we return partial output
+///    rather than hanging.
+///
+/// The returned value carries the direct child's PID (== process-group ID, since
+/// the child is spawned with `process_group(0)`), so the caller can `killpg` any
+/// still-running grandchildren on timeout.
+///
+/// Captured stdout/stderr are written into `capture` so that a timeout handler
+/// can still read back whatever partial output the command produced *before* it
+/// was cancelled (see the `tokio::select!` in `BashTool::execute`).
+async fn run_with_output(mut cmd: Command, capture: Arc<SharedCapture>) -> Result<RanOutput> {
+    let mut child = cmd.spawn()?;
+    let child_pid = child.id();
+    LAST_PGID.with(|cell| cell.set(child_pid));
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let mut tasks = Vec::new();
+    if let Some(mut s) = stdout {
+        let cap = Arc::clone(&capture);
+        tasks.push(tokio::spawn(async move {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match s.read(&mut chunk).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => SharedCapture::append(&cap.stdout, &chunk[..n]),
+                    Err(_) => break,
+                }
+            }
+        }));
+    }
+    if let Some(mut s) = stderr {
+        let cap = Arc::clone(&capture);
+        tasks.push(tokio::spawn(async move {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match s.read(&mut chunk).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => SharedCapture::append(&cap.stderr, &chunk[..n]),
+                    Err(_) => break,
+                }
+            }
+        }));
+    }
+
+    let status = child.wait().await?;
+
+    // Bounded drain window: give the readers a moment to flush any output that
+    // was still in flight when the child exited. If a grandchild inherited the
+    // pipe write-end, EOF never arrives and the window simply expires.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(POST_EXIT_DRAIN_TIMEOUT_SECS),
+        async {
+            for t in &mut tasks {
+                let _ = t.await;
+            }
+        },
+    )
+    .await;
+
+    // If the readers are still blocked (a grandchild holds a pipe open), stop
+    // them so they do not leak as background tasks.
+    for t in tasks {
+        t.abort();
+    }
+
+    Ok(RanOutput {
+        output: std::process::Output {
+            status,
+            stdout: capture.stdout_str().into_bytes(),
+            stderr: capture.stderr_str().into_bytes(),
+        },
+    })
+}
+
+/// The result of a foreground command execution: the captured output.
+struct RanOutput {
+    output: std::process::Output,
+}
+
+/// Result of a foreground command run raced against a timeout.
+///
+/// `output` carries the captured (possibly empty) output and exit status;
+/// `partial_stdout`/`partial_stderr` hold whatever was captured before a
+/// timeout cancelled the command, and `timed_out` distinguishes a real
+/// completion from a timeout so the caller can report it as a failure.
+struct PartialOutput {
+    output: std::process::Output,
+    partial_stdout: String,
+    partial_stderr: String,
+    timed_out: bool,
+}
+
+/// Shared stdout/stderr buffers for a foreground command.
+///
+/// Held behind an [`Arc`] so that, if the running command is cancelled by a
+/// timeout, the buffers remain accessible and the partial output captured so
+/// far can be surfaced in the timeout error instead of being lost.
+#[derive(Default)]
+struct SharedCapture {
+    stdout: Arc<Mutex<Vec<u8>>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
+}
+
+impl SharedCapture {
+    /// Create an empty capture with fresh buffers.
+    fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// Append `chunk` to `buf`, stopping once [`MAX_CAPTURE_BYTES`] is reached.
+    fn append(buf: &Mutex<Vec<u8>>, chunk: &[u8]) {
+        let mut b = buf.lock().unwrap();
+        if b.len() < MAX_CAPTURE_BYTES {
+            let room = MAX_CAPTURE_BYTES - b.len();
+            b.extend_from_slice(&chunk[..chunk.len().min(room)]);
+        }
+    }
+
+    /// Snapshot the captured stdout as lossy UTF-8.
+    fn stdout_str(&self) -> String {
+        String::from_utf8_lossy(&self.stdout.lock().unwrap()).into_owned()
+    }
+
+    /// Snapshot the captured stderr as lossy UTF-8.
+    fn stderr_str(&self) -> String {
+        String::from_utf8_lossy(&self.stderr.lock().unwrap()).into_owned()
+    }
+}
+
+// Thread-local that `run_with_output` records the spawned child's PGID into,
+// so a timeout handler can retrieve it without introspecting the (cancelled)
+// future.
+thread_local! {
+    static LAST_PGID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
 /// Spawn a long-running shell command for background execution.
@@ -1169,6 +1332,10 @@ fn truncate_output(content: String) -> String {
 /// piped, and `kill_on_drop(true)` so dropping the handle terminates the
 /// process. The command is validated through [`validate_shell_command`] before
 /// spawning.
+// reason: used by the `bg` tool in bg.rs within the lib; flagged dead only
+// when bash.rs is re-included into the test crate via #[path], where the bg
+// path is not exercised.
+#[allow(dead_code)]
 pub async fn spawn_background_shell(
     command: &str,
     working_dir: &std::path::Path,
@@ -1354,8 +1521,7 @@ impl Tool for BashTool {
         // hanging on the controlling tty. See `askpass` module docs.
         let mut broker = crate::askpass::AskPassBroker::start(&ctx.session_id);
         let start = Instant::now();
-
-        let result = match shell {
+        let result: Result<Result<PartialOutput, anyhow::Error>, ()> = match shell {
             ShellType::Bash | ShellType::GitBash(_) | ShellType::PowerShell(_) => {
                 // Build the wrapper invocation. For the foreground tool the
                 // wrapper script carries the user command + persistent-shell
@@ -1363,22 +1529,82 @@ impl Tool for BashTool {
                 let mut cmd = build_shell_command(shell, &wrapper, &ctx.working_dir);
                 // `build_shell_command` detaches stdin from the tty so nothing
                 // can block on it; sudo is handled via SUDO_ASKPASS instead.
-                // Kill the child process when the future is dropped (e.g.
-                // when `tokio::time::timeout` elapses).  Without this, a
-                // timed-out command becomes an orphan that keeps consuming
-                // CPU — the root cause of the "100% CPU stuck mid-run"
-                // bug.
+                // `kill_on_drop(true)` + `process_group(0)` ensure that when
+                // the future is dropped (e.g. the timeout below elapses) the
+                // *whole process group* — including any orphaned grandchildren
+                // like a deadlocked `cargo test` binary — is terminated, not
+                // just the direct `bash`. This was the root cause of orphaned
+                // test binaries continuing to consume CPU / hold locks after a
+                // timeout fired.
                 if let Some(ref mut b) = broker {
                     for (k, v) in b.env_vars() {
                         cmd.env(k, v);
                     }
                     b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
                 }
-                tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), cmd.output())
-                    .await
+                let capture = SharedCapture::new();
+                let mut cmd = Box::pin(run_with_output(cmd, Arc::clone(&capture)));
+                // Race the command against the timeout. On timeout we retain
+                // `capture` so the partial stdout/stderr the command produced
+                // before cancellation can be surfaced in the error message.
+                let timed_out = tokio::select! {
+                    r = &mut cmd => Ok(r),
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => Err(()),
+                };
+
+                // ── Timeout cleanup: kill the whole process group ────────
+                // `kill_on_drop` only terminates the direct child. If the
+                // command (e.g. `cargo test --workspace`) spawned grandchildren
+                // that inherited the pipes, those survive the drop. SIGKILL the
+                // entire group so no deadlocked test binary is left behind
+                // holding a mutex.
+                if timed_out.is_err() {
+                    #[cfg(unix)]
+                    if let Some(pgid) = LAST_PGID.with(|c| c.get()) {
+                        match kill_process_group(pgid as i32) {
+                            Ok(_) => {
+                                tracing::warn!(pgid, "killed process group after command timeout")
+                            }
+                            Err(e) => tracing::warn!(
+                                pgid,
+                                error = %e,
+                                "failed to kill process group after timeout (group may have already exited)"
+                            ),
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = &cmd;
+                    }
+                }
+
+                // Carry the inner result (real completion or command error)
+                // through untouched, attaching the captured output. When the
+                // timeout fired (`Err(())`) we still emit a `PartialOutput`
+                // marked `timed_out: true` carrying whatever partial
+                // stdout/stderr was captured *before* cancellation, so the
+                // agent can see how far the command got. The `Err` variant of
+                // the inner result is only a genuine spawn/io failure.
+                match timed_out {
+                    Ok(inner) => Ok(inner.map(|o| PartialOutput {
+                        output: o.output,
+                        partial_stdout: String::new(),
+                        partial_stderr: String::new(),
+                        timed_out: false,
+                    })),
+                    Err(()) => Ok(Ok(PartialOutput {
+                        output: std::process::Output {
+                            status: std::process::ExitStatus::default(),
+                            stdout: Vec::new(),
+                            stderr: Vec::new(),
+                        },
+                        partial_stdout: capture.stdout_str(),
+                        partial_stderr: capture.stderr_str(),
+                        timed_out: true,
+                    })),
+                }
             }
         };
-
         // Tear down the askpass broker (cancels the watcher, removes temp
         // files) once the command has finished.
         if let Some(b) = broker {
@@ -1398,10 +1624,45 @@ impl Tool for BashTool {
         }
 
         match result {
+            Ok(Ok(output)) if output.timed_out => {
+                // The command exceeded the timeout and its whole process group
+                // was killed (see the `kill_process_group` cleanup above). This
+                // is reported as a *failure*, not a successful completion, so
+                // the agent loop records `ToolCallStatus::Error` and the LLM is
+                // prompted to investigate why the command stalled (e.g. a
+                // `cargo test --workspace` binary deadlocked holding a mutex)
+                // rather than treating a hung run as a clean success.
+                let redacted = crate::sanitize::redact_secrets(command);
+                // Surface whatever partial output the command produced before
+                // it was killed, so the agent can see how far it got.
+                let mut partial = String::new();
+                if !output.partial_stdout.is_empty() {
+                    partial.push_str(&output.partial_stdout);
+                }
+                if !output.partial_stderr.is_empty() {
+                    if !partial.is_empty() {
+                        partial.push('\n');
+                    }
+                    partial.push_str("[stderr]\n");
+                    partial.push_str(&output.partial_stderr);
+                }
+                let partial = truncate_output(partial);
+                let partial_note = if partial.is_empty() {
+                    " No output was captured before the timeout.".to_string()
+                } else {
+                    format!("\nPartial output captured before timeout:\n{partial}")
+                };
+                Err(anyhow::anyhow!(
+                    "Command timed out after {timeout_secs} seconds and was killed. \
+                     The command did not complete within the timeout; investigate the \
+                     reason it stalled. Command: {redacted}{partial_note}"
+                ))
+            }
             Ok(Ok(output)) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let exit_code = output.status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&output.output.stdout);
+                let stderr = String::from_utf8_lossy(&output.output.stderr);
+                let exit_code = output.output.status.code().unwrap_or(-1);
+                let exit_desc = describe_exit_status(&output.output.status);
 
                 let mut content = String::new();
                 if !stdout.is_empty() {
@@ -1422,10 +1683,11 @@ impl Tool for BashTool {
                 let line_count = content.lines().count();
                 Ok(ToolOutput {
                     content: format!(
-                        "Exit code: {exit_code}\nDuration: {elapsed_ms}ms\n\n{content}"
+                        "Exit code: {exit_desc}\nDuration: {elapsed_ms}ms\n\n{content}"
                     ),
                     metadata: Some(json!({
                         "exit_code": exit_code,
+                        "exit_status": exit_desc,
                         "duration_ms": elapsed_ms,
                         "line_count": line_count,
                     })),
@@ -1434,13 +1696,20 @@ impl Tool for BashTool {
             Ok(Err(e)) => Err(anyhow::anyhow!(
                 "Failed to execute command: {e}. Check that the command exists and is accessible."
             )),
-            Err(_) => Ok(ToolOutput {
-                content: format!("Command timed out after {timeout_secs} seconds"),
-                metadata: Some(json!({
-                    "timed_out": true,
-                    "duration_ms": timeout_secs * 1000,
-                })),
-            }),
+            Err(_) => {
+                // The timeout arm of the `tokio::select!` fired (the command did
+                // not complete within `timeout_secs`). The whole process group
+                // was killed (see the `kill_process_group` cleanup above). This
+                // is reported as a *failure* so the agent loop records
+                // `ToolCallStatus::Error` rather than treating a hung run as a
+                // clean success.
+                let redacted = crate::sanitize::redact_secrets(command);
+                Err(anyhow::anyhow!(
+                    "Command timed out after {timeout_secs} seconds and was killed. \
+                     The command did not complete within the timeout; investigate the \
+                     reason it stalled. Command: {redacted}"
+                ))
+            }
         }
     }
 }

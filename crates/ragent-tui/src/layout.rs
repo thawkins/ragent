@@ -3047,7 +3047,11 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner_width = log_inner.width;
     let w = inner_width as usize;
-    let cur_version = app.log_version;
+    // C-008: each entry carries its own `version` stamp (the `log_seq`
+    // counter value when it was last rendered), so a new entry only
+    // invalidates the *new* group instead of the entire cache. Newly
+    // appended groups have `version: 0` (stale) and are rendered below.
+    let cur_version = app.log_seq;
 
     // ── Per-entry line cache (mirrors render_messages) ───────────────────
     //
@@ -3058,7 +3062,9 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     //   4. Flatten the cached lines and sum the wrapped counts.
     let need_rewrap = app.log_cache_width != inner_width;
 
-    // Reconcile cache length.
+    // Reconcile cache length. `push_log` keeps `log_line_cache` in lockstep
+    // with `log_entries` (pushing a stale `version: 0` group per entry), so
+    // the length normally matches. This is a defensive guard only.
     if app.log_line_cache.len() > all_entries.len() {
         app.log_line_cache.truncate(all_entries.len());
     }
@@ -3071,7 +3077,11 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         });
     }
 
-    // Re-render stale groups (new entries appended since last render).
+    // Re-render stale groups. A group is stale when its `version` stamp does
+    // not match the current `log_seq` counter. Only newly-added groups (with
+    // `version: 0`) and any group added while trimming dropped cache entries
+    // fall into this path — previously-rendered groups keep their cached
+    // lines and are not re-rendered (C-008).
     for (i, entry) in all_entries.iter().enumerate() {
         let group = &mut app.log_line_cache[i];
         if group.version != cur_version {
@@ -3511,20 +3521,24 @@ fn render_memory_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    let project_dir = std::env::current_dir().unwrap_or_default();
+    // M-032: use the cwd cached in `App` (it cannot change at runtime) instead
+    // of calling `std::env::current_dir()` (a syscall) on every rendered frame
+    // while the memory panel is visible.
+    let project_dir = &app.cwd;
 
     // Refresh the cached memory data only when dirty, avoiding per-frame
     // N+1 SQLite queries (count + list + N x get_memory_tags).  The cache
     // is marked dirty by memory-related tool results (memory_store,
     // memory_recall, memory_forget).
     if app.memory_cache_dirty {
+        let project_dir = std::path::Path::new(project_dir);
         let count = app
             .storage
-            .count_memories_for_project(&project_dir)
+            .count_memories_for_project(project_dir)
             .unwrap_or(0);
         let entries = app
             .storage
-            .list_memories_for_project(&project_dir, 100)
+            .list_memories_for_project(project_dir, 100)
             .unwrap_or_default();
         // Pre-fetch tags for each row so the render path does not issue a
         // per-row SQLite query.

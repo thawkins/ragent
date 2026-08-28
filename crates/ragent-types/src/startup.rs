@@ -26,6 +26,10 @@ pub struct StartupTimings {
     stages: Vec<StartupStage>,
     /// Wall-clock instant when timing started (set in [`StartupTimings::new`]).
     global_start: Instant,
+    /// Frozen wall-clock total, set by [`StartupTimings::finish`]. When set,
+    /// [`StartupTimings::total_elapsed_ms`] reports this value instead of the
+    /// still-running clock, so `/startup` stays stable after startup completes.
+    finished_total_ms: Option<u128>,
 }
 
 impl Default for StartupTimings {
@@ -41,6 +45,7 @@ impl StartupTimings {
         Self {
             stages: Vec::new(),
             global_start: Instant::now(),
+            finished_total_ms: None,
         }
     }
 
@@ -60,10 +65,27 @@ impl StartupTimings {
         });
     }
 
+    /// Freeze the wall-clock total at its current value.
+    ///
+    /// Call this once startup is complete (e.g. the primary agent goes ready).
+    /// After this, [`Self::total_elapsed_ms`] and [`Self::untracked_ms`] report
+    /// the value captured here rather than the still-advancing clock, so
+    /// repeated `/startup` displays stay stable instead of growing the
+    /// "Untracked" row.
+    pub fn finish(&mut self) {
+        if self.finished_total_ms.is_none() {
+            self.finished_total_ms = Some(self.global_start.elapsed().as_millis());
+        }
+    }
+
     /// Total wall-clock elapsed time from [`StartupTimings::new`] to now.
+    ///
+    /// If [`Self::finish`] has been called, returns the frozen value captured
+    /// at that point; otherwise returns the live elapsed time.
     #[must_use]
     pub fn total_elapsed_ms(&self) -> u128 {
-        self.global_start.elapsed().as_millis()
+        self.finished_total_ms
+            .unwrap_or_else(|| self.global_start.elapsed().as_millis())
     }
 
     /// Sum of all recorded stage durations.
@@ -99,7 +121,7 @@ impl StartupTimings {
     ///
     /// The stages are moved (not copied) from `other`, leaving `other` empty.
     /// The global start of `self` is preserved; `other`'s start is discarded.
-    pub fn merge_stages(&mut self, other: &mut StartupTimings) {
+    pub fn merge_stages(&mut self, other: &mut Self) {
         self.stages.append(&mut other.stages);
     }
 
@@ -135,7 +157,7 @@ impl StartupTimings {
             .max(4);
 
         // Total visible width: name_w + 2 spaces + time_w.
-        let rule = "─".repeat(name_w + 2 + time_w);
+        let rule = "-".repeat(name_w + 2 + time_w);
 
         let mut out = String::new();
         out.push_str("From: /startup\n\n");
@@ -154,11 +176,14 @@ impl StartupTimings {
                 time_w = time_w
             ));
         };
-        row(&mut out, "Stage", 0);
-        out.replace_range(
-            out.len() - 7..out.len(),
-            &format!("{:>time_w$}\n", "Time", time_w = time_w),
-        );
+        // Header row: "Stage" in the name column, "Time" in the time column.
+        out.push_str(&format!(
+            "{:<name_w$}  {:>time_w$}\n",
+            "Stage",
+            "Time",
+            name_w = name_w,
+            time_w = time_w
+        ));
         out.push_str(&rule);
         out.push('\n');
         for stage in &self.stages {

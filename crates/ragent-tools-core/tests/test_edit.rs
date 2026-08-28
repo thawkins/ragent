@@ -8,10 +8,7 @@
 //! test crate. Shims are provided for `super::replace` and `super::{Tool,...}`
 //! references in `edit.rs`.
 
-use ragent_tools_core::{
-    CanonicalPathCache, Tool, ToolContext, ToolOutput, check_path_within_root,
-    check_path_within_root_cached,
-};
+use ragent_tools_core::{Tool, ToolContext, ToolOutput, check_path_within_root_cached};
 
 mod replace {
     pub(crate) use ragent_tools_core::replace::{

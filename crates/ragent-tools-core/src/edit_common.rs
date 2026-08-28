@@ -17,7 +17,11 @@ use super::ToolContext;
 /// available) or when the on-disk mtime is within 1 ms of the recorded
 /// baseline. A 1 ms tolerance avoids spurious rejections caused by filesystem
 /// mtime granularity when a read and edit happen in the same tick.
-pub(crate) fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
+// reason: used by the edit and multiedit tools in the lib; flagged dead only
+// when edit_common.rs is re-included into the test crate via #[path], where
+// the tool-execution path is not exercised.
+#[allow(dead_code)]
+pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
     let recorded = ctx
         .read_timestamps
         .read()
@@ -59,7 +63,7 @@ pub(crate) fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 ///
 /// Call this after a successful write so a follow-up edit in the same session
 /// does not trip the stale-file check on a file we just modified.
-pub(crate) fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
+pub fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)
         && let Ok(mtime) = meta.modified()
     {

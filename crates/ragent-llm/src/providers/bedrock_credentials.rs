@@ -41,8 +41,9 @@ pub struct AwsCredentials {
 ///
 /// Returns an error with actionable diagnostics when no credentials are found
 /// from any source (FR-002).
+#[allow(clippy::implicit_hasher)] // options is always a plain std HashMap from the provider config
 pub fn resolve_aws_credentials(
-    options: &HashMap<String, serde_json::Value>,
+    options: &std::collections::HashMap<String, serde_json::Value>,
 ) -> Result<AwsCredentials> {
     // Resolve region first (needed for all paths)
     let region = resolve_region(options);
@@ -102,7 +103,8 @@ pub fn resolve_aws_credentials(
 /// 2. `AWS_REGION` (FR-005)
 /// 3. `options["region"]` (FR-004)
 /// 4. Default `us-east-1`
-pub fn resolve_region(options: &HashMap<String, serde_json::Value>) -> String {
+#[allow(clippy::implicit_hasher)] // called with the same plain std HashMap as resolve_aws_credentials
+pub fn resolve_region(options: &std::collections::HashMap<String, serde_json::Value>) -> String {
     // FR-006: Bedrock-specific region override
     if let Ok(region) = std::env::var("AWS_BEDROCK_REGION")
         && !region.trim().is_empty()

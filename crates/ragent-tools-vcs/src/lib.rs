@@ -23,11 +23,17 @@ pub mod storage {
 
     /// Storage backend abstraction used by GitLab auth/client helpers.
     pub trait StorageBackend: Send + Sync {
+        /// Fetch a stored provider credential by id.
         fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>>;
+        /// Persist a provider credential by id.
         fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> Result<()>;
+        /// Remove a stored provider credential by id.
         fn delete_provider_auth(&self, provider_id: &str) -> Result<()>;
+        /// Fetch a stored setting by key.
         fn get_setting(&self, key: &str) -> Result<Option<String>>;
+        /// Persist a setting value by key.
         fn set_setting(&self, key: &str, value: &str) -> Result<()>;
+        /// Remove a stored setting by key.
         fn delete_setting(&self, key: &str) -> Result<()>;
     }
 
@@ -69,15 +75,20 @@ pub mod storage {
 /// The result of a tool execution, including optional structured metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolOutput {
+    /// The textual result of the tool execution.
     pub content: String,
+    /// Optional structured metadata associated with the result.
     pub metadata: Option<Value>,
 }
 
 /// Execution context passed to each tool invocation.
 #[derive(Clone)]
 pub struct ToolContext {
+    /// Identifier of the session running the tool.
     pub session_id: String,
+    /// Base directory tools should operate within.
     pub working_dir: PathBuf,
+    /// Optional storage backend for VCS credential access.
     pub storage: Option<Arc<dyn storage::StorageBackend>>,
     /// Optional ragent configuration loaded from config files.
     pub config: Option<Arc<ragent_config::Config>>,
@@ -86,10 +97,15 @@ pub struct ToolContext {
 /// A tool that an agent can invoke to perform actions.
 #[async_trait::async_trait]
 pub trait Tool: Send + Sync {
+    /// The unique name used to invoke the tool.
     fn name(&self) -> &str;
+    /// A human-readable description of what the tool does.
     fn description(&self) -> &str;
+    /// The JSON schema describing the tool's input parameters.
     fn parameters_schema(&self) -> Value;
+    /// The permission category the tool belongs to.
     fn permission_category(&self) -> &str;
+    /// Execute the tool with the given input and context.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput>;
 }
 
@@ -100,6 +116,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    /// Create an empty tool registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -108,6 +125,7 @@ impl ToolRegistry {
         }
     }
 
+    /// Register a tool, replacing any existing tool with the same name.
     pub fn register(&self, tool: Arc<dyn Tool>) {
         self.tools
             .write()
@@ -115,6 +133,7 @@ impl ToolRegistry {
             .insert(tool.name().to_string(), tool);
     }
 
+    /// Fetch a registered tool by name.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools
@@ -124,6 +143,7 @@ impl ToolRegistry {
             .cloned()
     }
 
+    /// List the names of all registered tools, sorted.
     #[must_use]
     pub fn list(&self) -> Vec<String> {
         let mut names: Vec<String> = self
@@ -137,11 +157,13 @@ impl ToolRegistry {
         names
     }
 
+    /// Replace the set of hidden (invisible) tool names.
     pub fn set_hidden(&self, names: &[String]) {
         let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
         *hidden = names.iter().cloned().collect();
     }
 
+    /// Return the definitions of all registered, non-hidden tools.
     #[must_use]
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let tools = self.tools.read().expect("tool registry lock poisoned");

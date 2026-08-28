@@ -28,11 +28,11 @@ pub struct CurrencyHistoryTool;
 
 #[async_trait::async_trait]
 impl Tool for CurrencyHistoryTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "currency_history"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch historical exchange-rate OHLCV bars for a currency pair."
     }
 
@@ -49,7 +49,7 @@ impl Tool for CurrencyHistoryTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

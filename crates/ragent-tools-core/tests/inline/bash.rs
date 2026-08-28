@@ -297,50 +297,138 @@ fn test_script_file_path_gitbash_extension() {
     );
 }
 
-// ── Low-priority wrapper tests ─────────────────────────────────────────
+// ── run_with_output: grandchild-holds-pipe regression test ──────────────
 
-#[test]
-fn test_low_priority_prefix_linux_bash() {
-    // On Linux with the default config (nice=10), a native Bash shell should
-    // get the nice + ionice prefix.
-    if !is_windows() {
-        ragent_config::bash_lists::load_from_config();
-        let prefix = low_priority_prefix(&ShellType::Bash);
-        if cfg!(target_os = "linux") {
-            assert_eq!(
-                prefix,
-                vec!["nice", "-n", "10", "ionice", "-c", "3"],
-                "expected nice+ionice prefix on Linux"
-            );
-        } else {
-            assert_eq!(
-                prefix,
-                vec!["nice", "-n", "10"],
-                "expected nice prefix on non-Linux POSIX"
-            );
-        }
-    }
+/// A direct child that exits while a grandchild still holds the stdout pipe
+/// write-end open must not hang the tool. `Command::output()` would block
+/// forever waiting for EOF; `run_with_output` must return promptly with the
+/// direct child's output.
+#[tokio::test]
+async fn test_run_with_output_returns_when_grandchild_holds_pipe() {
+    // The shell prints HELLO, spawns a background grandchild that inherits
+    // stdout and sleeps 30s, then exits immediately. The grandchild holds the
+    // pipe write-end open, so EOF never arrives on stdout.
+    let script = "echo HELLO; (sleep 30 &) ; echo DONE";
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
+        .arg(script)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+
+    let start = std::time::Instant::now();
+    let capture = SharedCapture::new();
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_with_output(cmd, capture),
+    )
+    .await;
+
+    let elapsed = start.elapsed().as_secs();
+    let output = out
+        .expect("run_with_output must not hang")
+        .expect("run_with_output io error");
+    let stdout = String::from_utf8_lossy(&output.output.stdout);
+    assert!(
+        stdout.contains("HELLO"),
+        "expected HELLO in output, got: {stdout:?}"
+    );
+    assert!(
+        stdout.contains("DONE"),
+        "expected DONE in output, got: {stdout:?}"
+    );
+    assert!(
+        elapsed < 8,
+        "should return promptly despite grandchild holding pipe, took {elapsed}s"
+    );
 }
 
-#[test]
-fn test_low_priority_prefix_skips_windows_shells() {
-    // Git Bash and PowerShell on Windows should never get the POSIX wrapper.
-    let git_bash = ShellType::GitBash(std::path::PathBuf::from("bash.exe"));
-    let pwsh = ShellType::PowerShell(std::path::PathBuf::from("pwsh.exe"));
-    assert!(low_priority_prefix(&git_bash).is_empty());
-    assert!(low_priority_prefix(&pwsh).is_empty());
+/// A normal command that produces output and exits cleanly must still capture
+/// all of its output and return promptly.
+#[tokio::test]
+async fn test_run_with_output_captures_normal_output() {
+    let mut cmd = Command::new("bash");
+    cmd.arg("-c")
+        .arg("echo one; echo two; echo three")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+
+    let start = std::time::Instant::now();
+    let capture = SharedCapture::new();
+    let out = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_with_output(cmd, capture),
+    )
+    .await;
+
+    let elapsed = start.elapsed().as_secs();
+    let output = out
+        .expect("run_with_output must not hang")
+        .expect("run_with_output io error");
+    let stdout = String::from_utf8_lossy(&output.output.stdout);
+    assert!(stdout.contains("one"), "expected 'one', got: {stdout:?}");
+    assert!(stdout.contains("two"), "expected 'two', got: {stdout:?}");
+    assert!(
+        stdout.contains("three"),
+        "expected 'three', got: {stdout:?}"
+    );
+    assert!(
+        elapsed < 8,
+        "normal command should return promptly, took {elapsed}s"
+    );
 }
 
-#[test]
-fn test_low_priority_prefix_respects_configured_level() {
-    // The configured level should appear in the prefix. We can't easily inject
-    // a custom level here (the runtime flag is a global), so we verify that the
-    // prefix is non-empty on POSIX when the default is active.
-    if !is_windows() {
-        let prefix = low_priority_prefix(&ShellType::Bash);
-        if !prefix.is_empty() {
-            // The level is always the value right after `-n`.
-            assert_eq!(prefix[1], "-n");
-        }
-    }
+// ── BashTool timeout regression test ────────────────────────────────────
+
+/// A command that runs past the configured timeout must be reported as a
+/// *failure* (`Err`), not a clean success, and the partial output it produced
+/// before being killed must be surfaced in the error message so the agent can
+/// see how far it got.
+#[tokio::test]
+async fn test_bash_tool_timeout_returns_error_with_partial_output() {
+    use crate::CanonicalPathCache;
+    use crate::event::EventBus;
+    use std::sync::RwLock;
+
+    let tool = BashTool;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let ctx = ToolContext {
+        session_id: "test-timeout-session".to_string(),
+        working_dir: tmp.path().to_path_buf(),
+        event_bus: Arc::new(EventBus::new(128)),
+        read_timestamps: Arc::new(RwLock::new(std::collections::HashMap::new())),
+        canonical_cache: Arc::new(CanonicalPathCache::new()),
+    };
+
+    // `sleep` runs past the 1s timeout. It first prints a marker to stdout so
+    // we can assert the partial output is surfaced. `sleep` is not in the
+    // banned/denied lists, so all 7 validation layers pass.
+    let input = serde_json::json!({
+        "command": "echo PARTIAL_MARKER; sleep 30",
+        "timeout": 1,
+    });
+
+    let start = std::time::Instant::now();
+    let result = tool.execute(input, &ctx).await;
+    let elapsed = start.elapsed().as_secs();
+
+    let err = result.expect_err("a timed-out command must return Err, not Ok");
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("timed out after 1 seconds"),
+        "expected timeout message, got: {msg}"
+    );
+    assert!(
+        msg.contains("PARTIAL_MARKER"),
+        "expected partial output captured before timeout to be surfaced, got: {msg}"
+    );
+    assert!(
+        elapsed < 15,
+        "timeout path should return promptly, took {elapsed}s"
+    );
 }

@@ -274,8 +274,10 @@ pub fn export_session_archive(
                     let entry = entry?;
                     let path = entry.path();
                     if path.is_file() {
-                        let file_name =
-                            format!("loop-state/{}", path.file_name().unwrap().to_string_lossy());
+                        let Some(name) = path.file_name() else {
+                            continue;
+                        };
+                        let file_name = format!("loop-state/{}", name.to_string_lossy());
                         let hash = sha256_file(&path)?;
                         file_checksums.insert(file_name, hash);
                     }
@@ -532,7 +534,9 @@ pub async fn import_session_archive(
                 let entry = entry?;
                 let path = entry.path();
                 if path.is_file() {
-                    let file_name = path.file_name().unwrap();
+                    let Some(file_name) = path.file_name() else {
+                        continue;
+                    };
                     let target_path = loop_state_target.join(file_name);
                     fs::copy(&path, &target_path).with_context(|| {
                         format!("Failed to restore loop state file: {}", path.display())

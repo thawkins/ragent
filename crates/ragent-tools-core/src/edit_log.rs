@@ -383,6 +383,10 @@ impl EditLogAnalysis {
 
     /// All tools that have at least one logged operation, sorted by name.
     #[must_use]
+    // reason: used by ragent-tui's `/alog show` via the public crate; flagged
+    // dead only when edit_log.rs is re-included into the test crate via
+    // #[path], where that UI path is not exercised.
+    #[allow(dead_code)]
     pub fn tools_sorted(&self) -> Vec<&String> {
         let mut tools: std::collections::HashSet<&String> = self.success_by_tool.keys().collect();
         for t in self.failure_by_tool.keys() {

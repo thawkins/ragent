@@ -6,9 +6,9 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use ragent_research::{
-    GrepMatch, LocalGatherer, LocalTool, ResearchManager, ResearchSession, SessionConfig,
-    SessionEvent, SessionObserver, WebFetchTool, WebFetchedPage, WebGatherer, WebSearchHit,
-    WebSearchTool,
+    GrepMatch, InputConfig, LocalConfig, LocalGatherer, LocalTool, ResearchManager,
+    ResearchSession, SessionConfig, SessionEvent, SessionObserver, WebConfig, WebFetchTool,
+    WebFetchedPage, WebGatherer, WebSearchHit, WebSearchTool,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -163,9 +163,18 @@ fn bench_gathering(c: &mut Criterion) {
         Arc::new(ragent_research::NoopAnalysisEngine),
     );
     let config = SessionConfig {
-        topic: "Rust async".into(),
-        max_web_results: n_hits,
-        max_local_sources: n_local,
+        input: InputConfig {
+            topic: "Rust async".into(),
+            ..InputConfig::default()
+        },
+        web: WebConfig {
+            max_web_results: n_hits,
+            ..WebConfig::default()
+        },
+        local: LocalConfig {
+            max_local_sources: n_local,
+            ..LocalConfig::default()
+        },
         ..SessionConfig::default()
     };
 

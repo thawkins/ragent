@@ -31,9 +31,13 @@ use ragent_types::ToolDefinition;
 /// - Bedrock: `{"toolSpec":{name,description,inputSchema:{json:...}}}`
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ToolFormat {
+    /// OpenAI function-call wire format.
     OpenAi,
+    /// Anthropic tool wire format.
     Anthropic,
+    /// Gemini tool wire format.
     Gemini,
+    /// Bedrock toolSpec wire format.
     Bedrock,
     /// HuggingFace reuses the OpenAI `{"type":"function",...}` envelope but
     /// prefixes every tool name with `t_` (see `huggingface.rs`), so it needs
@@ -125,7 +129,8 @@ fn fingerprint(tools: &[ToolDefinition]) -> u64 {
 /// every turn reuses the same buffer instead of re-allocating.
 pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedTools> {
     let key = (format, fingerprint(tools));
-    if let Some(hit) = cache().lock().unwrap().get(&key).cloned() {
+    let cached = cache().lock().unwrap().get(&key).cloned();
+    if let Some(hit) = cached {
         return hit;
     }
     // Serialise outside the lock so concurrent misses don't contend.

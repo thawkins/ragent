@@ -26,6 +26,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -319,7 +320,7 @@ impl Storage {
             return Ok(true);
         }
         let has: bool = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
             )?
             .query_row([], |r| r.get::<_, i64>(0))
@@ -359,6 +360,10 @@ impl Storage {
         // behind a writer and startup `get_setting` calls stall for the whole
         // rebuild.
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // H-008: `synchronous=NORMAL` (instead of the default FULL) avoids an
+        // fsync on every WAL commit while remaining crash-safe (the WAL is
+        // still durable on checkpoint). This matches the activity-log store.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         // R-24: Use a generous busy_timeout so a startup write (e.g. the
         // background FTS warm-up, which holds a single long write transaction
         // on a second connection to the same DB) never surfaces as an
@@ -715,7 +720,7 @@ impl Storage {
             ("cron_events", "stateful"),
         ] {
             let has_col: bool = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name='{col}'"
                 ))?
                 .query_row([], |r| r.get::<_, i64>(0))
@@ -755,7 +760,7 @@ impl Storage {
             ("blocked_by", "'[]'"),
         ] {
             let has_col: bool = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name='{col}'"
                 ))?
                 .query_row([], |r| r.get::<_, i64>(0))
@@ -839,7 +844,7 @@ impl Storage {
                 .to_string()
         };
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let row = stmt
             .query_row(params![id], |row| {
                 Ok(SessionRow {
@@ -910,7 +915,7 @@ impl Storage {
                 .to_string()
         };
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(SessionRow {
@@ -1021,12 +1026,16 @@ impl Storage {
     /// storage.create_message(&msg).unwrap();
     /// ```
     pub fn create_message(&self, msg: &Message) -> Result<()> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
         let role_str = msg.role.to_string();
         let created = msg.created_at.to_rfc3339();
         let updated = msg.updated_at.to_rfc3339();
-        conn.execute(
+        // H-008: wrap the multi-statement write in a single transaction so the
+        // message insert + FTS sync + session-touch commit once instead of
+        // three implicit autocommits (three fsyncs per message in WAL mode).
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO messages (id, session_id, role, parts, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
@@ -1040,17 +1049,18 @@ impl Storage {
         )?;
         // M5: Sync the message FTS index.
         let content = extract_message_text(&msg.parts);
-        conn.execute(
+        tx.execute(
             "INSERT INTO messages_fts (message_id, session_id, role, content) \
              VALUES (?1, ?2, ?3, ?4)",
             params![msg.id, msg.session_id, role_str, content],
         )?;
         // Touch session updated_at
         let now = Utc::now().to_rfc3339();
-        conn.execute(
+        tx.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![now, msg.session_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -1075,7 +1085,7 @@ impl Storage {
     /// ```
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, role, parts, created_at, updated_at \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
         )?;
@@ -1151,27 +1161,31 @@ impl Storage {
     ///
     /// Returns an error if serialization or the update fails.
     fn update_message_parts(&self, msg: &Message, sync_fts: bool) -> Result<()> {
-        let conn = lock_conn!(self)?;
+        let mut conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
         let updated = Utc::now().to_rfc3339();
-        conn.execute(
+        // H-008: wrap the parts update + FTS resync in a single transaction so
+        // the two statements commit once instead of two implicit autocommits.
+        let tx = conn.transaction()?;
+        tx.execute(
             "UPDATE messages SET parts = ?1, updated_at = ?2 WHERE id = ?3",
             params![parts_json, updated, msg.id],
         )?;
         if sync_fts {
             // M5: Sync the message FTS index — delete old entry and re-insert.
-            conn.execute(
+            tx.execute(
                 "DELETE FROM messages_fts WHERE message_id = ?1",
                 params![msg.id],
             )?;
             let content = extract_message_text(&msg.parts);
             let role_str = msg.role.to_string();
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages_fts (message_id, session_id, role, content) \
                  VALUES (?1, ?2, ?3, ?4)",
                 params![msg.id, msg.session_id, role_str, content],
             )?;
         }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1300,7 +1314,7 @@ impl Storage {
     /// ```
     pub fn list_run_cost_summaries(&self, session_id: &str) -> Result<Vec<RunCostSummaryRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, model_id, input_tokens, output_tokens, total_cost_usd, \
              duration_ms, created_at \
              FROM run_cost_summaries WHERE session_id = ?1 ORDER BY created_at ASC",
@@ -1399,7 +1413,8 @@ impl Storage {
     /// ```
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
+        let mut stmt =
+            conn.prepare_cached("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
         let encoded = stmt
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
@@ -1435,7 +1450,7 @@ impl Storage {
     pub fn seed_secret_registry(&self) -> Result<()> {
         let keys: Vec<String> = {
             let conn = lock_conn!(self)?;
-            let mut stmt = conn.prepare("SELECT api_key FROM provider_auth")?;
+            let mut stmt = conn.prepare_cached("SELECT api_key FROM provider_auth")?;
             stmt.query_map([], |row| row.get::<_, String>(0))?
                 .filter_map(std::result::Result::ok)
                 .map(|encoded| deobfuscate_key(&encoded))
@@ -1512,7 +1527,7 @@ impl Storage {
     /// ```
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut stmt = conn.prepare_cached("SELECT value FROM settings WHERE key = ?1")?;
         let val = stmt
             .query_row(params![key], |row| row.get::<_, String>(0))
             .optional()?;
@@ -1543,8 +1558,8 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn get_discovered_models(&self, provider_id: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
-        let mut stmt =
-            conn.prepare("SELECT models_json FROM discovered_models WHERE provider_id = ?1")?;
+        let mut stmt = conn
+            .prepare_cached("SELECT models_json FROM discovered_models WHERE provider_id = ?1")?;
         let val = stmt
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
@@ -1597,7 +1612,7 @@ impl Storage {
         let conn = lock_conn!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     "SELECT id, session_id, title, status, description, created_at, updated_at,
                             active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1 AND status = ?2
@@ -1607,7 +1622,7 @@ impl Storage {
                     .collect::<rusqlite::Result<Vec<_>>>()?
             }
             _ => {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     "SELECT id, session_id, title, status, description, created_at, updated_at,
                             active_form, owner, metadata, blocked_by
                      FROM todos WHERE session_id = ?1
@@ -1782,7 +1797,7 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn get_task(&self, id: &str, session_id: &str) -> Result<Option<TaskRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, title, status, description, created_at, updated_at,
                     active_form, owner, metadata, blocked_by
              FROM todos WHERE id = ?1 AND session_id = ?2",
@@ -1987,7 +2002,7 @@ impl Storage {
     /// Fetches a single initiative by ID, scoped to `project`.
     pub fn get_initiative(&self, id: &str, project: &str) -> Result<Option<InitiativeRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
              FROM initiatives WHERE id = ?1 AND project = ?2",
         )?;
@@ -2008,7 +2023,7 @@ impl Storage {
         let conn = lock_conn!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
                      FROM initiatives WHERE project = ?1 AND status = ?2
                      ORDER BY created_at",
@@ -2017,7 +2032,7 @@ impl Storage {
                     .collect::<rusqlite::Result<Vec<_>>>()?
             }
             _ => {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     "SELECT id, title, description, status, milestones_json, progress, project, session_id, created_at, updated_at, closed_at
                      FROM initiatives WHERE project = ?1
                      ORDER BY created_at",
@@ -2180,7 +2195,7 @@ impl Storage {
     /// Used by the `/cron list` slash command.
     pub fn list_cron_events(&self) -> Result<Vec<CronEventRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
            last_fired, stateful FROM cron_events ORDER BY next_due",
@@ -2198,7 +2213,7 @@ impl Storage {
     pub fn list_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
         let conn = lock_conn!(self)?;
         let now_str = now.to_rfc3339();
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
            last_fired, stateful FROM cron_events WHERE enabled = 1 AND next_due <= ?1 \
@@ -2218,7 +2233,7 @@ impl Storage {
     pub fn list_disabled_due_cron_events(&self, now: &DateTime<Utc>) -> Result<Vec<CronEventRow>> {
         let conn = lock_conn!(self)?;
         let now_str = now.to_rfc3339();
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, agent_type, prompt, schedule_form, start_at, \
            duration_secs, schedule_raw, enabled, next_due, created_at, \
            last_fired, stateful FROM cron_events WHERE enabled = 0 AND next_due <= ?1 \
@@ -2369,11 +2384,47 @@ impl Storage {
     pub fn get_memory_tags(&self, memory_id: i64) -> Result<Vec<String>> {
         let conn = lock_conn!(self)?;
         let mut stmt =
-            conn.prepare("SELECT tag FROM memory_tags WHERE memory_id = ?1 ORDER BY tag")?;
+            conn.prepare_cached("SELECT tag FROM memory_tags WHERE memory_id = ?1 ORDER BY tag")?;
         let tags: Vec<String> = stmt
             .query_map(params![memory_id], |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(tags)
+    }
+
+    /// M-002: retrieve tags for a specific set of memory IDs in a single
+    /// batched query, replacing the N+1 `get_memory_tags` pattern at hot call
+    /// sites. Returns a `memory_id → tags` map (only entries with at least one
+    /// tag are present).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_memory_tags_batched(&self, memory_ids: &[i64]) -> Result<HashMap<i64, Vec<String>>> {
+        if memory_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let conn = lock_conn!(self)?;
+        // Build a dynamic `IN (?1, ?2, ...)` clause.
+        let placeholders: Vec<String> = (1..=memory_ids.len()).map(|i| format!("?{i}")).collect();
+        let sql = format!(
+            "SELECT memory_id, tag FROM memory_tags WHERE memory_id IN ({}) ORDER BY memory_id, tag",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = memory_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
+        let mut map: HashMap<i64, Vec<String>> = HashMap::new();
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            let memory_id: i64 = row.get(0)?;
+            let tag: String = row.get(1)?;
+            Ok((memory_id, tag))
+        })?;
+        for (id, tag) in rows.flatten() {
+            map.entry(id).or_default().push(tag);
+        }
+        Ok(map)
     }
 
     /// Retrieves tags for all structured memories in a single query (FR-010).
@@ -2392,7 +2443,7 @@ impl Storage {
     pub fn get_all_memory_tags(&self) -> Result<std::collections::HashMap<i64, Vec<String>>> {
         let conn = lock_conn!(self)?;
         let mut stmt =
-            conn.prepare("SELECT memory_id, tag FROM memory_tags ORDER BY memory_id, tag")?;
+            conn.prepare_cached("SELECT memory_id, tag FROM memory_tags ORDER BY memory_id, tag")?;
         let mut map: std::collections::HashMap<i64, Vec<String>> = std::collections::HashMap::new();
         let rows = stmt.query_map([], |row| {
             let memory_id: i64 = row.get(0)?;
@@ -2513,7 +2564,7 @@ impl Storage {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows: Vec<MemoryRow> = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(MemoryRow {
@@ -2552,7 +2603,7 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, content, category, source, confidence, project, session_id,
                     created_at, updated_at, access_count, last_accessed
              FROM memories
@@ -2666,7 +2717,7 @@ impl Storage {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(std::convert::AsRef::as_ref).collect();
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let ids: Vec<i64> = stmt
             .query_map(param_refs.as_slice(), |row| row.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2781,7 +2832,7 @@ impl Storage {
 
         let mut stmt;
         let rows = if name.is_empty() {
-            stmt = conn.prepare(
+            stmt = conn.prepare_cached(
                 "SELECT id, content, category, source, confidence, project, session_id,
                         created_at, updated_at, access_count, last_accessed
                  FROM memories
@@ -2791,7 +2842,7 @@ impl Storage {
             )?;
             stmt.query_map(params![full.as_ref(), limit as i64], memory_row_from_sql)?
         } else {
-            stmt = conn.prepare(
+            stmt = conn.prepare_cached(
                 "SELECT id, content, category, source, confidence, project, session_id,
                         created_at, updated_at, access_count, last_accessed
                  FROM memories
@@ -2818,7 +2869,7 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn list_all_memories(&self, limit: usize) -> Result<Vec<MemoryRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, content, category, source, confidence, project, session_id,
                     created_at, updated_at, access_count, last_accessed
              FROM memories
@@ -2909,7 +2960,7 @@ impl Storage {
     pub fn list_memory_embeddings(&self) -> Result<Vec<(i64, Vec<u8>)>> {
         let conn = lock_conn!(self)?;
         let mut stmt =
-            conn.prepare("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
+            conn.prepare_cached("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
         let rows: Vec<(i64, Vec<u8>)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -3029,7 +3080,7 @@ impl Storage {
         dimensions: usize,
     ) -> Result<Option<Vec<f32>>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT embedding FROM messages_embedding \
                    WHERE message_id = ?1 AND dimensions = ?2",
         )?;
@@ -3045,8 +3096,8 @@ impl Storage {
     /// Lists all stored session-message embeddings.
     pub fn list_message_embeddings(&self) -> Result<Vec<(String, Vec<u8>, usize)>> {
         let conn = lock_conn!(self)?;
-        let mut stmt =
-            conn.prepare("SELECT message_id, embedding, dimensions FROM messages_embedding")?;
+        let mut stmt = conn
+            .prepare_cached("SELECT message_id, embedding, dimensions FROM messages_embedding")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -3081,7 +3132,7 @@ impl Storage {
         F: Fn(&[f32], &[f32]) -> f32,
     {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT message_id, embedding FROM messages_embedding WHERE dimensions = ?1",
         )?;
         let rows: Vec<(String, Vec<u8>)> = stmt
@@ -3195,7 +3246,7 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn list_entities(&self) -> Result<Vec<KgEntityRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities ORDER BY mention_count DESC",
         )?;
         let entities = stmt
@@ -3220,7 +3271,7 @@ impl Storage {
     /// Returns an error if the query fails.
     pub fn list_relationships(&self) -> Result<Vec<KgRelationshipRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at FROM kg_relationships ORDER BY confidence DESC",
         )?;
         let relationships = stmt
@@ -3252,7 +3303,7 @@ impl Storage {
         let conn = lock_conn!(self)?;
 
         // Find all relationships where this entity is source or target.
-        let mut rel_stmt = conn.prepare(
+        let mut rel_stmt = conn.prepare_cached(
             "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at
              FROM kg_relationships WHERE source_id = ?1 OR target_id = ?1",
         )?;
@@ -3289,7 +3340,7 @@ impl Storage {
             "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities WHERE id IN ({})",
             placeholders.join(",")
         );
-        let mut entity_stmt = conn.prepare(&sql)?;
+        let mut entity_stmt = conn.prepare_cached(&sql)?;
         let params: Vec<&dyn rusqlite::types::ToSql> = ids
             .iter()
             .map(|id| id as &dyn rusqlite::types::ToSql)
@@ -3408,7 +3459,7 @@ impl Storage {
     /// Fetches a single background task by id.
     pub fn get_background_task(&self, id: &str) -> Result<Option<BackgroundTaskRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT id, session_id, command, status, exit_code, stdout, stderr,
                     progress_json, created_at, updated_at, completed_at
              FROM background_tasks WHERE id = ?1",
@@ -3458,7 +3509,7 @@ impl Storage {
         params_vec.push(Box::new(limit as i64));
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params_vec.iter().map(std::convert::AsRef::as_ref).collect();
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(BackgroundTaskRow {
@@ -3651,7 +3702,7 @@ impl Storage {
             return Ok(Vec::new());
         }
 
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare_cached(
             "SELECT f.message_id, f.session_id, f.role, f.content,
                     m.created_at, s.title, s.directory, f.rank
              FROM messages_fts f
@@ -3813,7 +3864,7 @@ impl Storage {
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             sql_params.iter().map(std::convert::AsRef::as_ref).collect();
 
-        let mut stmt = conn.prepare(&sql)?;
+        let mut stmt = conn.prepare_cached(&sql)?;
         let rows = stmt
             .query_map(param_refs.as_slice(), |row| {
                 Ok(MessageSearchResult {
@@ -3940,7 +3991,7 @@ impl Storage {
         // so many small transactions trigger expensive incremental index merges.
         let mut conn = lock_conn!(self)?;
         let missing: Vec<(String, String, String, String)> = {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare_cached(
                 "SELECT m.id, m.session_id, m.role, m.parts \
                  FROM messages m \
                  LEFT JOIN messages_fts f ON f.message_id = m.id \
@@ -4259,8 +4310,6 @@ pub struct TaskView {
 ///
 /// A `HashMap<String, TaskDerived>` keyed by task ID.
 pub fn compute_task_dag(tasks: &[TaskRow]) -> std::collections::HashMap<String, TaskDerived> {
-    use std::collections::HashMap;
-
     // Build id → status lookup for O(1) blocked_by resolution.
     let status_map: HashMap<&str, &str> = tasks
         .iter()
@@ -4372,7 +4421,7 @@ pub struct CycleError {
 /// `blocked_by` edges, using stdlib `HashMap` / `HashSet` only
 /// (NFR-003 — no new dependencies).
 pub fn detect_cycle(tasks: &[TaskRow], source: &str, target: &str) -> Result<(), CycleError> {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     // Self-loop: a task cannot depend on itself.
     if source == target {

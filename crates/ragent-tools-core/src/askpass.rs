@@ -56,7 +56,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.
-pub(crate) struct AskPassBroker {
+pub struct AskPassBroker {
     /// Absolute path to the generated askpass helper script.
     helper_path: PathBuf,
     /// Per-invocation directory the helper writes request files into and the

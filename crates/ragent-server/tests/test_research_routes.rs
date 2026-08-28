@@ -63,6 +63,7 @@ fn test_state(token: &str) -> AppState {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        skill_registry_cache: parking_lot::Mutex::new(None),
         bg_service: std::sync::OnceLock::new(),
     });
     AppState {

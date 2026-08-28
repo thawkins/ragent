@@ -47,27 +47,27 @@ pub enum Tier {
 
 impl Tier {
     /// Returns all tier variants in ascending complexity order.
-    pub fn all() -> &'static [Tier] {
-        &[Tier::Simple, Tier::Medium, Tier::Complex, Tier::Reasoning]
+    pub fn all() -> &'static [Self] {
+        &[Self::Simple, Self::Medium, Self::Complex, Self::Reasoning]
     }
 
     /// Returns the single-character abbreviation for this tier.
     pub fn initial(&self) -> char {
         match self {
-            Tier::Simple => 'S',
-            Tier::Medium => 'M',
-            Tier::Complex => 'C',
-            Tier::Reasoning => 'R',
+            Self::Simple => 'S',
+            Self::Medium => 'M',
+            Self::Complex => 'C',
+            Self::Reasoning => 'R',
         }
     }
 
     /// Parse a tier from a case-insensitive string.
-    pub fn from_str_insensitive(s: &str) -> Option<Tier> {
+    pub fn from_str_insensitive(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
-            "SIMPLE" => Some(Tier::Simple),
-            "MEDIUM" => Some(Tier::Medium),
-            "COMPLEX" => Some(Tier::Complex),
-            "REASONING" => Some(Tier::Reasoning),
+            "SIMPLE" => Some(Self::Simple),
+            "MEDIUM" => Some(Self::Medium),
+            "COMPLEX" => Some(Self::Complex),
+            "REASONING" => Some(Self::Reasoning),
             _ => None,
         }
     }
@@ -76,10 +76,10 @@ impl Tier {
 impl std::fmt::Display for Tier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Tier::Simple => write!(f, "SIMPLE"),
-            Tier::Medium => write!(f, "MEDIUM"),
-            Tier::Complex => write!(f, "COMPLEX"),
-            Tier::Reasoning => write!(f, "REASONING"),
+            Self::Simple => write!(f, "SIMPLE"),
+            Self::Medium => write!(f, "MEDIUM"),
+            Self::Complex => write!(f, "COMPLEX"),
+            Self::Reasoning => write!(f, "REASONING"),
         }
     }
 }

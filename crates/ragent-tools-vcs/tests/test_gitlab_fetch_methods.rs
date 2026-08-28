@@ -311,7 +311,7 @@ async fn test_fetch_readme_present_via_readme_url() {
         .await;
 
     // The raw README content served at the readme_url.
-    let raw_url = format!("{}/raw/group/project/main/README.md", server.uri());
+    let _raw_url = format!("{}/raw/group/project/main/README.md", server.uri());
     Mock::given(method("GET"))
         .and(path("/raw/group/project/main/README.md"))
         .respond_with(ResponseTemplate::new(200).set_body_string("# My Project\n\nHello world!"))

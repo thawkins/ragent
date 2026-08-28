@@ -242,6 +242,37 @@ impl ActivityLog {
         Ok(max_seq.flatten().map_or(0, |s| (s as u64) + 1))
     }
 
+    /// Insert a lifecycle event (expiry/archive/other) directly, bypassing the
+    /// interrupted check in `append_new` so it works on interrupted runs too
+    /// (FR-016). The caller must already hold the store lock.
+    fn insert_lifecycle_event_locked(
+        conn: &Connection,
+        run_id: &RunId,
+        event: &str,
+    ) -> Result<u64> {
+        let seq = Self::next_seq_locked(conn, run_id)?;
+        let kind = EventKind::Lifecycle {
+            event: event.to_string(),
+        };
+        let kind_json =
+            serde_json::to_string(&kind).context("Failed to serialise lifecycle event")?;
+        conn.execute(
+            "INSERT INTO activity_events
+                (run_id, seq, id, schema_version, timestamp, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                run_id.as_str(),
+                seq as i64,
+                EventId::new().as_str(),
+                ACTIVITY_EVENT_SCHEMA_VERSION as i64,
+                Utc::now().to_rfc3339(),
+                kind_json,
+            ],
+        )
+        .context("Failed to insert lifecycle event")?;
+        Ok(seq)
+    }
+
     /// Returns `true` if the run's last committed event is a termination with
     /// reason `Interrupted` or `Aborted` (FR-006). While in this state, new
     /// events cannot be appended until a resume operation is initiated.
@@ -451,6 +482,75 @@ impl ActivityLog {
         Ok(event)
     }
 
+    /// Build a fresh event for `run_id` whose payload records `stopped_at`
+    /// as the last committed sequence, and append it under a single lock in
+    /// one transaction. Avoids the double-lock + duplicate `MAX(seq)` query
+    /// of `last_seq` followed by `append_new`.
+    fn append_new_at_locked(
+        &self,
+        run_id: &RunId,
+        kind: EventKind,
+        stopped_at: u64,
+    ) -> std::result::Result<ActivityEvent, AppendError> {
+        let mut conn = self.lock()?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| AppendError::Storage(anyhow::anyhow!("begin tx: {e}")))?;
+        if Self::is_interrupted_locked(&tx, run_id)? {
+            return Err(AppendError::RunInterrupted {
+                run_id: run_id.clone(),
+            });
+        }
+        let seq = Self::next_seq_locked(&tx, run_id).map_err(AppendError::Storage)?;
+        let event = ActivityEvent {
+            id: EventId::new(),
+            run_id: run_id.clone(),
+            seq,
+            schema_version: ACTIVITY_EVENT_SCHEMA_VERSION,
+            timestamp: Utc::now(),
+            kind: match kind {
+                EventKind::Termination { reason, .. } => EventKind::Termination {
+                    reason,
+                    seq: stopped_at,
+                },
+                EventKind::Checkpoint { name, .. } => EventKind::Checkpoint {
+                    name,
+                    seq: stopped_at,
+                },
+                other => other,
+            },
+        };
+        let kind_json = serde_json::to_string(&event.kind)
+            .context("Failed to serialise event kind")
+            .map_err(AppendError::Storage)?;
+        tx.execute(
+            "INSERT INTO activity_events
+                (run_id, seq, id, schema_version, timestamp, kind)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                event.run_id.as_str(),
+                event.seq as i64,
+                event.id.as_str(),
+                event.schema_version as i64,
+                event.timestamp.to_rfc3339(),
+                kind_json,
+            ],
+        )
+        .map_err(|e| {
+            if e.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
+                AppendError::DuplicateSeq {
+                    run_id: run_id.clone(),
+                    seq,
+                }
+            } else {
+                AppendError::Storage(anyhow::anyhow!("insert failed: {e}"))
+            }
+        })?;
+        tx.commit()
+            .map_err(|e| AppendError::Storage(anyhow::anyhow!("commit: {e}")))?;
+        Ok(event)
+    }
+
     /// Reads all events for `run_id` in ascending sequence-number order.
     ///
     /// Used by the projection/replay engine (T-011) and the JSON Lines export
@@ -575,24 +675,31 @@ impl ActivityLog {
         run_id: &RunId,
         tool_call_id: &str,
     ) -> Result<(Option<ActivityEvent>, Option<ActivityEvent>)> {
-        let events = self.read_run(run_id)?;
-        let mut call = None;
-        let mut result = None;
-        for event in events {
-            match &event.kind {
-                EventKind::ToolCall {
-                    tool_call_id: id, ..
-                } if id == tool_call_id => {
-                    call = Some(event);
-                }
-                EventKind::ToolResult {
-                    tool_call_id: id, ..
-                } if id == tool_call_id => {
-                    result = Some(event);
-                }
-                _ => {}
-            }
-        }
+        // M-003: query the specific events directly instead of replaying the
+        // whole run log (which loaded + JSON-parsed every event just to find
+        // two rows). The `kind` column stores the serialised `EventKind` JSON
+        // as `{"kind":"tool_call",...}` / `{"kind":"tool_result",...}`; we
+        // match on the full discriminator to avoid cross-matching the two
+        // variants (both carry `tool_call_id`).
+        let conn = self.lock()?;
+        let call = find_event_locked(
+            &conn,
+            run_id,
+            &format!(
+                "\"kind\":\"{}\"",
+                ragent_types::activity::EventKind::tool_call_discriminator()
+            ),
+            tool_call_id,
+        )?;
+        let result = find_event_locked(
+            &conn,
+            run_id,
+            &format!(
+                "\"kind\":\"{}\"",
+                ragent_types::activity::EventKind::tool_result_discriminator()
+            ),
+            tool_call_id,
+        )?;
         Ok((call, result))
     }
 
@@ -656,17 +763,17 @@ impl ActivityLog {
         reason: ragent_types::activity::TerminationReason,
     ) -> std::result::Result<ActivityEvent, AppendError> {
         // FR-003: the termination marks the run as stopped at the last
-        // committed sequence number.
+        // committed sequence number. The stopped-at seq and the insert are
+        // computed under a single lock/transaction to avoid a double-lock +
+        // duplicate MAX(seq) query.
         let stopped_at = self
             .last_seq(run_id)
             .map_err(AppendError::Storage)?
             .unwrap_or(0);
-        self.append_new(
+        self.append_new_at_locked(
             run_id,
-            EventKind::Termination {
-                reason,
-                seq: stopped_at,
-            },
+            EventKind::Termination { reason, seq: 0 },
+            stopped_at,
         )
     }
 
@@ -712,12 +819,13 @@ impl ActivityLog {
             .last_seq(run_id)
             .map_err(AppendError::Storage)?
             .unwrap_or(0);
-        self.append_new(
+        self.append_new_at_locked(
             run_id,
             EventKind::Checkpoint {
                 name: name.into(),
-                seq: checkpoint_at,
+                seq: 0,
             },
+            checkpoint_at,
         )
     }
 
@@ -732,16 +840,18 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable or a stored row cannot be
     /// deserialised (FR-017).
     pub fn find_checkpoint(&self, run_id: &RunId, name: &str) -> Result<Option<ActivityEvent>> {
-        let events = self.read_run(run_id)?;
-        let mut found: Option<ActivityEvent> = None;
-        for event in events {
-            if let EventKind::Checkpoint { name: n, .. } = &event.kind
-                && n == name
-            {
-                found = Some(event);
-            }
-        }
-        Ok(found)
+        // M-003: targeted `kind LIKE` query (newest-first) instead of replaying
+        // the whole run log.
+        let conn = self.lock()?;
+        find_event_locked(
+            &conn,
+            run_id,
+            &format!(
+                "\"kind\":\"{}\"",
+                ragent_types::activity::EventKind::checkpoint_discriminator()
+            ),
+            name,
+        )
     }
 
     /// Derives the current status of `run_id` from its event log (FR-015).
@@ -758,10 +868,41 @@ impl ActivityLog {
     /// Returns an error if storage is unavailable or a stored row cannot be
     /// deserialised (FR-017).
     pub fn run_status(&self, run_id: &RunId) -> Result<ragent_types::activity::RunStatus> {
-        // Delegate to the projection so replay and point queries share one
-        // status derivation (including the FR-013 "resumed" transition).
-        let events = self.read_run(run_id)?;
-        Ok(ragent_types::activity::Projection::replay(&events).status)
+        // M-003: status is determined by the *last* state-affecting event:
+        // a resume (lifecycle) event overrides a prior interruption, and the
+        // newest termination wins. Rather than replaying the whole log, query
+        // the newest termination and the newest resume-event, and apply the
+        // resume override when the resume is newer (FR-013).
+        let conn = self.lock()?;
+        let termination_tag = format!(
+            "\"kind\":\"{}\"",
+            ragent_types::activity::EventKind::termination_discriminator()
+        );
+        let lifecycle_tag = format!(
+            "\"kind\":\"{}\"",
+            ragent_types::activity::EventKind::lifecycle_resumed_discriminator()
+        );
+        let last_termination = find_event_locked(&conn, run_id, &termination_tag, "")?;
+        let last_resume = find_event_locked(&conn, run_id, &lifecycle_tag, "")?;
+
+        // A resume only affects status if it is newer than the last
+        // termination (a termination after a resume wins).
+        let status_from_termination = match &last_termination {
+            Some(event) => match &event.kind {
+                ragent_types::activity::EventKind::Termination { reason, .. } => {
+                    reason.derived_status()
+                }
+                _ => ragent_types::activity::RunStatus::Active,
+            },
+            None => ragent_types::activity::RunStatus::Active,
+        };
+        let status = match &last_resume {
+            Some(resume) if last_termination.as_ref().is_none_or(|t| resume.seq > t.seq) => {
+                ragent_types::activity::RunStatus::Active
+            }
+            _ => status_from_termination,
+        };
+        Ok(status)
     }
 
     /// Returns the current `journal_mode` (e.g. `"wal"`, `"delete"`) for the
@@ -1011,13 +1152,17 @@ impl ActivityLog {
         if self.count(new_run_id)? > 0 {
             anyhow::bail!("new run {new_run_id} already has events; cannot branch into it");
         }
-        // Copy events into the new run with fresh ids.
+        // Copy events into the new run with fresh ids, wrapped in a single
+        // transaction so a mid-batch failure cannot leave a half-written run.
         {
-            let conn = self.lock()?;
+            let mut conn = self.lock()?;
+            let tx = conn
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .context("Failed to start branch transaction")?;
             for event in &source_events {
                 let kind_json =
                     serde_json::to_string(&event.kind).context("Failed to serialise event kind")?;
-                conn.execute(
+                tx.execute(
                     "INSERT INTO activity_events
                         (run_id, seq, id, schema_version, timestamp, kind)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1029,8 +1174,10 @@ impl ActivityLog {
                         event.timestamp.to_rfc3339(),
                         kind_json,
                     ],
-                )?;
+                )
+                .context("Failed to insert branched event")?;
             }
+            tx.commit().context("Failed to commit branch")?;
         }
         // Record the branch origin in the new run (FR-018).
         let branch_event = self.append_new(
@@ -1072,33 +1219,12 @@ impl ActivityLog {
         let reason_str = reason.into();
         // FR-016: record the expiry as a lifecycle event before deletion.
         // Direct insert (bypasses the interrupted check in append_new) so
-        // expiry works on interrupted runs too.
-        {
-            let conn = self.lock()?;
-            let seq = Self::next_seq_locked(&conn, run_id)?;
-            let id = EventId::new();
-            let kind = EventKind::Lifecycle {
-                event: format!("expired: {reason_str}"),
-            };
-            let kind_json =
-                serde_json::to_string(&kind).context("Failed to serialise lifecycle event")?;
-            conn.execute(
-                "INSERT INTO activity_events
-                    (run_id, seq, id, schema_version, timestamp, kind)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    run_id.as_str(),
-                    seq as i64,
-                    id.as_str(),
-                    ACTIVITY_EVENT_SCHEMA_VERSION as i64,
-                    Utc::now().to_rfc3339(),
-                    kind_json,
-                ],
-            )
-            .context("Failed to insert lifecycle event")?;
-        }
-        // Remove all events for this run (retention expiry, FR-016).
+        // expiry works on interrupted runs too. The insert and the delete
+        // share one lock acquisition (a second `self.lock()` while the first
+        // guard is still alive would deadlock).
         let conn = self.lock()?;
+        Self::insert_lifecycle_event_locked(&conn, run_id, &format!("expired: {reason_str}"))?;
+        // Remove all events for this run (retention expiry, FR-016).
         conn.execute(
             "DELETE FROM activity_events WHERE run_id = ?1",
             params![run_id.as_str()],
@@ -1123,30 +1249,11 @@ impl ActivityLog {
         let reason_str = reason.into();
         // FR-016: append the expiry lifecycle event BEFORE exporting so the
         // JSONL includes it.
-        {
-            let conn = self.lock()?;
-            let seq = Self::next_seq_locked(&conn, run_id)?;
-            let id = EventId::new();
-            let kind = EventKind::Lifecycle {
-                event: format!("expired: {reason_str}"),
-            };
-            let kind_json =
-                serde_json::to_string(&kind).context("Failed to serialise lifecycle event")?;
-            conn.execute(
-                "INSERT INTO activity_events
-                    (run_id, seq, id, schema_version, timestamp, kind)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    run_id.as_str(),
-                    seq as i64,
-                    id.as_str(),
-                    ACTIVITY_EVENT_SCHEMA_VERSION as i64,
-                    Utc::now().to_rfc3339(),
-                    kind_json,
-                ],
-            )
-            .context("Failed to insert lifecycle event")?;
-        }
+        let conn = self.lock()?;
+        Self::insert_lifecycle_event_locked(&conn, run_id, &format!("expired: {reason_str}"))?;
+        // Release the lock before reading/exporting so we do not hold it while
+        // calling self.export_jsonl (which re-locks).
+        drop(conn);
         // Export the complete log (now including the lifecycle event).
         let jsonl = self.export_jsonl(run_id)?;
         // Remove all events for this run.
@@ -1202,15 +1309,24 @@ impl ActivityLog {
     pub fn expire_runs_older_than(&self, max_age: chrono::Duration) -> Result<Vec<RunId>> {
         let now = Utc::now();
         let cutoff = now - max_age;
-        let runs = self.list_runs()?;
+        let cutoff_str = cutoff.to_rfc3339();
+        // Find stale runs with a single query (per-run lock/query would be an
+        // N+1 storm over every run in the store).
+        let stale_runs: Vec<String> = {
+            let conn = self.lock()?;
+            let mut stmt = conn.prepare_cached(
+                "SELECT run_id FROM activity_events
+                 GROUP BY run_id
+                 HAVING MAX(timestamp) < ?1",
+            )?;
+            let rows = stmt.query_map(params![cutoff_str], |row| row.get::<_, String>(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
         let mut expired = Vec::new();
-        for run in &runs {
-            if let Some(last) = self.run_last_activity(run)?
-                && last < cutoff
-            {
-                self.expire_run(run, "retention limit")?;
-                expired.push(run.clone());
-            }
+        for run in stale_runs {
+            let run_id = RunId::from(run);
+            self.expire_run(&run_id, "retention limit")?;
+            expired.push(run_id);
         }
         Ok(expired)
     }
@@ -1542,4 +1658,40 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivityEvent> {
         timestamp,
         kind,
     })
+}
+
+/// M-003: load a single event of a given kind within `run_id` using a
+/// targeted `kind LIKE` query (events store the serialised `EventKind` JSON),
+/// ordered newest-first and limited to one. The discriminator prefix uniquely
+/// identifies the variant in the serialised JSON (e.g. `{"ToolCall":...}`).
+fn find_event_locked(
+    conn: &Connection,
+    run_id: &RunId,
+    kind_tag: &str,
+    lookup: &str,
+) -> Result<Option<ActivityEvent>> {
+    // `kind_tag` is the JSON discriminator prefix (e.g. "tool_call"); the
+    // serialised `EventKind` JSON opens with `{"kind":"tool_call",...}`.
+    // An empty `lookup` matches any event of that kind (used for the status
+    // query which only needs the kind, not a specific payload value).
+    let mut stmt = conn.prepare_cached(
+        "SELECT run_id, seq, id, schema_version, timestamp, kind
+         FROM activity_events
+         WHERE run_id = ?1 AND kind LIKE ?2
+         ORDER BY seq DESC
+         LIMIT 1",
+    )?;
+    let like = if lookup.is_empty() {
+        format!("%{kind_tag}%")
+    } else {
+        format!("%{kind_tag}%\"{lookup}\"%")
+    };
+    let mut rows = stmt
+        .query_map(params![run_id.as_str(), like], row_to_event)
+        .context("Failed to query activity event")?;
+    match rows.next() {
+        Some(Ok(row)) => Ok(Some(row)),
+        Some(Err(e)) => Err(e.into()),
+        None => Ok(None),
+    }
 }

@@ -16,11 +16,11 @@ pub struct StockOptionsTool;
 
 #[async_trait::async_trait]
 impl Tool for StockOptionsTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "stock_options"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Fetch the options chain (calls and puts) for a ticker symbol."
     }
 
@@ -35,7 +35,7 @@ impl Tool for StockOptionsTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "network:fetch"
     }
 

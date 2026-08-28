@@ -206,7 +206,10 @@ pub fn read_cron_log(working_dir: &Path, event_id: Option<&str>) -> Vec<CronLogE
         .flatten()
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            name.starts_with("cron-") && name.ends_with(".jsonl")
+            name.starts_with("cron-")
+                && Path::new(&name)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("jsonl"))
         })
         .map(|e| e.path())
         .collect();

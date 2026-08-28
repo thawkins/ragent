@@ -11,8 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ragent_agent::trigger::mcp_notification::{
-    McpNotification, McpNotificationAdapter, McpNotificationError, NotificationInjector,
-    RecordingNotificationInjector,
+    McpNotification, McpNotificationAdapter, McpNotificationError, RecordingNotificationInjector,
 };
 use ragent_agent::trigger::runtime::{TriggerRuntime, TriggerRuntimeConfig};
 use ragent_config::McpNotificationMode;
@@ -35,18 +34,6 @@ fn make_adapter() -> (
     let injector = Arc::new(RecordingNotificationInjector::new());
     let adapter = McpNotificationAdapter::new(runtime.clone(), injector.clone());
     (adapter, injector, runtime)
-}
-
-/// Adapter with dedup_window=0 so duplicates pass through dedup.
-/// Used for cycle suppression tests.
-fn make_adapter_no_dedup() -> (McpNotificationAdapter, Arc<RecordingNotificationInjector>) {
-    let runtime = TriggerRuntime::new(TriggerRuntimeConfig {
-        dedup_window: Duration::from_secs(0),
-        max_cycles: 100,
-    });
-    let injector = Arc::new(RecordingNotificationInjector::new());
-    let adapter = McpNotificationAdapter::new(runtime, injector.clone());
-    (adapter, injector)
 }
 
 fn make_message_notification(server: &str, data: &str) -> McpNotification {

@@ -92,6 +92,10 @@ pub struct CodeIndex {
     reindex_total: AtomicU32,
     /// Files processed so far in the current reindex.
     reindex_done: AtomicU32,
+    /// M-029: cached total on-disk size of `index_dir`. Recomputing this on
+    /// every `status()` poll rescanned the whole tree; the cache is refreshed
+    /// only on a full reindex (where the size meaningfully changes).
+    cached_index_size: std::sync::Mutex<Option<u64>>,
 }
 
 impl CodeIndex {
@@ -115,6 +119,7 @@ impl CodeIndex {
             config: config.clone(),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
+            cached_index_size: std::sync::Mutex::new(None),
         })
     }
 
@@ -133,13 +138,14 @@ impl CodeIndex {
             config: config.clone(),
             reindex_total: AtomicU32::new(0),
             reindex_done: AtomicU32::new(0),
+            cached_index_size: std::sync::Mutex::new(None),
         })
     }
 
     /// Access the FTS index directly (for testing only).
     #[doc(hidden)]
     pub fn fts_for_test(&self) -> std::sync::MutexGuard<'_, FtsIndex> {
-        self.fts.lock().unwrap()
+        self.fts_guard()
     }
 
     /// Try to acquire the store mutex (for testing concurrency behaviour).
@@ -152,6 +158,28 @@ impl CodeIndex {
     #[doc(hidden)]
     pub fn try_lock_fts_for_test(&self) -> Option<std::sync::MutexGuard<'_, FtsIndex>> {
         self.fts.try_lock().ok()
+    }
+
+    /// Lock the store, recovering a poisoned guard so a panicking thread
+    /// during indexing cannot cascade panics into every subsequent user call.
+    fn store_guard(&self) -> std::sync::MutexGuard<'_, IndexStore> {
+        self.store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Lock the FTS index, recovering a poisoned guard (see [`Self::store_guard`]).
+    fn fts_guard(&self) -> std::sync::MutexGuard<'_, FtsIndex> {
+        self.fts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Lock the tree cache, recovering a poisoned guard (see [`Self::store_guard`]).
+    fn tree_cache_guard(&self) -> std::sync::MutexGuard<'_, TreeCache> {
+        self.tree_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     // ── Query Methods ───────────────────────────────────────────────────
@@ -170,7 +198,7 @@ impl CodeIndex {
         // dropping it before locking store prevents deadlocks between readers
         // and the background indexing worker.
         let mut results = {
-            let fts = self.fts.lock().unwrap();
+            let fts = self.fts_guard();
             debug!(
                 query = %query.query,
                 kind = ?query.kind,
@@ -193,7 +221,7 @@ impl CodeIndex {
             results.retain(|r| r.kind == kind_str);
         }
         if let Some(ref lang) = query.language {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             results.retain(|r| {
                 store
                     .get_file(&r.file_path)
@@ -260,7 +288,7 @@ impl CodeIndex {
 
     /// Query symbols from the structured `SQLite` index.
     pub fn symbols(&self, filter: &SymbolFilter) -> Result<Vec<Symbol>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         store.query_symbols(filter)
     }
 
@@ -279,7 +307,7 @@ impl CodeIndex {
 
     /// Find all references to a symbol by name.
     pub fn references(&self, symbol_name: &str, limit: usize) -> Result<Vec<SymbolRef>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let mut refs = store.find_references(symbol_name)?;
         if limit > 0 {
             refs.truncate(limit);
@@ -308,7 +336,7 @@ impl CodeIndex {
 
     /// Get file dependencies in the given direction.
     pub fn dependencies(&self, path: &str, direction: DepDirection) -> Result<Vec<String>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         match direction {
             DepDirection::Imports => {
                 let file_id = store
@@ -318,16 +346,15 @@ impl CodeIndex {
                 Ok(imports.into_iter().map(|i| i.source_module).collect())
             }
             DepDirection::Dependents => {
+                // H-004: resolve dependent file IDs to paths with a single
+                // `id → path` map (one query) instead of a fresh `get_file_id`
+                // query per dependent (which was O(D) queries per call).
+                let id_to_path: std::collections::HashMap<i64, String> =
+                    store.list_files_with_ids()?.into_iter().collect();
                 let dep_ids = store.get_dependents(path)?;
-                let files = store.list_files()?;
                 Ok(dep_ids
                     .into_iter()
-                    .filter_map(|id| {
-                        files
-                            .iter()
-                            .find(|f| store.get_file_id(&f.path).ok().flatten() == Some(id))
-                    })
-                    .map(|f| f.path.clone())
+                    .filter_map(|id| id_to_path.get(&id).cloned())
                     .collect())
             }
         }
@@ -354,16 +381,14 @@ impl CodeIndex {
                 imports.into_iter().map(|i| i.source_module).collect()
             }
             DepDirection::Dependents => {
+                // H-004: single `id → path` map (one query) instead of a
+                // per-dependent `get_file_id` query.
+                let id_to_path: std::collections::HashMap<i64, String> =
+                    store.list_files_with_ids()?.into_iter().collect();
                 let dep_ids = store.get_dependents(path)?;
-                let files = store.list_files()?;
                 dep_ids
                     .into_iter()
-                    .filter_map(|id| {
-                        files
-                            .iter()
-                            .find(|f| store.get_file_id(&f.path).ok().flatten() == Some(id))
-                    })
-                    .map(|f| f.path.clone())
+                    .filter_map(|id| id_to_path.get(&id).cloned())
                     .collect()
             }
         };
@@ -372,17 +397,19 @@ impl CodeIndex {
 
     /// Get index status and statistics.
     pub fn status(&self) -> Result<IndexStats> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let mut stats = store.get_stats()?;
 
         // FTS doc count from tantivy.
-        let fts = self.fts.lock().unwrap();
+        let fts = self.fts_guard();
         stats.fts_doc_count = fts.doc_count().unwrap_or(0);
         drop(fts);
 
-        // Calculate on-disk index size if using a real directory.
+        // Calculate on-disk index size if using a real directory. M-029:
+        // served from a cache (refreshed only on full reindex) so a status
+        // poll does not rescan the whole tree every time.
         if self.config.index_dir.exists() {
-            stats.index_size_bytes = dir_size(&self.config.index_dir);
+            stats.index_size_bytes = self.index_size_cached();
         }
 
         Ok(stats)
@@ -406,10 +433,33 @@ impl CodeIndex {
         }
 
         if self.config.index_dir.exists() {
-            stats.index_size_bytes = dir_size(&self.config.index_dir);
+            stats.index_size_bytes = self.index_size_cached();
         }
 
         Some(stats)
+    }
+
+    /// M-029: return the cached on-disk size of `index_dir`, computing it on
+    /// the first call and on full reindex.
+    fn index_size_cached(&self) -> u64 {
+        let mut guard = self
+            .cached_index_size
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(size) = *guard {
+            return size;
+        }
+        let size = dir_size(&self.config.index_dir);
+        *guard = Some(size);
+        size
+    }
+
+    /// Invalidate the cached index-size (called after a full reindex so the
+    /// next status poll recomputes it).
+    fn invalidate_index_size_cache(&self) {
+        if let Ok(mut guard) = self.cached_index_size.lock() {
+            *guard = None;
+        }
     }
 
     /// List the top-N highest-degree (most-connected) symbols in the graph
@@ -419,7 +469,7 @@ impl CodeIndex {
     /// returns the top `n` sorted by degree (descending).  Blocks until the
     /// store lock is acquired.
     pub fn godnodes(&self, n: usize) -> Result<Vec<graph::GodNode>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let graph = graph::SymbolGraph::new(&store);
         graph.godnodes(n)
     }
@@ -444,7 +494,7 @@ impl CodeIndex {
     /// Returns `Ok(None)` if either symbol is not found or no path exists.
     /// Blocks until the store lock is acquired.
     pub fn path(&self, from: &str, to: &str) -> Result<Option<graph::PathResult>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let graph = graph::SymbolGraph::new(&store);
         graph.path(from, to)
     }
@@ -471,7 +521,7 @@ impl CodeIndex {
     /// Returns `Ok(None)` if the symbol is not found.  Blocks until the store
     /// lock is acquired.
     pub fn explain(&self, name: &str) -> Result<Option<graph::ExplainResult>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let graph = graph::SymbolGraph::new(&store);
         graph.explain(name)
     }
@@ -498,7 +548,7 @@ impl CodeIndex {
     /// summary of detected communities with auto-generated labels and member
     /// counts.  Blocks until the store lock is acquired.
     pub fn communities(&self) -> Result<Vec<graph::CommunityInfo>> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let graph = graph::SymbolGraph::new(&store);
         graph.communities()
     }
@@ -526,7 +576,7 @@ impl CodeIndex {
     /// [`graph::BuildResult`] with edge counts distinguishing `EXTRACTED` from
     /// `INFERRED`.  Blocks until the store lock is acquired.
     pub fn build_graph(&self) -> Result<graph::BuildResult> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         graph::SymbolGraph::new(&store).build()
     }
 
@@ -536,7 +586,7 @@ impl CodeIndex {
     /// Like [`build_graph()`] but only derives edges for files whose detected
     /// language matches `language`.  Useful for per-language subgraph analysis.
     pub fn build_graph_for_language(&self, language: &str) -> Result<graph::BuildResult> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         graph::SymbolGraph::new(&store).build_for_language(language)
     }
 
@@ -545,7 +595,7 @@ impl CodeIndex {
     /// Used by the TUI empty-graph guard (FR-015) to check whether the graph
     /// has been built before running graph query sub-commands.
     pub fn graph_edge_count(&self) -> Result<u64> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         store.edge_count()
     }
 
@@ -555,7 +605,7 @@ impl CodeIndex {
     /// command can report on the graph data set alongside the index stats.
     /// Blocks until the store lock is acquired.
     pub fn graph_status(&self) -> Result<GraphStatus> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         Ok(GraphStatus {
             total_edges: store.edge_count()?,
             edges_extracted: store.edge_count_by_confidence_typed(types::Confidence::Extracted)?,
@@ -587,11 +637,11 @@ impl CodeIndex {
     /// `SQLite` (e.g., after schema recreation, corruption, or accumulated
     /// duplicates from multiple reindexes) and rebuilds it from `SQLite` data.
     pub fn ensure_fts_sync(&self) -> Result<()> {
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let sqlite_symbols = store.symbol_count()?;
         drop(store);
 
-        let fts = self.fts.lock().unwrap();
+        let fts = self.fts_guard();
         let fts_docs = fts.doc_count().unwrap_or(0);
         drop(fts);
 
@@ -671,9 +721,21 @@ impl CodeIndex {
             return Ok(());
         }
 
+        // H-007: skip re-parsing/upserting when the stored content hash
+        // already matches (the file is unchanged since the last index). This
+        // avoids always re-parsing unchanged files on every watcher event.
+        {
+            let store = self.store_guard();
+            if let Some(existing) = store.get_file(&rel_path)?
+                && existing.content_hash == hash
+            {
+                return Ok(());
+            }
+        }
+
         // ── Store the file entry ──────────────────────────────────────────
         let file_id = {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             let entry = FileEntry {
                 path: rel_path.clone(),
                 content_hash: hash,
@@ -688,7 +750,7 @@ impl CodeIndex {
 
         // ── Collect old symbol IDs before upsert (for edge cleanup) ────
         let old_symbol_ids: Vec<i64> = {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             store
                 .get_file_symbols(file_id)?
                 .iter()
@@ -702,7 +764,7 @@ impl CodeIndex {
         {
             match parser.parse(&content) {
                 Ok(parsed) => {
-                    let store = self.store.lock().unwrap();
+                    let store = self.store_guard();
                     store.upsert_symbols(file_id, &parsed.symbols)?;
                     store.upsert_imports(file_id, &parsed.imports)?;
                     store.upsert_refs(file_id, &parsed.references)?;
@@ -715,7 +777,7 @@ impl CodeIndex {
                     drop(store);
 
                     // Update FTS.
-                    let fts = self.fts.lock().unwrap();
+                    let fts = self.fts_guard();
                     let fts_syms: Vec<FtsSymbol<'_>> = parsed
                         .symbols
                         .iter()
@@ -733,12 +795,15 @@ impl CodeIndex {
         // Delete edges involving this file's symbols, then re-derive
         // edges for those symbols.
         {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
 
             let file_symbols = store.get_file_symbols(file_id)?;
+            // Dedup current + stale symbol ids using a HashSet to avoid the
+            // O(n) `contains` scan per element (O(n²) overall).
             let mut symbol_ids: Vec<i64> = file_symbols.iter().map(|s| s.id).collect();
+            let mut seen: std::collections::HashSet<i64> = symbol_ids.iter().copied().collect();
             for old_id in &old_symbol_ids {
-                if !symbol_ids.contains(old_id) {
+                if seen.insert(*old_id) {
                     symbol_ids.push(*old_id);
                 }
             }
@@ -783,7 +848,7 @@ impl CodeIndex {
         }
 
         // Count total symbols after batch.
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         result.symbols_extracted = store.symbol_count()? as usize;
         result.elapsed_ms = start.elapsed().as_millis() as u64;
 
@@ -808,7 +873,7 @@ impl CodeIndex {
         // Compute diff against current index.
         let diff_start = Instant::now();
         let diff = {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             store.get_stale_files(&scanned)?
         };
         let diff_ms = diff_start.elapsed().as_millis();
@@ -836,7 +901,7 @@ impl CodeIndex {
         // Apply the diff to the SQLite store.
         let apply_start = Instant::now();
         {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             store.apply_diff(&diff)?;
         }
         let apply_ms = apply_start.elapsed().as_millis();
@@ -886,7 +951,7 @@ impl CodeIndex {
 
             // Phase 2: Batch-write to SQLite in a single transaction.
             if !parsed_results.is_empty() {
-                let store = self.store.lock().unwrap();
+                let store = self.store_guard();
                 store.begin_transaction()?;
                 for (rel_path, parsed) in &parsed_results {
                     if let Some(file_id) = store.get_file_id(rel_path)? {
@@ -902,7 +967,7 @@ impl CodeIndex {
 
             // Phase 3: Batch-update FTS with a single writer and commit.
             if !parsed_results.is_empty() {
-                let fts = self.fts.lock().unwrap();
+                let fts = self.fts_guard();
                 let remove_paths: Vec<&str> =
                     parsed_results.iter().map(|(p, _)| p.as_str()).collect();
                 let fts_syms: Vec<FtsSymbol<'_>> = parsed_results
@@ -928,7 +993,7 @@ impl CodeIndex {
 
         // Remove deleted files from FTS in a single batch.
         if !diff.to_remove.is_empty() {
-            let fts = self.fts.lock().unwrap();
+            let fts = self.fts_guard();
             let remove_paths: Vec<&str> = diff
                 .to_remove
                 .iter()
@@ -947,7 +1012,7 @@ impl CodeIndex {
         // ── Build semantic edge graph (FR-007) ──────────────────────────
         let graph_start = Instant::now();
         let (edges_extracted, edges_inferred) = {
-            let store = self.store.lock().unwrap();
+            let store = self.store_guard();
             match graph::edges::derive_and_store(&store) {
                 Ok(build_result) => {
                     debug!(
@@ -978,6 +1043,9 @@ impl CodeIndex {
         // Clear progress counters.
         self.reindex_total.store(0, Ordering::Relaxed);
         self.reindex_done.store(0, Ordering::Relaxed);
+        // M-029: the on-disk index size changed with this reindex, so the next
+        // status poll recomputes it.
+        self.invalidate_index_size_cache();
 
         Ok(result)
     }
@@ -987,23 +1055,31 @@ impl CodeIndex {
     /// Clears all FTS documents and re-populates from the `SQLite` symbol store.
     /// Use this to recover from FTS/SQLite mismatches.
     pub fn rebuild_fts(&self) -> Result<()> {
-        let fts = self.fts.lock().unwrap();
+        let fts = self.fts_guard();
         fts.clear()?;
 
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         let files = store.list_files()?;
 
+        // H-006: batch all symbols from all files into a single writer/commit
+        // pass instead of calling `add_symbols` (which allocates a fresh
+        // 15 MB `IndexWriter` + commits) per file. We first collect every
+        // (Symbol, file_path) pair into owned buffers so the borrowed
+        // `FtsSymbol` slice can be built once and written in a single commit.
+        let mut syms_owned: Vec<(types::Symbol, String)> = Vec::new();
         for file in &files {
             if let Some(file_id) = store.get_file_id(&file.path)? {
-                let symbols = store.get_file_symbols(file_id)?;
-                if !symbols.is_empty() {
-                    let fts_syms: Vec<FtsSymbol<'_>> = symbols
-                        .iter()
-                        .map(|s| symbol_to_fts(s, &file.path))
-                        .collect();
-                    fts.add_symbols(&fts_syms)?;
+                for s in store.get_file_symbols(file_id)? {
+                    syms_owned.push((s, file.path.clone()));
                 }
             }
+        }
+        if !syms_owned.is_empty() {
+            let fts_syms: Vec<FtsSymbol<'_>> = syms_owned
+                .iter()
+                .map(|(s, path)| symbol_to_fts(s, path))
+                .collect();
+            fts.add_symbols(&fts_syms)?;
         }
 
         debug!(
@@ -1017,16 +1093,16 @@ impl CodeIndex {
     /// Remove a file from the index.
     pub fn remove_file(&self, path: &Path) -> Result<()> {
         let path_str = path.to_string_lossy();
-        let store = self.store.lock().unwrap();
+        let store = self.store_guard();
         store.delete_file(&path_str)?;
         drop(store);
 
-        let fts = self.fts.lock().unwrap();
+        let fts = self.fts_guard();
         fts.remove_file(&path_str)?;
         drop(fts);
 
         // Remove from tree cache.
-        let mut tc = self.tree_cache.lock().unwrap();
+        let mut tc = self.tree_cache_guard();
         tc.remove(path);
 
         Ok(())

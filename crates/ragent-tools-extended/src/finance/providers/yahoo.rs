@@ -27,7 +27,7 @@ impl Throttle {
         let min_interval = Duration::from_secs_f64(60.0 / f64::from(rpm));
         Self {
             min_interval,
-            last_request: std::sync::Mutex::new(Instant::now() - min_interval),
+            last_request: std::sync::Mutex::new(Instant::now().checked_sub(min_interval).unwrap()),
         }
     }
 
@@ -37,7 +37,7 @@ impl Throttle {
             let last = *self.last_request.lock().expect("throttle lock poisoned");
             let elapsed = Instant::now().saturating_duration_since(last);
             if elapsed < self.min_interval {
-                self.min_interval - elapsed
+                self.min_interval.checked_sub(elapsed).unwrap()
             } else {
                 Duration::ZERO
             }

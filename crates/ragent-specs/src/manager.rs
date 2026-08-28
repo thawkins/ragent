@@ -512,6 +512,7 @@ impl SpecFilter {
     }
 
     /// Only return specs whose ID starts with this prefix.
+    #[must_use]
     pub fn with_id_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.id_prefix = Some(prefix.into());
         self

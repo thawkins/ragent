@@ -67,7 +67,12 @@ impl ConcurrentFileReader {
 
         for p in paths {
             let sem = sem.clone();
-            let permit = sem.acquire_owned().await.unwrap();
+            // acquire_owned only errors if the semaphore is closed; this one is
+            // never closed, but propagate instead of unwrap (no unwrap rule).
+            let permit = sem
+                .acquire_owned()
+                .await
+                .map_err(|e| anyhow::anyhow!("semaphore acquire failed: {e}"))?;
             let path = p.clone();
             let h = tokio::spawn(async move {
                 // permit dropped at the end of scope
@@ -200,7 +205,12 @@ impl EditStaging {
 
         for e in &self.edits {
             let sem = sem.clone();
-            let permit = sem.acquire_owned().await.unwrap();
+            // acquire_owned only errors if the semaphore is closed; this one is
+            // never closed, but propagate instead of unwrap (no unwrap rule).
+            let permit = sem
+                .acquire_owned()
+                .await
+                .map_err(|e| anyhow::anyhow!("semaphore acquire failed: {e}"))?;
             let path = e.path.clone();
             let content = e.proposed_content.clone();
             let original_checksum = e.original_checksum.clone();

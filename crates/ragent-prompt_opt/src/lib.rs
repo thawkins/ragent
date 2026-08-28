@@ -17,6 +17,10 @@ use async_trait::async_trait;
 /// message, collect the full response, and return it as a `String`.
 #[async_trait]
 pub trait Completer: Send + Sync {
+    /// Perform a completion call.
+    ///
+    /// Sends `system` as the system prompt and `user` as the user message,
+    /// collects the full response, and returns it as a `String`.
     async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String>;
 }
 

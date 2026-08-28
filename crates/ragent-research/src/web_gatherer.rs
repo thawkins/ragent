@@ -674,6 +674,7 @@ impl WebGatherer {
     /// created eagerly (even when a pass yields no hits) and flushed when
     /// the gatherer is dropped. Failures to open the log are reported via
     /// the observer and tracing, never propagated.
+    #[must_use]
     pub fn with_gather_log(mut self, log: GatherLog) -> Self {
         self.gather_log = Some(Arc::new(Mutex::new(log)));
         self
@@ -705,7 +706,8 @@ impl WebGatherer {
         } else {
             Some(reason)
         };
-        if let Err(e) = log.lock().unwrap_or_else(|p| p.into_inner()).log_url(
+        let lock = log.lock().unwrap_or_else(|p| p.into_inner());
+        let result = lock.log_url(
             url,
             query,
             status,
@@ -714,7 +716,8 @@ impl WebGatherer {
             search_engine,
             reason,
             detail,
-        ) {
+        );
+        if let Err(e) = result {
             tracing::warn!(error = %e, url, "research: web URL log write failed");
         }
     }
@@ -722,6 +725,7 @@ impl WebGatherer {
     /// Attach a query decomposer.  When present, [`gather_with_observer`]
     /// decomposes the topic into parallel sub-queries and deduplicates the
     /// combined results.
+    #[must_use]
     pub fn with_decomposer(mut self, decomposer: Arc<dyn QueryDecomposer>) -> Self {
         self.decomposer = Some(decomposer);
         self
@@ -951,7 +955,17 @@ impl WebGatherer {
         let mut youtube_count = 0usize;
         let mut sources = Vec::with_capacity(hits.len());
         for (index, hit) in hits.into_iter().enumerate() {
-            let body = match vault.read_content(&hit.source_id) {
+            // M-026: `read_content` does blocking `fs::read_to_string` + a
+            // `Mutex<Connection>`; off-load it to a blocking thread like the
+            // `vault.search` call above so it never stalls the async runtime.
+            let body = {
+                let vault = Arc::clone(&vault);
+                let source_id = hit.source_id.clone();
+                tokio::task::spawn_blocking(move || vault.read_content(&source_id))
+                    .await
+                    .map_err(|e| anyhow::anyhow!("vault read_content task panicked: {e}"))?
+            };
+            let body = match body {
                 Ok(b) => b,
                 Err(e) => {
                     tracing::warn!(source_id = %hit.source_id, error = %e, "research: failed to read vaulted source content; skipping");
@@ -1534,70 +1548,69 @@ impl WebGatherer {
             .into_iter()
             .collect();
         engines.sort();
-        let candidates: Vec<(usize, String, WebSearchHit)> = hits_by_url
+        let fetch_futures = hits_by_url
             .into_iter()
             .take(max_results)
             .enumerate()
             .map(|(index, (query, hit))| (index, query, hit))
-            .collect();
-        let fetch_futures = candidates.into_iter().map(|(index, query, hit)| {
-            let fetch_tool = fetch_tool.clone();
-            async move {
-                // Scholarly hits are captured as self-contained sources from
-                // the reconstructed abstract in the snippet — the DOI/landing
-                // page is typically a paywalled redirect that readability
-                // cannot extract, so a URL fetch would drop nearly every
-                // scholarly result. Synthesize a page directly from the hit.
-                if is_scholarly_hit(&hit) {
-                    let page = WebFetchedPage {
-                        url: hit.url.clone(),
-                        title: hit.title.clone(),
-                        body: hit.snippet.clone(),
-                        published_at: None,
-                        content_type: None,
-                        page_type: Some("scholarly".to_string()),
-                        language: detect_language_best_effort(&hit.snippet),
-                        // Scholarly snippets carry an engine-provided author
-                        // list (OpenAlex `authorships`) — the page is never
-                        // fetched, so the hit's author is the only source.
-                        author: hit.author.clone(),
-                    };
-                    let result: Result<
-                        Result<WebFetchedPage, anyhow::Error>,
-                        tokio::time::error::Elapsed,
-                    > = Ok(Ok(page));
-                    return (index, query, hit, result);
+            .map(|(index, query, hit)| {
+                let fetch_tool = fetch_tool.clone();
+                async move {
+                    // Scholarly hits are captured as self-contained sources from
+                    // the reconstructed abstract in the snippet — the DOI/landing
+                    // page is typically a paywalled redirect that readability
+                    // cannot extract, so a URL fetch would drop nearly every
+                    // scholarly result. Synthesize a page directly from the hit.
+                    if is_scholarly_hit(&hit) {
+                        let page = WebFetchedPage {
+                            url: hit.url.clone(),
+                            title: hit.title.clone(),
+                            body: hit.snippet.clone(),
+                            published_at: None,
+                            content_type: None,
+                            page_type: Some("scholarly".to_string()),
+                            language: detect_language_best_effort(&hit.snippet),
+                            // Scholarly snippets carry an engine-provided author
+                            // list (OpenAlex `authorships`) — the page is never
+                            // fetched, so the hit's author is the only source.
+                            author: hit.author.clone(),
+                        };
+                        let result: Result<
+                            Result<WebFetchedPage, anyhow::Error>,
+                            tokio::time::error::Elapsed,
+                        > = Ok(Ok(page));
+                        return (index, query, hit, result);
+                    }
+                    // Encyclopedia hits are captured as self-contained sources from
+                    // the page summary in the snippet — the full Wikipedia article
+                    // HTML is large and readability extraction on it can fail or
+                    // produce inconsistent results. Synthesize a page directly from
+                    // the hit so the concise summary is used as evidence.
+                    if is_encyclopedia_hit(&hit) {
+                        let page = WebFetchedPage {
+                            url: hit.url.clone(),
+                            title: hit.title.clone(),
+                            body: hit.snippet.clone(),
+                            published_at: None,
+                            content_type: None,
+                            page_type: Some("encyclopedia".to_string()),
+                            language: detect_language_best_effort(&hit.snippet),
+                            author: hit.author.clone(),
+                        };
+                        let result: Result<
+                            Result<WebFetchedPage, anyhow::Error>,
+                            tokio::time::error::Elapsed,
+                        > = Ok(Ok(page));
+                        return (index, query, hit, result);
+                    }
+                    let result = tokio::time::timeout(
+                        fetch_timeout,
+                        fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
+                    )
+                    .await;
+                    (index, query, hit, result)
                 }
-                // Encyclopedia hits are captured as self-contained sources from
-                // the page summary in the snippet — the full Wikipedia article
-                // HTML is large and readability extraction on it can fail or
-                // produce inconsistent results. Synthesize a page directly from
-                // the hit so the concise summary is used as evidence.
-                if is_encyclopedia_hit(&hit) {
-                    let page = WebFetchedPage {
-                        url: hit.url.clone(),
-                        title: hit.title.clone(),
-                        body: hit.snippet.clone(),
-                        published_at: None,
-                        content_type: None,
-                        page_type: Some("encyclopedia".to_string()),
-                        language: detect_language_best_effort(&hit.snippet),
-                        author: hit.author.clone(),
-                    };
-                    let result: Result<
-                        Result<WebFetchedPage, anyhow::Error>,
-                        tokio::time::error::Elapsed,
-                    > = Ok(Ok(page));
-                    return (index, query, hit, result);
-                }
-                let result = tokio::time::timeout(
-                    fetch_timeout,
-                    fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
-                )
-                .await;
-                (index, query, hit, result)
-            }
-        });
+            });
         let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
         while let Some((index, query, hit, result)) = stream.next().await {

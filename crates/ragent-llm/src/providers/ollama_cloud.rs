@@ -546,15 +546,12 @@ impl LlmClient for OllamaCloudClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
-            // Log the full request body and error at warn level for diagnostics
-            let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
             tracing::warn!(
                 url = %url,
                 model = %request.model,
                 status = %status,
                 error = %error_body,
-                request_body = %body_str,
-                "Ollama Cloud API error — full request logged"
+                "Ollama Cloud API error"
             );
             bail!("Ollama Cloud API error ({status}): {error_body}");
         }
@@ -571,7 +568,9 @@ impl LlmClient for OllamaCloudClient {
 
             while !stream_done {
                 let chunk_result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
+                    std::time::Duration::from_secs(
+                        super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS,
+                    ),
                     stream.next(),
                 )
                 .await
@@ -580,7 +579,10 @@ impl LlmClient for OllamaCloudClient {
                     Ok(None) => break,
                     Err(_) => {
                         yield StreamEvent::Error {
-                            message: format!("Ollama Cloud: stream stalled — no data received for {timeout_secs}s"),
+                            message: format!(
+                                "Ollama Cloud: stream stalled — no data received for {}s",
+                                super::http_client::STREAM_CHUNK_IDLE_TIMEOUT_SECS
+                            ),
                         };
                         break;
                     }
@@ -595,10 +597,7 @@ impl LlmClient for OllamaCloudClient {
 
                 buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
+                while let Some(line) = super::http_client::take_sse_line(&mut buffer) {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;

@@ -12,12 +12,7 @@ use ragent_agent::{
     storage::Storage,
     tool,
 };
-use ragent_tui::app::{
-    ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogEntry, LogLevel,
-    OutputViewState, OutputViewTarget, ProviderSetupStep, ProviderSource, ScreenMode,
-};
-use ragent_tui::{App, layout};
-use ratatui::{Terminal, backend::TestBackend};
+use ragent_tui::App;
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -65,6 +60,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         )),
         telemetry: std::sync::Arc::new(ragent_agent::telemetry::TelemetrySubsystem::disabled()),
         activity_log: std::sync::OnceLock::new(),
+        skill_registry_cache: parking_lot::Mutex::new(None),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

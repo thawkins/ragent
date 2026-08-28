@@ -575,6 +575,7 @@ async fn main() -> Result<()> {
         )),
         activity_log: std::sync::OnceLock::new(),
         telemetry,
+        skill_registry_cache: parking_lot::Mutex::new(None),
     });
     tracing::info!(auto_approve = cli.yes, "Session processor initialized");
     startup.record("Session manager & processor", t0.elapsed());

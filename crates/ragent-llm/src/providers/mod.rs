@@ -21,10 +21,12 @@ pub mod openai;
 pub mod openai_responses;
 pub mod router;
 pub mod router_classifier;
+/// Model-router client that multiplexes requests across providers.
 pub mod router_client;
 pub mod router_config;
 pub mod router_modifiers;
 mod thinking;
+/// Serialisation cache for tool definitions per wire format.
 pub mod tool_cache;
 pub mod xai;
 

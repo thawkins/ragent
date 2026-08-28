@@ -150,12 +150,12 @@ impl RouterProvider {
 #[async_trait::async_trait]
 impl Provider for RouterProvider {
     /// Returns `"router"` (FR-001).
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "router"
     }
 
     /// Returns `"Model Router"` (FR-001).
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Model Router"
     }
 

@@ -168,6 +168,11 @@ pub fn render_status_bar_v2(frame: &mut Frame, app: &mut App, area: Rect) {
         verbose: !matches!(mode, ResponsiveMode::Minimal),
     };
 
+    // C-006: populate the cached status-bar model label before rendering so
+    // the hot per-frame path serves it from the cache rather than recomputing
+    // (and hitting SQLite + Config::load) on every frame.
+    app.update_cached_provider_model_label(app.compute_provider_model_label());
+
     // Split area into 2 lines
     let line1_area = Rect {
         x: area.x,
@@ -396,7 +401,9 @@ fn build_line2_left(
         ));
     }
 
-    // Provider with health indicator
+    // Provider with health indicator. C-006: `provider_model_label()` serves
+    // from a cached field (recomputed only when the model/provider/thinking
+    // changes), so this hot render path does not hit SQLite/Config per frame.
     if let Some(label) = app.provider_model_label() {
         let (icon, health_color) = match app.provider_health_status() {
             Some(true) => (indicators::HEALTHY, colors::HEALTHY),

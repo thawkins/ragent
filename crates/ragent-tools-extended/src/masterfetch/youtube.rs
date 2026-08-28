@@ -262,7 +262,7 @@ pub fn parse_caption_xml(xml: &str) -> Result<String> {
 /// Return `true` if the supplied URL points to a YouTube video watch page.
 #[must_use]
 pub fn is_youtube_url(url: &str) -> bool {
-    url::Url::parse(url).ok().is_some_and(|u| {
+    url::Url::parse(url).is_ok_and(|u| {
         let host = u.host_str().unwrap_or("").to_ascii_lowercase();
         host.ends_with("youtube.com") || host == "youtu.be"
     })
