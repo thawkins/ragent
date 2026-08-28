@@ -4,6 +4,11 @@
 //!
 //! These tests use a local `axum` HTTP server so they exercise the full fetch
 //! pipeline without calling external networks.
+//!
+//! Note: `std::env::set_var` is `unsafe` in Rust 2024; the workspace denies
+//! `unsafe_code`, so this test target opts back in explicitly.
+
+#![allow(unsafe_code)]
 
 use std::net::SocketAddr;
 use std::sync::Arc;

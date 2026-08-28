@@ -332,7 +332,6 @@ impl App {
             model_picker_rows_cache: None,
             message_line_cache: Vec::new(),
             message_cache_width: 0,
-            messages_version: 0,
             autopilot_enabled: false,
             autopilot_token_budget: None,
             autopilot_time_limit_secs: None,

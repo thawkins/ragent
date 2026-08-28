@@ -631,7 +631,11 @@ impl LlmClient for OllamaClient {
 
                         // Finish reason
                         if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            for (_idx, id) in tool_call_ids.drain() {
+                            // End pending tool calls in index order (see the
+                            // openai provider for the rationale).
+                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
+                            ends.sort_unstable_by_key(|(idx, _)| *idx);
+                            for (_, id) in ends {
                                 yield StreamEvent::ToolCallEnd { id };
                             }
 

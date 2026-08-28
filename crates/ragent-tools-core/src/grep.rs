@@ -211,14 +211,17 @@ impl Tool for GrepTool {
                     .line_number(true)
                     .build();
                 Box::new(move |entry_result| {
-                    if should_stop() {
-                        return ignore::WalkState::Quit;
-                    }
                     let Ok(entry) = entry_result else {
                         return ignore::WalkState::Continue;
                     };
+                    // Cheap file-type filter first: directories and error
+                    // entries must not pay for the global truncation check
+                    // (which takes one or two mutexes per path).
                     if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                         return ignore::WalkState::Continue;
+                    }
+                    if should_stop() {
+                        return ignore::WalkState::Quit;
                     }
                     let path = entry.path().to_path_buf();
                     *files_par

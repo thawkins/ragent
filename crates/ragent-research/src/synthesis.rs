@@ -274,15 +274,17 @@ fn evidence_critic(sources: &[Source], analysis: &AnalysisResult) -> CriticRepor
             ));
             continue;
         }
+        // A finding counts as cited when at least one index is valid, but
+        // every out-of-range citation is still reported: silently accepting a
+        // mix of valid and out-of-range indices would hide broken references.
         if indices.iter().any(|n| *n <= sources.len()) {
             cited_findings += 1;
-        } else {
-            for n in indices.iter().filter(|n| **n > sources.len()) {
-                issues.push(format!(
-                    "Finding {display_idx} cites out-of-range source #{n} (only {} sources available)",
-                    sources.len()
-                ));
-            }
+        }
+        for n in indices.iter().filter(|n| **n > sources.len()) {
+            issues.push(format!(
+                "Finding {display_idx} cites out-of-range source #{n} (only {} sources available)",
+                sources.len()
+            ));
         }
     }
 

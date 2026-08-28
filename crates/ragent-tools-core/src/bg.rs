@@ -41,11 +41,13 @@ struct Inner {
     done: bool,
     /// Total bytes dropped from the combined buffers due to the size cap.
     bytes_dropped: usize,
-    /// R-17: Notified by `waiter_task` when `done` is set so `cancel()` can
-    /// block on it instead of polling every 50 ms.
-    done_notify: Arc<Notify>,
     /// R-9: Notified by `cancel()` to wake the `waiter_task` out of
     /// `child.wait().await` so it can kill the process.
+    ///
+    /// (`done_notify` is intentionally NOT stored here: it is immutable after
+    /// spawn and lives directly on [`BackgroundCommand`] so readers never need
+    /// to take this lock just to obtain it. `waiter_task` receives it as a
+    /// task argument.)
     cancel_notify: Arc<Notify>,
 }
 
@@ -54,20 +56,28 @@ struct Inner {
 /// Cloning the handle is cheap (it shares the same `Arc<Mutex<Inner>>`). All
 /// methods are synchronous reads except for [`BackgroundCommand::cancel`] and
 /// [`BackgroundCommand::wait`], which interact with the underlying process.
+/// The notification handles are cloned out of `Inner` at spawn time and stored
+/// directly on the handle: they are immutable after creation, so readers never
+/// need to take the inner lock just to obtain them.
 #[derive(Clone)]
 pub struct BackgroundCommand {
     id: String,
     command: String,
     inner: Arc<Mutex<Inner>>,
+    /// Notified by `waiter_task` when the task finishes. Immutable after
+    /// spawn, hence held outside the locked `Inner` state.
+    done_notify: Arc<Notify>,
 }
 
 impl BackgroundCommand {
     /// Lock the shared inner state, returning a tool error if the mutex was
-    /// poisoned rather than panicking.
+    /// poisoned rather than panicking. Poisoning is logged once here so the
+    /// degraded getters below are never silent.
     fn lock_inner(&self) -> anyhow::Result<std::sync::MutexGuard<'_, Inner>> {
-        self.inner
-            .lock()
-            .map_err(|_| anyhow::anyhow!("background inner lock poisoned"))
+        self.inner.lock().map_err(|e| {
+            tracing::warn!("background inner lock poisoned: {e}");
+            anyhow::anyhow!("background inner lock poisoned")
+        })
     }
 
     /// Spawn a new background shell command.
@@ -121,7 +131,6 @@ impl BackgroundCommand {
             cancelled: false,
             done: false,
             bytes_dropped: 0,
-            done_notify: Arc::clone(&done_notify),
             cancel_notify: Arc::clone(&cancel_notify),
         }));
 
@@ -129,6 +138,7 @@ impl BackgroundCommand {
             id: id.clone(),
             command: command.clone(),
             inner: Arc::clone(&inner),
+            done_notify: Arc::clone(&done_notify),
         };
 
         let id_reader = id.clone();
@@ -245,10 +255,6 @@ impl BackgroundCommand {
         // 10 s timeout). Falls back to a deadline in case the waiter task
         // itself panicked and never sets `done`.
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
-        let done_notify = {
-            let inner = self.lock_inner()?;
-            Arc::clone(&inner.done_notify)
-        };
         loop {
             if self.is_done() {
                 return Ok(());
@@ -256,7 +262,7 @@ impl BackgroundCommand {
             // Use a short timeout so we re-check `is_done` even if the notify
             // is missed (e.g. waiter panicked before signalling).
             tokio::select! {
-                _ = done_notify.notified() => {}
+                _ = self.done_notify.notified() => {}
                 _ = tokio::time::sleep_until(deadline) => {
                     if self.is_done() {
                         return Ok(());
@@ -277,17 +283,13 @@ impl BackgroundCommand {
     /// use [`BackgroundCommand::cancel`] if they want to stop it.
     pub async fn wait(&self, timeout_secs: u64) -> Result<()> {
         let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
-        let done_notify = {
-            let inner = self.lock_inner()?;
-            Arc::clone(&inner.done_notify)
-        };
         loop {
             if self.is_done() {
                 return Ok(());
             }
             // R-17: Block on the Notify instead of polling every 200 ms.
             tokio::select! {
-                _ = done_notify.notified() => {}
+                _ = self.done_notify.notified() => {}
                 _ = tokio::time::sleep_until(deadline) => {
                     if self.is_done() {
                         return Ok(());
@@ -517,6 +519,10 @@ impl BackgroundCommand {
             Ok(g) => g,
             Err(_) => {
                 warn!(%task_id, "background inner lock poisoned finalising");
+                // Signal waiters even on the poison path so `cancel()`/`wait()`
+                // callers are woken by the notification (their fallback
+                // deadline no longer has to expire first).
+                done_notify.notify_waiters();
                 return;
             }
         };

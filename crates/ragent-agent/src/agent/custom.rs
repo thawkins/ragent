@@ -112,6 +112,12 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
 
     {
         let mut guard = cache.write().unwrap_or_else(|e| e.into_inner());
+        // Bound the cache: in practice there are 1-2 working dirs per process
+        // (the root project plus occasional sub-agent cwds), but a run that
+        // sweeps many directories should not grow it without limit.
+        if guard.len() > 8 {
+            guard.clear();
+        }
         guard.insert(
             working_dir.to_path_buf(),
             CustomAgentCache {

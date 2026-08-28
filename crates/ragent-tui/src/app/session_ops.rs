@@ -123,7 +123,6 @@ impl App {
         let display_text = format!("$ {command}");
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
-        self.messages_version = self.messages_version.wrapping_add(1);
         self.add_to_history(raw.clone());
         self.input.clear();
         self.input_cursor = 0;
@@ -201,7 +200,6 @@ impl App {
         };
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
-        self.messages_version = self.messages_version.wrapping_add(1);
         self.add_to_history(text.clone());
         self.input.clear();
         self.input_cursor = 0;
@@ -1687,16 +1685,17 @@ impl App {
     pub(crate) fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
         // C-008: stamp each entry with its own monotonic sequence number so a
         // new log line only invalidates the *new* group in `log_line_cache`,
-        // not the whole cache.
+        // not the whole cache (the cache compares against `entry.seq`).
+        self.log_seq = self.log_seq.wrapping_add(1);
         let entry = LogEntry {
             timestamp: chrono::Utc::now(),
             level,
             message: message.clone(),
             session_id: self.session_id.clone(),
             agent_id,
+            seq: self.log_seq,
         };
         self.log_entries.push(entry);
-        self.log_seq = self.log_seq.wrapping_add(1);
         // Keep the per-entry cache in lockstep: push a fresh (stale) group
         // now so the render path never has to reconcile a length mismatch.
         self.log_line_cache.push(crate::app::LogLineGroup {
@@ -1728,7 +1727,6 @@ impl App {
             // with their messages (both vectors drop from the front).
             let drop_cache = drop_count.min(self.message_line_cache.len());
             self.message_line_cache.drain(0..drop_cache);
-            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 

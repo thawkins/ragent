@@ -1,5 +1,10 @@
 //! Tests for experimental flag merge semantics in `Config::merge`.
 //!
+//! Note: `std::env::set_var` is `unsafe` in Rust 2024; the workspace denies
+//! `unsafe_code`, so this test target opts back in explicitly.
+
+#![allow(unsafe_code)]
+//!
 //! Regression: `max_background_agents` and `background_agent_timeout` were not
 //! propagated by `Config::merge`, so a value set in the global or project
 //! `ragent.json` never replaced the compiled default of 8.

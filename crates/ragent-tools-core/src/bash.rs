@@ -1058,16 +1058,6 @@ pub async fn validate_shell_command(command: &str, working_dir: &std::path::Path
 /// `.sh`/`.ps1` file written earlier; for native Bash it is also a script.
 fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path::Path) -> Command {
     let mut cmd = match shell {
-        ShellType::Bash => {
-            let mut cmd = Command::new("bash");
-            cmd.arg("-c").arg(wrapper);
-            cmd
-        }
-        ShellType::GitBash(path) => {
-            let mut cmd = Command::new(path);
-            cmd.arg("-c").arg(wrapper);
-            cmd
-        }
         ShellType::PowerShell(path) => {
             let mut cmd = Command::new(path);
             cmd.arg("-NoLogo")
@@ -1075,6 +1065,18 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
                 .arg("-NonInteractive")
                 .arg("-Command")
                 .arg(wrapper);
+            cmd
+        }
+        // Native Bash and Git Bash share the same invocation (argv
+        // `-c <wrapper>`); they differ only in the program to execute.
+        shell @ (ShellType::Bash | ShellType::GitBash(_)) => {
+            let program: &std::ffi::OsStr = match shell {
+                ShellType::Bash => "bash".as_ref(),
+                ShellType::GitBash(path) => path.as_os_str(),
+                ShellType::PowerShell(_) => unreachable!("handled above"),
+            };
+            let mut cmd = Command::new(program);
+            cmd.arg("-c").arg(wrapper);
             cmd
         }
     };
@@ -1100,16 +1102,16 @@ fn build_shell_command(shell: &ShellType, wrapper: &str, working_dir: &std::path
 /// whole group guarantees that orphaned grandchildren — most importantly a
 /// deadlocked `cargo test --workspace` binary that inherited the pipe
 /// write-ends and is stuck holding a mutex — are terminated too, not just the
-/// direct `bash`. Returns the number of processes signalled (for logging),
-/// or an error if the group no longer exists.
+/// direct `bash`. Returns an error if the group no longer exists (it may
+/// already have exited by the time the timeout fires).
 #[cfg(unix)]
 #[allow(unsafe_code)] // approved: killpg has no safe std alternative (see AGENTS-RUST.md)
-fn kill_process_group(pgid: i32) -> std::io::Result<i32> {
+fn kill_process_group(pgid: i32) -> std::io::Result<()> {
     // SAFETY: libc::killpg takes a plain C int and has no pointer arguments; no
     // invariants are required of the caller beyond a valid process-group id.
     let ret = unsafe { libc::killpg(pgid, libc::SIGKILL) };
     if ret == 0 {
-        Ok(0)
+        Ok(())
     } else {
         Err(std::io::Error::last_os_error())
     }
@@ -1202,7 +1204,12 @@ fn truncate_output(content: String) -> String {
 async fn run_with_output(mut cmd: Command, capture: Arc<SharedCapture>) -> Result<RanOutput> {
     let mut child = cmd.spawn()?;
     let child_pid = child.id();
-    LAST_PGID.with(|cell| cell.set(child_pid));
+    // Record the process-group id in the shared capture (not a thread-local:
+    // tokio may resume this future and the timeout handler on different
+    // worker threads, so the value must cross threads).
+    if let Some(pid) = child_pid {
+        let _ = capture.pgid.set(pid);
+    }
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
@@ -1282,15 +1289,21 @@ struct PartialOutput {
     timed_out: bool,
 }
 
-/// Shared stdout/stderr buffers for a foreground command.
+/// Shared state between `run_with_output` and its timeout handler.
 ///
 /// Held behind an [`Arc`] so that, if the running command is cancelled by a
-/// timeout, the buffers remain accessible and the partial output captured so
-/// far can be surfaced in the timeout error instead of being lost.
+/// timeout, the buffers and process-group id remain accessible and the partial
+/// output captured so far can be surfaced in the timeout error instead of being
+/// lost.
 #[derive(Default)]
 struct SharedCapture {
     stdout: Arc<Mutex<Vec<u8>>>,
     stderr: Arc<Mutex<Vec<u8>>>,
+    /// Process-group id (== direct child PID) recorded by `run_with_output`
+    /// after spawn, read back by the timeout handler to `killpg` survivors.
+    /// A `OnceLock` shared via `Arc` is required because tokio may poll the
+    /// writer and the timeout handler on different worker threads.
+    pgid: std::sync::OnceLock<u32>,
 }
 
 impl SharedCapture {
@@ -1301,7 +1314,9 @@ impl SharedCapture {
 
     /// Append `chunk` to `buf`, stopping once [`MAX_CAPTURE_BYTES`] is reached.
     fn append(buf: &Mutex<Vec<u8>>, chunk: &[u8]) {
-        let mut b = buf.lock().unwrap();
+        let mut b = buf
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if b.len() < MAX_CAPTURE_BYTES {
             let room = MAX_CAPTURE_BYTES - b.len();
             b.extend_from_slice(&chunk[..chunk.len().min(room)]);
@@ -1310,20 +1325,25 @@ impl SharedCapture {
 
     /// Snapshot the captured stdout as lossy UTF-8.
     fn stdout_str(&self) -> String {
-        String::from_utf8_lossy(&self.stdout.lock().unwrap()).into_owned()
+        String::from_utf8_lossy(
+            &self
+                .stdout
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_owned()
     }
 
     /// Snapshot the captured stderr as lossy UTF-8.
     fn stderr_str(&self) -> String {
-        String::from_utf8_lossy(&self.stderr.lock().unwrap()).into_owned()
+        String::from_utf8_lossy(
+            &self
+                .stderr
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_owned()
     }
-}
-
-// Thread-local that `run_with_output` records the spawned child's PGID into,
-// so a timeout handler can retrieve it without introspecting the (cancelled)
-// future.
-thread_local! {
-    static LAST_PGID: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
 }
 
 /// Spawn a long-running shell command for background execution.
@@ -1521,90 +1541,100 @@ impl Tool for BashTool {
         // hanging on the controlling tty. See `askpass` module docs.
         let mut broker = crate::askpass::AskPassBroker::start(&ctx.session_id);
         let start = Instant::now();
-        let result: Result<Result<PartialOutput, anyhow::Error>, ()> = match shell {
-            ShellType::Bash | ShellType::GitBash(_) | ShellType::PowerShell(_) => {
-                // Build the wrapper invocation. For the foreground tool the
-                // wrapper script carries the user command + persistent-shell
-                // bookkeeping; askpass env vars are added below.
-                let mut cmd = build_shell_command(shell, &wrapper, &ctx.working_dir);
-                // `build_shell_command` detaches stdin from the tty so nothing
-                // can block on it; sudo is handled via SUDO_ASKPASS instead.
-                // `kill_on_drop(true)` + `process_group(0)` ensure that when
-                // the future is dropped (e.g. the timeout below elapses) the
-                // *whole process group* — including any orphaned grandchildren
-                // like a deadlocked `cargo test` binary — is terminated, not
-                // just the direct `bash`. This was the root cause of orphaned
-                // test binaries continuing to consume CPU / hold locks after a
-                // timeout fired.
-                if let Some(ref mut b) = broker {
-                    for (k, v) in b.env_vars() {
-                        cmd.env(k, v);
+        // The select! below converts a timeout into a `PartialOutput` with
+        // `timed_out: true`, so the outer `Err` variant is unreachable: it is
+        // only a genuine spawn/io failure from `run_with_output`.
+        let result: Result<Result<PartialOutput, anyhow::Error>, std::convert::Infallible> =
+            match shell {
+                ShellType::Bash | ShellType::GitBash(_) | ShellType::PowerShell(_) => {
+                    // Build the wrapper invocation. For the foreground tool the
+                    // wrapper script carries the user command + persistent-shell
+                    // bookkeeping; askpass env vars are added below.
+                    let mut cmd = build_shell_command(shell, &wrapper, &ctx.working_dir);
+                    // `build_shell_command` detaches stdin from the tty so nothing
+                    // can block on it; sudo is handled via SUDO_ASKPASS instead.
+                    // `kill_on_drop(true)` + `process_group(0)` ensure that when
+                    // the future is dropped (e.g. the timeout below elapses) the
+                    // *whole process group* — including any orphaned grandchildren
+                    // like a deadlocked `cargo test` binary — is terminated, not
+                    // just the direct `bash`. This was the root cause of orphaned
+                    // test binaries continuing to consume CPU / hold locks after a
+                    // timeout fired.
+                    if let Some(ref mut b) = broker {
+                        for (k, v) in b.env_vars() {
+                            cmd.env(k, v);
+                        }
+                        b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
                     }
-                    b.spawn_watcher(ctx.session_id.clone(), Arc::clone(&ctx.event_bus));
-                }
-                let capture = SharedCapture::new();
-                let mut cmd = Box::pin(run_with_output(cmd, Arc::clone(&capture)));
-                // Race the command against the timeout. On timeout we retain
-                // `capture` so the partial stdout/stderr the command produced
-                // before cancellation can be surfaced in the error message.
-                let timed_out = tokio::select! {
-                    r = &mut cmd => Ok(r),
-                    _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => Err(()),
-                };
+                    let capture = SharedCapture::new();
+                    let mut cmd = Box::pin(run_with_output(cmd, Arc::clone(&capture)));
+                    // Race the command against the timeout. On timeout we retain
+                    // `capture` so the partial stdout/stderr the command produced
+                    // before cancellation can be surfaced in the error message.
+                    let timed_out: Result<
+                        Result<PartialOutput, anyhow::Error>,
+                        std::convert::Infallible,
+                    > = tokio::select! {
+                        // Carry the inner result (real completion or command
+                        // error) through untouched, wrapping the output into a
+                        // `PartialOutput` with empty partial buffers and
+                        // `timed_out: false` (the timeout arm below assembles
+                        // the partial-output variant instead of an outer Err).
+                        r = &mut cmd => Ok(r.map(|o| PartialOutput {
+                            output: o.output,
+                            partial_stdout: String::new(),
+                            partial_stderr: String::new(),
+                            timed_out: false,
+                        })),
+                        // Infallible: the sleep arm only marks the timeout; the
+                        // partial output is assembled below from `capture`.
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs)) => {
+                            Ok(Ok(PartialOutput {
+                                output: std::process::Output {
+                                    status: std::process::ExitStatus::default(),
+                                    stdout: Vec::new(),
+                                    stderr: Vec::new(),
+                                },
+                                partial_stdout: capture.stdout_str(),
+                                partial_stderr: capture.stderr_str(),
+                                timed_out: true,
+                            }))
+                        }
+                    };
 
-                // ── Timeout cleanup: kill the whole process group ────────
-                // `kill_on_drop` only terminates the direct child. If the
-                // command (e.g. `cargo test --workspace`) spawned grandchildren
-                // that inherited the pipes, those survive the drop. SIGKILL the
-                // entire group so no deadlocked test binary is left behind
-                // holding a mutex.
-                if timed_out.is_err() {
-                    #[cfg(unix)]
-                    if let Some(pgid) = LAST_PGID.with(|c| c.get()) {
-                        match kill_process_group(pgid as i32) {
-                            Ok(_) => {
-                                tracing::warn!(pgid, "killed process group after command timeout")
+                    // ── Timeout cleanup: kill the whole process group ────────
+                    // `kill_on_drop` only terminates the direct child. If the
+                    // command (e.g. `cargo test --workspace`) spawned grandchildren
+                    // that inherited the pipes, those survive the drop. SIGKILL the
+                    // entire group so no deadlocked test binary is left behind
+                    // holding a mutex.
+                    let timed_out_flag = matches!(&timed_out, Ok(Ok(o)) if o.timed_out);
+                    if timed_out_flag {
+                        #[cfg(unix)]
+                        if let Some(pgid) = capture.pgid.get() {
+                            match kill_process_group(*pgid as i32) {
+                                Ok(_) => {
+                                    tracing::warn!(
+                                        pgid,
+                                        "killed process group after command timeout"
+                                    )
+                                }
+                                Err(e) => tracing::warn!(
+                                    pgid,
+                                    error = %e,
+                                    "failed to kill process group after timeout (group may have already exited)"
+                                ),
                             }
-                            Err(e) => tracing::warn!(
-                                pgid,
-                                error = %e,
-                                "failed to kill process group after timeout (group may have already exited)"
-                            ),
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = &cmd;
                         }
                     }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = &cmd;
-                    }
-                }
 
-                // Carry the inner result (real completion or command error)
-                // through untouched, attaching the captured output. When the
-                // timeout fired (`Err(())`) we still emit a `PartialOutput`
-                // marked `timed_out: true` carrying whatever partial
-                // stdout/stderr was captured *before* cancellation, so the
-                // agent can see how far the command got. The `Err` variant of
-                // the inner result is only a genuine spawn/io failure.
-                match timed_out {
-                    Ok(inner) => Ok(inner.map(|o| PartialOutput {
-                        output: o.output,
-                        partial_stdout: String::new(),
-                        partial_stderr: String::new(),
-                        timed_out: false,
-                    })),
-                    Err(()) => Ok(Ok(PartialOutput {
-                        output: std::process::Output {
-                            status: std::process::ExitStatus::default(),
-                            stdout: Vec::new(),
-                            stderr: Vec::new(),
-                        },
-                        partial_stdout: capture.stdout_str(),
-                        partial_stderr: capture.stderr_str(),
-                        timed_out: true,
-                    })),
+                    timed_out
                 }
-            }
-        };
+            };
         // Tear down the askpass broker (cancels the watcher, removes temp
         // files) once the command has finished.
         if let Some(b) = broker {
@@ -1696,20 +1726,6 @@ impl Tool for BashTool {
             Ok(Err(e)) => Err(anyhow::anyhow!(
                 "Failed to execute command: {e}. Check that the command exists and is accessible."
             )),
-            Err(_) => {
-                // The timeout arm of the `tokio::select!` fired (the command did
-                // not complete within `timeout_secs`). The whole process group
-                // was killed (see the `kill_process_group` cleanup above). This
-                // is reported as a *failure* so the agent loop records
-                // `ToolCallStatus::Error` rather than treating a hung run as a
-                // clean success.
-                let redacted = crate::sanitize::redact_secrets(command);
-                Err(anyhow::anyhow!(
-                    "Command timed out after {timeout_secs} seconds and was killed. \
-                     The command did not complete within the timeout; investigate the \
-                     reason it stalled. Command: {redacted}"
-                ))
-            }
         }
     }
 }

@@ -133,7 +133,6 @@ impl App {
             let sid = session_id.to_string();
             let msg = Message::user_text(&sid, &full_task);
             self.messages.push(msg);
-            self.messages_version = self.messages_version.wrapping_add(1);
             self.trim_messages_if_needed();
 
             // Spawn async processing
@@ -1041,22 +1040,16 @@ impl App {
                 // Pretty-print JSON args as a single truncated log entry
                 // (H-009) rather than one entry per line, which both avoided
                 // dozens of `format!` allocations for a large payload and
-                // (previously) bumped the global log version per line.
+                // (previously) bumped the global log version per line. Compact
+                // serialization is used because newlines render poorly in the
+                // single-line log panel and only the first 200 chars survive
+                // the preview cap anyway.
                 let pretty = serde_json::from_str::<serde_json::Value>(args)
                     .ok()
-                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .and_then(|v| serde_json::to_string(&v).ok())
                     .unwrap_or_else(|| args.to_string());
                 // Cap at ~200 chars so a single tool call cannot flood the log.
-                let preview: String = {
-                    let trimmed = pretty.trim();
-                    if trimmed.chars().count() > 200 {
-                        let mut out: String = trimmed.chars().take(200).collect();
-                        out.push_str("…");
-                        out
-                    } else {
-                        trimmed.to_string()
-                    }
-                };
+                let preview = crate::app::helpers::truncate_chars(pretty.trim(), 200);
                 self.push_log_no_agent(
                     LogLevel::Tool,
                     format!("{}→ {}({})", step_tag, tool, preview),
@@ -2141,7 +2134,6 @@ impl App {
             {
                 *text = rendered;
                 msg.touch();
-                self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
         }
@@ -2153,7 +2145,6 @@ impl App {
                 Role::Assistant,
                 vec![MessagePart::Text { text: rendered }],
             ));
-            self.messages_version = self.messages_version.wrapping_add(1);
             self.trim_messages_if_needed();
         }
     }
@@ -2178,7 +2169,6 @@ impl App {
                     });
                 }
                 last.touch();
-                self.messages_version = self.messages_version.wrapping_add(1);
                 return;
             }
         }
@@ -2191,7 +2181,6 @@ impl App {
                 vec![MessagePart::Text { text: rendered }],
             );
             self.messages.push(msg);
-            self.messages_version = self.messages_version.wrapping_add(1);
         }
     }
 
@@ -2207,7 +2196,6 @@ impl App {
                 });
             }
             last.touch();
-            self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2219,7 +2207,6 @@ impl App {
                 }],
             );
             self.messages.push(msg);
-            self.messages_version = self.messages_version.wrapping_add(1);
             self.trim_messages_if_needed();
         }
     }
@@ -2242,7 +2229,6 @@ impl App {
                 },
             });
             last.touch();
-            self.messages_version = self.messages_version.wrapping_add(1);
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -2262,7 +2248,6 @@ impl App {
                 }],
             );
             self.messages.push(msg);
-            self.messages_version = self.messages_version.wrapping_add(1);
             self.trim_messages_if_needed();
         }
     }
@@ -2295,7 +2280,6 @@ impl App {
                     }
                     state.duration_ms = Some(duration_ms);
                     msg.touch();
-                    self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }
             }
@@ -2321,7 +2305,6 @@ impl App {
                         if state.input.is_null() {
                             state.input = input;
                             msg.touch();
-                            self.messages_version = self.messages_version.wrapping_add(1);
                         }
                         return true;
                     }
@@ -2378,7 +2361,6 @@ impl App {
                             {
                                 state.input = input;
                                 msg.touch();
-                                self.messages_version = self.messages_version.wrapping_add(1);
                             }
                         }
                         self.pending_tool_args.remove(&call_id);
@@ -2419,7 +2401,6 @@ impl App {
                 {
                     state.output = Some(value);
                     msg.touch();
-                    self.messages_version = self.messages_version.wrapping_add(1);
                     return;
                 }
             }
@@ -2470,7 +2451,6 @@ impl App {
 
         let msg = Message::user_text(&session_id, &prompt);
         self.messages.push(msg);
-        self.messages_version = self.messages_version.wrapping_add(1);
         self.trim_messages_if_needed();
 
         let processor = self.session_processor.clone();

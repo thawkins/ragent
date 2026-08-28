@@ -79,11 +79,6 @@ impl RuntimeFlag {
         Ok(new_state)
     }
 
-    /// The field name this flag is persisted under.
-    pub fn name(&self) -> &'static str {
-        self.name
-    }
-
     fn read_from_config(&self, config: &crate::config::Config) -> bool {
         match self.name {
             "activity_log" => config.activity_log,

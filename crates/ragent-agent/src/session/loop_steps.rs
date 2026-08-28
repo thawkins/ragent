@@ -730,14 +730,15 @@ impl SessionProcessor {
                 });
                 match client.chat(init_request).await {
                     Ok(mut stream) => {
+                        // Per-event stall guard, matching the main loop's
+                        // stall detection (`stream_config.timeout_secs`)
+                        // instead of a fixed 60s: slow providers (e.g. a
+                        // local reasoning model that thinks for over a
+                        // minute before its first token) were aborted
+                        // mid-ack even though the stream was healthy. Hoisted
+                        // above the per-event loop: the value is loop-invariant.
+                        let stall_secs = self.stream_config.timeout_secs;
                         loop {
-                            // Per-event stall guard, matching the main loop's
-                            // stall detection (`stream_config.timeout_secs`)
-                            // instead of a fixed 60s: slow providers (e.g. a
-                            // local reasoning model that thinks for over a
-                            // minute before its first token) were aborted
-                            // mid-ack even though the stream was healthy.
-                            let stall_secs = self.stream_config.timeout_secs;
                             let ev = match tokio::time::timeout(
                                 std::time::Duration::from_secs(stall_secs),
                                 stream.next(),

@@ -1,5 +1,9 @@
 //! Regression test for `/codeindex on` persistence across restart.
 //!
+//! Note: `std::env::set_var` / `remove_var` are `unsafe` in Rust 2024; the
+//! workspace denies `unsafe_code`, so this test target opts back in
+//! explicitly (env mutation is contained to the test binary).
+//!
 //! Bug: when a global config has `code_index.enabled: false` and the user
 //! runs `/codeindex on` (which saves to the project config), the `enabled:
 //! true` value was stripped by `skip_serializing_if = "is_true"`. On reload
@@ -7,6 +11,7 @@
 //! `enabled: false` (because `specified.enabled` was false), so codeindex
 //! came back disabled.
 
+#![allow(unsafe_code)]
 #![cfg(test)]
 
 use ragent_config::Config;

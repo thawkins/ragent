@@ -1,5 +1,91 @@
 # Changelog
 
+## Version: 1.0.64
+
+### Added
+
+- **Interim-save gate for streaming assistant messages (M-008/P-12/H3)** —
+  the per-stream-event interim save is now gated on a count of significant
+  (non-tool-call) message parts and uses the FTS-skip update variant. Tool-call
+  parts are appended to the transcript and finalised on the final save, so
+  rewriting the SQLite row (and re-indexing FTS) on every stream event was
+  wasted work; the significant-count invariant makes the count alone a
+  sufficient save gate.
+- **Per-entry log-line render cache (C-008)** — each TUI log entry carries a
+  monotonic `seq` stamp and each cached render group mirrors the `seq` of the
+  entry it was rendered for, so appending a log line only invalidates its own
+  group instead of the entire log-panel cache. `truncate_chars`/
+  `truncate_bytes` helpers handle UTF-8 boundaries for compact JSON previews.
+- **`list_dependent_paths` (H-004)** — the code-index store resolves files that
+  depend on a target path with a single SQL join instead of loading the whole
+  indexed-file table on the caller side.
+- **Concurrent vault reads (M-026)** — research `gather_from_vault` off-loads
+  every local-file read to the blocking pool and runs them concurrently
+  (`join_all` preserves hit order); previously the batch serialized behind the
+  slowest file.
+- **Parallel grep walker early exit** — the `ignore` parallel walker now checks
+  the stop flag per entry before paying the global truncation check, and
+  directory/error entries skip it entirely.
+
+### Fixed
+
+- **Tool-call `ToolCallEnd` emission order** — Ollama, Copilot, and HuggingFace
+  providers now drain pending tool-call ends at `finish_reason`, sort by
+  tool-call index, and emit them in order, matching the OpenAI provider;
+  out-of-order ends could leave the UI associating results with the wrong call.
+- **Event-bus drop diagnostics** — broadcast overflow and no-active-subscriber
+  drops are now logged with the event type (and a `[short-session:step]` tag
+  when a step counter is active) instead of being silently discarded.
+- **Background-command lock hygiene** — the completion `Notify` handle is
+  immutable after spawn and now lives outside the locked `Inner` state; mutex
+  poisoning is logged once and surfaced as an error rather than panicking.
+- **Bash timeout process-group kill** — the process-group id is recorded in
+  the shared capture (`OnceLock` on an `Arc`) so the timeout handler can
+  `killpg` survivors across tokio worker threads; native Bash and Git Bash
+  share one command-builder arm.
+- **Read-tool cache resilience** — the LRU file-read cache recovers from mutex
+  poisoning (the ops under the lock cannot panic) instead of permanently
+  failing all reads.
+- **Memory routes** — removed the redundant existence pre-check in
+  `forget_memory` (TOCTOU window; relies on the delete result), surfaced
+  batched-tag-fetch errors via `tracing::warn!` instead of silently blanking
+  tags, and handled the store-then-refetch `JoinError`.
+- **Research citation checking** — `cited_indices` is shared with
+  verification/synthesis; out-of-range citations are always reported even when
+  mixed with valid ones; source token sets are cached by index so repeated
+  finding-by-citation lookups are allocation-free; excerpt building accumulates
+  lazily within a byte budget instead of copying whole bodies.
+- **Codeindex persistence** — edge clear + bulk insert runs inside one
+  transaction so a crash cannot leave the edge table empty (which would trip
+  the TUI empty-graph guard); community upserts use `prepare_cached` inside the
+  detection transaction.
+- **HTTP tools** — `http_request`/`webfetch` share the versioned masterfetch
+  client (redirect limit, gzip, UA); `webfetch` truncates once after extraction
+  with a `[Content truncated]` marker instead of cutting mid-tag.
+- **Custom-agent cache bounded** — the per-working-directory cache clears
+  itself past 8 entries so directory-sweeping runs cannot grow it unbounded.
+- **Task runner** — unhandled task errors warn instead of silently aborting the
+  background task (which stalled `wait_agents` forever); model override parsing
+  extracted into `parse_model_ref`.
+- **AGENTS.md init exchange** — the per-event stall guard reuses the
+  loop-invariant `stream_config.timeout_secs` (hoisted out of the loop).
+- **Activity log** — lifecycle event lookup uses `prepare_cached`.
+
+### Tests
+
+- **Workspace test-target compilation restored** — 7 env-mutating integration
+  test files (`ragent-config` x5, `ragent-llm` `test_ollama_cloud_real.rs`,
+  `ragent-tools-extended` `test_mf_fetch.rs`) gained a file-level
+  `#![allow(unsafe_code)]` with an explanatory note: Rust 2024 makes
+  `std::env::set_var`/`remove_var` unsafe while the workspace lints deny
+  `unsafe_code`. `cargo test --workspace` passes (7586 tests, 0 failures).
+
+### Removed
+
+- Stale root-level planning documents (`GUIDEANCEFIX.md`, `PIPELINEPLAN.md`,
+  `RESEARCHPLAN.md`, `RESOURCEPLAN.md`, `SECPLAN.md`, `SIMPPLAN.md`,
+  `TOOLS.md`) superseded by `docs/` material.
+
 ## Version: 1.0.63
 
 ### Added

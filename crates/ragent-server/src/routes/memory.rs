@@ -182,17 +182,32 @@ pub async fn search_memories(
             // run off the async executor.
             let storage = Arc::clone(&state.storage);
             let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-            let responses: Vec<MemoryResponse> = tokio::task::spawn_blocking(move || {
-                let tags_map = storage.get_memory_tags_batched(&ids).unwrap_or_default();
-                rows.iter()
-                    .map(|row| {
-                        let tags: Vec<String> = tags_map.get(&row.id).cloned().unwrap_or_default();
-                        memory_row_to_response(row, tags)
-                    })
-                    .collect()
+            let responses: Vec<MemoryResponse> = match tokio::task::spawn_blocking(move || {
+                let tags_map = storage.get_memory_tags_batched(&ids);
+                tags_map.map(|tags| {
+                    rows.iter()
+                        .map(|row| {
+                            let tags: Vec<String> = tags.get(&row.id).cloned().unwrap_or_default();
+                            memory_row_to_response(row, tags)
+                        })
+                        .collect::<Vec<MemoryResponse>>()
+                })
             })
             .await
-            .unwrap_or_default();
+            {
+                Ok(Ok(responses)) => responses,
+                Ok(Err(e)) => {
+                    // One storage failure must not silently blank every tag:
+                    // surface it (best-effort — keep serving the rows without
+                    // tags rather than failing the whole search).
+                    tracing::warn!("Batched tag fetch failed for memory search: {e}");
+                    Vec::new()
+                }
+                Err(e) => {
+                    tracing::warn!("Memory-search tag fetch task panicked: {e}");
+                    Vec::new()
+                }
+            };
 
             state.event_bus.publish(Event::MemorySearched {
                 session_id: "api".to_string(),
@@ -279,14 +294,20 @@ pub async fn store_memory(
 
             // Fetch the created memory to return full response
             let storage = Arc::clone(&state.storage);
-            let (row, tags) = tokio::task::spawn_blocking(move || {
+            let fetch = tokio::task::spawn_blocking(move || {
                 (
                     storage.get_memory(id).ok().flatten(),
                     storage.get_memory_tags(id).unwrap_or_default(),
                 )
             })
-            .await
-            .unwrap_or((None, Vec::new()));
+            .await;
+            let (row, tags) = match fetch {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::warn!("Memory fetch-after-store task panicked: {e}");
+                    (None, Vec::new())
+                }
+            };
 
             match row {
                 Some(r) => (
@@ -310,47 +331,27 @@ pub async fn forget_memory(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    // M-005: run the SQLite lookups/deletes off the async executor.
+    // M-005: run the SQLite delete off the async executor. `delete_memory`
+    // itself reports whether a row was removed, so a separate existence
+    // pre-check (and its extra lock round-trip + TOCTOU window) is redundant.
     let storage = Arc::clone(&state.storage);
-    let exists = tokio::task::spawn_blocking(move || storage.get_memory(id)).await;
-
-    let exists = match exists {
-        Ok(r) => r,
-        Err(e) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Lookup task panicked: {e}"),
-            );
+    let deleted = tokio::task::spawn_blocking(move || storage.delete_memory(id)).await;
+    match deleted {
+        Ok(Ok(true)) => {
+            state.event_bus.publish(Event::MemoryForgotten {
+                session_id: "api".to_string(),
+                count: 1,
+            });
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
-    };
-
-    match exists {
-        Ok(Some(_)) => {
-            let storage = Arc::clone(&state.storage);
-            let deleted = tokio::task::spawn_blocking(move || storage.delete_memory(id)).await;
-            match deleted {
-                Ok(Ok(true)) => {
-                    state.event_bus.publish(Event::MemoryForgotten {
-                        session_id: "api".to_string(),
-                        count: 1,
-                    });
-                    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
-                }
-                Ok(Ok(false)) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
-                Ok(Err(e)) => error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Delete failed: {e}"),
-                ),
-                Err(e) => error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Delete task panicked: {e}"),
-                ),
-            }
-        }
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
+        Ok(Ok(false)) => error_response(StatusCode::NOT_FOUND, "Memory not found"),
+        Ok(Err(e)) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Delete failed: {e}"),
+        ),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Lookup failed: {e}"),
+            format!("Delete task panicked: {e}"),
         ),
     }
 }

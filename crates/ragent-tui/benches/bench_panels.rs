@@ -144,7 +144,6 @@ fn bench_message_list(c: &mut Criterion) {
                 let mut app = make_app();
                 app.session_id = Some(session_id.to_string());
                 app.messages = messages.clone();
-                app.messages_version = 1;
                 app.message_line_cache.clear();
                 app.message_cache_width = 0; // force re-wrap
 
@@ -165,7 +164,6 @@ fn bench_message_list(c: &mut Criterion) {
             let mut app = make_app();
             app.session_id = Some(session_id.to_string());
             app.messages = messages;
-            app.messages_version = 1;
 
             // Prime the cache with one render.
             {

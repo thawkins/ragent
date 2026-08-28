@@ -8,7 +8,6 @@
 
 use crate::analysis::AnalysisResult;
 use crate::polarity::cited_indices;
-use crate::source::Source;
 use crate::state::ResearchState;
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -125,6 +124,28 @@ fn is_stopword_lc(word: &str) -> bool {
     )
 }
 
+/// Tokenized body of source `idx`, cached in `cache`.
+///
+/// The cache is keyed by source index and resolves the source itself, so a
+/// caller cannot accidentally pair one source's body with another's index.
+/// The token set is returned by reference (never cloned) so repeated
+/// (finding x citation) lookups stay allocation-free.
+fn cached_source_words<'a>(
+    state: &ResearchState,
+    cache: &'a mut HashMap<usize, Option<HashSet<String>>>,
+    idx: usize,
+) -> Option<&'a HashSet<String>> {
+    cache
+        .entry(idx)
+        .or_insert_with(|| {
+            state.sources.get(idx).and_then(|s| {
+                s.body()
+                    .map(|b| KeywordVerifier::words(b).into_iter().collect())
+            })
+        })
+        .as_ref()
+}
+
 #[async_trait]
 impl Verifier for KeywordVerifier {
     async fn verify(
@@ -147,18 +168,12 @@ impl Verifier for KeywordVerifier {
         let mut supported = 0usize;
 
         // Tokenize each cited source body once (not once per finding that
-        // cites it) and each finding once per pass.
+        // cites it) and each finding once per pass. The cache is keyed by
+        // source index and resolves the source itself, so a caller cannot
+        // accidentally pair one source's body with another's index. Values
+        // are returned by reference to avoid cloning the token set on every
+        // (finding x citation) lookup.
         let mut source_words_cache: HashMap<usize, Option<HashSet<String>>> = HashMap::new();
-        let words_for = |source: &Source,
-                         cache: &mut HashMap<usize, Option<HashSet<String>>>,
-                         idx: usize|
-         -> Option<HashSet<String>> {
-            cache
-                .entry(idx)
-                .or_insert_with(|| source.body().map(|b| Self::words(b).into_iter().collect()))
-                .clone()
-        };
-
         for (idx, finding) in findings.iter().enumerate() {
             let indices = cited_indices(finding);
             if indices.is_empty() {
@@ -169,15 +184,16 @@ impl Verifier for KeywordVerifier {
             let finding_words = Self::words(finding);
             let mut finding_supported = true;
             for n in indices {
-                let Some(source) = state.sources.get(n - 1) else {
+                if n == 0 || n > state.sources.len() {
                     issues.push(format!(
                         "Finding {} cites source [#{n}] which does not exist",
                         idx + 1
                     ));
                     finding_supported = false;
                     continue;
-                };
-                let Some(s_words) = words_for(source, &mut source_words_cache, n - 1) else {
+                }
+                let Some(s_words) = cached_source_words(state, &mut source_words_cache, n - 1)
+                else {
                     issues.push(format!(
                         "Finding {} cites source [#{n}] but the source body does not support the claim",
                         idx + 1
@@ -185,7 +201,7 @@ impl Verifier for KeywordVerifier {
                     finding_supported = false;
                     continue;
                 };
-                if !Self::supported_by(&finding_words, &s_words) {
+                if !Self::supported_by(&finding_words, s_words) {
                     issues.push(format!(
                         "Finding {} cites source [#{n}] but the source body does not support the claim",
                         idx + 1

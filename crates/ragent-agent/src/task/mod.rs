@@ -515,7 +515,8 @@ impl AgentManager {
 
             // Run the sub-agent logic in a nested task so that panics inside
             // process_message (or agent resolution) are caught as a JoinError
-            // rather than silently aborting this background task and leaving              // the parent wait_agents call stalled forever.
+            // rather than silently aborting this background task and leaving
+            // the parent wait_agents call stalled forever.
             let csid_inner = csid.clone();
             let inner = tokio::spawn(async move {
                 let config = processor.load_config_cached();
@@ -946,6 +947,19 @@ impl AgentManager {
     }
 }
 
+/// Parse a `provider/model` or `provider:model` string into a [`ModelRef`].
+///
+/// Returns `None` when the string carries no separator (a bare model id is
+/// ambiguous without a default provider).
+fn parse_model_ref(s: &str) -> Option<ModelRef> {
+    s.split_once('/')
+        .or_else(|| s.split_once(':'))
+        .map(|(provider, model_id)| ModelRef {
+            provider_id: provider.to_string(),
+            model_id: model_id.to_string(),
+        })
+}
+
 /// Apply an explicit model override to an agent, falling back to the user's
 /// persisted `selected_model` setting when no override is given.
 ///
@@ -958,15 +972,16 @@ fn apply_model_override(
     log_kind: &str,
 ) {
     // Apply explicit model override if provided.
-    if let Some(model_str) = model_override
-        && let Some((provider, model_id)) = model_str
-            .split_once('/')
-            .or_else(|| model_str.split_once(':'))
-    {
-        agent.model = Some(ModelRef {
-            provider_id: provider.to_string(),
-            model_id: model_id.to_string(),
-        });
+    if let Some(model_str) = model_override {
+        if let Some(model_ref) = parse_model_ref(model_str) {
+            agent.model = Some(model_ref);
+        } else {
+            tracing::warn!(
+                agent = %agent.name,
+                override = %model_str,
+                "Ignoring unparsable model override (expected 'provider/model' or 'provider:model')"
+            );
+        }
     } else if !agent.model_pinned || agent.model.is_none() {
         // No explicit override: fall back to the user's persisted
         // `selected_model` setting (same path the TUI uses via
@@ -978,19 +993,13 @@ fn apply_model_override(
             .storage()
             .get_setting("selected_model")
         {
-            if let Some((provider, model_id)) = model_str
-                .split_once('/')
-                .or_else(|| model_str.split_once(':'))
-            {
+            if let Some(model_ref) = parse_model_ref(&model_str) {
                 tracing::info!(
                     agent = %agent.name,
                     selected_model = %model_str,
                     "Applied persisted selected_model to {log_kind}"
                 );
-                agent.model = Some(ModelRef {
-                    provider_id: provider.to_string(),
-                    model_id: model_id.to_string(),
-                });
+                agent.model = Some(model_ref);
             }
         }
     }

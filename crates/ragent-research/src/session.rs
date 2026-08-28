@@ -1732,13 +1732,23 @@ impl ResearchSession {
 
     /// Strip fenced code blocks and take the first 200 characters as a
     /// preview. Shared by the `--from-url` and `--from-file` seed helpers.
+    ///
+    /// Accumulates lazily and stops once the byte budget is reached, so a
+    /// large body is never fully copied: `str::len()` is a lower bound on the
+    /// character count, so `out.len() >= 200` guarantees the character budget
+    /// is already met.
     fn body_preview(body: &str) -> String {
-        body.lines()
-            .filter(|l| !l.trim_start().starts_with("```"))
-            .collect::<String>()
-            .chars()
-            .take(200)
-            .collect()
+        let mut out = String::new();
+        for line in body.lines().filter(|l| !l.trim_start().starts_with("```")) {
+            if out.len() >= 200 {
+                break;
+            }
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(line);
+        }
+        out.chars().take(200).collect()
     }
 
     /// Fetch each `--from-url` seed page and capture it as a web source.

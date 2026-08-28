@@ -165,11 +165,15 @@ pub fn detect_communities(store: &IndexStore) -> Result<Vec<CommunityInfo>> {
     }
 
     let mut communities: Vec<CommunityInfo> = Vec::new();
-    // M-028: wrap the per-member `upsert_community` calls in a single
+    // M-028: wrap the clear + per-member `upsert_community` calls in a single
     // transaction so a community with many members commits once instead of
-    // once per row (each was an implicit autocommit).
+    // once per row (each was an implicit autocommit). Keeping the clear
+    // inside the transaction also avoids a data-loss window: if the process
+    // exits between a bare `clear_communities` and the commit, the community
+    // table would stay empty until the next full rebuild.
     store.begin_transaction()?;
     let tx_result = (|| -> anyhow::Result<()> {
+        store.clear_communities()?;
         for (&comm_id, members) in &community_members {
             let label = label_for_community(&comm_id, members, &sym_name);
             for &(sym_id, _) in members {

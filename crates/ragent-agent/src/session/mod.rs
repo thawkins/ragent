@@ -142,6 +142,7 @@ impl SessionManager {
     /// The cache is allocated on first use and held in a process-wide
     /// `Mutex<HashMap<String, Arc<Mutex<SessionState>>>>`.  It is used by
     /// the agent loop to skip redundant `Message -> ChatMessage` and
+    /// `ChatRequest` serialisation work between iterations of the
     /// tool-call loop.
     pub fn session_state_cache(&self, session_id: &str) -> Arc<Mutex<SessionState>> {
         let cache = SESSION_STATE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));

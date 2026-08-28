@@ -3047,11 +3047,10 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let inner_width = log_inner.width;
     let w = inner_width as usize;
-    // C-008: each entry carries its own `version` stamp (the `log_seq`
-    // counter value when it was last rendered), so a new entry only
-    // invalidates the *new* group instead of the entire cache. Newly
-    // appended groups have `version: 0` (stale) and are rendered below.
-    let cur_version = app.log_seq;
+    // C-008: each entry carries its own `seq` stamp and each cache group
+    // mirrors the `seq` of the entry it was rendered for, so a new entry only
+    // invalidates the *new* group instead of the entire cache. Newly appended
+    // groups have `version: 0` (stale) and are rendered below.
 
     // ── Per-entry line cache (mirrors render_messages) ───────────────────
     //
@@ -3078,15 +3077,15 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Re-render stale groups. A group is stale when its `version` stamp does
-    // not match the current `log_seq` counter. Only newly-added groups (with
+    // not match the entry's own `seq`. Only newly-added groups (with
     // `version: 0`) and any group added while trimming dropped cache entries
     // fall into this path — previously-rendered groups keep their cached
     // lines and are not re-rendered (C-008).
     for (i, entry) in all_entries.iter().enumerate() {
         let group = &mut app.log_line_cache[i];
-        if group.version != cur_version {
+        if group.version != entry.seq {
             group.lines = log_entry_to_lines(entry, &app.sid_to_display_name);
-            group.version = cur_version;
+            group.version = entry.seq;
             group.content_lines = build_wrapped_content_lines(&group.lines, w);
             let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
             group.wrapped_count = para.line_count(inner_width) as u16;

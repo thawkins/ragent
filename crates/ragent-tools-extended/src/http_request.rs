@@ -84,9 +84,12 @@ impl Tool for HttpRequestTool {
 
         // M-014: reuse the shared reqwest client singleton (connection pool +
         // TLS session cache) instead of building a fresh client per call. The
-        // per-request timeout is applied via `RequestBuilder`.
-        let client = crate::masterfetch::http::shared_client()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+        // per-request timeout is applied via `RequestBuilder`. Note this also
+        // means requests inherit the shared client's behaviour: a 5-redirect
+        // limit, transparent gzip/deflate decompression, and the versioned
+        // masterfetch `User-Agent` header.
+        let client =
+            crate::masterfetch::http::shared_client().context("Failed to build HTTP client")?;
 
         let mut request = client
             .request(method, url)

@@ -298,7 +298,6 @@ impl App {
             format!("⏳ Reverse-engineering {provider_label}: {repo_id}…"),
         );
         self.messages.push(context_msg);
-        self.messages_version = self.messages_version.wrapping_add(1);
 
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));

@@ -52,7 +52,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// Maximum time the watcher waits for a single password response before
 /// giving up (matched by the helper's own poll loop so both sides fail at
 /// roughly the same time).
-const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
+///
+/// Note: written as `from_secs(120)` rather than `Duration::from_mins(2)`
+/// because `from_mins` is nightly-only and this crate targets stable Rust
+/// (the workspace happens to build on nightly, but the constant must not
+/// depend on that).
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A handle that owns the temp helper script path and the request directory,
 /// and drives the background watcher task for a single bash invocation.

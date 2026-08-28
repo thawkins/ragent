@@ -361,10 +361,15 @@ pub fn derive_and_store(store: &IndexStore) -> Result<BuildResult> {
         all_edges.extend(derive_impl_edges(&file_symbols, &nr));
     }
 
-    // Persist: clear + bulk-insert in one transaction.
-    store.clear_edges()?;
+    // Persist: clear + bulk-insert in one transaction. The clear stays
+    // inside the transaction so a crash between clear and commit cannot leave
+    // the edge table permanently empty (which would trip the TUI empty-graph
+    // guard until the next rebuild).
     store.begin_transaction()?;
-    let result = store.upsert_edges_batch(&all_edges);
+    let result = (|| -> anyhow::Result<()> {
+        store.clear_edges()?;
+        store.upsert_edges_batch(&all_edges)
+    })();
     if result.is_ok() {
         store.commit_transaction()?;
     } else {
@@ -488,10 +493,13 @@ pub fn derive_and_store_for_language(store: &IndexStore, language: &str) -> Resu
         all_edges.extend(derive_impl_edges(&file_symbols, &nr));
     }
 
-    // Persist: clear + bulk-insert in one transaction.
-    store.clear_edges()?;
+    // Persist: clear + bulk-insert in one transaction (same crash-safety
+    // reasoning as `derive_and_store_for_language` above).
     store.begin_transaction()?;
-    let result = store.upsert_edges_batch(&all_edges);
+    let result = (|| -> anyhow::Result<()> {
+        store.clear_edges()?;
+        store.upsert_edges_batch(&all_edges)
+    })();
     if result.is_ok() {
         store.commit_transaction()?;
     } else {

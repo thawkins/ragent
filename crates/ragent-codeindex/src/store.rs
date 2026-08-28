@@ -332,10 +332,29 @@ impl IndexStore {
     pub fn list_files_with_ids(&self) -> Result<Vec<(i64, String)>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path FROM indexed_files ORDER BY path")?;
+            .prepare_cached("SELECT id, path FROM indexed_files ORDER BY path")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Resolve the indexed-file paths that *depend on* `target_path` (i.e. the
+    /// sources of `file_deps` rows whose `target_path` matches). A single
+    /// SQL join replaces loading the whole file table on the caller side
+    /// (H-004 dependents path).
+    pub fn list_dependent_paths(&self, target_path: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT DISTINCT f.path FROM file_deps d
+             JOIN indexed_files f ON f.id = d.source_file_id
+             WHERE d.target_path = ?1
+             ORDER BY f.path",
+        )?;
+        let rows = stmt.query_map([target_path], |row| row.get::<_, String>(0))?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -1237,14 +1256,16 @@ impl IndexStore {
 
     /// Insert or replace a community assignment for a symbol.
     pub fn upsert_community(&self, sym_id: i64, community: i64, label: Option<&str>) -> Result<()> {
-        self.conn.execute(
+        let mut stmt = self.conn.prepare_cached(
+            // Runs once per member row inside the M-028 community-detection
+            // transaction, so caching avoids a re-prepare per row.
             "INSERT INTO communities (sym_id, community, label)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(sym_id) DO UPDATE SET
                  community = excluded.community,
                  label = excluded.label",
-            params![sym_id, community, label],
         )?;
+        stmt.execute(params![sym_id, community, label])?;
         Ok(())
     }
 

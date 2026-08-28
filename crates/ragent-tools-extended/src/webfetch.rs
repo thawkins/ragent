@@ -124,8 +124,8 @@ impl Tool for WebFetchTool {
         // M-014: reuse the shared reqwest client singleton (reusing the
         // connection pool + TLS session cache) instead of building a fresh
         // client per call. The per-request timeout is applied via `RequestBuilder`.
-        let client = crate::masterfetch::http::shared_client()
-            .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+        let client =
+            crate::masterfetch::http::shared_client().context("Failed to build HTTP client")?;
 
         let response = client
             .get(url)
@@ -188,15 +188,11 @@ impl Tool for WebFetchTool {
             }
         }
         let body = String::from_utf8_lossy(&body_bytes).into_owned();
-        // Ensure the final string still respects `max_length` (the read cap is
-        // a safety bound; `max_length` is the user-visible truncation).
-        let body = if body.len() > max_length {
-            let mut s: String = body.chars().take(max_length).collect();
-            s.push('…');
-            s
-        } else {
-            body
-        };
+        // Note: the body is deliberately NOT truncated to `max_length` here.
+        // The M-015 streaming cap (`max_length` + 256 KiB headroom) bounds the
+        // download, and giving readability/html2text the full headroom avoids
+        // cutting mid-tag; the user-visible `max_length` truncation (with a
+        // single `[Content truncated]` marker) happens once, after extraction.
 
         let is_html =
             content_type.contains("text/html") || content_type.contains("application/xhtml");

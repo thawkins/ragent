@@ -178,6 +178,10 @@ pub struct LogEntry {
     pub session_id: Option<String>,
     /// Agent ID that produced this log (for distinguishing teammates in multi-agent scenarios).
     pub agent_id: Option<String>,
+    /// Monotonic per-entry sequence number (the `log_seq` value assigned at
+    /// push time). Used by the log-line cache so a new entry only invalidates
+    /// its own rendered group, not the whole cache.
+    pub seq: u64,
 }
 
 /// A background shell task spawned via the `bg` tool, as displayed in the TUI.
@@ -307,8 +311,8 @@ pub struct MessageLineGroup {
 /// Mirrors [`MessageLineGroup`] for the log panel: the un-wrapped `Line`
 /// values are width-independent and rendered once per entry; the
 /// `content_lines` and `wrapped_count` are recomputed only when the
-/// terminal width changes.  The `version` tracks the log-entry version
-/// counter so only newly-added entries are re-rendered.
+/// terminal width changes.  The `version` mirrors the entry's own `seq`, so
+/// only newly-added entries are re-rendered.
 #[derive(Clone)]
 pub struct LogLineGroup {
     /// Un-wrapped rendered lines for this log entry.
@@ -317,7 +321,7 @@ pub struct LogLineGroup {
     pub content_lines: Vec<String>,
     /// Number of wrapped lines this entry occupies at the cached width.
     pub wrapped_count: u16,
-    /// `log_seq` when this group was last rendered.
+    /// `LogEntry::seq` of the entry this group was rendered for.
     pub version: u64,
 }
 
@@ -1626,11 +1630,6 @@ pub struct App {
     /// fields of [`message_line_cache`] were last computed.  When the width
     /// changes, all groups need re-wrapping (but not re-rendering).
     pub message_cache_width: u16,
-    /// Monotonically increasing version counter incremented whenever
-    /// `self.messages` is mutated.  Compared against
-    /// [`MessageLineGroup::edit_seq`] to detect which messages need
-    /// re-rendering.
-    pub messages_version: u64,
 
     // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
     /// True when autopilot mode is active. Agent continues autonomously until

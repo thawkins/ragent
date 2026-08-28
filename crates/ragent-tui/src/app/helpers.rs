@@ -66,8 +66,10 @@ pub(crate) fn short_run_id(run_id: &ragent_types::id::RunId) -> String {
 }
 
 /// Return the last 8 characters of a string, or the whole string if shorter.
+/// Slices on a char boundary so a multi-byte sequence straddling the cut
+/// point cannot panic.
 fn tail8(s: &str) -> String {
-    let start = s.len().saturating_sub(8);
+    let start = s.char_indices().rev().nth(7).map(|(i, _)| i).unwrap_or(0);
     s[start..].to_string()
 }
 
@@ -171,9 +173,12 @@ pub(crate) fn summarise_error(raw: &str) -> String {
     truncate_to_char_boundary(cleaned, 120)
 }
 
-/// Truncate `s` to at most `max` characters, always ending on a UTF-8 char
+/// Truncate `s` to at most `max` **bytes**, always ending on a UTF-8 char
 /// boundary so a multi-byte sequence at the cut point cannot panic. Appends a
 /// single ellipsis when truncation occurred.
+///
+/// Callers pass byte budgets (e.g. status-bar width limits). For a
+/// character-count budget use [`truncate_chars`] instead.
 pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
     if s.len() <= max {
         return s.to_string();
@@ -183,6 +188,20 @@ pub(crate) fn truncate_to_char_boundary(s: &str, max: usize) -> String {
         end -= 1;
     }
     format!("{}…", &s[..end])
+}
+
+/// Truncate `s` to at most `max_chars` **characters**, appending a single
+/// ellipsis when truncation occurred. Uses a cheap byte-length fast path
+/// (`chars <= bytes`), so short ASCII strings never pay for a full scan.
+pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars {
+        return s.to_string();
+    }
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let out: String = s.chars().take(max_chars).collect();
+    format!("{out}…")
 }
 
 /// Remove control characters (except newlines and tabs) and ANSI escape

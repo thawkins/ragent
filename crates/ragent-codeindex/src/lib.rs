@@ -337,27 +337,7 @@ impl CodeIndex {
     /// Get file dependencies in the given direction.
     pub fn dependencies(&self, path: &str, direction: DepDirection) -> Result<Vec<String>> {
         let store = self.store_guard();
-        match direction {
-            DepDirection::Imports => {
-                let file_id = store
-                    .get_file_id(path)?
-                    .with_context(|| format!("file not indexed: {path}"))?;
-                let imports = store.get_file_imports(file_id)?;
-                Ok(imports.into_iter().map(|i| i.source_module).collect())
-            }
-            DepDirection::Dependents => {
-                // H-004: resolve dependent file IDs to paths with a single
-                // `id → path` map (one query) instead of a fresh `get_file_id`
-                // query per dependent (which was O(D) queries per call).
-                let id_to_path: std::collections::HashMap<i64, String> =
-                    store.list_files_with_ids()?.into_iter().collect();
-                let dep_ids = store.get_dependents(path)?;
-                Ok(dep_ids
-                    .into_iter()
-                    .filter_map(|id| id_to_path.get(&id).cloned())
-                    .collect())
-            }
-        }
+        dependencies_impl(&store, path, direction)
     }
 
     /// Non-blocking variant of [`dependencies()`].
@@ -372,33 +352,18 @@ impl CodeIndex {
             Ok(g) => g,
             Err(_) => return Ok(None),
         };
-        let deps = match direction {
-            DepDirection::Imports => {
-                let file_id = store
-                    .get_file_id(path)?
-                    .with_context(|| format!("file not indexed: {path}"))?;
-                let imports = store.get_file_imports(file_id)?;
-                imports.into_iter().map(|i| i.source_module).collect()
-            }
-            DepDirection::Dependents => {
-                // H-004: single `id → path` map (one query) instead of a
-                // per-dependent `get_file_id` query.
-                let id_to_path: std::collections::HashMap<i64, String> =
-                    store.list_files_with_ids()?.into_iter().collect();
-                let dep_ids = store.get_dependents(path)?;
-                dep_ids
-                    .into_iter()
-                    .filter_map(|id| id_to_path.get(&id).cloned())
-                    .collect()
-            }
-        };
-        Ok(Some(deps))
+        Ok(Some(dependencies_impl(&store, path, direction)?))
     }
 
     /// Get index status and statistics.
     pub fn status(&self) -> Result<IndexStats> {
-        let store = self.store_guard();
-        let mut stats = store.get_stats()?;
+        // Lock-order note: the store guard is dropped (via the scoped block)
+        // before the FTS guard is taken. `rebuild_fts` takes them in the
+        // opposite order, so holding both here would risk an ABBA deadlock.
+        let mut stats = {
+            let store = self.store_guard();
+            store.get_stats()?
+        };
 
         // FTS doc count from tantivy.
         let fts = self.fts_guard();
@@ -440,7 +405,13 @@ impl CodeIndex {
     }
 
     /// M-029: return the cached on-disk size of `index_dir`, computing it on
-    /// the first call and on full reindex.
+    /// the first call and whenever a mutation invalidates the cache.
+    ///
+    /// The (potentially expensive) `dir_size` walk runs while holding the
+    /// cache lock: the cache is a `Mutex<Option<u64>>` and the walk is
+    /// bounded by the index directory, so this is acceptable and keeps the
+    /// single-read/single-write shape simple. Callers on hot paths use
+    /// [`try_status`], which only pays it once per invalidation.
     fn index_size_cached(&self) -> u64 {
         let mut guard = self
             .cached_index_size
@@ -454,12 +425,14 @@ impl CodeIndex {
         size
     }
 
-    /// Invalidate the cached index-size (called after a full reindex so the
-    /// next status poll recomputes it).
+    /// Invalidate the cached index-size (called after a full reindex or any
+    /// mutation of the FTS directory so the next status poll recomputes it).
     fn invalidate_index_size_cache(&self) {
-        if let Ok(mut guard) = self.cached_index_size.lock() {
-            *guard = None;
-        }
+        let mut guard = self
+            .cached_index_size
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = None;
     }
 
     /// List the top-N highest-degree (most-connected) symbols in the graph
@@ -724,14 +697,16 @@ impl CodeIndex {
         // H-007: skip re-parsing/upserting when the stored content hash
         // already matches (the file is unchanged since the last index). This
         // avoids always re-parsing unchanged files on every watcher event.
-        {
+        let previous_hash: Option<String> = {
             let store = self.store_guard();
-            if let Some(existing) = store.get_file(&rel_path)?
-                && existing.content_hash == hash
-            {
-                return Ok(());
+            match store.get_file(&rel_path)? {
+                Some(existing) if existing.content_hash == hash => {
+                    return Ok(());
+                }
+                Some(existing) => Some(existing.content_hash),
+                None => None,
             }
-        }
+        };
 
         // ── Store the file entry ──────────────────────────────────────────
         let file_id = {
@@ -787,6 +762,27 @@ impl CodeIndex {
                 }
                 Err(e) => {
                     warn!("index_file: parse error in {}: {e}", path.display());
+                    // H-007 guard: the file entry was already upserted with
+                    // the NEW content hash. If the hash stays, every future
+                    // event for this unchanged content is skipped and the
+                    // stale symbols persist. A transient parse failure (e.g.
+                    // a truncated read while an editor is writing the file)
+                    // must not become permanent staleness, so restore the
+                    // previous hash — the next event for this content will
+                    // re-parse and self-heal.
+                    if let Some(prev) = &previous_hash {
+                        let store = self.store_guard();
+                        let entry = FileEntry {
+                            path: rel_path.clone(),
+                            content_hash: prev.clone(),
+                            byte_size: content.len() as u64,
+                            language: language.clone(),
+                            last_indexed: chrono::Utc::now(),
+                            mtime_ns,
+                            line_count,
+                        };
+                        let _ = store.upsert_file(&entry);
+                    }
                 }
             }
         }
@@ -1101,6 +1097,9 @@ impl CodeIndex {
         fts.remove_file(&path_str)?;
         drop(fts);
 
+        // The on-disk FTS directory changed, so the cached index size is stale.
+        self.invalidate_index_size_cache();
+
         // Remove from tree cache.
         let mut tc = self.tree_cache_guard();
         tc.remove(path);
@@ -1194,6 +1193,30 @@ pub fn start_watching(
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Shared body of [`CodeIndex::dependencies`] and
+/// [`CodeIndex::try_dependencies`]. Requires the caller to hold the store
+/// lock (passed as a guard deref).
+///
+/// `Imports` resolves the file's own import list; `Dependents` uses a single
+/// SQL join (`list_dependent_paths`) instead of loading the whole file table
+/// to build an `id → path` map (H-004).
+fn dependencies_impl(
+    store: &std::sync::MutexGuard<'_, crate::store::IndexStore>,
+    path: &str,
+    direction: DepDirection,
+) -> Result<Vec<String>> {
+    match direction {
+        DepDirection::Imports => {
+            let file_id = store
+                .get_file_id(path)?
+                .with_context(|| format!("file not indexed: {path}"))?;
+            let imports = store.get_file_imports(file_id)?;
+            Ok(imports.into_iter().map(|i| i.source_module).collect())
+        }
+        DepDirection::Dependents => store.list_dependent_paths(path),
+    }
+}
 
 /// Convert a `Symbol` into an `FtsSymbol` for tantivy indexing.
 fn symbol_to_fts<'a>(sym: &'a Symbol, file_path: &'a str) -> FtsSymbol<'a> {

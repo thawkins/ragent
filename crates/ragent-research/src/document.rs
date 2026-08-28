@@ -1558,16 +1558,9 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
 
 /// Extract 1-based source indices from `[#N]` citations in a finding body.
 /// Returns a sorted, deduplicated list suitable for rendering a Sources list.
+/// Delegates to [`crate::polarity::cited_indices`], the shared citation parser.
 fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
-    let re = crate::polarity::citation_re();
-    let mut indices: Vec<usize> = re
-        .captures_iter(finding)
-        .filter_map(|cap| cap[1].parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .collect();
-    indices.sort_unstable();
-    indices.dedup();
-    indices
+    crate::polarity::cited_indices(finding)
 }
 
 /// Build a `**Sources:**` paragraph for a finding that cites one or more

@@ -882,8 +882,21 @@ impl ActivityLog {
             "\"kind\":\"{}\"",
             ragent_types::activity::EventKind::lifecycle_resumed_discriminator()
         );
+        // The `lifecycle` discriminator matches *every* `EventKind::Lifecycle`
+        // variant (expiry/archive markers included), so the lookup narrows it
+        // to the `"resumed"` marker specifically. Otherwise any lifecycle
+        // event (e.g. `expired: ...`) newer than the last termination would
+        // wrongly flip an interrupted run back to Active. This relies on serde
+        // struct-variant field order: `"kind":"lifecycle"` is serialised
+        // before the `event` payload, so the LIKE pattern below is anchored
+        // correctly.
         let last_termination = find_event_locked(&conn, run_id, &termination_tag, "")?;
-        let last_resume = find_event_locked(&conn, run_id, &lifecycle_tag, "")?;
+        let last_resume = find_event_locked(
+            &conn,
+            run_id,
+            &lifecycle_tag,
+            ragent_types::activity::LIFECYCLE_RESUMED,
+        )?;
 
         // A resume only affects status if it is newer than the last
         // termination (a termination after a resume wins).

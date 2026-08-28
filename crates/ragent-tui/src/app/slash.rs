@@ -2295,7 +2295,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                     let msg = Message::user_text(&sid, &task);
                     self.messages.push(msg);
-                    self.messages_version = self.messages_version.wrapping_add(1);
 
                     let processor = self.session_processor.clone();
                     let flag = Arc::new(AtomicBool::new(false));
@@ -2318,7 +2317,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             "clear" => {
                 self.messages.clear();
                 self.message_line_cache.clear();
-                self.messages_version = self.messages_version.wrapping_add(1);
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
                 self.last_step_per_session.clear();
@@ -3428,7 +3426,6 @@ Tools: `task_create`, `task_update`, `task_get`, `task_list`.\n";
                 let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
-                self.messages_version = self.messages_version.wrapping_add(1);
                 self.set_status_working("processing");
                 self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
@@ -5410,7 +5407,6 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         // (typically one assistant response, but could be more)
                         let removed_count = self.messages.len() - user_idx;
                         self.messages.truncate(user_idx);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         // Reset scroll to show the new end of conversation
                         self.scroll_offset = 0;
@@ -5736,7 +5732,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -5886,7 +5881,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let task = SpecCommand::build_jtbd_prompt(&spec_id);
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -6803,7 +6797,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 
                                 let msg = Message::user_text(&sid, &prompt);
                                 self.messages.push(msg);
-                                self.messages_version = self.messages_version.wrapping_add(1);
 
                                 let processor = self.session_processor.clone();
                                 let flag = Arc::new(AtomicBool::new(false));
@@ -6980,7 +6973,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let sid = self.session_id.clone().unwrap_or_default();
                         let msg = Message::user_text(&sid, &prompt);
                         self.messages.push(msg);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -7042,7 +7034,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         );
                         let msg = Message::user_text(&sid, &task);
                         self.messages.push(msg);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -7183,7 +7174,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         let sid_msg = self.session_id.clone().unwrap_or_default();
                         let msg = Message::user_text(&sid_msg, &prompt);
                         self.messages.push(msg);
-                        self.messages_version = self.messages_version.wrapping_add(1);
 
                         let processor = self.session_processor.clone();
                         let flag = Arc::new(AtomicBool::new(false));
@@ -9631,7 +9621,6 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                     };
                     let user_msg = Message::user_text(&sid, &display_text);
                     self.messages.push(user_msg);
-                    self.messages_version = self.messages_version.wrapping_add(1);
                     self.add_to_history(display_text);
 
                     let flag = Arc::new(AtomicBool::new(false));

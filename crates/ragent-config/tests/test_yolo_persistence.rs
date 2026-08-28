@@ -1,4 +1,9 @@
 //! Tests for YOLO mode persistence.
+//!
+//! Note: `std::env::set_var` is `unsafe` in Rust 2024; the workspace denies
+//! `unsafe_code`, so this test target opts back in explicitly.
+
+#![allow(unsafe_code)]
 
 use std::io::Write;
 

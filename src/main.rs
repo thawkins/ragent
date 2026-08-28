@@ -685,7 +685,6 @@ async fn main() -> Result<()> {
     let alog_path = ragent_agent::storage::ActivityLog::default_path(&db_path);
     {
         let sp = Arc::clone(&session_processor);
-        let alog_path = alog_path.clone();
         tokio::task::spawn_blocking(move || {
             match ragent_agent::storage::ActivityLog::open(&alog_path) {
                 Ok(log) => {

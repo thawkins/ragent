@@ -41,8 +41,11 @@ struct CacheKey(PathBuf, SystemTime);
 fn read_cache() -> &'static Mutex<LruCache<CacheKey, Arc<String>>> {
     static CACHE: OnceLock<Mutex<LruCache<CacheKey, Arc<String>>>> = OnceLock::new();
     CACHE.get_or_init(|| {
-        let cap = NonZeroUsize::new(CACHE_MAX_ENTRIES).unwrap_or(NonZeroUsize::new(1).unwrap());
-        Mutex::new(LruCache::new(cap))
+        // `CACHE_MAX_ENTRIES` is a compile-time constant greater than zero, so
+        // the non-zero constructor cannot fail.
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(CACHE_MAX_ENTRIES).expect("CACHE_MAX_ENTRIES is a non-zero constant"),
+        ))
     })
 }
 
@@ -56,11 +59,14 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
 
     let key = CacheKey(path.to_path_buf(), mtime);
 
-    // Check cache first (avoid holding lock across await)
+    // Check cache first (avoid holding lock across await).
+    // Poison recovery: the ops under the lock (get/put/sum) cannot panic, so
+    // recovering the guard is safe and avoids permanently failing all reads
+    // after a hypothetical poison.
     {
         let mut cache = read_cache()
             .lock()
-            .map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(content) = cache.get(&key) {
             return Ok(Arc::clone(content));
         }
@@ -84,7 +90,7 @@ async fn cached_read(path: &Path) -> Result<Arc<String>> {
     {
         let mut cache = read_cache()
             .lock()
-            .map_err(|e| anyhow::anyhow!("cache poisoned: {e}"))?;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Enforce the total-byte budget: pop oldest entries while the cached
         // contents (excluding the new entry) exceed the budget.
         cache.put(key, Arc::clone(&arc));

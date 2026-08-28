@@ -590,7 +590,8 @@ impl Projection {
 ///
 /// Contains the rebuilt [`Projection`] (events up to and including the target,
 /// per FR-012) and the number of events *after* the target that were ignored
-/// for this projection but **preserved in the log** for audit (FR-007).  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// for this projection but **preserved in the log** for audit (FR-007).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RollbackResult {
     /// The rebuilt projection (events up to and including the target).
     pub projection: Projection,
@@ -605,7 +606,8 @@ pub struct RollbackResult {
 ///
 /// Contains the reconstructed active-context [`Projection`] (replayed from the
 /// event log) and the sequence number from which execution should continue
-/// (the event following the resume marker).  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// (the event following the resume marker).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResumeResult {
     /// The reconstructed active context (replayed from the event log, FR-013).
     pub projection: Projection,

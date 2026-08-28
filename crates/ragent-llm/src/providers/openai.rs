@@ -555,8 +555,13 @@ impl OpenAiClient {
 
                         // Finish reason
                         if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End any pending tool calls
-                            for (_idx, id) in tool_call_ids.drain() {
+                            // End any pending tool calls in index order so
+                            // consumers pairing Start/End events by sequence
+                            // see a deterministic order (HashMap iteration is
+                            // arbitrary).
+                            let mut ends: Vec<(u64, String)> = tool_call_ids.drain().collect();
+                            ends.sort_unstable_by_key(|(idx, _)| *idx);
+                            for (_, id) in ends {
                                 yield StreamEvent::ToolCallEnd { id };
                             }
 

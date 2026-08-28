@@ -1,7 +1,12 @@
 //! Tests for default config creation when no config exists.
 //!
 //! These tests mutate process-global state (env vars, current dir) and must
-//! run serially to avoid cross-test contamination.
+//! run serially to avoid cross-test contamination. `std::env::set_var` /
+//! `remove_var` are `unsafe` in Rust 2024; the workspace denies `unsafe_code`,
+//! so this test target opts back in explicitly (env mutation is contained to
+//! the test binary).
+
+#![allow(unsafe_code)]
 
 /// Sets `XDG_CONFIG_HOME` to a temp directory and returns the old value (if any).
 fn with_temp_config_home(temp: &tempfile::TempDir) -> Option<String> {

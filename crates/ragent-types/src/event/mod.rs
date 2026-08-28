@@ -1167,27 +1167,7 @@ impl EventBus {
         // type name. When the count is zero we skip the clone/send and only
         // log once we have a concrete event to inspect.
         if self.sender.receiver_count() == 0 {
-            let tag = event.session_id().and_then(|sid| {
-                let step = self.current_step(sid);
-                if step > 0 {
-                    let short_id = &sid[sid.len().saturating_sub(8)..];
-                    Some(format!("[{short_id}:{step}]"))
-                } else {
-                    None
-                }
-            });
-            if let Some(tag) = tag {
-                tracing::warn!(
-                    "Event dropped (no active subscribers) {}: {}",
-                    tag,
-                    event.type_name()
-                );
-            } else {
-                tracing::warn!(
-                    "Event dropped (no active subscribers): {}",
-                    event.type_name()
-                );
-            }
+            self.warn_no_subscribers(&event);
             return;
         }
 
@@ -1195,33 +1175,47 @@ impl EventBus {
             Ok(n) => {
                 // n = number of receivers that got the event
                 if n == 0 {
-                    let tag = event.session_id().and_then(|sid| {
-                        let step = self.current_step(sid);
-                        if step > 0 {
-                            let short_id = &sid[sid.len().saturating_sub(8)..];
-                            Some(format!("[{short_id}:{step}]"))
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(tag) = tag {
-                        tracing::warn!(
-                            "Event dropped (no active subscribers) {}: {}",
-                            tag,
-                            event.type_name()
-                        );
-                    } else {
-                        tracing::warn!(
-                            "Event dropped (no active subscribers): {}",
-                            event.type_name()
-                        );
-                    }
+                    self.warn_no_subscribers(&event);
                 }
             }
             Err(broadcast::error::SendError(ev)) => {
-                // Buffer overflow — some receivers are lagging
-                tracing::warn!("Event dropped (broadcast channel full): {}", ev.type_name());
+                // Buffer overflow — some receivers are lagging. (SendError is
+                // also returned when a subscriber unsubscribes between the
+                // receiver_count check above and this send; that benign
+                // check-then-act race is indistinguishable here, so the
+                // message mentions both possibilities.)
+                tracing::warn!(
+                    "Event dropped (broadcast channel full or no remaining subscribers): {}",
+                    ev.type_name()
+                );
             }
+        }
+    }
+
+    /// Log a dropped-event warning for an event that had no active
+    /// subscribers. The optional `[short-id:step]` tag is resolved from the
+    /// event's session id when a step counter is active for it.
+    fn warn_no_subscribers(&self, event: &Event) {
+        let tag = event.session_id().and_then(|sid| {
+            let step = self.current_step(sid);
+            if step > 0 {
+                let short_id = &sid[sid.len().saturating_sub(8)..];
+                Some(format!("[{short_id}:{step}]"))
+            } else {
+                None
+            }
+        });
+        if let Some(tag) = tag {
+            tracing::warn!(
+                "Event dropped (no active subscribers) {}: {}",
+                tag,
+                event.type_name()
+            );
+        } else {
+            tracing::warn!(
+                "Event dropped (no active subscribers): {}",
+                event.type_name()
+            );
         }
     }
 }

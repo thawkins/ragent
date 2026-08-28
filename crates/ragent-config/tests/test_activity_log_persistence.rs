@@ -1,4 +1,10 @@
 //! Tests for activity-log enable/disable persistence.
+//!
+//! Note: `std::env::set_var` / `remove_var` are `unsafe` in Rust 2024; the
+//! workspace denies `unsafe_code`, so this test target opts back in
+//! explicitly (env mutation is contained to the test binary).
+
+#![allow(unsafe_code)]
 
 use std::io::Write;
 
