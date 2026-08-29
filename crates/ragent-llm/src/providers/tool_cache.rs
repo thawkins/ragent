@@ -68,13 +68,24 @@ pub struct CachedTools {
 }
 
 impl CachedTools {
+    /// Parse the inner tool-list payload (the slice between `payload_start`
+    /// and `payload_end`) back into a [`serde_json::Value`].
+    ///
+    /// The bytes were produced by `serde_json::to_writer` in the cache
+    /// builders, so a parse failure can only mean data corruption; the
+    /// fallback returns the empty-tolerant `Value::Null` rather than panicking
+    /// mid-request (the caller treats a missing tool list as "no tools").
+    fn payload_value(&self) -> serde_json::Value {
+        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
+            .unwrap_or(serde_json::Value::Null)
+    }
+
     /// Extract the inner tool-list array for OpenAI-compatible providers.
     ///
     /// The cached wrapper is `{"tools":[...]}`, so the payload is the `[...]`
     /// array.
     pub fn openai_tools_array(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
-            .expect("cached OpenAI tool list is valid JSON")
+        self.payload_value()
     }
 
     /// Extract the inner tool-list array for Anthropic-format providers.
@@ -82,8 +93,7 @@ impl CachedTools {
     /// The cached wrapper is `{"tools":[...]}` with `input_schema` items, so
     /// the payload is the `[...]` array.
     pub fn anthropic_tools_array(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
-            .expect("cached Anthropic tool list is valid JSON")
+        self.payload_value()
     }
 
     /// Extract the Gemini `tools` array (`[{"functionDeclarations":[...]}]`).
@@ -91,8 +101,7 @@ impl CachedTools {
     /// The cached wrapper is `{"tools":[{"functionDeclarations":[...]}]}`, so
     /// the payload is the `[{"functionDeclarations":[...]}]` array.
     pub fn gemini_tools_array(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
-            .expect("cached Gemini tool list is valid JSON")
+        self.payload_value()
     }
 
     /// Extract the Bedrock Converse `toolConfig` field value (`{"tools": [...]}`).
@@ -100,8 +109,7 @@ impl CachedTools {
     /// The cached wrapper is `{"tools":[...]}` (each item a `toolSpec` object)
     /// and the caller assigns it directly to `body["toolConfig"]`.
     pub fn bedrock_tool_config_object(&self) -> serde_json::Value {
-        serde_json::from_slice(&self.bytes[self.payload_start..self.payload_end])
-            .expect("cached Bedrock toolConfig is valid JSON")
+        self.payload_value()
     }
 }
 
@@ -129,7 +137,11 @@ fn fingerprint(tools: &[ToolDefinition]) -> u64 {
 /// every turn reuses the same buffer instead of re-allocating.
 pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedTools> {
     let key = (format, fingerprint(tools));
-    let cached = cache().lock().unwrap().get(&key).cloned();
+    let cached = cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(&key)
+        .cloned();
     if let Some(hit) = cached {
         return hit;
     }
@@ -142,7 +154,9 @@ pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedT
         ToolFormat::HuggingFace => build_huggingface(tools),
     };
     let entry = Arc::new(built);
-    let mut guard = cache().lock().unwrap();
+    let mut guard = cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(existing) = guard.get(&key) {
         return existing.clone();
     }
@@ -153,7 +167,10 @@ pub fn cached_tools(format: ToolFormat, tools: &[ToolDefinition]) -> Arc<CachedT
 /// Invalidate the whole tool cache. Called when the session's tool registry is
 /// invalidated (the same invalidation that drives `cached_tool_definitions`).
 pub fn invalidate_tool_cache() {
-    cache().lock().unwrap().clear();
+    cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clear();
 }
 
 fn build_openai(tools: &[ToolDefinition]) -> CachedTools {

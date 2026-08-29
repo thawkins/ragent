@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 /// For `Web`, `Local`, and `Other` sources this returns the body text; for
 /// `Spec` sources it returns the spec id (the only text available without
 /// reading the spec file from disk).
-pub fn source_body_text(source: &Source) -> String {
+pub(crate) fn source_body_text(source: &Source) -> String {
     match source {
         Source::Web { body, .. } => body.clone(),
         Source::Local { body, .. } => body.clone(),
@@ -27,7 +27,7 @@ pub fn source_body_text(source: &Source) -> String {
 /// Classify a source-count into the same depth levels used by `locus.rs`.
 ///
 /// `0–1` → `Surface`, `2–3` → `Moderate`, `4+` → `Deep`.
-pub fn depth_from_count(n: usize) -> DepthLevel {
+pub(crate) fn depth_from_count(n: usize) -> DepthLevel {
     match n {
         0 | 1 => DepthLevel::Surface,
         2 | 3 => DepthLevel::Moderate,
@@ -36,7 +36,7 @@ pub fn depth_from_count(n: usize) -> DepthLevel {
 }
 
 /// Return true when `body` contains any of the supplied tokens.
-pub fn has_any_token(body: &str, tokens: &[&str]) -> bool {
+pub(crate) fn has_any_token(body: &str, tokens: &[&str]) -> bool {
     tokens.iter().any(|t| body.contains(t))
 }
 
@@ -44,7 +44,7 @@ pub fn has_any_token(body: &str, tokens: &[&str]) -> bool {
 ///
 /// Used by synthesis, verification, cite-checking, and document rendering;
 /// a single definition keeps the citation syntax consistent everywhere.
-pub fn citation_re() -> &'static Regex {
+pub(crate) fn citation_re() -> &'static Regex {
     static CITATION_RE: OnceLock<Regex> = OnceLock::new();
     CITATION_RE.get_or_init(|| Regex::new(r"\[#(\d+)\]").expect("valid citation regex"))
 }
@@ -54,7 +54,7 @@ pub fn citation_re() -> &'static Regex {
 /// Indices are parsed, filtered to `> 0`, sorted, and deduplicated so callers
 /// can iterate citations without repeating the capture loop. Shared by the
 /// verification, synthesis, and cite-checking passes.
-pub fn cited_indices(text: &str) -> Vec<usize> {
+pub(crate) fn cited_indices(text: &str) -> Vec<usize> {
     let mut out: Vec<usize> = citation_re()
         .captures_iter(text)
         .filter_map(|cap| cap[1].parse().ok())

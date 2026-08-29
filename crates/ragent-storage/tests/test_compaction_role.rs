@@ -1,3 +1,5 @@
+//! Tests for compaction role handling in storage.
+
 use ragent_storage::storage::Storage;
 use ragent_types::message::{Message, MessagePart, Role};
 

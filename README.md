@@ -16,7 +16,7 @@ Read TUI-QUICKSTART for instructions on how to use the tool.
 - **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
   GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
   Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, Microsoft Foundry Local,
-  and a Model Router cluster out of the box, with an extensible provider trait for adding more
+  OpenRouter, and a Model Router cluster out of the box, with an extensible provider trait for adding more
 - **Local-first defaults** — when no model is explicitly configured, ragent resolves
   to the first available local/self-hosted provider (e.g. Ollama) rather than
   hard-wiring a cloud provider
@@ -146,6 +146,8 @@ export OPENAI_API_KEY="sk-..."
 export AZURE_AI_FOUNDRY_API_KEY="sk-..."
 # or (for Generic OpenAI API provider)
 export GENERIC_OPENAI_API_KEY="sk-..."
+# or (for OpenRouter)
+export OPENROUTER_API_KEY="sk-or-..."
 
 # Launch the interactive TUI
 ragent
@@ -155,6 +157,12 @@ ragent run "Explain this codebase"
 
 # Start the HTTP server only
 ragent serve --port 9100
+```
+
+Use OpenRouter models directly from the CLI:
+
+```bash
+ragent run --model openrouter/anthropic/claude-sonnet-4 "Refactor this function"
 ```
 
 Generic OpenAI-compatible endpoint (including custom port) can be configured in

@@ -67,6 +67,7 @@ pub mod research_name;
 pub mod run_config;
 pub mod run_manifest;
 pub mod run_request;
+pub mod scoreboard;
 pub mod session;
 pub mod source;
 pub mod source_registry;
@@ -145,6 +146,7 @@ pub use run_manifest::{
     ResumeOutcome, RunManifest, RunManifestError, RunStep, StepEntry, StepStatus,
 };
 pub use run_request::{ResearchRunRequest, build_session_config};
+pub use scoreboard::{GradeBand, METER_CELLS, render_meter_bar};
 pub use session::{
     AnalysisConfig, AnalysisEvent, InputConfig, LocalConfig, NoopObserver, OutputConfig,
     ResearchSession, ResilienceConfig, RunEngineConfig, RunOutcome, SessionConfig, SessionEvent,

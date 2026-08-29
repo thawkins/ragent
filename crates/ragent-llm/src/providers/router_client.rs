@@ -542,6 +542,7 @@ fn resolve_env_api_key(provider_id: &str) -> String {
         "generic_openai" => &["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
         "ollama_cloud" => &["OLLAMA_API_KEY"],
         "azure_foundry" => &["AZURE_AI_FOUNDRY_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
         "xai" => &["XAI_API_KEY"],
         "ollama" => &["OLLAMA_API_KEY"],
         _ => &[],

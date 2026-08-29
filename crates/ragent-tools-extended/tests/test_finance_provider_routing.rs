@@ -361,8 +361,11 @@ mod helpers {
 }
 
 /// Minimal struct matching the AgentNotice payload for assertions.
+/// Session that produced the notice.
 pub struct AgentNotice {
+    /// Identifier of the session the notice refers to.
     pub session_id: String,
+    /// Human-readable notice text.
     pub message: String,
 }
 

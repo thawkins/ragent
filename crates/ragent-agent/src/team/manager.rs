@@ -438,6 +438,12 @@ pub struct TeamManager {
     /// Event bus for publishing team lifecycle events.
     event_bus: Arc<EventBus>,
     /// Mailbox poll interval.
+    ///
+    /// Idle-CPU fix: raised from 500 ms to 5 s. The push path
+    /// (`notify.notified()`, registered by [`Mailbox::push`]) is the normal
+    /// wakeup, so the timer is only a missed-notify safety net; 5 s keeps
+    /// external-writer delivery latency bounded while removing 10x of the
+    /// per-teammate idle disk-I/O wakes (2 Hz -> 0.2 Hz).
     poll_interval: Duration,
     /// Serialises spawn operations to avoid concurrent config read/write races.
     spawn_lock: Arc<Mutex<()>>,
@@ -450,6 +456,9 @@ pub struct TeamManager {
     pub watchdog_timeout: Duration,
     /// M6-T1: cancel flag for the watchdog task (set on shutdown_all).
     watchdog_cancel: Arc<AtomicBool>,
+    /// Idle-CPU fix: handle to the watchdog task so `Drop` can abort it
+    /// instead of waiting for the next 30 s tick to observe the flag.
+    watchdog_handle: parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// PERF-027: short-TTL in-memory cache of per-agent `is_plan_pending`
     /// results so the session processor's per-tool-call plan-pending gate
     /// does not hit disk on every invocation. The cache is invalidated by
@@ -484,11 +493,30 @@ impl Drop for TeamManager {
     /// filesystem I/O. Without this, abandoning a team without
     /// `team_cleanup` leaves poll loops running at 500 ms intervals
     /// forever.
+    ///
+    /// Idle-CPU fix: flags alone leave each loop parked in a
+    /// `sleep(500 ms)` that fires one last disk-I/O cycle per teammate
+    /// before noticing the flag, and the loops would stay alive until the
+    /// process exits when the processor holds this Arc for the session's
+    /// lifetime. Aborting the JoinHandles (and re-registering on each
+    /// `Notify` so a parked `notified()` arm does not miss the bounce)
+    /// removes every tick the moment the manager goes away.
     fn drop(&mut self) {
         self.watchdog_cancel.store(true, Ordering::Relaxed);
         for entry in self.handles.iter() {
             entry.cancel.store(true, Ordering::Relaxed);
             entry.poll_cancel.store(true, Ordering::Relaxed);
+            if let Some(h) = entry.poll_handle.as_ref() {
+                h.abort();
+            }
+            if let Some(h) = entry.agent_handle.as_ref() {
+                h.abort();
+            }
+            entry.notify.notify_waiters();
+        }
+        let watchdog = self.watchdog_handle.lock().take();
+        if let Some(h) = watchdog {
+            h.abort();
         }
     }
 }
@@ -556,11 +584,12 @@ impl TeamManager {
             handles: Arc::new(dashmap::DashMap::new()),
             processor: Arc::downgrade(&processor),
             event_bus,
-            poll_interval: Duration::from_millis(500),
+            poll_interval: Duration::from_secs(5),
             spawn_lock: Arc::new(Mutex::new(())),
             active_model: None,
             watchdog_timeout: Duration::from_mins(5),
             watchdog_cancel: Arc::new(AtomicBool::new(false)),
+            watchdog_handle: parking_lot::Mutex::new(None),
             // PERF-027: cache `is_plan_pending` results for 2 seconds so the
             // per-tool-call plan-pending gate doesn't hit disk on every
             // teammate tool invocation. The cache is explicitly invalidated
@@ -1022,7 +1051,7 @@ impl TeamManager {
     ///
     /// Uses `tokio::select!` to wake on either:
     /// - `notify.notified()` — instant push from [`Mailbox::push`], or
-    /// - `sleep(poll_interval)` — fallback for external writers.
+    /// - `sleep(poll_interval)` — safety net for external writers.
     fn start_poll_loop(
         &self,
         agent_id: String,
@@ -1033,7 +1062,7 @@ impl TeamManager {
         let team_name = self.team_name.clone();
         let lead_session_id = self.lead_session_id.clone();
         let event_bus = self.event_bus.clone();
-        let interval = self.poll_interval;
+        let poll_interval = self.poll_interval;
 
         tokio::spawn(async move {
             loop {
@@ -1042,9 +1071,17 @@ impl TeamManager {
                 }
 
                 // Wait for a push notification or the fallback interval.
+                //
+                // Idle-CPU fix: the fallback was 500 ms, i.e. 2 disk-I/O
+                // wakes per second per teammate even when the team is
+                // completely quiet. The push path (`notify.notified()`) is
+                // the normal wakeup (registered whenever a message is
+                // written), so the timer only exists as a missed-notify
+                // safety net; 5 s bounds a missed-notify delay to one
+                // mailbox read while cutting idle wakes 10x.
                 tokio::select! {
                     () = notify.notified() => {}
-                    () = tokio::time::sleep(interval) => {}
+                    () = tokio::time::sleep(poll_interval) => {}
                 }
 
                 if cancel.load(Ordering::Relaxed) {
@@ -1272,6 +1309,13 @@ impl TeamManager {
     pub async fn shutdown_all(&self) -> Result<()> {
         // M6-T1: stop the watchdog so it does not race with shutdown.
         self.watchdog_cancel.store(true, Ordering::Relaxed);
+        // Idle-CPU fix: abort the watchdog task as well as flagging it, so
+        // an explicit team teardown never leaves the 30 s ticker running.
+        let watchdog = self.watchdog_handle.lock().take();
+        if let Some(h) = watchdog {
+            h.abort();
+        }
+
         // PERF-025: DashMap — `.iter()` over the map yields owned keys (or
         // we can collect via `.keys()` on a `DashMap`). No async read guard.
         let agent_ids: Vec<String> = self
@@ -1307,14 +1351,14 @@ impl TeamManager {
         let timeout = self.watchdog_timeout;
         // Only spawn if a tokio runtime is available; tests that call
         // TeamManager::new outside a runtime will silently skip the watchdog.
-        let handle = match tokio::runtime::Handle::try_current() {
+        let runtime = match tokio::runtime::Handle::try_current() {
             Ok(h) => h,
             Err(_) => {
                 tracing::warn!("start_watchdog called outside a tokio runtime; skipping");
                 return;
             }
         };
-        handle.spawn(async move {
+        let task_handle = runtime.spawn(async move {
             let mut ticker = tokio::time::interval(check_interval);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -1409,6 +1453,9 @@ impl TeamManager {
                 }
             }
         });
+        // Idle-CPU fix: remember the task so `Drop` can abort it instead of
+        // leaving a 30 s-interval tick running for the rest of the session.
+        *self.watchdog_handle.lock() = Some(task_handle);
     }
 
     /// M6-T2: Reassign tasks that were `InProgress` and assigned to the old

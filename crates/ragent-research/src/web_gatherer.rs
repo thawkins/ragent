@@ -83,6 +83,12 @@ pub const DEFAULT_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// `--fetch-concurrently N` CLI flag or [`WebGatherer::with_fetch_concurrency`].
 pub const DEFAULT_FETCH_CONCURRENCY: usize = 10;
 
+/// Default wall-clock timeout for a single open-access recovery lookup
+/// (Unpaywall / Europe PMC). The lookup is awaited inside the fetch dispatch
+/// loop, so an un-timed call against a stalled OA API would freeze the
+/// entire gather pass; this bound keeps the pause proportional to one lookup.
+pub const OA_LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Default maximum number of retry attempts for a failed sub-query search
 /// (Milestone H-002). Retries use exponential backoff. `0` would disable
 /// retries entirely; 2 gives a short burst of retries before giving up.
@@ -447,11 +453,25 @@ pub enum GatherEvent {
         error: String,
     },
     /// A single page fetch failed after the search produced a candidate URL.
+    /// Reserved for genuine network/transport errors and timeouts; policy
+    /// exclusions (low relevance, too-short body, disabled PDFs) are
+    /// reported as [`GatherEvent::SourceExcluded`] instead so the UI can
+    /// distinguish "the network failed" from "the page was filtered out".
     FetchFailed {
         /// URL that could not be fetched.
         url: String,
         /// Error message from the fetch tool.
         error: String,
+    },
+    /// A candidate was deliberately excluded by a gather policy rather than
+    /// failing on the network: pre-fetch relevance filter, post-fetch
+    /// relevance filter, minimum-content threshold, or PDF sources disabled.
+    /// Surfaced separately so fetch-failure counters stay meaningful.
+    SourceExcluded {
+        /// URL of the excluded candidate.
+        url: String,
+        /// Human-readable exclusion reason.
+        reason: String,
     },
     /// Search succeeded but returned zero hits.
     SearchReturnedNoHits,
@@ -1389,9 +1409,9 @@ impl WebGatherer {
                                 None,
                             );
                             if let Some(obs) = observer {
-                                obs.on_event(GatherEvent::FetchFailed {
+                                obs.on_event(GatherEvent::SourceExcluded {
                                     url: hit.url.clone(),
-                                    error: reason.to_string(),
+                                    reason: reason.to_string(),
                                 });
                             }
                             continue;
@@ -1467,9 +1487,9 @@ impl WebGatherer {
                                 None,
                             );
                             if let Some(obs) = observer {
-                                obs.on_event(GatherEvent::FetchFailed {
+                                obs.on_event(GatherEvent::SourceExcluded {
                                     url: hit.url.clone(),
-                                    error: reason,
+                                    reason,
                                 });
                             }
                         }
@@ -1601,25 +1621,40 @@ impl WebGatherer {
                     } else {
                         None
                     };
-                    if let Some(page_type) = special_page_type {
-                        let page = synthesize_hit_page(&hit, page_type);
-                        let result: Result<
-                            Result<WebFetchedPage, anyhow::Error>,
-                            tokio::time::error::Elapsed,
-                        > = Ok(Ok(page));
-                        return (index, query, hit, result);
-                    }
-                    let result = tokio::time::timeout(
-                        fetch_timeout,
-                        fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
-                    )
-                    .await;
-                    (index, query, hit, result)
+                    let result: Result<
+                        Result<WebFetchedPage, anyhow::Error>,
+                        tokio::time::error::Elapsed,
+                    > = if let Some(page_type) = special_page_type {
+                        Ok(Ok(synthesize_hit_page(&hit, page_type)))
+                    } else {
+                        tokio::time::timeout(
+                            fetch_timeout,
+                            fetch_tool.fetch_with_limit(&hit.url, MAX_SOURCE_BODY_BYTES),
+                        )
+                        .await
+                    };
+                    // Best-effort language detection is CPU-bound lingua work:
+                    // compute it here, concurrent with the other in-flight
+                    // fetches, instead of serially in the dispatch loop where
+                    // it stalls the whole event stream behind every page.
+                    let language_fallback = match &result {
+                        Ok(Ok(page)) => {
+                            let body = page.body.clone();
+                            tokio::task::spawn_blocking(move || {
+                                detectable_body(&body).and_then(detect_language_best_effort)
+                            })
+                            .await
+                            .ok()
+                            .flatten()
+                        }
+                        _ => None,
+                    };
+                    (index, query, hit, result, language_fallback)
                 }
             });
         let mut collected: Vec<(usize, Option<Source>)> = Vec::with_capacity(max_results);
         let mut stream = futures::stream::iter(fetch_futures).buffer_unordered(fetch_concurrency);
-        while let Some((index, query, hit, result)) = stream.next().await {
+        while let Some((index, query, hit, result, language_fallback)) = stream.next().await {
             match result {
                 Ok(Ok(page)) => {
                     let scholarly = page.page_type.as_deref() == Some("scholarly");
@@ -1630,10 +1665,7 @@ impl WebGatherer {
                     // Use the fetcher's language when available; otherwise run
                     // an aggressive best-guess detector on the body so that
                     // stored `Source::Web.language` is rarely `None`.
-                    let detected_language = page
-                        .language
-                        .clone()
-                        .or_else(|| detectable_body(&body).and_then(detect_language_best_effort));
+                    let detected_language = page.language.clone().or(language_fallback);
                     // Scholarly and encyclopedia sources are already ranked by
                     // the source engine (e.g. OpenAlex's `relevance_score`,
                     // Wikipedia's search relevance); skip the lexical
@@ -1655,9 +1687,9 @@ impl WebGatherer {
                             "research: skipping web source due to low relevance"
                         );
                         if let Some(obs) = observer {
-                            obs.on_event(GatherEvent::FetchFailed {
+                            obs.on_event(GatherEvent::SourceExcluded {
                                 url: page.url.clone(),
-                                error: format!("relevance too low ({relevance})"),
+                                reason: format!("relevance too low ({relevance})"),
                             });
                         }
                         collected.push((index, None));
@@ -1691,8 +1723,18 @@ impl WebGatherer {
                             && let Some(client) = self.oa_client.clone()
                         {
                             let email = self.contact_email.as_deref();
-                            match recover_open_access(&page.url, email, client.as_ref()).await {
-                                Ok(Some(recovered)) => {
+                            // Bound the OA lookup so a stalled Unpaywall /
+                            // Europe PMC API cannot freeze the whole dispatch
+                            // loop (the loop blocks on every completion, so an
+                            // un-timed lookup halts progress for every other
+                            // in-flight fetch).
+                            match tokio::time::timeout(
+                                OA_LOOKUP_TIMEOUT,
+                                recover_open_access(&page.url, email, client.as_ref()),
+                            )
+                            .await
+                            {
+                                Ok(Ok(Some(recovered))) => {
                                     let recovered_url = recovered.url.clone();
                                     let recovered_source = recovered.source.to_string();
                                     tracing::info!(
@@ -1739,12 +1781,19 @@ impl WebGatherer {
                                         }
                                     }
                                 }
-                                Ok(None) => {}
-                                Err(e) => {
+                                Ok(Ok(None)) => {}
+                                Ok(Err(e)) => {
                                     tracing::warn!(
                                         url = %page.url,
                                         error = %e,
                                         "research: OA recovery lookup failed"
+                                    );
+                                }
+                                Err(_) => {
+                                    tracing::warn!(
+                                        url = %page.url,
+                                        timeout_secs = OA_LOOKUP_TIMEOUT.as_secs(),
+                                        "research: OA recovery lookup timed out; keeping original"
                                     );
                                 }
                             }
@@ -1783,9 +1832,9 @@ impl WebGatherer {
                             "research: skipping web source — extracted content below minimum"
                         );
                         if let Some(obs) = observer {
-                            obs.on_event(GatherEvent::FetchFailed {
+                            obs.on_event(GatherEvent::SourceExcluded {
                                 url: page.url.clone(),
-                                error: error.clone(),
+                                reason: error.clone(),
                             });
                         }
                         collected.push((index, None));
@@ -4183,11 +4232,11 @@ mod tests {
         assert!(
             events.iter().any(|e| matches!(
                 e,
-                GatherEvent::FetchFailed { url, error }
+                GatherEvent::SourceExcluded { url, reason }
                     if url == "https://tiny.example"
-                        && error.contains("too short")
+                        && reason.contains("too short")
             )),
-            "expected FetchFailed with 'too short' message, got {:?}",
+            "expected SourceExcluded with 'too short' message, got {:?}",
             *events
         );
     }

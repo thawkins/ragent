@@ -1,3 +1,5 @@
+//! Basic tests for prompt optimization methods and the completer abstraction.
+
 use async_trait::async_trait;
 use ragent_prompt_opt::{Completer, OptMethod, optimize, system_prompt};
 

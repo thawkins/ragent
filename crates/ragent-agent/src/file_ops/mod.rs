@@ -78,12 +78,15 @@ impl ConcurrentFileReader {
                 // permit dropped at the end of scope
                 let _permit = permit;
                 match tokio::fs::read_to_string(&path).await {
-                    Ok(s) => Ok(FileReadResult {
-                        path: path.clone(),
-                        content: Some(s.clone()),
-                        err: None,
-                        lines: Some(s.lines().count()),
-                    }),
+                    Ok(s) => {
+                        let lines = s.lines().count();
+                        Ok(FileReadResult {
+                            path: path.clone(),
+                            content: Some(s),
+                            err: None,
+                            lines: Some(lines),
+                        })
+                    }
                     Err(e) => Ok(FileReadResult {
                         path: path.clone(),
                         content: None,
@@ -249,15 +252,13 @@ impl EditStaging {
                     }
                 }
 
-                if let Err(e) = tokio::fs::write(&tmp, content.clone()).await {
-                    let p1 = path.clone();
-                    let p2 = p1.clone();
-                    return Ok((p1, None, Some((p2, anyhow::Error::new(e)))));
+                if let Err(e) = tokio::fs::write(&tmp, content.as_bytes()).await {
+                    return Ok((path.clone(), None, Some((path, anyhow::Error::new(e)))));
                 }
                 if let Err(e) = tokio::fs::rename(&tmp, &path).await {
-                    let p1 = path.clone();
-                    let p2 = p1.clone();
-                    return Ok((p1, None, Some((p2, anyhow::Error::new(e)))));
+                    // clean up the abandoned temp file so it does not leak on disk
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Ok((path.clone(), None, Some((path, anyhow::Error::new(e)))));
                 }
 
                 // successful write

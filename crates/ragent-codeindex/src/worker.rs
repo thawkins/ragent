@@ -278,8 +278,14 @@ fn worker_loop(
         // R-7: Block on the event channel with a timeout instead of
         // busy-spinning with `try_recv` + `sleep`. The thread wakes only when
         // an event arrives or the timeout fires (for manual-command and
-        // debounce checks). This eliminates ~20 idle wakeups/second.
-        match event_rx.recv_timeout(Duration::from_millis(50)) {
+        // debounce checks).
+        //
+        // Idle-CPU fix: the timeout matches `debounce_ms` (500 ms by default)
+        // instead of a fixed 50 ms. The debounce check below only needs to
+        // run once per debounce interval, so the shorter timeout produced 20
+        // wakeups/second for the whole process lifetime while adding no
+        // responsiveness (arrivals still wake the recv immediately).
+        match event_rx.recv_timeout(debounce) {
             Ok(ev) => {
                 trace!("watch event: {ev:?}");
                 batch.push(ev);

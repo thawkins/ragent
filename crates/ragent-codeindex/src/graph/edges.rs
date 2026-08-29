@@ -170,27 +170,31 @@ fn derive_import_edges(
     nr: &NameResolution,
 ) -> Vec<GraphEdge> {
     let mut edges = Vec::new();
-    for sym in file_symbols {
-        for imp in imports {
-            if let Some(candidates) = nr.name_to_symbols.get(&imp.imported_name) {
-                for &(target_id, target_file_id) in candidates {
-                    if target_id == sym.id {
-                        continue;
-                    }
-                    let confidence = if sym.file_id == target_file_id {
-                        Confidence::Extracted
-                    } else {
-                        Confidence::Inferred
-                    };
-                    edges.push(GraphEdge {
-                        source_sym: sym.id,
-                        target_sym: target_id,
-                        kind: EdgeKind::Imports,
-                        confidence,
-                        source_file: Some(sym.file_id),
-                        line: Some(imp.line),
-                    });
+    // Invert the loop: resolve each import's candidate list once instead of
+    // re-hashing the same import names once per symbol (symbols × imports
+    // hash lookups become imports).
+    for imp in imports {
+        let Some(candidates) = nr.name_to_symbols.get(&imp.imported_name) else {
+            continue;
+        };
+        for sym in file_symbols {
+            for &(target_id, target_file_id) in candidates {
+                if target_id == sym.id {
+                    continue;
                 }
+                let confidence = if sym.file_id == target_file_id {
+                    Confidence::Extracted
+                } else {
+                    Confidence::Inferred
+                };
+                edges.push(GraphEdge {
+                    source_sym: sym.id,
+                    target_sym: target_id,
+                    kind: EdgeKind::Imports,
+                    confidence,
+                    source_file: Some(sym.file_id),
+                    line: Some(imp.line),
+                });
             }
         }
     }

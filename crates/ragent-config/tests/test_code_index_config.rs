@@ -1,3 +1,5 @@
+//! Tests for code-index configuration parsing and defaults.
+
 use ragent_config::Config;
 
 #[test]

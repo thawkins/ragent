@@ -111,6 +111,13 @@ pub fn create_streaming_http_client() -> Client {
         .clone()
 }
 
+/// Compute the exponential backoff delay for retry attempt `attempt`.
+///
+/// Schedule: 0.5s, 1s, 2s, 4s, 8s (doubles per attempt, capped at 8s).
+fn backoff_delay(attempt: u32) -> Duration {
+    Duration::from_millis(500_u64.saturating_mul(1_u64 << attempt.min(4)))
+}
+
 /// Executes an HTTP request with retry logic for transient failures.
 ///
 /// Retries on:
@@ -119,8 +126,10 @@ pub fn create_streaming_http_client() -> Client {
 /// - Connection errors
 /// - Timeout errors
 ///
-/// Uses exponential backoff: 1s, 2s, 4s, 8s (max 4 retries)
-/// For 429 responses, uses the `Retry-After` header value when present.
+/// Uses exponential backoff: 0.5s, 1s, 2s, 4s, 8s (doubles per attempt,
+/// capped at 8s) for 5xx and transient errors.
+/// For 429 responses, uses the `Retry-After` header value when present and the
+/// same backoff schedule otherwise.
 ///
 /// # Errors
 ///
@@ -143,6 +152,10 @@ pub fn create_streaming_http_client() -> Client {
 ///     Ok(response)
 /// }
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if all retries are exhausted or the error is not retryable.
 pub async fn execute_with_retry<F, Fut>(
     request_fn: F,
     max_retries: u32,
@@ -168,7 +181,7 @@ where
                         body
                     ));
                     // Exponential backoff for 5xx
-                    let delay = Duration::from_millis(500 * (1 << (attempt).min(4)));
+                    let delay = backoff_delay(attempt);
                     tracing::debug!(
                         attempt = attempt + 1,
                         max_retries = max_retries,
@@ -189,8 +202,7 @@ where
                         attempt + 1,
                         body
                     ));
-                    let delay = retry_after
-                        .unwrap_or_else(|| Duration::from_secs(2_u64.pow(attempt.min(4))));
+                    let delay = retry_after.unwrap_or_else(|| backoff_delay(attempt));
                     tracing::warn!(
                         attempt = attempt + 1,
                         max_retries = max_retries,
@@ -212,7 +224,7 @@ where
             }
             Err(e) if is_retryable_error(&e) && attempt < max_retries => {
                 last_error = Some(anyhow::anyhow!("Request failed: {}", e));
-                let delay = Duration::from_millis(500 * (1 << (attempt).min(4)));
+                let delay = backoff_delay(attempt);
                 tracing::debug!(
                     attempt = attempt + 1,
                     max_retries = max_retries,

@@ -127,6 +127,25 @@ impl PromptClassifier {
     ///
     /// If the classifier encounters any error (panic, NaN, or Inf in the
     /// composite score), the method falls back to `Tier::Medium` and returns
+    /// zeroed dimension scores.      /// Build the MEDIUM-tier fallback result shared by the non-finite-score
+    /// guard and the panic guard in [`Self::classify_safe`] (FR-039).
+    fn medium_fallback(
+        boundaries: &BoundaryConfig,
+        attachments: &AttachmentInfo,
+    ) -> ClassificationResult {
+        ClassificationResult {
+            dimension_scores: [0.0; 15],
+            composite_score: boundaries.simple_medium,
+            tier: Tier::Medium,
+            requires_vision: attachments.has_media(),
+            modifier_tier: None,
+        }
+    }
+
+    /// Classify a prompt with error fallback to MEDIUM tier (FR-039).
+    ///
+    /// If the classifier encounters any error (panic, NaN, or Inf in the
+    /// composite score), the method falls back to `Tier::Medium` and returns
     /// zeroed dimension scores.
     pub fn classify_safe(
         prompt: &str,
@@ -147,26 +166,14 @@ impl PromptClassifier {
                         composite = r.composite_score,
                         "Classifier produced invalid composite score, falling back to MEDIUM tier"
                     );
-                    ClassificationResult {
-                        dimension_scores: [0.0; 15],
-                        composite_score: boundaries.simple_medium,
-                        tier: Tier::Medium,
-                        requires_vision: attachments.has_media(),
-                        modifier_tier: None,
-                    }
+                    Self::medium_fallback(boundaries, attachments)
                 } else {
                     r
                 }
             }
             Err(_) => {
                 tracing::warn!("Classifier panicked, falling back to MEDIUM tier (FR-039)");
-                ClassificationResult {
-                    dimension_scores: [0.0; 15],
-                    composite_score: boundaries.simple_medium,
-                    tier: Tier::Medium,
-                    requires_vision: attachments.has_media(),
-                    modifier_tier: None,
-                }
+                Self::medium_fallback(boundaries, attachments)
             }
         }
     }
@@ -318,11 +325,15 @@ impl PromptClassifier {
     /// Counts commas, semicolons, parentheses, and conditional keywords as
     /// proxies for syntactic complexity.
     fn score_syntax_complexity(prompt: &str) -> f64 {
+        // Deliberately case-insensitive keyword scan: conditional markers like
+        // "If" / " IF " must count like " if ", so scan the lowercased prefix
+        // (matching the `_lower` scorer convention) instead of the raw prompt.
+        let lower = scan_prefix(prompt).to_lowercase();
         let comma_count = prompt.matches(',').count() as f64;
         let semi_count = prompt.matches(';').count() as f64;
         let paren_depth = Self::max_paren_depth(prompt) as f64;
-        let conditional_count = count_keywords(
-            prompt,
+        let conditional_count = count_keywords_lower(
+            &lower,
             &[
                 " if ",
                 " unless ",
@@ -889,18 +900,6 @@ impl PromptClassifier {
         }
         max_depth
     }
-}
-
-/// Count how many of `keywords` appear as whole-word or substring matches in
-/// `text` (case-sensitive).
-fn count_keywords(text: &str, keywords: &[&str]) -> u64 {
-    let mut count = 0u64;
-    for kw in keywords {
-        if text.contains(kw) {
-            count += 1;
-        }
-    }
-    count
 }
 
 /// Count how many of `keywords` appear in `lower_text` (already lowercased).

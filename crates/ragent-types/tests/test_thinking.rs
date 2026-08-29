@@ -1,3 +1,5 @@
+//! Tests for thinking-config types: levels, display modes, and serde round-trips.
+
 use ragent_types::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 
 #[test]

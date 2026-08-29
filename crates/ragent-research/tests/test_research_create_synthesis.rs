@@ -501,6 +501,8 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
     );
 
     // FR-004: exact H2 section order (findings are rendered as bold H2 sub-headings).
+    // specs/corpusAnalysis FR-011 prepends the Corpus Quality Scoreboard as
+    // the first H2 when quality artifacts are available.
     let h2: Vec<&str> = body
         .lines()
         .filter(|line| line.starts_with("## ") && !line.starts_with("## **Finding"))
@@ -509,6 +511,7 @@ async fn imrad_format_writes_imrad_section_order_and_preserves_content() {
     assert_eq!(
         h2,
         vec![
+            "## Corpus Quality Scoreboard",
             "## Abstract",
             "## Introduction",
             "## Methods",

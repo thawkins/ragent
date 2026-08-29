@@ -137,7 +137,7 @@ There is no `search` or `search_in_repo` tool. Use `grep` for every text search 
 ### Shell Execution Rules
 
 - For simple commands or code snippets, use `bash` with the `command` parameter.
-- Timeout defaults to 1000 seconds.
+- Timeout defaults to 1500 seconds.
 - The `bash_reset` tool resets the persistent shell state.
 
 ### Important
@@ -171,7 +171,6 @@ When reading files with the `read` tool:
 
 ## GitHub Access
 
-- Use "gh" to access all GitHub repositories.
 - When asked to "push to remote", update the SPEC.md, README.md, STATS.md, QUICKSTART.md and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
 - When asked to "push release to remote", update the release number, and then follow the "push to remote" process. **Commit Message Rule**: Do not use "chore: bump version to ...", instead use "Version: <version_number>".
 - When initializing a new repo, add BUG, FEATURE, TASK and CHANGE issue templates only do this once.
@@ -191,12 +190,8 @@ When reading files with the `read` tool:
 
 - For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
+- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `TUI-QUICKSTART.md, QUICKSTART.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
 - Do not create explainer documents or other `.md` files unless specifically asked to.
-
-## Code Style Guidelines
-
-For Rust-specific style guidance, see [AGENTS-RUST.md](AGENTS-RUST.md).
 
 ## Team Workflow
 

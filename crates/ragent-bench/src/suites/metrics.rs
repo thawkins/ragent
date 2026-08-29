@@ -33,13 +33,25 @@ pub fn best_exact_or_similarity_sample(
     reference: &str,
 ) -> (String, f64) {
     let normalized_reference = normalized_code(reference);
+    // Phase 1: an exact match scores the maximum 1.0 (similarity is clamped
+    // to [0, 1]), so the O(L×R) Levenshtein pass can be skipped entirely the
+    // moment one is found.
+    if let Some(sample) = generation
+        .samples
+        .iter()
+        .find(|sample| normalized_code(&sample.text) == normalized_reference)
+    {
+        return (sample.text.clone(), 1.0);
+    }
+    // Phase 2: no exact hit — compare all samples by edit similarity.
     generation
         .samples
         .iter()
         .map(|sample| {
-            let similarity = edit_similarity(&sample.text, reference);
-            let exact = normalized_code(&sample.text) == normalized_reference;
-            (sample.text.clone(), if exact { 1.0 } else { similarity })
+            (
+                sample.text.clone(),
+                edit_similarity(&sample.text, reference),
+            )
         })
         .max_by(|left, right| left.1.total_cmp(&right.1))
         .unwrap_or_else(|| (String::new(), 0.0))
@@ -47,7 +59,7 @@ pub fn best_exact_or_similarity_sample(
 
 /// Normalize code-like content for text-based comparisons.
 #[must_use]
-pub fn normalized_code(value: &str) -> String {
+pub(crate) fn normalized_code(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

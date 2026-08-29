@@ -130,9 +130,10 @@ fn recompile_allowlist() -> Result<()> {
         .read()
         .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
     let compiled = compile_patterns(&g.allowlist);
-    if let Ok(mut guard) = compiled_allowlist().write() {
-        *guard = compiled;
-    }
+    let mut guard = compiled_allowlist()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = compiled;
     Ok(())
 }
 
@@ -142,9 +143,10 @@ fn recompile_denylist() -> Result<()> {
         .read()
         .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
     let compiled = compile_patterns(&g.denylist);
-    if let Ok(mut guard) = compiled_denylist().write() {
-        *guard = compiled;
-    }
+    let mut guard = compiled_denylist()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = compiled;
     Ok(())
 }
 
@@ -190,15 +192,20 @@ pub fn load_from_config() {
     let compiled_allow = compile_patterns(&lists.allowlist);
     let compiled_deny = compile_patterns(&lists.denylist);
 
-    if let Ok(mut guard) = global().write() {
-        *guard = lists;
-    }
-    if let Ok(mut guard) = compiled_allowlist().write() {
-        *guard = compiled_allow;
-    }
-    if let Ok(mut guard) = compiled_denylist().write() {
-        *guard = compiled_deny;
-    }
+    // Poison recovery: a stale snapshot is better than silently dropping the
+    // user's allow/deny list update.
+    let mut guard = global()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = lists;
+    let mut guard = compiled_allowlist()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = compiled_allow;
+    let mut guard = compiled_denylist()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = compiled_deny;
 }
 // ── Read accessors ────────────────────────────────────────────────────────────
 

@@ -1,3 +1,5 @@
+//! Tests for the spec manager: filters, sorting, and status transitions.
+
 use ragent_specs::manager::{SortBy, SpecFilter, SpecManager, is_valid_transition};
 use ragent_specs::spec::SpecStatus;
 use std::path::PathBuf;

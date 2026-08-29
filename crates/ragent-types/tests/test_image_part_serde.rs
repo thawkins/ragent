@@ -1,3 +1,5 @@
+//! Serialization tests for `MessagePart::Image` payloads.
+
 use ragent_types::message::{ImageData, MessagePart};
 
 #[test]

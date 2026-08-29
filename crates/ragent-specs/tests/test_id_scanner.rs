@@ -1,3 +1,5 @@
+//! Tests for spec ID scanning helpers (highest id, FR/NFR/task numbering).
+
 use ragent_specs::id_scanner::{highest_fr, highest_id, highest_nfr, highest_task};
 
 /// External tests for `tests` from `crates/ragent-specs/src/id_scanner.rs`

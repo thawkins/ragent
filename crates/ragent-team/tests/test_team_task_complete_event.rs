@@ -78,6 +78,7 @@ async fn team_task_complete_publishes_exactly_one_event() {
         storage: None,
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: Some(Arc::new(ragent_agent::tool::TeamContext {
             team_name: "perf-005-team".to_string(),
             agent_id: "tm-001".to_string(),

@@ -60,7 +60,7 @@ impl RouterProvider {
     pub fn config(&self) -> RouterConfig {
         self.config
             .read()
-            .expect("router config lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -68,14 +68,20 @@ impl RouterProvider {
     ///
     /// Acquires a write lock and replaces the configuration atomically.
     pub fn reload_config(&self, new_config: RouterConfig) {
-        let mut guard = self.config.write().expect("router config lock poisoned");
+        let mut guard = self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = new_config;
         tracing::info!("Router configuration reloaded");
     }
 
     /// Update whether the router is enabled.
     pub fn set_enabled(&self, enabled: bool) {
-        let mut guard = self.config.write().expect("router config lock poisoned");
+        let mut guard = self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         guard.enabled = enabled;
         tracing::info!(enabled = enabled, "Router enabled state updated");
     }
@@ -88,7 +94,7 @@ impl RouterProvider {
         let mut guard = self
             .registry
             .write()
-            .expect("router registry lock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some(registry);
         tracing::info!("Router provider registry attached");
     }
@@ -97,7 +103,7 @@ impl RouterProvider {
     pub fn registry(&self) -> Option<Arc<ProviderRegistry>> {
         self.registry
             .read()
-            .expect("router registry lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -108,7 +114,10 @@ impl RouterProvider {
     /// keys saved via `ragent auth`) before falling back to environment
     /// variables.
     pub fn set_storage(&self, storage: Arc<ragent_storage::Storage>) {
-        let mut guard = self.storage.write().expect("router storage lock poisoned");
+        let mut guard = self
+            .storage
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some(storage);
         tracing::info!("Router storage attached");
     }
@@ -117,7 +126,7 @@ impl RouterProvider {
     pub fn storage(&self) -> Option<Arc<ragent_storage::Storage>> {
         self.storage
             .read()
-            .expect("router storage lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -126,7 +135,7 @@ impl RouterProvider {
         let mut guard = self
             .event_bus
             .write()
-            .expect("router event bus lock poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = event_bus;
     }
 
@@ -134,7 +143,7 @@ impl RouterProvider {
     pub fn event_bus(&self) -> Option<Arc<ragent_types::event::EventBus>> {
         self.event_bus
             .read()
-            .expect("router event bus lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -142,7 +151,7 @@ impl RouterProvider {
     pub fn is_enabled(&self) -> bool {
         self.config
             .read()
-            .expect("router config lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .enabled
     }
 }

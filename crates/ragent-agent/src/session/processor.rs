@@ -1286,6 +1286,7 @@ impl SessionProcessor {
                     storage: Some(self.session_manager.storage().clone()),
                     agent_manager: self.agent_manager.get().cloned(),
                     active_model: Some(turn.model_ref.clone()),
+                    provider_registry: Some(Arc::clone(&self.provider_registry)),
                     team_context: turn.team_context.clone(),
                     team_manager: self
                         .team_manager

@@ -66,8 +66,10 @@ pub fn shortest_path(store: &IndexStore, from: &str, to: &str) -> Result<Option<
             break;
         }
 
-        let neighbours = adjacency.get(&current).cloned().unwrap_or_default();
-        for edge in neighbours {
+        // Borrow the neighbour list instead of cloning it for every visited
+        // node; the borrow ends before the next loop iteration.
+        let empty: Vec<&GraphEdge> = Vec::new();
+        for edge in adjacency.get(&current).unwrap_or(&empty) {
             let next = edge.target_sym;
             if visited.contains_key(&next) {
                 continue;

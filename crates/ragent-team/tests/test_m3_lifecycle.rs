@@ -48,6 +48,7 @@ fn make_ctx(
         storage: None,
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: None,
         team_manager: None,
         code_index: None,
@@ -216,6 +217,7 @@ async fn test_team_idle_publishes_teammate_idle_event() {
         storage: None,
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: Some(Arc::new(ragent_agent::tool::TeamContext {
             team_name: "idle-event-team".to_string(),
             agent_id: "tm-001".to_string(),

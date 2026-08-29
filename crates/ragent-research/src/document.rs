@@ -40,7 +40,7 @@ use crate::research_name::ResearchName;
 use crate::source::{LocalSourceKind, Source};
 use crate::status::ResearchStatus;
 use crate::synthesis::SynthesisAudit;
-use chrono::Utc;
+use chrono::{Datelike, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
@@ -605,7 +605,9 @@ fn render_data_quality_summary(doc: &ResearchDocument) -> String {
 
     if let Some(graph) = &doc.contradiction_graph {
         let count = graph.edges.len();
-        let strongest = graph.edges.first().map(|e| e.strength).unwrap_or(0);
+        // Use the true maximum so the Data Quality row agrees with the
+        // scoreboard's strongest-edge computation below.
+        let strongest = graph.edges.iter().map(|e| e.strength).max().unwrap_or(0);
         rows.push((
             "Contradictions".into(),
             format!("{count} edge(s)"),
@@ -885,6 +887,261 @@ fn render_surgical_patch(result: &crate::patcher::PatchResult) -> String {
     out
 }
 
+/// Extract the distinct hostnames of all gathered web sources.
+///
+/// The hostname is taken from the URL by stripping the scheme and everything
+/// from the first `/`, `?`, or `#`; a leading `www.` is removed so
+/// `www.example.com` and `example.com` count as one distinct domain.
+fn distinct_web_domains(sources: &[Source]) -> Vec<String> {
+    // HashSet dedup avoids the O(n^2) `Vec::contains` scan; sorting at the end
+    // keeps the previous deterministic output order.
+    let mut domains: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for source in sources {
+        let Source::Web { url, .. } = source else {
+            continue;
+        };
+        let host = url
+            .split_once("://")
+            .map_or(url.as_str(), |(_, rest)| rest)
+            .split(['/', '?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        if host.is_empty() {
+            continue;
+        }
+        let host = host.strip_prefix("www.").unwrap_or(&host);
+        if !host.is_empty() {
+            domains.insert(host.to_string());
+        }
+    }
+    let mut domains: Vec<String> = domains.into_iter().collect();
+    domains.sort();
+    domains
+}
+
+/// Render the Corpus Quality Scoreboard section (spec `corpusAnalysis`).
+///
+/// A deterministic, LLM-free at-a-glance block rendered immediately after the
+/// document title and before the first body section (FR-011). The scoreboard
+/// aggregates quality indicators the pipeline already computed:
+///
+/// - Score line (FR-002): `Quality: **74/100** - Grade B (Good)` with the
+///   grade band from [`crate::scoreboard::GradeBand`]. Score precedence is
+///   corpus critic, then synthesis audit (FR-006); with neither artifact the
+///   line reads `Quality: Not graded` and no meter is rendered (FR-007).
+/// - Meter bar (FR-003): 20-cell ASCII bar inside a fenced code block.
+/// - Critic subscore line (FR-005): coverage / evidence / balance / tension
+///   when a corpus critic report is present.
+/// - Source-facts line (FR-004): gathered, cited, full-text, and
+///   distinct-domain counts, plus average web relevance. For local-only runs
+///   (zero web sources) the distinct-domain count and the average relevance
+///   are omitted (FR-014), as is the cited date span.
+/// - Tension/citation line (FR-009, FR-010): contradiction-edge count with
+///   the strongest edge strength, and the citation-check status when a
+///   cite-check result is present.
+/// - Abbreviated formats (FR-013): for `executive-summary`,
+///   `comparison-table`, and `source-bibliography` documents the critic
+///   subscore line and the tension/citation line are omitted, leaving the
+///   score line, meter bar, and source-facts block.
+///
+/// The existing `render_data_quality_summary` section is untouched (FR-012);
+/// the scoreboard is an at-a-glance summary, not a replacement. No scoring
+/// computation is modified (FR-015) and all output is ASCII-only (FR-016).
+///
+/// Returns an empty string when no quality artifact is available at all
+/// (no gathered sources, no critic report, no audit), so skeleton documents
+/// do not grow an empty section (FR-001).
+fn render_scoreboard(doc: &ResearchDocument) -> String {
+    let sources = &doc.item.sources;
+    let has_critic = doc.corpus_critic.is_some();
+    let has_audit = doc.synthesis_audit.is_some();
+    if sources.is_empty() && !has_critic && !has_audit {
+        return String::new();
+    }
+
+    // FR-013: abbreviated formats render only the score line, meter bar, and
+    // source facts; the critic subscore and tension/citation lines are held
+    // back for the full report and IMRaD layouts.
+    let abbreviated = matches!(
+        doc.output_format,
+        crate::run_config::OutputFormat::ExecutiveSummary
+            | crate::run_config::OutputFormat::ComparisonTable
+            | crate::run_config::OutputFormat::SourceBibliography
+    );
+
+    let mut out = String::new();
+    out.push_str("## Corpus Quality Scoreboard\n\n");
+
+    // ── Score line + meter bar (FR-002, FR-003, FR-006, FR-007) ─────────
+    // Score precedence is corpus critic, then synthesis audit (FR-006).
+    let score = doc
+        .corpus_critic
+        .as_ref()
+        .map(|r| r.score)
+        .or_else(|| doc.synthesis_audit.as_ref().map(|a| a.overall_score));
+    match score {
+        Some(s) => {
+            let band = crate::scoreboard::GradeBand::from_score(s);
+            out.push_str(&format!(
+                "Quality: **{s}/100** - Grade {} ({})\n\n",
+                band,
+                band.meaning()
+            ));
+            out.push_str(&render_scoreboard_meter(s));
+        }
+        None => {
+            out.push_str("Quality: Not graded\n\n");
+        }
+    }
+
+    // ── Critic subscore line (FR-005, suppressed in abbreviated formats) ─
+    if !abbreviated && let Some(report) = &doc.corpus_critic {
+        out.push_str(&format!(
+            "- Critic: {} (coverage {} | evidence {} | balance {} | tension {})\n",
+            if report.passed { "pass" } else { "review" },
+            report.coverage_score,
+            report.evidence_score,
+            report.balance_score,
+            report.tension_score
+        ));
+    }
+
+    // ── Source-facts line (FR-004, FR-014) ──────────────────────────────
+    let cited = cited_source_indices(doc);
+    let cited_count = cited.len();
+    let full_text = sources.iter().filter(|s| s.has_body()).count();
+    let web_domains = distinct_web_domains(sources);
+    out.push_str(&format!(
+        "- Sources: {} gathered | {} cited | {} full text",
+        sources.len(),
+        cited_count,
+        full_text
+    ));
+    if !web_domains.is_empty() {
+        out.push_str(&format!(
+            " | {} distinct domains | {:.1}/8 average relevance",
+            web_domains.len(),
+            average_web_relevance(sources)
+        ));
+    }
+    out.push('\n');
+
+    // ── Cited date-span line (FR-004) ───────────────────────────────────
+    if let Some((earliest, latest, undated)) = cited_date_span(doc, &cited) {
+        out.push_str(&format!(
+            "- Cited date span: {earliest}-{latest} ({undated} undated)\n"
+        ));
+    }
+
+    // ── Tension/citation line (FR-009, FR-010, suppressed by FR-013) ────
+    if !abbreviated {
+        let mut tension_parts: Vec<String> = Vec::new();
+        if let Some(graph) = &doc.contradiction_graph
+            && !graph.edges.is_empty()
+        {
+            let strongest = graph.edges.iter().map(|e| e.strength).max().unwrap_or(0);
+            tension_parts.push(format!(
+                "Contradictions: {} edges (strongest {strongest}/100)",
+                graph.edges.len()
+            ));
+        }
+        if let Some(check) = &doc.cite_check {
+            let status = if check.passed { "passed" } else { "failed" };
+            tension_parts.push(format!("Citation check: {status}"));
+        }
+        if !tension_parts.is_empty() {
+            out.push_str(&format!("- {}\n", tension_parts.join(" | ")));
+        }
+    }
+
+    out.push('\n');
+    out
+}
+
+/// Render the fenced-code-block meter bar for the scoreboard (FR-003).
+fn render_scoreboard_meter(score: u32) -> String {
+    format!(
+        "```\n{}\n```\n\n",
+        crate::scoreboard::render_meter_bar(score)
+    )
+}
+
+/// Distinct, in-range source indices cited by the document narrative.
+///
+/// Citations are collected from the summary, findings, top implications, and
+/// open questions via the shared `[#N]` regex; indices outside the gathered
+/// source range are ignored so the count never exceeds the corpus size.
+fn cited_source_indices(doc: &ResearchDocument) -> Vec<usize> {
+    let mut texts = String::new();
+    texts.push_str(&doc.summary);
+    for finding in &doc.findings {
+        texts.push('\n');
+        texts.push_str(finding);
+    }
+    for implication in &doc.top_implications {
+        texts.push('\n');
+        texts.push_str(implication);
+    }
+    for question in &doc.open_questions {
+        texts.push('\n');
+        texts.push_str(question);
+    }
+    let total = doc.item.sources.len();
+    crate::polarity::cited_indices(&texts)
+        .into_iter()
+        .filter(|n| *n <= total)
+        .collect()
+}
+
+/// Average relevance rank (`x.x`) across gathered web sources (FR-004).
+///
+/// Local, spec, and other sources have no relevance label and are excluded;
+/// callers must not invoke this when the run gathered zero web sources
+/// (FR-014 omission is handled by [`render_scoreboard`]).
+fn average_web_relevance(sources: &[Source]) -> f64 {
+    // Single pass: count web sources and sum their ranks together.
+    let (web_count, rank_sum) = sources
+        .iter()
+        .filter(|s| matches!(s, Source::Web { .. }))
+        .fold((0usize, 0u32), |(n, sum), s| {
+            (n + 1, sum + u32::from(s.relevance_rank()))
+        });
+    if web_count == 0 {
+        return 0.0;
+    }
+    f64::from(rank_sum) / web_count as f64
+}
+
+/// Publication-date span of the cited web sources (FR-004).
+///
+/// Returns `(earliest_year, latest_year, undated_count)` over the cited web
+/// sources that carry a publication date; `undated_count` covers cited web
+/// sources without one. `None` when no cited source exposes a date.
+fn cited_date_span(doc: &ResearchDocument, cited: &[usize]) -> Option<(i32, i32, usize)> {
+    let sources = &doc.item.sources;
+    let mut dated_years: Vec<i32> = Vec::new();
+    let mut undated = 0usize;
+    for index in cited {
+        let Some(source) = sources.get(index - 1) else {
+            continue;
+        };
+        let Source::Web { published_at, .. } = source else {
+            continue;
+        };
+        match published_at {
+            Some(date) => dated_years.push(date.year()),
+            None => undated += 1,
+        }
+    }
+    if dated_years.is_empty() {
+        return None;
+    }
+    dated_years.sort_unstable();
+    Some((dated_years[0], dated_years[dated_years.len() - 1], undated))
+}
+
 /// Build the body of a legacy multi-section `RESEARCH.md` report.
 ///
 /// This preserves the original section order: Topic, Search Queries, Executive
@@ -892,6 +1149,13 @@ fn render_surgical_patch(result: &crate::patcher::PatchResult) -> String {
 /// Relationship Diagram, In-Project Cross-References, References Index.
 fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
+
+    // ── Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) ──
+    // Rendered immediately after the title and before the first body section
+    // (## Topic). Omitted entirely for skeleton documents with no gathered
+    // sources and no QA artifacts. The detailed Data Quality & Consistency
+    // section below is untouched (FR-012).
+    body.push_str(&render_scoreboard(doc));
 
     // -- Topic -----------------------------------------------------------
     body.push_str("## Topic\n\n");
@@ -1188,6 +1452,13 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
 /// reused; only the headings and grouping change.
 fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
     let mut body = String::new();
+
+    // ── Corpus Quality Scoreboard (spec corpusAnalysis, FR-011 / FR-012) ──
+    // Rendered immediately after the title and before the Abstract (IMRaD
+    // layout). Omitted entirely for skeleton documents with no gathered
+    // sources and no QA artifacts. The detailed Data Quality & Consistency
+    // subsection inside Discussion below is untouched (FR-012).
+    body.push_str(&render_scoreboard(doc));
 
     // ── Abstract (FR-005) ───────────────────────────────────────────────
     body.push_str("## Abstract\n\n");
@@ -1556,13 +1827,6 @@ pub fn apply_template(template: &str, title: &str, topic: &str) -> String {
         .replace("{{name}}", "")
 }
 
-/// Extract 1-based source indices from `[#N]` citations in a finding body.
-/// Returns a sorted, deduplicated list suitable for rendering a Sources list.
-/// Delegates to [`crate::polarity::cited_indices`], the shared citation parser.
-fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
-    crate::polarity::cited_indices(finding)
-}
-
 /// Build a `**Sources:**` paragraph for a finding that cites one or more
 /// captured sources. Each bullet contains the citation number, source title,
 /// author (when known), and path/URL so the reader can map the finding back to
@@ -1575,14 +1839,17 @@ fn extract_cited_source_indices(finding: &str) -> Vec<usize> {
 /// The line reads `—` when no cited web source exposes a publication date.
 fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
     // If the finding already contains a Sources paragraph (e.g. produced by
-    // the LLM itself), don't append a duplicate list. Match any case variant
-    // (`**Sources:**`, `**sources:**`, `**SOURCES:**`) via a lowercase
-    // comparison so we don't miss a duplicate.
-    if finding.to_lowercase().contains("**sources:**") {
+    // the LLM itself), don't append a duplicate list. Match the `**Sources:**`
+    // literal in its three case variants directly to avoid allocating a full
+    // lowercase copy of the finding body on every call.
+    if finding.contains("**Sources:**")
+        || finding.contains("**sources:**")
+        || finding.contains("**SOURCES:**")
+    {
         return None;
     }
 
-    let indices = extract_cited_source_indices(finding);
+    let indices = crate::polarity::cited_indices(finding);
     if indices.is_empty() {
         return None;
     }
@@ -1622,15 +1889,23 @@ fn render_finding_sources(finding: &str, sources: &[Source]) -> Option<String> {
 
 /// Compute a `**Source date range:**` summary line for the cited sources.
 ///
-/// Considers only web sources that expose a `published_at` value. Returns
-/// `None` when none of the cited sources is a dated web source. The returned
-/// line uses the form `earliest..latest` (both inclusive, `YYYY-MM-DD`), or a
-/// single date when all dated sources share the same publication date.
+/// Considers only web sources that expose a `published_at` value. Unknown
+/// citation indices are skipped (matching [`render_finding_sources`]) instead
+/// of aborting the whole line. The returned line uses the form
+/// `earliest..latest` (both inclusive, `YYYY-MM-DD`), or a single date when
+/// all dated sources share the same publication date; when the finding cites
+/// web sources but none of them expose a date it reads `—` with an
+/// explanatory suffix.
 fn render_finding_date_range(indices: &[usize], sources: &[Source]) -> Option<String> {
     let mut dates: Vec<chrono::DateTime<chrono::Utc>> = Vec::new();
     let mut total_web = 0usize;
     for idx in indices {
-        let src = sources.get(idx - 1)?;
+        // Tolerate stale citations (e.g. a source list that shrank since the
+        // finding was written): skip the unknown index instead of dropping
+        // the whole date-range line.
+        let Some(src) = sources.get(idx.checked_sub(1)?) else {
+            continue;
+        };
         if matches!(src, Source::Web { .. }) {
             total_web += 1;
             if let Some(dt) = src.published_at() {
@@ -1642,13 +1917,11 @@ fn render_finding_date_range(indices: &[usize], sources: &[Source]) -> Option<St
         // No dated web sources: still emit a line when the finding cites web
         // sources, so the reader knows the dates were unavailable rather than
         // absent.
-        return total_web.checked_sub(0).map(|_| {
-            if total_web > 0 {
-                "**Source date range:** — (cited web sources did not expose a publication date)"
-                    .to_string()
-            } else {
-                "**Source date range:** — (no web sources cited)".to_string()
-            }
+        return Some(if total_web > 0 {
+            "**Source date range:** — (cited web sources did not expose a publication date)"
+                .to_string()
+        } else {
+            "**Source date range:** — (no web sources cited)".to_string()
         });
     }
     dates.sort();
@@ -1801,13 +2074,17 @@ fn char_index_at(chars: &[(usize, char)], target_byte: usize) -> usize {
 /// outside the link.
 fn trim_url_trailing(raw: &str) -> (&str, &str) {
     let mut end = raw.len();
+    // Count parens once and adjust the counter as `end` retreats so the
+    // imbalance check stays O(1) per step instead of rescanning the prefix
+    // (which made the loop worst-case O(n^2) per URL).
+    let opens = raw[..end].chars().filter(|&cc| cc == '(').count();
+    let mut closes = raw[..end].chars().filter(|&cc| cc == ')').count();
     while end > 0 {
         let c = raw.as_bytes()[end - 1] as char;
         if c == ')' {
-            let opens = raw[..end].chars().filter(|&cc| cc == '(').count();
-            let closes = raw[..end].chars().filter(|&cc| cc == ')').count();
             if closes > opens {
                 end -= 1;
+                closes -= 1;
                 continue;
             }
         }

@@ -198,6 +198,7 @@ pub fn build_session_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::DEFAULT_WEB_PHASE_TIMEOUT_SECS;
 
     #[test]
     fn default_request_has_no_subject() {
@@ -264,7 +265,10 @@ mod tests {
         assert!(!cfg.web.use_low_relevance);
         assert!(!cfg.web.disable_scholarly);
         assert!(!cfg.web.use_pdf_web_sources);
-        assert!(cfg.web.web_phase_timeout_secs.is_none());
+        assert_eq!(
+            cfg.web.web_phase_timeout_secs,
+            Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)
+        );
         assert_eq!(cfg.local.max_local_sources, 10);
         assert!(!cfg.local.disable_local);
         assert!(!cfg.local.disable_specs);

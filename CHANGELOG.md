@@ -1,5 +1,31 @@
 # Changelog
 
+## Version: 1.0.65
+
+### Added
+
+- **OpenRouter provider** — new `openrouter` first-class LLM provider for the OpenRouter model aggregator. Supports dynamic model discovery (`GET /api/v1/models`), OpenAI-compatible streaming chat completions with tool-call and reasoning deltas, per-model metadata mapping (context window, pricing, vision/reasoning flags), vendor-slug model ids such as `openrouter/anthropic/claude-sonnet-4`, secure API-key storage via `ragent auth openrouter <key>` (with `OPENROUTER_API_KEY` fallback), and masked-key redaction in logs. `ragent models --provider openrouter` lists the live catalog (discovery works without a key; chat requires one). (spec: `openrouterprov`; FR-001..026)
+- **`model_info` tool** — read-only introspection tool reporting the active provider/model pair with resolved capabilities, context window, output limits, cost tier, thinking support, and Model Router enabled state. Hardwired auto-approved, registered in the default tool registry, and wired to a new optional `ToolContext::provider_registry` so tools can resolve model metadata.
+- **Ollama thinking defaults** — Ollama-family models that advertise reasoning support now carry a default `ThinkingConfig` (level `Low`), and boolean-thinking providers present the full user-facing effort range (`Auto/Off/Low/Medium/High`), with any non-`Off` level mapped to `think: true` at request time.
+- **Research corpus scoreboard** — deterministic, LLM-free corpus-quality display helpers per the `corpusAnalysis` spec: `GradeBand` letter grades (FR-002), proportional ASCII meter bars (FR-003), and IMRAD report rendering, all pure-ASCII output (FR-016).
+- **OpenRouter reasoning payload builder** — `openrouter_reasoning_payload_from_request` maps `ThinkingConfig` (`effort` low/medium/high/none plus `max_tokens` from `budget_tokens`) onto OpenRouter's native `reasoning` object, with legacy `reasoning_effort`/`reasoning_level` option fallbacks.
+
+### Fixed
+
+- **TUI scroll pinning and idle CPU** — message/log panels pre-wrap cached lines at the pane width (`wrap_line_styled`, a faithful ratatui 0.29 `WordWrapper` port with NBSP/ZWSP parity) so scroll geometry and the visible-window slice share one coordinate system; only the visible window is wrapped per frame. The code-index busy latch clears when a reindex completes, the cron tick loop sleeps the full interval instead of polling, and a saturated event bus no longer hot-spins the permission prompt loop on `RecvError::Lagged` (brief yield added).
+- **Model picker columns** — `SelectModel`/`SelectRouterModel` tables size columns to the widest header or cell so long vendor-slug model names and the Thinking column render untruncated.
+- **Config deep merge** — provider `models` entries are now merged per model id instead of replaced wholesale, so a project overlay that sets only `thinking` no longer wipes globally-configured model names, capabilities, or pricing; model-level thinking overrides the provider default.
+- **Provider discovery cache** — a transient discovery failure no longer wipes a provider's previously discovered catalog; the empty list is only cached when nothing is stored yet.
+- **Research gather events** — policy exclusions (low relevance, too-short body, PDFs disabled) are reported as a new `SourceExcluded` event instead of masquerading as `FetchFailed`, keeping fetch-failure counters meaningful; the web phase gained a default 180 s wall-clock timeout and open-access lookups (Unpaywall/Europe PMC) a 15 s bound so a stalled API cannot wedge a run; distinct web domains are collected via `HashSet`, and the Data Quality panel reports the true strongest contradiction edge.
+- **Lock-poisoning resilience sweep** — router config, bash/dir allow/deny lists, grep results, edit timestamps, tool cache, and the read cache recover from poisoned locks (`PoisonError::into_inner`) instead of silently dropping updates or failing subsequent calls; session archive import/export replaces the `.` data-dir fallback with a real error and hashes files via `std::io::copy`; the orchestrator conflict resolver removes unwrap-style paths on the guaranteed-non-empty tail.
+- **HTTP retry backoff unified** — a single `backoff_delay` helper (0.5 s doubling to 8 s) drives 5xx and 429 retries.
+- **Bench metrics and code-index** — exact-match bench samples short-circuit the Levenshtein pass entirely; the parallel grep walker checks its stop flag per entry before the truncation check; code-index import-edge derivation inverts the symbol/import loop to resolve each import once.
+- **Router classifier panic guard** — non-finite composite scores and classifier errors fall back to the MEDIUM tier with zeroed dimension scores instead of poisoning the routing decision.
+
+### Tests
+
+- New suites: `test_openrouter_provider` (16 tests), `test_scoreboard` with IMRAD/reductions/report companions (31 tests), `test_model_info_tool` (4), `test_vendor_slug_partitioning` (3), and expanded `test_thinking_config` coverage (141 added lines).
+
 ## Version: 1.0.64
 
 ### Added

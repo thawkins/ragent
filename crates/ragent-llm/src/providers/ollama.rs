@@ -23,6 +23,7 @@ use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::ThinkingConfig;
 use ragent_types::event::FinishReason;
 
 /// Default Ollama server address.
@@ -700,6 +701,11 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
             let ctx = estimate_context_window(&entry.details.parameter_size);
             let reasoning = model_supports_binary_thinking(&entry.name);
             let thinking_levels = binary_thinking_levels_for_model(&entry.name);
+            let thinking_config = if reasoning {
+                Some(ThinkingConfig::new(ragent_types::ThinkingLevel::Low))
+            } else {
+                None
+            };
 
             ModelInfo {
                 id: entry.name,
@@ -719,7 +725,7 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
                 context_window: ctx,
                 max_output: None,
                 request_multiplier: None,
-                thinking_config: None,
+                thinking_config,
             }
         })
         .collect();

@@ -103,6 +103,22 @@ impl Metrics {
             errors: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
+
+    /// Classify a router send failure into the matching metric counter.
+    ///
+    /// Send failures currently carry the timeout marker only inside their
+    /// error message, so the classification is string-based; keep it in one
+    /// place so a change of wording cannot silently reclassify timeouts.
+    pub fn record_send_error(&self, err: &anyhow::Error) {
+        let err_str = err.to_string();
+        if err_str.contains("timed out") || err_str.contains("timeout") {
+            self.timeouts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            self.errors
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
 }
 
 /// R-20: Drop guard that decrements `active_jobs` when the job task finishes
@@ -285,16 +301,9 @@ impl Coordinator {
                     responses.push((agent_id, resp));
                 }
                 Err(e) => {
-                    let err_str = e.to_string();
-                    if err_str.contains("timed out") || err_str.contains("timeout") {
-                        self.metrics
-                            .timeouts
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else {
-                        // Defer counting errors until after collecting responses to
-                        // avoid double-counting when all agents fail.
-                        tracing::warn!(error = %err_str, "agent send error");
-                    }
+                    // Note: failures are also counted via `record_send_error`.
+                    self.metrics.record_send_error(&e);
+                    tracing::warn!(error = %e, "agent send error");
                 }
             }
         }
@@ -371,16 +380,7 @@ impl Coordinator {
                     continue;
                 }
                 Err(e) => {
-                    let err_str = e.to_string();
-                    if err_str.contains("timed out") || err_str.contains("timeout") {
-                        self.metrics
-                            .timeouts
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else {
-                        self.metrics
-                            .errors
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
+                    self.metrics.record_send_error(&e);
                     continue;
                 }
             }
@@ -470,16 +470,7 @@ impl Coordinator {
                             agent_id: agent_id.clone(),
                             success: false,
                         });
-                        let es = e.to_string();
-                        if es.contains("timed out") || es.contains("timeout") {
-                            metrics
-                                .timeouts
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        } else {
-                            metrics
-                                .errors
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        }
+                        metrics.record_send_error(&e);
                     }
                 }
             }

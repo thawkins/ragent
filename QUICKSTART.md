@@ -36,8 +36,8 @@ ragent        # launch ragent
                                # press 'p' to open the provider setup dialog```
 
 The dialog walks you through:
-1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, Amazon Bedrock, or Ollama)
-2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none)
+1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, Amazon Bedrock, OpenRouter, or Ollama)
+2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none, OpenRouter needs `OPENROUTER_API_KEY`)
 3. **Choosing a model** from the provider's available models
 
 The key is stored persistently in `~/.local/share/ragent/ragent.db` so you only need to
@@ -74,7 +74,24 @@ export GEMINI_API_KEY="AIza..."
 ragent auth gemini AIza-your-key-here
 ```
 
-### Option D: GitHub Copilot (No Extra API Key)
+### Option D: OpenRouter (200+ models with one key)
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+# or store persistently:
+ragent auth openrouter sk-or-your-key-here
+```
+
+OpenRouter exposes vendor models behind an OpenAI-compatible endpoint, so
+model ids keep their vendor slug:
+
+```bash
+ragent run --model openrouter/anthropic/claude-sonnet-4 "Explain this code"
+ragent run --model openrouter/openai/gpt-4o "Write a Rust test"
+ragent run --model openrouter/deepseek/deepseek-chat "Summarise this file"
+```
+
+### Option E: GitHub Copilot (No Extra API Key)
 
 If you have an active [GitHub Copilot](https://github.com/features/copilot)
 subscription and the extension installed in VS Code or JetBrains, ragent will
@@ -88,7 +105,7 @@ ragent run --model copilot/gpt-4o "Explain this code"
 export GITHUB_COPILOT_TOKEN="ghu_your_token_here"
 ```
 
-### Option E: Hugging Face
+### Option F: Hugging Face
 
 ```bash
 export HF_TOKEN="hf_..."
@@ -106,7 +123,7 @@ ragent run --model huggingface/meta-llama/Llama-3.1-70B-Instruct "Hello world"
 # For dedicated Inference Endpoints, set base_url in ragent.json
 ```
 
-### Option F: Ollama (Local — No API Key Required)
+### Option G: Ollama (Local — No API Key Required)
 
 ```bash
 # Install Ollama: https://ollama.com/download
@@ -118,7 +135,7 @@ ollama pull llama3.2  # Pull a model
 export OLLAMA_HOST="http://your-server:11434"
 ```
 
-### Option G: Amazon Bedrock (AWS Credentials)
+### Option H: Amazon Bedrock (AWS Credentials)
 
 ```bash
 # Set AWS credentials (or use an AWS profile)
@@ -146,7 +163,7 @@ Bedrock supports both Anthropic Claude models (via Messages API) and
 non-Anthropic models like Amazon Nova and Meta Llama (via Converse API).
 No API key is needed — authentication uses your AWS credentials.
 
-**API key resolution order:** environment variable → provider auto-discovery (Copilot) → database.
+**API key resolution order:** environment variable → provider auto-discovery (Copilot, OpenRouter discovery without chat) → database.
 
 ---
 
@@ -240,6 +257,9 @@ ragent run --yes "Fix the failing test in src/lib.rs"
 # Show all registered models
 ragent models
 
+# Show only OpenRouter models
+ragent models --provider openrouter
+
 # Show only Ollama models (queries the running server)
 ragent models --provider ollama
 
@@ -267,6 +287,7 @@ ragent models --provider gemini
 | OpenAI     | `gpt-4o`                        | 128K     | $2.50 / $10              |
 | OpenAI     | `gpt-4o-mini`                   | 128K     | $0.15 / $0.60            |
 | Ollama     | *(discovered from server)*      | varies   | Free (local)             |
+| OpenRouter | *(discovered from API)*         | varies   | Per-model from catalog   |
 
 ---
 
@@ -314,6 +335,20 @@ Ragent loads configuration from multiple sources (last wins):
             "thinking": {
               "enabled": true,
               "level": "high"
+            }
+          }
+        }
+      },
+      "openrouter": {
+        "api": {
+          "base_url": "https://openrouter.ai"
+        },
+        "models": {
+          "anthropic/claude-sonnet-4": {
+            "name": "Claude Sonnet 4 (via OpenRouter)",
+            "thinking": {
+              "enabled": true,
+              "level": "medium"
             }
           }
         }

@@ -4,7 +4,7 @@
 //! These helpers were previously inline in `web_gatherer.rs`.
 
 #[allow(dead_code)]
-pub fn compute_relevance_label(
+pub(crate) fn compute_relevance_label(
     query: &str,
     title: &str,
     snippet: &str,
@@ -61,7 +61,7 @@ pub fn compute_relevance_label(
 ///
 /// This is intentionally exposed at module scope so benchmarks and unit tests
 /// can measure it in isolation (Milestone B-003).
-pub fn normalize_query_terms(query: &str) -> Vec<String> {
+pub(crate) fn normalize_query_terms(query: &str) -> Vec<String> {
     let query_lc = query.to_lowercase();
     query_lc
         .split_whitespace()
@@ -74,6 +74,11 @@ pub fn normalize_query_terms(query: &str) -> Vec<String> {
 }
 
 /// Case-insensitive stopword check for an already-lowercased token.
+///
+/// Returns true for common English stopwords that should not dilute the
+/// relevance ratio. Removing them prevents a question like "What is Rust?"
+/// from being scored as low relevance just because the auxiliary words do not
+/// appear in the title or snippet.
 fn is_stopword_lc(word: &str) -> bool {
     const STOPWORDS: &[&str] = &[
         "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
@@ -84,13 +89,4 @@ fn is_stopword_lc(word: &str) -> bool {
         "there", "them", "his", "her", "its", "our", "your", "my", "me", "him", "us",
     ];
     STOPWORDS.contains(&word)
-}
-
-/// Returns true for common English stopwords that should not dilute the
-/// relevance ratio. Removing them prevents a question like "What is Rust?"
-/// from being scored as low relevance just because the auxiliary words do not
-/// appear in the title or snippet.
-#[allow(dead_code)]
-fn is_stopword(word: &str) -> bool {
-    is_stopword_lc(&word.to_lowercase())
 }

@@ -150,7 +150,7 @@ different merge strategies:
 | ------- | -------- |
 | `username`, API keys, `gitlab`, `channels`, `gmail` | Overlay overrides base when `Some`. |
 | `defaultAgent` | Overlay overrides when explicitly set or different from default. |
-| `provider` | Deep merge per provider key: models, API, and thinking are merged so partial overlays do not discard lower-layer defaults. |
+| `provider` | Deep merge per provider key: provider-level `api`, `env`, `thinking`, and `options` are replaced when the overlay specifies them, while `models` entries are merged per-model-id so a partial overlay (e.g. `provider.openrouter.models."anthropic/claude-sonnet-4".thinking`) does not discard lower-layer fields such as `name` or `capabilities`. Model-level `thinking` overrides provider-level `thinking`. |
 | `agent`, `command`, `mcp` | Per-key overlay replaces base entry. |
 | `permission`, `instructions`, `skill_dirs`, `hooks` | Append (union). |
 | `bash.allowlist`, `bash.denylist` | Union (deduplicated). |

@@ -159,6 +159,12 @@ impl GatherObserver for StateGatherForwarder {
                     error: String::new(),
                 });
             }
+            GatherEvent::SourceExcluded { url, reason } => {
+                // Policy rejections are not fetch failures: forward only the
+                // dedicated exclusion event so failure counters stay clean.
+                self.observer
+                    .on_event(SessionEvent::WebSourceExcluded { url, reason });
+            }
             GatherEvent::QueriesDecomposed { queries } => {
                 self.observer
                     .on_event(SessionEvent::QueriesDecomposed { queries });

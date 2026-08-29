@@ -10,7 +10,7 @@
 const MIN_TOPIC_WORDS: usize = 3;
 
 /// Maximum number of characters a derived topic may span.
-pub const MAX_DERIVED_TOPIC_CHARS: usize = 240;
+pub(crate) const MAX_DERIVED_TOPIC_CHARS: usize = 240;
 
 /// Maximum number of characters a body-derived description may span.
 const MAX_BODY_DESCRIPTION_CHARS: usize = 140;
@@ -26,7 +26,7 @@ const MAX_BODY_DESCRIPTION_CHARS: usize = 140;
 /// the first substantive sentence of the body is used alone. Returns `None`
 /// only when neither source yields usable text, so the caller can abort cleanly
 /// instead of using a URL-only topic.
-pub fn derive_topic_from_url_body(
+pub(crate) fn derive_topic_from_url_body(
     src_body: &str,
     src_title: &str,
     _src_url: &str,
@@ -60,7 +60,7 @@ pub fn derive_topic_from_url_body(
 /// extractor could not isolate the article text and the tool fell back to
 /// html2text, this helper skips link-only lines, headings of tables of contents,
 /// update banners, and other common page noise.
-pub fn derive_topic_from_body(cleaned_body: &str) -> String {
+pub(crate) fn derive_topic_from_body(cleaned_body: &str) -> String {
     let trimmed = cleaned_body.trim();
     if trimmed.is_empty() {
         return String::new();
@@ -93,7 +93,7 @@ pub fn derive_topic_from_body(cleaned_body: &str) -> String {
 /// subtitle for a title-derived topic. The sentence must be substantive (at
 /// least `MIN_BODY_DESCRIPTION_WORDS`), must not duplicate the page title, and
 /// is truncated to [`MAX_BODY_DESCRIPTION_CHARS`].
-pub fn derive_topic_description(cleaned_body: &str, title: Option<&str>) -> Option<String> {
+pub(crate) fn derive_topic_description(cleaned_body: &str, title: Option<&str>) -> Option<String> {
     const MIN_BODY_DESCRIPTION_WORDS: usize = 6;
 
     let trimmed = cleaned_body.trim();
@@ -142,7 +142,7 @@ pub fn derive_topic_description(cleaned_body: &str, title: Option<&str>) -> Opti
 /// Return true when `needle` appears as a contiguous sequence of words inside
 /// `haystack`, after normalising whitespace. Used to avoid appending a body
 /// sentence that merely repeats the page title.
-pub fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
+pub(crate) fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
     let hay_words: Vec<&str> = haystack.split_whitespace().collect();
     let needle_words: Vec<&str> = needle.split_whitespace().collect();
     if needle_words.is_empty() || hay_words.len() < needle_words.len() {
@@ -155,7 +155,7 @@ pub fn fuzzy_contains(haystack: &str, needle: &str) -> bool {
 
 /// Strip markdown heading/list markers, split glued-together words, and remove
 /// leading site-chrome tokens from a candidate topic fragment.
-pub fn clean_topic_fragment(s: &str) -> String {
+pub(crate) fn clean_topic_fragment(s: &str) -> String {
     let mut out = s.trim().to_string();
     while out.starts_with('#') {
         out = out.trim_start_matches('#').trim_start().to_string();
@@ -189,7 +189,7 @@ const TITLE_SEPARATORS: &[char] = &['|', '-', '—', '–', '/', '>', '»', '·'
 /// leading site-brand tokens ("`InfoQ` Homepage Articles ...") and trailing
 /// site names ("... | `InfoQ`"). Each segment has nav words, glued tokens, and
 /// short/generic noise removed. Returns `None` when no segment is meaningful.
-pub fn clean_site_title(title: &str) -> Option<String> {
+pub(crate) fn clean_site_title(title: &str) -> Option<String> {
     let mut best: Option<String> = None;
     let mut best_words = 0;
 
@@ -370,7 +370,7 @@ fn is_topic_noise(cleaned: &str, original: &str) -> bool {
 ///
 /// Acronyms that end with a lowercase plural suffix (e.g. "LCMs", "APIs") are
 /// kept intact rather than split into "LC Ms".
-pub fn split_glued_words(s: &str) -> String {
+pub(crate) fn split_glued_words(s: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut out = String::with_capacity(s.len() + chars.len());
     for (i, c) in chars.iter().enumerate() {
@@ -416,7 +416,7 @@ fn should_split_topic_words(
 }
 
 /// Collapse runs of whitespace into a single space and trim the result.
-pub fn collapse_whitespace(s: &str) -> String {
+pub(crate) fn collapse_whitespace(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -429,7 +429,7 @@ fn remove_markdown_links(s: &str) -> String {
 }
 
 /// Truncate `s` to at most `max_chars` characters on a UTF-8 char boundary.
-pub fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_at_char_boundary(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
     }

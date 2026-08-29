@@ -161,7 +161,7 @@ pub fn find_project_agents_dir(working_dir: &Path) -> Option<PathBuf> {
         if candidate.is_dir() {
             return Some(candidate);
         }
-        // Try just .ragent existing (agents subdir may not exist yet — skip upward)
+        // `parent()` returning the same directory (filesystem root) means we are done.
         match current.parent() {
             Some(parent) if parent != current => current = parent,
             _ => return None,
@@ -237,7 +237,9 @@ fn load_agent_file(path: &Path, is_project_local: bool) -> Result<CustomAgentDef
         serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {e}"))?;
 
     record_to_agent_info(&record, path).map(|agent_info| CustomAgentDef {
-        record: record.clone(),
+        // `record` is moved into the struct, avoiding a full clone of the
+        // parsed record per agent file.
+        record,
         source_path: path.to_path_buf(),
         agent_info,
         is_project_local,
@@ -331,6 +333,11 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
     };
 
     // Synthesise a minimal OASF record so the rest of the pipeline is happy.
+    // A serialisation failure surfaces the real cause instead of writing a
+    // `Value::Null` payload that would fail later with a misleading
+    // "invalid payload" message.
+    let payload_value = serde_json::to_value(&payload)
+        .map_err(|e| format!("serialise agent payload failed: {e}"))?;
     let record = OasfAgentRecord {
         name: fm.name.clone(),
         description: fm.description,
@@ -343,7 +350,7 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
         locators: Vec::new(),
         modules: vec![crate::agent::oasf::OasfModule {
             module_type: crate::agent::oasf::RAGENT_MODULE_TYPE.to_string(),
-            payload: serde_json::to_value(&payload).unwrap_or_default(),
+            payload: payload_value,
         }],
     };
 
@@ -406,6 +413,7 @@ pub fn record_to_agent_info(
         .find(|m| m.module_type == RAGENT_MODULE_TYPE)
         .ok_or_else(|| format!("missing required module type '{RAGENT_MODULE_TYPE}'"))?;
 
+    // `T::deserialize(&Value)` borrows instead of deep-cloning the payload.
     let payload: RagentAgentPayload = serde_json::from_value(ragent_module.payload.clone())
         .map_err(|e| format!("invalid '{RAGENT_MODULE_TYPE}' payload: {e}"))?;
 

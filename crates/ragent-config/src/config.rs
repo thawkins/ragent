@@ -1245,6 +1245,13 @@ impl Config {
     /// Load configuration with precedence:
     /// compiled defaults → global → project → env var → inline content
     ///
+    /// Provider configurations are merged deeply: each provider block is merged
+    /// per-provider, and model-level entries inside `provider.<id>.models` are
+    /// merged per-model-id so that lower-precedence settings (e.g. a global
+    /// `provider.openrouter.models.anthropic/claude-sonnet-4.name`) are preserved
+    /// when a project config only overrides a single field (e.g. `thinking`).
+    /// Model-level thinking overrides the provider-level default.
+    ///
     /// # Errors
     ///
     /// Returns an error if a config file cannot be read or contains invalid JSON.
@@ -2042,21 +2049,45 @@ impl Config {
         if overlay.thinking.is_some() {
             base.thinking = overlay.thinking;
         }
-        // Provider-level api/env/models/options come from the overlay if it
-        // specifies them; the base value is preserved otherwise.  Deep
-        // model-level merge happens at the `provider.<id>.models.<model>` level
-        // when callers go through `Config::merge`.
+        // Provider-level api/env/options come from the overlay if it
+        // specifies them; the base value is preserved otherwise.
         if overlay.api.is_some() {
             base.api = overlay.api;
         }
         if !overlay.env.is_empty() {
             base.env = overlay.env;
         }
-        if !overlay.models.is_empty() {
-            base.models = overlay.models;
-        }
         if !overlay.options.is_empty() {
             base.options = overlay.options;
+        }
+        // Deep-merge model-level entries so a partial overlay (e.g. project
+        // config setting `provider.openrouter.models.<id>.thinking`) does not
+        // wipe out lower-precedence model fields such as `name` or
+        // `capabilities`.  For each model id present in the overlay, overlay
+        // fields take precedence; models only in the base are preserved.
+        for (model_id, overlay_model) in overlay.models {
+            let merged = if let Some(base_model) = base.models.remove(&model_id) {
+                Self::merge_model_config(base_model, overlay_model)
+            } else {
+                overlay_model
+            };
+            base.models.insert(model_id, merged);
+        }
+        base
+    }
+
+    fn merge_model_config(mut base: ModelConfig, overlay: ModelConfig) -> ModelConfig {
+        if overlay.name.is_some() {
+            base.name = overlay.name;
+        }
+        if overlay.cost.is_some() {
+            base.cost = overlay.cost;
+        }
+        if overlay.capabilities.is_some() {
+            base.capabilities = overlay.capabilities;
+        }
+        if overlay.thinking.is_some() {
+            base.thinking = overlay.thinking;
         }
         base
     }
@@ -2064,6 +2095,41 @@ impl Config {
     /// Returns the configured thinking default for the given provider/model.
     ///
     /// Model-level configuration overrides provider-level configuration.
+    /// This is the resolved fallback used when the user has not made a
+    /// per-request `/thinking` selection and the model discovery data did not
+    /// already attach a thinking configuration.
+    ///
+    /// Model ids are matched exactly as they appear in `ragent.json`, including
+    /// vendor slugs such as `openrouter/anthropic/claude-sonnet-4`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_config::Config;
+    /// use ragent_types::{ThinkingConfig, ThinkingLevel};
+    ///
+    /// let config: Config = serde_json::from_str(r#"{
+    ///     "provider": {
+    ///         "openrouter": {
+    ///             "thinking": { "enabled": true, "level": "low" },
+    ///             "models": {
+    ///                 "openrouter/anthropic/claude-sonnet-4": {
+    ///                     "thinking": { "enabled": true, "level": "high" }
+    ///                 }
+    ///             }
+    ///         }
+    ///     }
+    /// }"#).unwrap();
+    ///
+    /// assert_eq!(
+    ///     config.thinking_config_for_model("openrouter", "openrouter/anthropic/claude-sonnet-4"),
+    ///     Some(ThinkingConfig::new(ThinkingLevel::High))
+    /// );
+    /// assert_eq!(
+    ///     config.thinking_config_for_model("openrouter", "openrouter/anthropic/claude-3-5-haiku"),
+    ///     Some(ThinkingConfig::new(ThinkingLevel::Low))
+    /// );
+    /// ```
     #[must_use]
     pub fn thinking_config_for_model(
         &self,

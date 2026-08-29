@@ -340,20 +340,15 @@ impl FtsIndex {
     fn open_or_create(path: &Path, schema: &Schema) -> Result<Index> {
         let dir = tantivy::directory::MmapDirectory::open(path)
             .with_context(|| format!("cannot open tantivy dir: {}", path.display()))?;
-        if let Ok(idx) = Index::open(dir) {
-            // Validate that the on-disk schema matches our expected schema.
-            // If field count differs, the index was created by a different code version;
-            // delete and recreate to avoid silent field-ID mismatches.
-            let disk_schema = idx.schema();
-            let expected_field_count = schema.fields().count();
-            let actual_field_count = disk_schema.fields().count();
-            if actual_field_count != expected_field_count {
+        let idx = match Index::open(dir) {
+            Ok(idx) => idx,
+            Err(e) => {
+                // Preserve the real failure reason (corruption, version
+                // mismatch, mmap error) before falling into the create branch.
                 tracing::warn!(
-                    "FTS schema mismatch: expected {} fields, found {}; recreating index",
-                    expected_field_count,
-                    actual_field_count,
+                    "existing FTS index at {} unreadable ({e}); recreating",
+                    path.display()
                 );
-                drop(idx);
                 // Clear the directory and recreate.
                 for entry in std::fs::read_dir(path)?.flatten() {
                     let _ = std::fs::remove_file(entry.path());
@@ -363,13 +358,30 @@ impl FtsIndex {
                 return Index::create(dir2, schema.clone(), Default::default())
                     .context("cannot create tantivy index");
             }
-            Ok(idx)
-        } else {
+        };
+        // Validate that the on-disk schema matches our expected schema.
+        // If field count differs, the index was created by a different code version;
+        // delete and recreate to avoid silent field-ID mismatches.
+        let disk_schema = idx.schema();
+        let expected_field_count = schema.fields().count();
+        let actual_field_count = disk_schema.fields().count();
+        if actual_field_count != expected_field_count {
+            tracing::warn!(
+                "FTS schema mismatch: expected {} fields, found {}; recreating index",
+                expected_field_count,
+                actual_field_count,
+            );
+            drop(idx);
+            // Clear the directory and recreate.
+            for entry in std::fs::read_dir(path)?.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
             let dir2 = tantivy::directory::MmapDirectory::open(path)
                 .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
-            Index::create(dir2, schema.clone(), Default::default())
-                .context("cannot create tantivy index")
+            return Index::create(dir2, schema.clone(), Default::default())
+                .context("cannot create tantivy index");
         }
+        Ok(idx)
     }
 
     fn from_index(index: Index, schema: Schema) -> Result<Self> {

@@ -246,20 +246,20 @@ impl Tool for GrepTool {
         .context("Grep search task panicked")?;
 
         // The walker's parallel closure holds clones of `results`; after
-        // `spawn_blocking` returns those are dropped, so unwrap normally
-        // succeeds. Fall back to locking+cloning the inner value if a stray
-        // owner lingers (a benign, timing-dependent condition) rather than
-        // failing the whole grep call.
-        let results = Arc::try_unwrap(results)
-            .map(|m| {
-                m.into_inner()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-            })
-            .unwrap_or_else(|arc| {
-                arc.lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone()
-            });
+        // `spawn_blocking` returns (all walker threads joined) this arc is the
+        // sole owner, so try_unwrap always succeeds here.
+        let results_mutex = match Arc::try_unwrap(results) {
+            Ok(mutex) => mutex,
+            // The sole-owner invariant above makes this branch unreachable; if
+            // it ever fires, keep the shared inner value by draining it.
+            Err(_arc) => {
+                debug_assert!(false, "grep results arc unexpectedly shared");
+                std::sync::Mutex::new(Vec::new())
+            }
+        };
+        let results = results_mutex
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let files_searched = *files_searched
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

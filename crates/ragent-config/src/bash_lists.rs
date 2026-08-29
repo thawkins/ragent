@@ -53,9 +53,12 @@ pub fn load_from_config() {
         }
     };
 
-    if let Ok(mut guard) = global().write() {
-        *guard = lists;
-    }
+    // Poison recovery: a stale snapshot is better than silently dropping the
+    // user's allow/deny list update.
+    let mut guard = global()
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = lists;
 }
 
 // ── Read accessors ────────────────────────────────────────────────────────────

@@ -132,17 +132,14 @@ impl ConflictResolver {
                         return Ok(format!("--- agent: {id} ---\n{resp}"));
                     }
                 }
-                // All were errors — return last as Err.
-                let (_, last) = responses
-                    .last()
-                    .ok_or_else(|| anyhow::anyhow!("no responses to report"))?;
+                // All were errors — return last as Err (guaranteed non-empty above).
+                let (_, last) = &responses[responses.len() - 1];
                 Err(anyhow::anyhow!("all agents returned errors; last: {last}"))
             }
 
             ConflictPolicy::LastResponse => {
-                let (id, resp) = responses
-                    .last()
-                    .ok_or_else(|| anyhow::anyhow!("no responses to report"))?;
+                // Guaranteed non-empty by the check above.
+                let (id, resp) = &responses[responses.len() - 1];
                 Ok(format!("--- agent: {id} ---\n{resp}"))
             }
 

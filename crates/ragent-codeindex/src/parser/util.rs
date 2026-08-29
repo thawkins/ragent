@@ -42,14 +42,22 @@ pub fn build_qname(scope: &[String], name: &str, sep: &str) -> String {
 ///
 /// # Expansion
 ///
-/// Expands to two associated functions on the struct:
+/// Expands to two associated functions on the struct. The `create_parser`
+/// body runs once per process inside the `OnceLock` initializer; a grammar
+/// load failure panics there because every subsequent parse would fail
+/// identically (the error is inherent to the linked grammar, not to user
+/// input), while the returned guard and parse results flow through `Result`.
 ///
 /// ```ignore
-/// fn create_parser() -> Result<Parser> {
-///     let mut parser = Parser::new();
-///     let language = $language;
-///     parser.set_language(&language.into()).context($grammar_err)?;
-///     Ok(parser)
+/// fn create_parser() -> Result<MutexGuard<'static, Parser>> {
+///     static CACHE: OnceLock<Mutex<Parser>> = OnceLock::new();
+///     let mutex = CACHE.get_or_init(|| {
+///         let mut parser = Parser::new();
+///         let language = $language;
+///         parser.set_language(&language.into()).expect($grammar_err);
+///         std::sync::Mutex::new(parser)
+///     });
+///     Ok(mutex.lock().unwrap_or_else(PoisonError::into_inner))
 /// }
 ///
 /// fn parse_tree(source: &[u8]) -> Result<Tree> {

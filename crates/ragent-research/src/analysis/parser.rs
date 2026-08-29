@@ -9,7 +9,7 @@ use crate::document::CrossReference;
 use crate::item::strip_control_chars;
 use regex::Regex;
 
-pub fn parse_analysis_response(text: &str) -> AnalysisResult {
+pub(crate) fn parse_analysis_response(text: &str) -> AnalysisResult {
     let mut result = AnalysisResult::default();
     let sections = split_sections(text);
     for (title, body) in sections {
@@ -51,7 +51,7 @@ pub fn parse_analysis_response(text: &str) -> AnalysisResult {
 /// [`AnalysisOutcome::Llm`]. Provider-level errors are surfaced by
 /// [`LlmAnalysisEngine::analyze_with_outcome`] as `Err`, which `session.rs`
 /// maps to [`crate::session::SynthesizeOutcome::FallbackError`].
-pub fn parse_analysis_response_with_outcome(
+pub(crate) fn parse_analysis_response_with_outcome(
     text: &str,
     sources: &[SourceBody],
 ) -> (AnalysisResult, AnalysisOutcome) {
@@ -132,7 +132,7 @@ pub fn parse_analysis_response_with_outcome(
 /// Returns a list of human-readable warning strings (one per invalid claim)
 /// so the caller can log them. Findings that pass validation are left
 /// untouched.
-pub fn validate_citations_and_dates(
+pub(crate) fn validate_citations_and_dates(
     findings: &mut [String],
     sources: &[SourceBody],
 ) -> Vec<String> {
@@ -202,7 +202,7 @@ pub fn validate_citations_and_dates(
 /// Return `true` when `result` should be treated as a malformed LLM response
 /// (FR-005): empty findings, any finding missing one of the four required
 /// bold labels, or any finding that contains no `[#N]` citation.
-pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
+pub(crate) fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
     if result.findings.is_empty() {
         return true;
     }
@@ -248,7 +248,7 @@ pub fn is_malformed_analysis_result(result: &AnalysisResult) -> bool {
 /// 4. If no candidate text could be extracted, return a single placeholder
 ///    finding that quotes the raw response (truncated) so the research item
 ///    remains usable.
-pub fn mechanical_fallback_findings(text: &str) -> Vec<String> {
+pub(crate) fn mechanical_fallback_findings(text: &str) -> Vec<String> {
     let candidates = extract_candidate_findings(text);
     let required = [
         "**Observation:**",
@@ -372,7 +372,7 @@ fn split_sections(text: &str) -> Vec<(String, String)> {
 /// * `1. First finding.` — number, dot, space, content on the same line
 /// * `1.` followed by blank line and paragraphs — number on its own line,
 ///   content starts on subsequent lines
-pub fn parse_numbered_list(body: &str) -> Vec<String> {
+pub(crate) fn parse_numbered_list(body: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut current = String::new();
     for line in body.lines() {
@@ -422,7 +422,7 @@ pub fn parse_numbered_list(body: &str) -> Vec<String> {
 /// Cycles (e.g. Finding 2 depends on Finding 3 and Finding 3 depends on
 /// Finding 2) are broken by falling back to the original order for the involved
 /// items.
-pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
+pub(crate) fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
     if findings.len() <= 1 {
         return findings.to_vec();
     }
@@ -523,7 +523,7 @@ pub fn reorder_findings_by_dependency(findings: &[String]) -> Vec<String> {
 }
 
 /// Parse a bullet list (`* ...` or `- ...`) into plain item strings.
-pub fn parse_bullet_list(body: &str) -> Vec<String> {
+pub(crate) fn parse_bullet_list(body: &str) -> Vec<String> {
     let mut items = Vec::new();
     let mut current = String::new();
     for line in body.lines() {
@@ -546,7 +546,7 @@ pub fn parse_bullet_list(body: &str) -> Vec<String> {
 
 /// Parse cross-reference bullets into [`CrossReference`] structs. Expected
 /// format: `* `path` — note` or `* path — note`.
-pub fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
+pub(crate) fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
     let mut out = Vec::new();
     for item in parse_bullet_list(body) {
         let (path, relevance) = if let Some(idx) = item.find(" — ") {
@@ -566,7 +566,7 @@ pub fn parse_cross_reference_list(body: &str) -> Vec<CrossReference> {
 
 /// Truncate a source body to a character budget so the prompt fits in common
 /// context windows. The limit is approximate and errs on the side of inclusion.
-pub fn truncate_body(body: &str, max_chars: usize) -> String {
+pub(crate) fn truncate_body(body: &str, max_chars: usize) -> String {
     if body.chars().count() <= max_chars {
         return body.to_string();
     }

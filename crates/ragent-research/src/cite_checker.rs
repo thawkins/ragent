@@ -87,7 +87,7 @@ pub fn check_citations(
                         "CITATION_VERIFICATION_FAILED: {source_label} in {context} references an unknown source (only {} source(s) available).",
                         sources.len()
                     );
-                    failed_claims.push(claim.clone());
+                    failed_claims.push(claim);
                     issues.push(format!(
                         "{source_label} in {context}: unknown source index {index}"
                     ));
@@ -101,7 +101,7 @@ pub fn check_citations(
                         let claim = format!(
                             "CITATION_VERIFICATION_FAILED: {source_label} in {context} points to a source with no captured body.",
                         );
-                        failed_claims.push(claim.clone());
+                        failed_claims.push(claim);
                         issues.push(format!(
                             "{source_label} in {context}: source {index} has no captured body"
                         ));

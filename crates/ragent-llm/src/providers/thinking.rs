@@ -41,10 +41,15 @@ pub fn full_reasoning_levels() -> Vec<ThinkingLevel> {
     ])
 }
 
-/// Returns the canonical two-state thinking-level set for boolean-thinking
-/// providers such as Ollama.
+/// Returns the canonical thinking-level set exposed for Ollama-family models.
+///
+/// Ollama is a boolean thinker: the wire parameter is simply `think: true` or
+/// `think: false`. We still present the full user-facing effort range
+/// (`Auto`/`Off`/`Low`/`Medium`/`High`) because model-name detection of
+/// thinking support is unreliable and users want to pick a level. Any non-`Off`
+/// level is mapped to `think: true` at request time.
 pub fn binary_thinking_levels() -> Vec<ThinkingLevel> {
-    normalize_levels([ThinkingLevel::Auto, ThinkingLevel::Off])
+    full_reasoning_levels()
 }
 
 /// Returns the thinking levels supported by Anthropic models known to expose
@@ -148,6 +153,231 @@ fn normalize_reasoning_effort(raw: &str) -> Option<&'static str> {
     }
 }
 
+/// Builds OpenRouter's `reasoning` payload from a typed request or legacy
+/// options.
+///
+/// OpenRouter's native reasoning control (used by models such as
+/// `anthropic/claude-sonnet-4` and `openai/o3-mini` when routed through it) is
+/// a `reasoning` object with two optional fields:
+///
+/// - `effort`: `"low"`, `"medium"`, `"high"`, or `"none"`
+/// - `max_tokens`: explicit reasoning-budget ceiling (mirrors Anthropic
+///   `budget_tokens` and is converted from `ThinkingConfig::budget_tokens`).
+///
+/// This table drives FR-018:
+///
+/// | `thinking.enabled` | `thinking.level` | `reasoning.effort` | `reasoning.max_tokens` |
+/// |--------------------|------------------|--------------------|------------------------|
+/// | `false` / `Off`    | any              | `"none"`           | `None`                 |
+/// | `true`             | `Auto`           | omitted            | `budget_tokens`        |
+/// | `true`             | `Off`            | `"none"`           | `None`                 |
+/// | `true`             | `Low`            | `"low"`            | `budget_tokens`        |
+/// | `true`             | `Medium`         | `"medium"`         | `budget_tokens`        |
+/// | `true`             | `High`           | `"high"`           | `budget_tokens`        |
+///
+/// When `budget_tokens` is set it is always emitted, matching the treatment of
+/// Anthropic's `thinking.budget_tokens`.  A missing budget leaves `max_tokens`
+/// unset so the upstream model uses its default.
+///
+/// Legacy fallback keys are `reasoning_effort`, `reasoning_level`, and the
+/// generic `thinking` string option.
+pub fn openrouter_reasoning_payload_from_request(request: &ChatRequest) -> Option<Value> {
+    let thinking = request
+        .thinking
+        .clone()
+        .or_else(|| {
+            request
+                .options
+                .get("reasoning_effort")
+                .or_else(|| request.options.get("reasoning_level"))
+                .and_then(Value::as_str)
+                .and_then(|raw| {
+                    normalize_reasoning_effort(raw).and_then(|effort| match effort {
+                        "none" | "off" => Some(ThinkingConfig::off()),
+                        "low" => Some(ThinkingConfig::new(ThinkingLevel::Low)),
+                        "medium" => Some(ThinkingConfig::new(ThinkingLevel::Medium)),
+                        "high" => Some(ThinkingConfig::new(ThinkingLevel::High)),
+                        _ => None,
+                    })
+                })
+        })
+        .or_else(|| parse_legacy_thinking_option(&request.options))?;
+
+    // If the user explicitly disabled thinking, emit a clean {"effort": "none"}
+    // so the model skips the reasoning pass instead of using its default.
+    if !thinking.is_effective_enabled() {
+        return Some(json!({ "effort": "none" }));
+    }
+
+    let effort = core_level_effort(thinking.level);
+    let mut payload = json!({});
+    if let Some(effort) = effort {
+        payload["effort"] = json!(effort);
+    }
+    if let Some(budget_tokens) = thinking.budget_tokens {
+        payload["max_tokens"] = json!(budget_tokens);
+    }
+
+    if payload.as_object().is_some_and(|o| !o.is_empty()) {
+        Some(payload)
+    } else {
+        // Auto with no budget means "let the model decide"; omit the reasoning
+        // object entirely to avoid constraining the upstream provider.
+        None
+    }
+}
+
+#[cfg(test)]
+mod openrouter_reasoning_tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::llm::{ChatContent, ChatMessage, ChatRequest};
+    use ragent_types::{ThinkingConfig, ThinkingLevel};
+    use std::sync::Arc;
+
+    fn make_request() -> ChatRequest {
+        ChatRequest {
+            model: "openrouter/anthropic/claude-sonnet-4".to_string(),
+            messages: Arc::new(vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hi".to_string()),
+            }]),
+            tools: Arc::new(vec![]),
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options: std::collections::HashMap::new(),
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: None,
+            thinking: None,
+        }
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_disabled() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig::off());
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "none" }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_auto_no_budget_omits_payload() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig::new(ThinkingLevel::Auto));
+        assert_eq!(openrouter_reasoning_payload_from_request(&request), None);
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_auto_with_budget_sets_max_tokens() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig {
+            enabled: true,
+            level: ThinkingLevel::Auto,
+            budget_tokens: Some(4096),
+            display: None,
+        });
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "max_tokens": 4096 }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_low_sets_effort() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig::new(ThinkingLevel::Low));
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "low" }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_medium_sets_effort_and_budget() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig {
+            enabled: true,
+            level: ThinkingLevel::Medium,
+            budget_tokens: Some(8192),
+            display: None,
+        });
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "medium", "max_tokens": 8192 }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_high_sets_effort_and_budget() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig {
+            enabled: true,
+            level: ThinkingLevel::High,
+            budget_tokens: Some(16_384),
+            display: None,
+        });
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "high", "max_tokens": 16_384 }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_prefers_typed_over_legacy_options() {
+        let mut request = make_request();
+        request.thinking = Some(ThinkingConfig::new(ThinkingLevel::High));
+        request
+            .options
+            .insert("reasoning_effort".to_string(), json!("low"));
+        let payload = openrouter_reasoning_payload_from_request(&request).unwrap();
+        assert_eq!(payload["effort"], "high");
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_legacy_effort_fallback() {
+        let mut request = make_request();
+        request
+            .options
+            .insert("reasoning_effort".to_string(), json!("medium"));
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "medium" }))
+        );
+    }
+
+    #[test]
+    fn test_openrouter_reasoning_legacy_thinking_string_fallback() {
+        let mut request = make_request();
+        request
+            .options
+            .insert("thinking".to_string(), json!("disabled"));
+        assert_eq!(
+            openrouter_reasoning_payload_from_request(&request),
+            Some(json!({ "effort": "none" }))
+        );
+    }
+}
+
+/// Maps the `Low`/`Medium`/`High` levels to their shared effort string.
+///
+/// Every provider payload table (OpenAI `reasoning_effort`, Anthropic
+/// `effort`, Gemini `thinkingLevel`) uses the same three strings; keep them
+/// single-sourced so adding a level cannot drift between providers.
+fn core_level_effort(level: ThinkingLevel) -> Option<&'static str> {
+    match level {
+        ThinkingLevel::Low => Some("low"),
+        ThinkingLevel::Medium => Some("medium"),
+        ThinkingLevel::High => Some("high"),
+        ThinkingLevel::Auto | ThinkingLevel::Off => None,
+    }
+}
+
 fn map_openai_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str> {
     if !thinking.is_effective_enabled() {
         return Some("none");
@@ -156,9 +386,7 @@ fn map_openai_reasoning_effort(thinking: &ThinkingConfig) -> Option<&'static str
     match thinking.level {
         ThinkingLevel::Auto => None,
         ThinkingLevel::Off => Some("none"),
-        ThinkingLevel::Low => Some("low"),
-        ThinkingLevel::Medium => Some("medium"),
-        ThinkingLevel::High => Some("high"),
+        level => core_level_effort(level),
     }
 }
 
@@ -233,12 +461,7 @@ pub fn anthropic_thinking_payload_from_request(request: &ChatRequest) -> Option<
         "type": "adaptive",
     });
 
-    if let Some(effort) = match thinking.level {
-        ThinkingLevel::Low => Some("low"),
-        ThinkingLevel::Medium => Some("medium"),
-        ThinkingLevel::High => Some("high"),
-        ThinkingLevel::Auto | ThinkingLevel::Off => None,
-    } {
+    if let Some(effort) = core_level_effort(thinking.level) {
         payload["effort"] = json!(effort);
     }
 
@@ -283,9 +506,7 @@ pub fn gemini_thinking_config_from_request(request: &ChatRequest) -> Option<Valu
         match thinking.level {
             ThinkingLevel::Auto => "auto",
             ThinkingLevel::Off => "minimal",
-            ThinkingLevel::Low => "low",
-            ThinkingLevel::Medium => "medium",
-            ThinkingLevel::High => "high",
+            level => core_level_effort(level).unwrap_or("minimal"),
         }
     };
 

@@ -1,3 +1,5 @@
+//! Tests for thinking configuration in `Config`.
+
 use ragent_config::Config;
 use ragent_types::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
 
@@ -224,4 +226,143 @@ fn test_merge_preserves_lower_precedence_provider_model_thinking() {
             .and_then(|api| api.base_url.as_deref()),
         Some("https://example.invalid")
     );
+}
+
+#[test]
+fn test_openrouter_model_thinking_overrides_provider() {
+    let config: Config = serde_json::from_str(
+        r#"{
+            "provider": {
+                "openrouter": {
+                    "api": { "base_url": "https://openrouter.ai" },
+                    "thinking": {
+                        "enabled": true,
+                        "level": "low"
+                    },
+                    "models": {
+                        "anthropic/claude-sonnet-4": {
+                            "thinking": {
+                                "enabled": true,
+                                "level": "high",
+                                "budget_tokens": 16000
+                            }
+                        }
+                    }
+                }
+            }
+        }"#,
+    )
+    .expect("config should parse");
+
+    let provider = config
+        .provider
+        .get("openrouter")
+        .expect("openrouter provider should exist");
+    assert_eq!(
+        provider
+            .api
+            .as_ref()
+            .and_then(|api| api.base_url.as_deref()),
+        Some("https://openrouter.ai")
+    );
+
+    assert_eq!(
+        config.thinking_config_for_model("openrouter", "anthropic/claude-sonnet-4"),
+        Some(ThinkingConfig {
+            enabled: true,
+            level: ThinkingLevel::High,
+            budget_tokens: Some(16000),
+            display: None,
+        })
+    );
+    assert_eq!(
+        config.thinking_config_for_model("openrouter", "deepseek/deepseek-chat"),
+        Some(ThinkingConfig::new(ThinkingLevel::Low))
+    );
+}
+
+#[test]
+fn test_merge_preserves_openrouter_model_fields_across_layers() {
+    let base: Config = serde_json::from_str(
+        r#"{
+            "provider": {
+                "openrouter": {
+                    "api": { "base_url": "https://openrouter.ai" },
+                    "thinking": { "enabled": true, "level": "low" },
+                    "models": {
+                        "anthropic/claude-sonnet-4": {
+                            "name": "Claude Sonnet 4 (OpenRouter)",
+                            "capabilities": { "reasoning": true, "vision": true },
+                            "thinking": { "enabled": true, "level": "high" }
+                        },
+                        "deepseek/deepseek-chat": {
+                            "name": "DeepSeek V3"
+                        }
+                    }
+                }
+            }
+        }"#,
+    )
+    .expect("base config should parse");
+
+    let overlay: Config = serde_json::from_str(
+        r#"{
+            "provider": {
+                "openrouter": {
+                    "api": { "base_url": "http://127.0.0.1:8999" },
+                    "models": {
+                        "anthropic/claude-sonnet-4": {
+                            "thinking": { "enabled": true, "level": "medium" }
+                        }
+                    }
+                }
+            }
+        }"#,
+    )
+    .expect("overlay config should parse");
+
+    let merged = Config::merge(base, overlay);
+    let provider = merged
+        .provider
+        .get("openrouter")
+        .expect("openrouter provider should exist");
+
+    // Provider-level api and thinking are replaced by overlay.
+    assert_eq!(
+        provider
+            .api
+            .as_ref()
+            .and_then(|api| api.base_url.as_deref()),
+        Some("http://127.0.0.1:8999")
+    );
+    assert_eq!(
+        provider.thinking,
+        Some(ThinkingConfig::new(ThinkingLevel::Low))
+    );
+
+    // Model-level deep merge: overlay thinking wins, but base name and
+    // capabilities are preserved because the overlay did not specify them.
+    let sonnet = provider
+        .models
+        .get("anthropic/claude-sonnet-4")
+        .expect("sonnet model should exist");
+    assert_eq!(sonnet.name.as_deref(), Some("Claude Sonnet 4 (OpenRouter)"));
+    let caps = sonnet
+        .capabilities
+        .as_ref()
+        .expect("capabilities should be preserved");
+    assert!(caps.reasoning);
+    assert!(caps.vision);
+    assert_eq!(
+        sonnet.thinking,
+        Some(ThinkingConfig::new(ThinkingLevel::Medium))
+    );
+
+    // Models only in the base are preserved unchanged.
+    let deepseek = provider
+        .models
+        .get("deepseek/deepseek-chat")
+        .expect("deepseek model should exist");
+    assert_eq!(deepseek.name.as_deref(), Some("DeepSeek V3"));
+    assert!(deepseek.thinking.is_none());
 }

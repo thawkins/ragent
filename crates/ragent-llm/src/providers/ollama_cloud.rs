@@ -20,6 +20,7 @@ use super::tool_cache::{ToolFormat, cached_tools};
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
+use ragent_types::ThinkingConfig;
 use ragent_types::event::FinishReason;
 
 const DEFAULT_OLLAMA_CLOUD_HOST: &str = "https://ollama.com";
@@ -843,6 +844,11 @@ pub async fn list_ollama_cloud_models(
             } else {
                 Vec::new()
             };
+            let thinking_config = if has_thinking {
+                Some(ThinkingConfig::new(ragent_types::ThinkingLevel::Low))
+            } else {
+                None
+            };
 
             ModelInfo {
                 id: model_id,
@@ -862,7 +868,7 @@ pub async fn list_ollama_cloud_models(
                 context_window: ctx,
                 max_output: None,
                 request_multiplier: None,
-                thinking_config: None,
+                thinking_config,
             }
         })
         .collect())

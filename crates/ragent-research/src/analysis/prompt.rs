@@ -9,7 +9,7 @@ use super::parser::truncate_body;
 use crate::run_config::OutputFormat;
 
 #[derive(Debug, Clone, Default)]
-pub struct SynthesisPromptConfig {
+pub(crate) struct SynthesisPromptConfig {
     /// Optional audience/domain framing appended to the task preamble
     /// (FR-009 / Finding 12). `None` preserves the legacy preamble.
     #[allow(dead_code)] // reserved for T-008 persona/audience wiring; not yet read
@@ -50,7 +50,7 @@ pub struct SynthesisPromptConfig {
 /// in to additional prompt sections via the config; they never alter the
 /// default output.
 #[derive(Debug, Clone)]
-pub struct SynthesisPromptBuilder<'a> {
+pub(crate) struct SynthesisPromptBuilder<'a> {
     topic: &'a str,
     sources: &'a [SourceBody],
     config: SynthesisPromptConfig,
@@ -117,7 +117,7 @@ impl<'a> SynthesisPromptBuilder<'a> {
 
 /// Render the task preamble. With the default config this is byte-identical to
 /// the legacy opening of `build_synthesis_prompt`.
-pub fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
     format!(
         "You are writing the analysis section of a research report for the topic:\n\n{topic}\n\n"
     )
@@ -136,7 +136,7 @@ pub fn render_preamble(topic: &str, _config: &SynthesisPromptConfig) -> String {
 /// the model is still asked for the same raw sections so the parser remains
 /// unchanged, and an extra paragraph encourages results-oriented phrasing so
 /// the final `IMRaD` layout reads naturally in the `## Results` section.
-pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_output_template(config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     match config.output_format {
         Some(OutputFormat::ExecutiveSummary) => {
@@ -326,7 +326,7 @@ pub fn render_output_template(config: &SynthesisPromptConfig) -> String {
 /// enables the **Sources Cited / Date Spread** paragraph, the caller passes
 /// `include_published = true` so each web source header gains a `Published`
 /// line the model can quote in its date-spread analysis.
-pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
+pub(crate) fn render_sources_block(sources: &[SourceBody], include_published: bool) -> String {
     let mut out = String::new();
     out.push_str("---\n\n### Sources\n\n");
     for src in sources {
@@ -363,7 +363,7 @@ pub fn render_sources_block(sources: &[SourceBody], include_published: bool) -> 
 
 /// Render the closing instruction line. With the default config this is
 /// byte-identical to the legacy final lines of `build_synthesis_prompt`.
-pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
+pub(crate) fn render_closing(_config: &SynthesisPromptConfig) -> String {
     let mut out = String::new();
     out.push_str(
         "\nNow produce only the six sections above: Executive Summary, Top 10 Implications, Findings, In-Project Cross-References, and Open Questions. Do not include a title or any other preamble. ",
@@ -387,7 +387,7 @@ pub fn render_closing(_config: &SynthesisPromptConfig) -> String {
 /// so its output is byte-identical to the pre-refactor implementation. Callers
 /// that need the extended knobs (T-003..T-008) should use the builder directly.
 #[allow(dead_code)] // preserved for backward-compat byte-identical tests
-pub fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
+pub(crate) fn build_synthesis_prompt(topic: &str, sources: &[SourceBody]) -> String {
     SynthesisPromptBuilder::new(topic)
         .sources(sources)
         .output_format(OutputFormat::Report)

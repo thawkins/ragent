@@ -1,3 +1,5 @@
+//! Tests for `/spec` slash-command parsing.
+
 use ragent_specs::SpecCommand;
 use regex::Regex;
 

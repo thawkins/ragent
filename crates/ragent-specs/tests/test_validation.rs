@@ -1,3 +1,5 @@
+//! Tests for spec validation: sections, requirements, EARS templates, and reports.
+
 use ragent_specs::spec::{EarsTemplate, Spec, SpecId};
 use ragent_specs::validate::{
     Category, Issue, Report, Severity, detect_ears_template, extract_sections, parse_requirements,

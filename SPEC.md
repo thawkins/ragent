@@ -448,9 +448,10 @@ based on the active agent/model.
 | `azure_resource` | Cloud | File-based | Yes | Yes | Yes | Reads `azureresources.json` |
 | `xai` | Cloud | Static | Yes | Yes | Yes | xAI Grok API |
 | `bedrock` | Cloud | Dynamic | Yes | Yes | Yes | AWS Bedrock, SigV4 signing |
+| `openrouter` | Cloud | Dynamic | Yes | Yes | Yes | OpenAI-compatible model aggregator; single API key unlocks 100+ upstream models |
 | `router` | Cloud | Static | Yes | Yes | Yes | Model Router with 15-dimension classifier |
 
-(The registry exposes 13 provider IDs; the `router` is a virtual provider that
+(The registry exposes 14 provider IDs; the `router` is a virtual provider that
 selects a downstream model based on request characteristics.)
 
 #### Provider Features
@@ -464,6 +465,7 @@ selects a downstream model based on request characteristics.)
 | **Vision** | Image inputs passed when the model reports vision capability |
 | **Reasoning levels** | Anthropic/OpenAI thinking blocks map to `low`/`medium`/`high` |
 | **Model routing** | `router` provider classifies prompts and picks a downstream provider/model/tier |
+| **OpenRouter integration** | `openrouter` provider discovers and streams from 100+ OpenAI-compatible models with a single API key |
 
 #### Anthropic Models
 
@@ -518,6 +520,14 @@ selects a downstream model based on request characteristics.)
 - Reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`
 - Supports per-endpoint API keys, custom context windows, capability tags, thinking config
 - Can route to Anthropic Messages (`/anthropic/v1/messages`) or OpenAI (`/openai/v1/chat/completions`) API shape via `api_type`
+
+#### OpenRouter Provider
+
+- API key via `OPENROUTER_API_KEY` or `ragent auth openrouter <key>`
+- Single `GET /api/v1/models` discovery call returns all 100+ upstream models
+- OpenAI-compatible `POST /api/v1/chat/completions` streaming with tool-call and reasoning deltas
+- Per-model metadata (context window, pricing, vision/reasoning flags) mapped from discovery
+- Supports vendor-slug model ids such as `openrouter/anthropic/claude-sonnet-4`
 
 ### 3.2 Tool System
 

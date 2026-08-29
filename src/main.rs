@@ -16,7 +16,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use ragent_agent::{
-    Config, StartupTimings, agent,
+    Config, ModelInfo, StartupTimings, agent,
     event::EventBus,
     permission::PermissionChecker,
     provider,
@@ -438,6 +438,14 @@ async fn main() -> Result<()> {
     {
         router_provider.set_registry(Arc::clone(&provider_registry));
         router_provider.set_storage(Arc::clone(&storage));
+    }
+    // Attach storage to the OpenRouter provider so chat clients can resolve
+    // the encrypted credential stored via `ragent auth openrouter <key>`.
+    if let Some(openrouter_provider) = provider_registry
+        .get_as_any("openrouter")
+        .and_then(|p| p.downcast_ref::<ragent_llm::providers::openrouter::OpenRouterProvider>())
+    {
+        openrouter_provider.set_storage(Arc::clone(&storage));
     }
     let tool_registry = Arc::new(tool::create_default_registry());
     let provider_count = provider_registry.list().len();
@@ -982,6 +990,44 @@ async fn main() -> Result<()> {
                     Err(e) => {
                         writeln!(stdout, "Could not connect to Ollama Cloud: {e}")?;
                     }
+                }
+            } else if filter.as_deref() == Some("openrouter") {
+                let api_key = storage
+                    .get_provider_auth("openrouter")
+                    .ok()
+                    .flatten()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        std::env::var("OPENROUTER_API_KEY")
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                    })
+                    .unwrap_or_default();
+
+                if let Some(provider) = provider_registry.get("openrouter") {
+                    match provider.discover_models().await {
+                        Ok(models) if models.is_empty() => {
+                            writeln!(stdout, "No models found on OpenRouter.")?;
+                        }
+                        Ok(models) => {
+                            writeln!(stdout, "openrouter models:")?;
+                            for ModelInfo { id, name, .. } in &models {
+                                writeln!(stdout, "  openrouter/{:<28} {}", id, name)?;
+                            }
+                            if api_key.is_empty() {
+                                writeln!(
+                                    stdout,
+                                    "\nNote: Chat requires an API key. Run `ragent auth \
+                                     openrouter <key>` or set OPENROUTER_API_KEY."
+                                )?;
+                            }
+                        }
+                        Err(e) => {
+                            writeln!(stdout, "Could not connect to OpenRouter: {e}")?;
+                        }
+                    }
+                } else {
+                    writeln!(stdout, "OpenRouter provider is not registered.")?;
                 }
             } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
                 match ragent_agent::provider::ollama::list_ollama_models(ollama_url.as_deref())

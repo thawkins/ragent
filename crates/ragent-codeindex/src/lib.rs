@@ -1178,13 +1178,15 @@ pub fn start_watching(
 
     // Perform initial diff scan in background to avoid blocking the caller.
     let bg = std::sync::Arc::clone(&index);
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("codeindex-init-reindex".into())
         .spawn(move || match bg.full_reindex() {
             Ok(result) => debug!("initial reindex on watch start: {result}"),
             Err(e) => warn!("initial reindex failed: {e}"),
         })
-        .ok();
+    {
+        warn!("initial reindex thread spawn failed: {e}");
+    }
 
     Ok(WatchSession {
         worker_handle,

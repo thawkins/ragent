@@ -17,6 +17,10 @@ use super::ToolContext;
 /// available) or when the on-disk mtime is within 1 ms of the recorded
 /// baseline. A 1 ms tolerance avoids spurious rejections caused by filesystem
 /// mtime granularity when a read and edit happen in the same tick.
+// reason: only consumed inside this crate (edit.rs / multiedit.rs) and by the
+// #[path]-re-included copy in tests/test_edit.rs, where the re-included module
+// is itself private - `pub` here never escapes the crate.
+#[allow(unreachable_pub)]
 // reason: used by the edit and multiedit tools in the lib; flagged dead only
 // when edit_common.rs is re-included into the test crate via #[path], where
 // the tool-execution path is not exercised.
@@ -25,8 +29,9 @@ pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
     let recorded = ctx
         .read_timestamps
         .read()
-        .ok()
-        .and_then(|map| map.get(path).copied());
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        .copied();
 
     let Some(recorded_millis) = recorded else {
         return Ok(());
@@ -42,6 +47,7 @@ pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
         });
 
     let Some(current_millis) = current_millis else {
+        // reason: no on-disk mtime available - nothing to compare against
         return Ok(());
     };
 
@@ -63,15 +69,17 @@ pub fn check_stale_file(path: &Path, ctx: &ToolContext) -> Result<()> {
 ///
 /// Call this after a successful write so a follow-up edit in the same session
 /// does not trip the stale-file check on a file we just modified.
-pub fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
+pub(crate) fn record_edit_timestamp(path: &Path, ctx: &ToolContext) {
     if let Ok(meta) = std::fs::metadata(path)
         && let Ok(mtime) = meta.modified()
     {
         let millis = mtime
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as u64);
-        if let Ok(mut map) = ctx.read_timestamps.write() {
-            map.insert(path.to_path_buf(), millis);
-        }
+        let mut map = ctx
+            .read_timestamps
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.insert(path.to_path_buf(), millis);
     }
 }

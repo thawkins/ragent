@@ -19,13 +19,15 @@ pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
 pub mod openai_responses;
+pub mod openrouter;
 pub mod router;
 pub mod router_classifier;
 /// Model-router client that multiplexes requests across providers.
 pub mod router_client;
 pub mod router_config;
 pub mod router_modifiers;
-mod thinking;
+/// Thinking-level helpers and provider-specific level mappings.
+pub mod thinking;
 /// Serialisation cache for tool definitions per wire format.
 pub mod tool_cache;
 pub mod xai;
@@ -360,10 +362,11 @@ impl ProviderRegistry {
                     error = %e,
                     "Model discovery failed during router resolution"
                 );
-                // Cache an empty list so a failing provider is not rediscovered
-                // on every routing attempt in the same session.
+                // Preserve any previously discovered models so a transient
+                // failure does not wipe a provider's catalog (openrouterprov
+                // T-003). Only insert an empty list if nothing is cached yet.
                 if let Ok(mut cache) = self.discovered.lock() {
-                    cache.insert(provider_id.to_string(), Vec::new());
+                    let _ = cache.entry(provider_id.to_string()).or_default();
                 }
                 None
             }
@@ -429,6 +432,7 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(generic_openai::GenericOpenAiProvider));
     registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));
     registry.register(Box::new(ollama::OllamaProvider::new()));
+    registry.register(Box::new(openrouter::OpenRouterProvider::new()));
     registry.register(Box::new(xai::XaiProvider));
     registry.register(Box::new(router::RouterProvider::with_defaults()));
     registry

@@ -184,7 +184,9 @@ impl Verifier for KeywordVerifier {
             let finding_words = Self::words(finding);
             let mut finding_supported = true;
             for n in indices {
-                if n == 0 || n > state.sources.len() {
+                // cited_indices already filters out zero indices; only an
+                // out-of-range (stale) citation reaches here.
+                if n > state.sources.len() {
                     issues.push(format!(
                         "Finding {} cites source [#{n}] which does not exist",
                         idx + 1

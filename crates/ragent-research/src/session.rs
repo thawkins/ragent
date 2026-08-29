@@ -60,6 +60,10 @@ impl GatherObserver for GatherEventForwarder {
                 self.observer
                     .on_event(SessionEvent::WebFetchFailed { url, error });
             }
+            GatherEvent::SourceExcluded { url, reason } => {
+                self.observer
+                    .on_event(SessionEvent::WebSourceExcluded { url, reason });
+            }
             GatherEvent::SearchReturnedNoHits => {
                 self.observer.on_event(SessionEvent::WebSearchFailed {
                     error: "web search returned 0 hits".into(),
@@ -262,9 +266,18 @@ pub struct WebConfig {
     /// aborted and a diagnostic event is emitted so a slow search/fetch
     /// cannot stall the session. When `None`, no phase-level timeout is
     /// applied (only the per-page [`Self::fetch_timeout_secs`] applies).
-    /// Defaults to `None`.
+    /// Defaults to `Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS)` so a stalled
+    /// search backend or OA lookup cannot wedge a run indefinitely.
     pub web_phase_timeout_secs: Option<u64>,
 }
+
+/// Default wall-clock budget for the entire web-gathering phase
+/// ([`WebConfig::web_phase_timeout_secs`]). 180 seconds comfortably exceeds
+/// the worst case for a healthy gather pass (hundreds of candidates at
+/// `DEFAULT_FETCH_CONCURRENCY` and a 30 s per-fetch timeout) while still
+/// guaranteeing that a stalled search backend, OA lookup, or LLM decomposer
+/// cannot wedge the session without emitting any progress.
+pub const DEFAULT_WEB_PHASE_TIMEOUT_SECS: u64 = 180;
 
 /// Local/spec gathering knobs for a research session.
 #[derive(Debug, Clone)]
@@ -398,7 +411,7 @@ impl Default for WebConfig {
             use_low_relevance: false,
             disable_scholarly: false,
             use_pdf_web_sources: false,
-            web_phase_timeout_secs: None,
+            web_phase_timeout_secs: Some(DEFAULT_WEB_PHASE_TIMEOUT_SECS),
         }
     }
 }
@@ -653,6 +666,16 @@ pub enum SessionEvent {
         url: String,
         /// Error describing the fetch failure.
         error: String,
+    },
+    /// A candidate was deliberately excluded by a gather policy (low
+    /// relevance, too-short extraction, PDFs disabled) rather than failing
+    /// on the network. Kept separate from [`SessionEvent::WebFetchFailed`]
+    /// so fetch-failure counters stay meaningful in the UI.
+    WebSourceExcluded {
+        /// URL of the excluded candidate.
+        url: String,
+        /// Human-readable exclusion reason.
+        reason: String,
     },
     /// A generic source fetch failed and was recorded in session state.
     SourceFailed {

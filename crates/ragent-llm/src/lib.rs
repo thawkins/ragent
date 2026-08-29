@@ -19,6 +19,7 @@ pub use providers::{
     copilot::CopilotProvider, create_default_registry, gemini::GeminiProvider,
     generic_openai::GenericOpenAiProvider, huggingface::HuggingFaceProvider,
     ollama::OllamaProvider, ollama_cloud::OllamaCloudProvider, openai::OpenAiProvider,
+    openrouter::OpenRouterProvider,
 };
 
 pub use shared_request::SharedChatRequest;

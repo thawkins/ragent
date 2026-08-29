@@ -16,6 +16,7 @@ fn ctx_with_storage(storage: Arc<Storage>, session_id: &str) -> ToolContext {
         storage: Some(storage),
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: None,
         team_manager: None,
         code_index: None,

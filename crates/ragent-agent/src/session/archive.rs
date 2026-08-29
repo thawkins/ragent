@@ -14,7 +14,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -23,6 +23,18 @@ use crate::trigger::dynamic::DynamicTriggerEngine;
 use ragent_storage::storage::{CronEventRow, Storage};
 use ragent_types::cron::{CronEvent, CronSchedule};
 use ragent_types::trigger::TriggerRule;
+
+/// Resolve the ragent data directory, failing loudly when the platform cannot
+/// provide one.
+///
+/// Falling back to the current directory would make loop-state exports read
+/// from and imports write to a location no cron runner ever inspects, so the
+/// fallback was removed: the caller surfaces a real error instead.
+fn ragent_data_dir() -> Result<PathBuf> {
+    dirs::data_dir()
+        .map(|d| d.join("ragent"))
+        .context("cannot resolve system data directory for loop-state I/O")
+}
 
 /// Manifest version for the archive format.
 const MANIFEST_VERSION: u32 = 1;
@@ -224,9 +236,7 @@ pub fn export_session_archive(
             let loop_state_dir = temp_path.join("loop-state");
             fs::create_dir_all(&loop_state_dir).context("Failed to create loop-state directory")?;
 
-            let data_dir = dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ragent");
+            let data_dir = ragent_data_dir()?;
             let loop_state_source = data_dir.join("loop-state");
 
             if loop_state_source.exists() {
@@ -485,6 +495,8 @@ pub async fn import_session_archive(
 
             if let Some(engine) = trigger_engine {
                 for trigger in triggers {
+                    // add_rule unconditionally consumes the rule and reports
+                    // the assigned id, so every presented rule counts.
                     let _ = engine.runtime().add_rule(trigger);
                     triggers_imported += 1;
                 }
@@ -523,9 +535,7 @@ pub async fn import_session_archive(
     if config.restore_loop_state {
         let loop_state_dir = temp_dir.path().join("loop-state");
         if loop_state_dir.exists() {
-            let data_dir = dirs::data_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("ragent");
+            let data_dir = ragent_data_dir()?;
             let loop_state_target = data_dir.join("loop-state");
             fs::create_dir_all(&loop_state_target)
                 .context("Failed to create loop-state directory")?;
@@ -578,15 +588,8 @@ fn verify_archive_checksums(extract_dir: &Path, manifest: &ArchiveManifest) -> R
             .with_context(|| format!("Failed to open file: {}", full_path.display()))?;
         let mut reader = BufReader::new(file);
         let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
 
-        loop {
-            let count = reader.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-        }
+        std::io::copy(&mut reader, &mut hasher)?;
 
         let actual_hash = format!("{:x}", hasher.finalize());
         if actual_hash != *expected_hash {
@@ -644,14 +647,7 @@ fn sha256_file(path: &Path) -> Result<String> {
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
 
-    let mut buffer = [0u8; 8192];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        hasher.update(&buffer[..count]);
-    }
+    std::io::copy(&mut reader, &mut hasher)?;
 
     let result = hasher.finalize();
     Ok(format!("{:x}", result))

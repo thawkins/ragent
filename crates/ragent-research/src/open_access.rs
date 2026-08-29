@@ -124,6 +124,10 @@ impl ReqwestOpenAccessClient {
     fn client(&self) -> Result<reqwest::Client> {
         reqwest::Client::builder()
             .timeout(self.timeout)
+            // Fail fast on DNS/TCP stalls: without a connect timeout a
+            // non-responsive host can burn the full request timeout before
+            // the transport reports an error.
+            .connect_timeout(Duration::from_secs(10))
             .user_agent(self.user_agent())
             .build()
             .map_err(OpenAccessError::Http)

@@ -64,6 +64,9 @@ pub mod initiative;
 /// Runtime skill management — load/list/reload/read skill prompts (M8, T-071).
 pub mod skill_manage;
 
+/// Model metadata introspection — report the currently connected provider/model.
+pub mod model_info;
+
 /// Spec management tools.
 pub mod spec_coverage;
 pub mod spec_list;
@@ -197,6 +200,7 @@ impl Default for ToolOutput {
 ///     storage: None,
 ///     agent_manager: None,
 ///     active_model: None,
+///     provider_registry: None,
 ///     team_context: None,
 ///     team_manager: None,
 ///     code_index: None,
@@ -225,6 +229,9 @@ pub struct ToolContext {
     /// Sub-agent tools use this to inherit the parent's provider when no
     /// explicit model override is specified in the tool call.
     pub active_model: Option<crate::agent::ModelRef>,
+    /// Optional provider registry for tools that need to resolve model metadata.
+    /// `None` when the registry has not been wired into the tool context.
+    pub provider_registry: Option<Arc<crate::provider::ProviderRegistry>>,
     /// Team identity for sessions participating in a team (lead or teammate).
     /// `None` when the session is not part of a team.
     pub team_context: Option<Arc<TeamContext>>,
@@ -1416,6 +1423,8 @@ pub fn create_default_registry() -> ToolRegistry {
     // M8 — durable initiatives and skill management
     registry.register(Arc::new(initiative::InitiativeTool));
     registry.register(Arc::new(skill_manage::SkillManageTool));
+    // Model metadata introspection
+    registry.register(Arc::new(model_info::ModelInfoTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));

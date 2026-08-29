@@ -38,6 +38,7 @@ fn make_ctx(
         storage: None,
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: None,
         team_manager: None,
         code_index: None,

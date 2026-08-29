@@ -1182,6 +1182,11 @@ pub fn default_permissions() -> PermissionRuleset {
             "*",
             PermissionAction::Allow,
         ),
+        rule(
+            Permission::Custom("tool:model_info".to_string()),
+            "*",
+            PermissionAction::Allow,
+        ),
     ]
 }
 

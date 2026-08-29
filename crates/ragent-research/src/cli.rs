@@ -613,6 +613,10 @@ pub fn session_event_json(event: &crate::session::SessionEvent) -> String {
             "web_fetch_error",
             serde_json::json!({ "url": url, "error": error }),
         ),
+        SessionEvent::WebSourceExcluded { url, reason } => (
+            "web_source_excluded",
+            serde_json::json!({ "url": url, "reason": reason }),
+        ),
         SessionEvent::PlanUpdated { sub_questions } => (
             "plan_updated",
             serde_json::json!({ "sub_questions": sub_questions }),

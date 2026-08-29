@@ -13,95 +13,134 @@ mod shim {
     pub use async_trait::async_trait;
 
     // Stub the tool result type.
+    /// Stub tool output payload.
     #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
     pub struct ToolOutput {
+        /// Rendered tool output content.
         pub content: String,
+        /// Optional structured metadata.
         pub metadata: Option<serde_json::Value>,
     } // Stub the canonical path cache used by the tool context.
+    /// Stub canonical-path cache.
     #[derive(Clone, Copy, Default)]
     pub struct CanonicalPathCache;
 
     impl CanonicalPathCache {
+        /// Create a stub cache.
         pub fn new() -> Self {
             CanonicalPathCache
         }
     }
 
     // Stub the tool context type.
+    /// Stub tool execution context.
     #[derive(Clone)]
     pub struct ToolContext {
+        /// Owning session identifier.
         pub session_id: String,
+        /// Working directory for tool execution.
         pub working_dir: std::path::PathBuf,
+        /// Event bus for shell notifications.
         pub event_bus: std::sync::Arc<crate::shim::event::EventBus>,
+        /// Timestamps of file reads keyed by path.
         pub read_timestamps:
             std::sync::Arc<std::sync::RwLock<std::collections::HashMap<std::path::PathBuf, u64>>>,
+        /// Canonical path cache.
         pub canonical_cache: std::sync::Arc<crate::shim::CanonicalPathCache>,
     }
 
     // Stub the tool trait. Only the type signature matters here; the actual
     // `execute` method is not exercised by these wrapper-quoting tests.
+    /// Stub tool trait mirroring the real `Tool` signature.
     #[async_trait]
     pub trait Tool: Send + Sync {
+        /// Tool name.
         fn name(&self) -> &str;
+        /// Tool description.
         fn description(&self) -> &str;
+        /// JSON schema for tool input.
         fn parameters_schema(&self) -> serde_json::Value;
+        /// Permission category for the tool.
         fn permission_category(&self) -> &str;
+        /// Execute the stub tool (unused by these tests).
         async fn execute(
             &self,
             input: serde_json::Value,
             ctx: &ToolContext,
         ) -> anyhow::Result<ToolOutput>;
-    } // Stub event bus and event enum used by the bash module.
+    }
+    /// Stub event bus and event enum used by the bash module.
     pub mod event {
+        /// Stub event bus.
         #[derive(Clone)]
         pub struct EventBus;
         impl EventBus {
+            /// Create a stub bus.
             pub fn new(_capacity: usize) -> EventBus {
                 EventBus
             }
+            /// Publish a stub event (no-op).
             pub fn publish(&self, _event: Event) {}
         }
 
+        /// Stub event variant set.
         #[allow(dead_code)]
         #[derive(Clone)]
         pub enum Event {
-            ShellCwdChanged { session_id: String, cwd: String },
+            /// Shell working-directory change notice.
+            ShellCwdChanged {
+                /// Owning session id.
+                session_id: String,
+                /// New working directory.
+                cwd: String,
+            },
         }
     }
 
     // Stub resource module used for process concurrency gating.
+    /// Stub process-concurrency resource module.
     pub mod resource {
+        /// Held process permit.
         pub struct ProcessPermit;
 
+        /// Acquire a stub process permit.
         pub async fn acquire_process_permit() -> anyhow::Result<ProcessPermit> {
             Ok(ProcessPermit)
         }
     }
 
     // Stub sanitization module used for secret redaction in tracing.
+    /// Stub secret-redaction module.
     pub mod sanitize {
+        /// Identity redaction for tests.
         pub fn redact_secrets(s: &str) -> String {
             s.to_string()
         }
     }
 
     // Stub askpass module used for sudo password prompting.
+    /// Stub askpass broker module.
     pub mod askpass {
+        /// Stub askpass broker.
         pub struct AskPassBroker;
 
         impl AskPassBroker {
+            /// Start a stub broker (always returns None).
             pub fn start(_session_id: &str) -> Option<AskPassBroker> {
                 None
             }
+            /// Stub env vars (empty).
             pub fn env_vars(&self) -> Vec<(String, String)> {
                 Vec::new()
             }
+            /// Stub watcher spawn (no-op).
             pub fn spawn_watcher(
                 &self,
                 _session_id: String,
                 _event_bus: std::sync::Arc<crate::shim::event::EventBus>,
             ) {
             }
+            /// Stop the stub watcher (no-op).
             pub fn stop(&self) {}
         }
     }
@@ -111,15 +150,19 @@ mod shim {
 // `super::{Tool, ToolContext, ToolOutput}` and `crate::{event, resource,
 // sanitize, askpass}` imports resolve.
 pub use shim::{CanonicalPathCache, Tool, ToolContext, ToolOutput};
+/// Re-exported stub event module.
 pub mod event {
     pub use crate::shim::event::*;
 }
+/// Re-exported stub resource module.
 pub mod resource {
     pub use crate::shim::resource::*;
 }
+/// Re-exported stub sanitize module.
 pub mod sanitize {
     pub use crate::shim::sanitize::*;
 }
+/// Re-exported stub askpass module.
 pub mod askpass {
     pub use crate::shim::askpass::*;
 }

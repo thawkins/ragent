@@ -179,6 +179,7 @@ pub(crate) fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
         || AUTO_APPROVED_AGENT_TOOLS.contains(&tool_name)
         || tool_name.starts_with("task_")
         || tool_name == "ask_user"
+        || tool_name == "model_info"
 }
 
 /// Check permission for a tool execution, prompting the user if necessary.
@@ -327,7 +328,16 @@ pub async fn check_permission_with_prompt(
                             PermissionAction::Deny
                         });
                     }
-                    Ok(Err(RecvError::Lagged(_))) => continue,
+                    Ok(Err(RecvError::Lagged(_))) => {
+                        // Idle-CPU fix: `broadcast::recv()` returns
+                        // `Err(Lagged)` immediately (no await) when the
+                        // subscriber is behind, so an unqualified `continue`
+                        // here degenerates into a hot resync loop while the
+                        // bus is saturated. Yield briefly so the loop makes
+                        // progress without pinning a core.
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        continue;
+                    }
                     Ok(Err(_)) => {
                         bail!("Event bus closed during permission check");
                     }
