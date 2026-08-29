@@ -12,9 +12,65 @@ use crate::app::state::{App, LogLevel};
 // Re-export status types from theme
 
 impl App {
+    /// Whether the active benchmark run has outlived the staleness cap.
+    ///
+    /// A wedged bench runner (hung HTTP call, blocked tool) would otherwise
+    /// keep `active_bench_task_id` set forever, pinning the main loop at a
+    /// 250 ms animate deadline and re-rendering the same status line.
+    pub(crate) fn bench_stale(&self) -> bool {
+        match (
+            self.active_bench_task_id.as_ref(),
+            self.active_bench_started_at,
+        ) {
+            (Some(_), Some(started)) => {
+                let elapsed_secs = (chrono::Utc::now() - started).num_seconds().max(0) as u64;
+                elapsed_secs >= crate::BENCH_STALE_SECS
+            }
+            // No start timestamp recorded: treat as fresh so the watchdog
+            // cannot prematurely cancel a valid run.
+            _ => false,
+        }
+    }
+
     /// Poll the active benchmark task, refresh the status line with progress,
     /// drain progress events, and surface the finished result when complete.
     pub fn poll_pending_bench(&mut self) {
+        // Watchdog: surface and clear a run that has outlived the staleness
+        // cap so a wedged runner cannot hold the animate deadline forever.
+        if self.bench_stale() {
+            let elapsed = self
+                .active_bench_started_at
+                .map(|started| (chrono::Utc::now() - started).num_seconds().max(0))
+                .unwrap_or(0);
+            if let Some(task_id) = self.active_bench_task_id.take()
+                && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
+            {
+                self.active_tasks.remove(idx);
+            }
+            self.active_bench_summary = None;
+            self.active_bench_started_at = None;
+            self.active_bench_cancel = None;
+            if let Some(progress) = &self.active_bench_progress {
+                progress.clear();
+            }
+            self.active_bench_progress = None;
+            self.status = "bench: timed out".to_string();
+            self.needs_redraw = true;
+            self.push_log_no_agent(
+                LogLevel::Warn,
+                format!(
+                    "Benchmark run exceeded the {} minute watchdog and was detached (elapsed {}s)",
+                    crate::BENCH_STALE_SECS / 60,
+                    elapsed
+                ),
+            );
+            self.append_assistant_text(
+                "⚠️ **Benchmark watchdog**\n\nThe benchmark run did not finish within the \
+                 watchdog window and was detached. It may still be wedged in the background; \
+                 check process state before retrying.",
+            );
+            return;
+        }
         if self.active_bench_task_id.is_some()
             && let Some(progress) = self
                 .active_bench_progress

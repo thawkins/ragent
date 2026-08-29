@@ -1673,6 +1673,10 @@ impl App {
                 if let Some(ref mut state) = self.model_download_state {
                     if state.provider_id == *provider_id && state.model_id == *model_id {
                         state.percent = percent;
+                        // Progress proves the latch is alive: restart the
+                        // staleness clock so slow-but-moving downloads are
+                        // not reaped by the watchdog purely on start time.
+                        state.started_at = std::time::Instant::now();
                     }
                 }
             }

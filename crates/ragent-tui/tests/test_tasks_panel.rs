@@ -642,6 +642,61 @@ fn test_tasks_panel_scroll_max_scroll() {
     );
 }
 
+/// Tasks uses "lines from bottom" scroll semantics (like the Log and
+/// Profile panels): offset 0 is bottom-pinned, max_scroll is the top.
+/// Dragging the scrollbar track must therefore follow the inverted
+/// formula `offset = (1.0 - fraction) * max_scroll` — dragging to the
+/// bottom of the track must show the BOTTOM of the task list.
+/// Regression test for the drag-vs-render direction inversion where the
+/// drag handler grouped Tasks with the "lines from top" family.
+#[test]
+fn test_drag_tasks_scrollbar_moves_offset_bottom_semantics() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ragent_tui::app::ScrollbarDragPane;
+
+    let mut app = support::make_app();
+    app.message_area = ratatui::layout::Rect::new(0, 1, 80, 20);
+    app.show_tasks_panel = true;
+    app.show_log = false;
+    app.show_profile = false;
+    app.tasks_area = ratatui::layout::Rect::new(80, 0, 30, 21);
+    app.tasks_max_scroll = 60;
+
+    let mouse_event = |kind: MouseEventKind, col: u16, row: u16| MouseEvent {
+        kind,
+        column: col,
+        row,
+        modifiers: KeyModifiers::empty(),
+    };
+
+    // Click the scrollbar gutter (rightmost column, 80 + 30 - 1).
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        109,
+        10,
+    ));
+    assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Tasks));
+
+    // Drag to bottom of track -> offset = 0 (bottom of content shown,
+    // matching render_tasks_panel's `max_scroll - scroll` mapping).
+    app.handle_mouse_event(mouse_event(
+        MouseEventKind::Drag(MouseButton::Left),
+        109,
+        20,
+    ));
+    assert_eq!(
+        app.tasks_scroll_offset, 0,
+        "dragging to the track bottom must produce offset 0 (lines from bottom)"
+    );
+
+    // Drag to top of track -> offset = max_scroll (top of content).
+    app.handle_mouse_event(mouse_event(MouseEventKind::Drag(MouseButton::Left), 109, 0));
+    assert_eq!(
+        app.tasks_scroll_offset, 60,
+        "dragging to the track top must produce offset = max_scroll"
+    );
+}
+
 /// The panel should still set tasks_area when visible.
 #[test]
 fn test_tasks_panel_sets_area() {

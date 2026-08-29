@@ -1,5 +1,45 @@
 # Changelog
 
+## Version: 1.0.66
+
+### Fixed
+
+- **Tasks panel scrollbar drag direction** — the drag handler grouped the
+  TODO/Tasks pane with the "lines from top" panels, but its renderer maps the
+  stored offset via `max_scroll - scroll` (the "lines from bottom" family, like
+  Profile). Dragging the Tasks scrollbar therefore moved the content the wrong
+  way relative to the thumb. Tasks now uses the inverted
+  `(1.0 - fraction) * max_scroll` formula, `tasks_scroll_offset` semantics are
+  documented as lines-from-bottom in `state.rs`, and a regression test
+  (`test_drag_tasks_scrollbar_moves_offset_bottom_semantics`) covers dragging
+  to both ends of the track.
+- **Active-agents button/kill hit-rect desync** — sub-panel button hit-rects
+  were placed with button-order arithmetic (`i + 2`), which desynced hit-rects
+  from painted rows whenever banner lines exist above the task list. The row's
+  painted line index is now captured at build time in `Rect::y` and shifted
+  once by scroll, with rows scrolled past the guard skipped instead of
+  mis-placed.
+- **Spinner latch self-healing** — the model-list and model-download spinners
+  are latched by single bus events; after a broadcast `Lagged` burst the
+  clearing event could be dropped, leaving a stuck popup and a 250 ms idle
+  deadline for the rest of the process. New staleness caps (120 s loading,
+  45 min download) clear wedged latches each main-loop wake, progress events
+  reset the download latch clock, and the animation deadline only counts
+  latches that are still fresh.
+- **Bench watchdog** — a benchmark run that outlives the 30-minute staleness
+  cap is detached (task row removed, status shown, warning logged) so a wedged
+  runner cannot hold the animate deadline and poll path forever.
+- **History flush latch** — `flush_history_if_due` now clears
+  `history_dirty` / `history_save_deadline` to a terminal state when no
+  history file is configured instead of keeping an already-past deadline that
+  would busy-spin the main loop.
+
+### Tests
+
+- New `test_drag_tasks_scrollbar_moves_offset_bottom_semantics` in
+  `test_tasks_panel.rs`; `test_flush_history_if_due_no_path_set` now asserts
+  the latch is cleared rather than preserved.
+
 ## Version: 1.0.65
 
 ### Added

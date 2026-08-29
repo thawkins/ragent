@@ -133,6 +133,23 @@ use tracing_layer::TuiLogReceiver;
 /// 10-15% of a core while idle.
 const IDLE_REDRAW_INTERVAL_MS: u64 = 2000;
 
+/// Self-healing staleness caps for spinner/progress latches (in seconds).
+///
+/// The model-list and model-download spinners are set on a single event and
+/// cleared by a single `*Finished` event. The event bus is broadcast, so an
+/// event burst can make the bridge drop the clearing event (`Lagged`), after
+/// which the latch would otherwise stay set forever: a stuck popup plus a
+/// 250 ms idle deadline for the remaining process lifetime. When a latch
+/// outlives its cap, `App::poll_stale_spinners` clears it.
+const MODEL_LOADING_STALE_SECS: u64 = 120;
+
+/// Self-healing staleness cap for model downloads (large models can take
+/// tens of minutes over slow links).
+const MODEL_DOWNLOAD_STALE_SECS: u64 = 45 * 60;
+
+/// Self-healing staleness cap for a wedged benchmark run.
+const BENCH_STALE_SECS: u64 = 30 * 60;
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -694,6 +711,10 @@ pub async fn run_tui(
         // Check for completed /bench background runs.
         app.poll_pending_bench();
 
+        // Reap spinner latches that outlived their staleness caps (dropped
+        // `*Finished` events after a broadcast Lagged burst).
+        app.poll_stale_spinners();
+
         // Transition slash-command statuses to "ready" after a grace period.
         app.poll_status_expiry();
 
@@ -860,11 +881,20 @@ fn compute_next_deadline(app: &App, last_draw: std::time::Instant) -> std::time:
     }
 
     // Smooth updates for active spinners / progress / autopilot continue.
-    let animate = app.model_loading_state.is_some()
-        || app.model_download_state.is_some()
-        || app.code_index_busy
-        || app.active_bench_task_id.is_some()
-        || (app.autopilot_enabled && app.autopilot_pending_continue.is_some());
+    // The latches below are guarded by self-healing staleness caps (see the
+    // constants above): the event bus is broadcast, so a burst can make the
+    // bridge drop the single `*Finished` event that clears a spinner latch
+    // (same failure shape as the old reindex busy-latch). Once a latch
+    // outlives its cap it no longer contributes to `animate`, and
+    // `poll_stale_spinners` (called each loop wake) clears it.
+    let animate =
+        app.model_loading_state.as_ref().is_some_and(|s| {
+            s.started_at.elapsed() < Duration::from_secs(MODEL_LOADING_STALE_SECS)
+        }) || app.model_download_state.as_ref().is_some_and(|s| {
+            s.started_at.elapsed() < Duration::from_secs(MODEL_DOWNLOAD_STALE_SECS)
+        }) || (app.active_bench_task_id.is_some() && !app.bench_stale())
+            || app.code_index_busy
+            || (app.autopilot_enabled && app.autopilot_pending_continue.is_some());
     if animate {
         deadline = deadline.min(now + Duration::from_millis(250));
     }

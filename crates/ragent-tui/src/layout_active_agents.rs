@@ -152,10 +152,15 @@ fn build_task_rows_with_buttons<'a>(
             //   + type(9) + elapsed(9) + steps(7) = 66.
             // Status badge adds 2-3 display cols; buttons follow.
             // Use generous click areas that work regardless of badge.
+            // `out.len()` is the line index this row will occupy (the
+            // row is pushed to `out` below the button push). Store it in
+            // `Rect::y` so hit-test placement shifts directly by scroll
+            // instead of relying on button-order arithmetic.
             let btn_x: u16 = 66;
             let kill_x: u16 = 72;
-            button_areas.push(Rect::new(btn_x, 0, 6, 1));
-            kill_areas.push(Rect::new(kill_x, 0, 4, 1));
+            let row = out.len() as u16;
+            button_areas.push(Rect::new(btn_x, row, 6, 1));
+            kill_areas.push(Rect::new(kill_x, row, 4, 1));
             button_task_ids.push(task.id.clone());
             kill_task_ids.push(task.id.clone());
         } else {
@@ -341,8 +346,13 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
                 let btn_x: u16 = 66;
                 let kill_x: u16 = 72;
-                button_areas.push(Rect::new(btn_x, 0, 6, 1));
-                kill_areas.push(Rect::new(kill_x, 0, 4, 1));
+                // The row is pushed to `lines` after the button push, so
+                // `lines.len()` is the row's painted line index. Store it in
+                // `Rect::y` so hit-test placement shifts directly by scroll
+                // instead of relying on button-order arithmetic.
+                let row = lines.len() as u16;
+                button_areas.push(Rect::new(btn_x, row, 6, 1));
+                kill_areas.push(Rect::new(kill_x, row, 4, 1));
                 button_task_ids.push(task.id.clone());
                 kill_task_ids.push(task.id.clone());
             } else {
@@ -365,28 +375,36 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
 
-    // Store button areas shifted by scroll and area position, keeping IDs in sync.
+    // Store button areas shifted by scroll and area position, keeping IDs in
+    // sync. Each Rect's `y` holds the row's painted line index in scroll
+    // space (captured at build time), so no button-order arithmetic is
+    // needed and banner rows cannot desync hit-rects from painted rows.
     let mut shifted_button_areas: Vec<Rect> = Vec::new();
     let mut shifted_button_task_ids: Vec<String> = Vec::new();
-    for (i, r) in button_areas.iter().enumerate() {
-        let y = area.y + (i as u16 + 2).saturating_sub(scroll); // +2 for header + primary
-        if y >= area.y && y < area.y + area.height {
+    for (r, task_id) in button_areas.iter().zip(button_task_ids.iter()) {
+        if r.width == 0 || r.y < scroll {
+            continue;
+        }
+        let y = area.y + (r.y - scroll);
+        if y < area.y + area.height {
             shifted_button_areas.push(Rect::new(area.x + r.x, y, r.width, 1));
-            shifted_button_task_ids.push(button_task_ids[i].clone());
+            shifted_button_task_ids.push(task_id.clone());
+        }
+    }
+    let mut shifted_kill_areas: Vec<Rect> = Vec::new();
+    let mut shifted_kill_task_ids: Vec<String> = Vec::new();
+    for (r, task_id) in kill_areas.iter().zip(kill_task_ids.iter()) {
+        if r.width == 0 || r.y < scroll {
+            continue;
+        }
+        let y = area.y + (r.y - scroll);
+        if y < area.y + area.height {
+            shifted_kill_areas.push(Rect::new(area.x + r.x, y, r.width, 1));
+            shifted_kill_task_ids.push(task_id.clone());
         }
     }
     app.agent_row_button_areas = shifted_button_areas;
     app.agent_row_button_task_ids = shifted_button_task_ids;
-
-    let mut shifted_kill_areas: Vec<Rect> = Vec::new();
-    let mut shifted_kill_task_ids: Vec<String> = Vec::new();
-    for (i, r) in kill_areas.iter().enumerate() {
-        let y = area.y + (i as u16 + 2).saturating_sub(scroll);
-        if y >= area.y && y < area.y + area.height {
-            shifted_kill_areas.push(Rect::new(area.x + r.x, y, r.width, 1));
-            shifted_kill_task_ids.push(kill_task_ids[i].clone());
-        }
-    }
     app.agent_row_kill_areas = shifted_kill_areas;
     app.agent_row_kill_task_ids = shifted_kill_task_ids;
 

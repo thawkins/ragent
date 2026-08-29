@@ -359,8 +359,12 @@ async fn test_flush_history_if_due_no_path_set() {
     // Should not panic even though dirty + deadline expired but no path set.
     app.flush_history_if_due();
 
-    // Dirty flag stays true because no file could be written.
-    assert!(app.history_dirty);
+    // No path means the flush can never proceed: the latch must be cleared
+    // to a terminal state. Leaving it set with an expired deadline would
+    // make compute_next_deadline return an already-past instant every loop
+    // iteration and busy-spin the main loop.
+    assert!(!app.history_dirty);
+    assert!(app.history_save_deadline.is_none());
 }
 
 // =========================================================================

@@ -1326,7 +1326,8 @@ pub struct App {
     pub log_scroll_offset: u16,
     /// Scroll offset for the profile panel (lines from bottom).
     pub profile_scroll_offset: u16,
-    /// Scroll offset for the TODO panel (lines from top).
+    /// Scroll offset for the TODO Tasks panel (lines from bottom; render
+    /// maps it via `max_scroll - scroll`, matching the Profile panel).
     pub tasks_scroll_offset: u16,
     /// Scroll offset for the Memory panel (lines from top).
     pub memory_scroll_offset: u16,
@@ -1991,7 +1992,13 @@ impl App {
                 return;
             }
         }
+        // No history file configured: the flush can never proceed, so clear
+        // the latch to a terminal state. Leaving it set with a past deadline
+        // would make compute_next_deadline return an already-past instant
+        // every iteration and busy-spin the main loop.
         let Some(ref path) = self.history_file_path else {
+            self.history_dirty = false;
+            self.history_save_deadline = None;
             return;
         };
         let path = path.clone();
@@ -2085,6 +2092,48 @@ impl App {
                 self.run_cost_banner_at = None;
                 self.needs_redraw = true;
             }
+        }
+    }
+
+    /// Clear spinner latches that have outlived their self-healing staleness
+    /// caps (see `MODEL_LOADING_STALE_SECS` / `MODEL_DOWNLOAD_STALE_SECS` in
+    /// `lib.rs`).
+    ///
+    /// The spinners are set by a single event and cleared by a single
+    /// `*Finished` event; a broadcast `Lagged` burst can drop the clearing
+    /// event, leaving a stuck popup and a permanently shortened (250 ms)
+    /// main-loop deadline. This poll reaps such latches so the loop returns
+    /// to its normal idle cadence.
+    ///
+    /// Called from the TUI main loop each wake.
+    pub fn poll_stale_spinners(&mut self) {
+        let mut reaped = false;
+        if let Some(state) = &self.model_loading_state
+            && state.started_at.elapsed()
+                >= std::time::Duration::from_secs(crate::MODEL_LOADING_STALE_SECS)
+        {
+            tracing::warn!(
+                "model-list loading for {} exceeded the staleness cap; clearing spinner",
+                state.provider_id
+            );
+            self.model_loading_state = None;
+            reaped = true;
+        }
+        if let Some(state) = &self.model_download_state
+            && state.started_at.elapsed()
+                >= std::time::Duration::from_secs(crate::MODEL_DOWNLOAD_STALE_SECS)
+        {
+            tracing::warn!(
+                "model download {}/{} exceeded the staleness cap; clearing progress popup",
+                state.provider_id,
+                state.model_id
+            );
+            self.model_download_state = None;
+            reaped = true;
+        }
+        if reaped {
+            self.status = "ready".to_string();
+            self.needs_redraw = true;
         }
     }
 }

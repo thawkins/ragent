@@ -1625,22 +1625,24 @@ impl App {
         let fraction = (relative / track_height).clamp(0.0, 1.0);
 
         // fraction 0.0 = top of scrollbar track, 1.0 = bottom.
-        // Messages, Log, and Profile use "lines from bottom" semantics
-        // (scroll_offset = 0 → bottom of content, max_scroll → top), so
-        // dragging to the top of the track must produce offset = max_scroll:
-        // offset = (1.0 - fraction) * max_scroll.
-        // Tasks, Memory, and Telemetry use "lines from top" semantics
-        // (scroll_offset = 0 → top of content, max_scroll → bottom), so
-        // dragging to the top must produce offset = 0 and dragging to the
-        // bottom must produce offset = max_scroll: offset = fraction *
-        // max_scroll.  Using a single formula for all panels inverts the
-        // drag direction for the "lines from top" family, which is the
-        // erratic-scrollbar bug.
+        // Messages, Log, Profile, and Tasks use "lines from bottom"
+        // semantics (scroll_offset = 0 -> bottom of content, max_scroll
+        // -> top; render_tasks_panel maps the stored offset via
+        // max_scroll - scroll), so dragging to the top of the track must
+        // produce offset = max_scroll: offset = (1.0 - fraction) *
+        // max_scroll.  Memory and Telemetry use "lines from top"
+        // semantics (scroll_offset = 0 -> top of content, max_scroll ->
+        // bottom), so dragging to the top must produce offset = 0 and
+        // dragging to the bottom must produce offset = max_scroll:
+        // offset = fraction * max_scroll.  Using a single formula for all
+        // panels inverts the drag direction for one of the two families,
+        // which is the erratic-scrollbar bug.
         let offset = match pane {
-            ScrollbarDragPane::Messages | ScrollbarDragPane::Log | ScrollbarDragPane::Profile => {
-                ((1.0 - fraction) * max_scroll as f32).round() as u16
-            }
-            ScrollbarDragPane::Tasks | ScrollbarDragPane::Memory | ScrollbarDragPane::Telemetry => {
+            ScrollbarDragPane::Messages
+            | ScrollbarDragPane::Log
+            | ScrollbarDragPane::Profile
+            | ScrollbarDragPane::Tasks => ((1.0 - fraction) * max_scroll as f32).round() as u16,
+            ScrollbarDragPane::Memory | ScrollbarDragPane::Telemetry => {
                 (fraction * max_scroll as f32).round() as u16
             }
         };
