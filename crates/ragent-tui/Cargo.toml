@@ -52,6 +52,10 @@ fs2 = { workspace = true }
 lru = { workspace = true }
 regex = { workspace = true }
 uuid = { workspace = true }
+# Width/grapheme handling for the message/log line caches (must match
+# ratatui's WordWrapper so pre-wrapped cache rows are stable).
+unicode-segmentation = "1.12"
+unicode-width = "0.2"
 
 [features]
 default = []
@@ -63,6 +67,7 @@ tempfile = "3.5"
 criterion = { workspace = true }
 parking_lot = { workspace = true }
 filetime = "0.2"
+unicode-width = "0.2"
 
 [[bench]]
 name = "bench_markdown"

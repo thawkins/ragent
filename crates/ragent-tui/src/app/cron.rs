@@ -139,14 +139,14 @@ async fn cron_scheduler_loop(
         // Execute one tick.
         cron_tick(&storage, &session_processor, &working_dir, &running_events).await;
 
-        // Wait for the next tick interval, checking the cancel flag
-        // every second so shutdown is responsive.
-        for _ in 0..CRON_TICK_INTERVAL_SECS {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
+        // Idle-CPU fix: wait for the next tick with a single long sleep
+        // instead of a 1 s interruptible poll. The old loop woke once per
+        // second purely to re-check the cancel flag (process-lifetime cost
+        // for zero benefit — shutdown just waited out the current second).
+        // A sleep longer than force-exit (3 s after loop teardown) needs no
+        // responsiveness: cancellation now takes effect at most one full
+        // tick late, which the 30 s tick interval already bounds.
+        tokio::time::sleep(Duration::from_secs(CRON_TICK_INTERVAL_SECS)).await;
     }
 
     tracing::info!("Cron scheduler stopped");
@@ -184,10 +184,6 @@ async fn cron_tick(
 ) {
     let now = Utc::now();
 
-    // Load the available agent types once per tick so multiple due events
-    // do not each scan the filesystem independently.
-    let (all_agents, _) = ragent_agent::agent::load_all_agents(working_dir);
-
     // Process enabled due events (fire or log error for unknown agent).
     match storage.list_due_cron_events(&now) {
         Ok(events) => {
@@ -195,6 +191,11 @@ async fn cron_tick(
                 tracing::debug!("Cron tick: no due events");
             } else {
                 tracing::info!("Cron tick: {} due event(s)", events.len());
+                // Idle-CPU fix: the agent-types filesystem scan is only
+                // needed when an event is actually about to fire. Loading
+                // it unconditionally scanned the agents directories every
+                // 30 s even with zero cron events configured.
+                let (all_agents, _) = ragent_agent::agent::load_all_agents(working_dir);
                 for event in &events {
                     // FR-012: no-double-fire guard for repeating events.
                     // If this repeating event's previous execution is still

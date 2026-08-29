@@ -611,6 +611,7 @@ fn test_router_setup_rejects_recursive_router_assignment() {
         provider_id: "router".to_string(),
         provider_name: "Model Router".to_string(),
         models: vec![ragent_tui::app::ModelPickerEntry {
+            provider_id: "router".to_string(),
             id: "router".to_string(),
             name: "Router".to_string(),
             context_window: 0,

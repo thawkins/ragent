@@ -829,8 +829,13 @@ impl App {
         if let Some(ref idx) = self.code_index {
             // Check progress atomics (lock-free) to detect active reindex
             // even when locks are momentarily free between chunks.
-            let (_done, total) = idx.reindex_progress();
-            let reindex_active = total > 0;
+            // The reindex is active only while work remains (done < total);
+            // a completed reindex keeps total > 0 forever, so comparing
+            // against `done` here is what lets the busy latch clear once the
+            // initial reindex finishes (idle-CPU fix: a permanently-true
+            // `reindex_active` pinned compute_next_deadline at 250 ms).
+            let (done, total) = idx.reindex_progress();
+            let reindex_active = total > 0 && done < total;
 
             if let Some(stats) = idx.try_status() {
                 self.code_index_stats_cache = Some(stats);
@@ -856,6 +861,13 @@ impl App {
             self.code_index_stats_last_refresh = std::time::Instant::now();
             self.code_index_busy = false;
         }
+    }
+
+    /// Test hook: exposes the crate-internal stats refresh to integration
+    /// tests (busy-latch regression coverage). Not part of the public API.
+    #[doc(hidden)]
+    pub fn refresh_code_index_stats_for_test(&mut self) {
+        self.refresh_code_index_stats();
     }
 
     /// Refresh cached structured-memory stats on a throttled 5s interval.
@@ -1700,6 +1712,7 @@ impl App {
         // now so the render path never has to reconcile a length mismatch.
         self.log_line_cache.push(crate::app::LogLineGroup {
             lines: Vec::new(),
+            wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
             version: 0, // stale → rendered on next frame

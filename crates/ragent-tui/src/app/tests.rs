@@ -188,6 +188,7 @@ mod app_tests {
     #[test]
     pub(crate) fn test_default_thinking_level_defaults_to_off_when_unconfigured() {
         let entry = ModelPickerEntry {
+            provider_id: "openai".to_string(),
             id: "model".to_string(),
             name: "Model".to_string(),
             context_window: 128_000,
@@ -212,6 +213,7 @@ mod app_tests {
     #[test]
     pub(crate) fn test_default_thinking_level_falls_back_to_off_for_nonthinking_models() {
         let entry = ModelPickerEntry {
+            provider_id: "openai".to_string(),
             id: "model".to_string(),
             name: "Model".to_string(),
             context_window: 128_000,
@@ -236,6 +238,7 @@ mod app_tests {
     #[test]
     pub(crate) fn test_default_thinking_level_uses_explicit_entry_config() {
         let entry = ModelPickerEntry {
+            provider_id: "openai".to_string(),
             id: "model".to_string(),
             name: "Model".to_string(),
             context_window: 128_000,

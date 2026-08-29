@@ -1519,6 +1519,7 @@ fn test_slash_provider_selection_updates_displayed_provider() {
         provider_id: "ollama".to_string(),
         provider_name: "Ollama (Local)".to_string(),
         models: vec![ragent_tui::app::ModelPickerEntry {
+            provider_id: "ollama".to_string(),
             id: "llama3.2".to_string(),
             name: "Llama 3.2".to_string(),
             context_window: 131_072,
@@ -1536,7 +1537,19 @@ fn test_slash_provider_selection_updates_displayed_provider() {
         selected: 0,
     });
 
-    // Press Enter to confirm the model selection.
+    // Press Enter to confirm the model selection. Because this is an Ollama-family
+    // provider, the selector now forces the thinking-level step even when model
+    // detection reports no levels.
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::SelectThinkingLevel { .. })
+        ),
+        "ollama model selection should open the thinking-level selector"
+    );
+
+    // Press Enter again to confirm the default thinking level.
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(
@@ -1574,6 +1587,7 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
         provider_name: "GitHub Copilot".to_string(),
         models: vec![
             ragent_tui::app::ModelPickerEntry {
+                provider_id: "copilot".to_string(),
                 id: "m1".to_string(),
                 name: "Model 1".to_string(),
                 context_window: 128_000,
@@ -1589,6 +1603,7 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 cost_multiplier: "0x".to_string(),
             },
             ragent_tui::app::ModelPickerEntry {
+                provider_id: "copilot".to_string(),
                 id: "m2".to_string(),
                 name: "Model 2".to_string(),
                 context_window: 128_000,
@@ -1604,6 +1619,7 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 cost_multiplier: "0x".to_string(),
             },
             ragent_tui::app::ModelPickerEntry {
+                provider_id: "copilot".to_string(),
                 id: "m3".to_string(),
                 name: "Model 3".to_string(),
                 context_window: 128_000,
@@ -4502,4 +4518,57 @@ fn test_slash_task_toggles_panel_with_tasks_status() {
         "tasks panel should be hidden after second /task"
     );
     assert_eq!(app.status, "tasks panel hidden");
+}
+
+#[test]
+fn test_model_selector_preserves_openrouter_vendor_slug() {
+    let mut app = make_app();
+    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+        provider_id: "openrouter".to_string(),
+        provider_name: "OpenRouter".to_string(),
+        models: vec![ragent_tui::app::ModelPickerEntry {
+            provider_id: "openrouter".to_string(),
+            id: "anthropic/claude-sonnet-4".to_string(),
+            name: "Claude Sonnet 4".to_string(),
+            context_window: 200_000,
+            max_output: None,
+            cost_input: 0.0,
+            cost_output: 0.0,
+            reasoning: true,
+            vision: false,
+            tool_use: true,
+            thinking_levels: vec![],
+            thinking_config: None,
+            cost_tier: "Paid".to_string(),
+            cost_multiplier: "1x".to_string(),
+        }],
+        selected: 0,
+    });
+
+    // Confirm the model selection. OpenRouter models may report reasoning levels
+    // from discovery, so the flow opens the thinking-level selector.
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::SelectThinkingLevel { .. })
+                | Some(ProviderSetupStep::Done { .. })
+        ),
+        "openrouter model selection should proceed"
+    );
+
+    if let Some(ProviderSetupStep::SelectThinkingLevel { .. }) = app.provider_setup {
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    }
+
+    assert_eq!(
+        app.selected_model.as_deref(),
+        Some("openrouter/anthropic/claude-sonnet-4"),
+        "selected_model must preserve the vendor slug after the provider segment"
+    );
+    assert_eq!(
+        app.provider_model_label().as_deref(),
+        Some("OpenRouter / anthropic/claude-sonnet-4"),
+        "status-bar label should show the OpenRouter model id with vendor slug"
+    );
 }

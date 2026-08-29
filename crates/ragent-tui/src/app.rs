@@ -20,6 +20,7 @@ mod md_worker;
 pub use self::md_worker::MdWorker;
 
 mod models;
+pub use models::model_part_from_selected_model;
 mod status_bar_cache;
 pub use self::status_bar_cache::StatusBarCache;
 

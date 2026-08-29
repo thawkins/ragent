@@ -958,6 +958,7 @@ async fn test_memory_store_tool_content_appears_in_memory_panel() {
         storage: Some(app.storage.clone()),
         agent_manager: None,
         active_model: None,
+        provider_registry: None,
         team_context: None,
         team_manager: None,
         code_index: None,

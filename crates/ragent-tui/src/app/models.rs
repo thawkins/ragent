@@ -13,6 +13,8 @@ use ragent_agent::{
 use ragent_team::team::TeamStore;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
 
+use ragent_llm::providers::thinking::full_reasoning_levels;
+
 // Prompt optimization templates
 
 // State types from app/state.rs
@@ -25,6 +27,23 @@ use crate::app::state::{
 use crate::app::helpers::{sanitize_for_display, try_extract_research_code_block};
 
 // Re-export status types from theme
+
+/// Returns true for providers that use Ollama's boolean `think` parameter.
+fn is_ollama_family(provider_id: &str) -> bool {
+    provider_id == "ollama" || provider_id == "ollama_cloud"
+}
+
+/// Returns the model portion of a `provider/model` string, preserving any
+/// vendor slug after the first `/`.
+///
+/// `openrouter/anthropic/claude-sonnet-4` becomes
+/// `Some("anthropic/claude-sonnet-4")`; a string with no separator returns
+/// `None`. This is the canonical first-segment-only partitioning used by the
+/// TUI and CLI (openrouterprov FR-017).
+#[must_use]
+pub fn model_part_from_selected_model(model_str: &str) -> Option<&str> {
+    model_str.split_once('/').map(|(_, model)| model)
+}
 
 impl App {
     pub(crate) fn is_ascii_table_line(line: &str) -> bool {
@@ -346,6 +365,13 @@ impl App {
             };
         }
 
+        // Ollama-family models are boolean thinkers, but we expose the full
+        // effort range to the user. Default to Low rather than Off so reasoning
+        // is enabled out of the box when the model advertises it.
+        if is_ollama_family(&entry.provider_id) && entry.reasoning {
+            return ThinkingLevel::Low;
+        }
+
         if entry.thinking_levels.contains(&ThinkingLevel::Off) {
             ThinkingLevel::Off
         } else {
@@ -451,7 +477,14 @@ impl App {
 
     pub(crate) fn active_thinking_levels(&self) -> Vec<ThinkingLevel> {
         self.active_model_entry()
-            .map(|entry| entry.thinking_levels)
+            .map(|entry| {
+                let levels = entry.thinking_levels;
+                if levels.is_empty() && is_ollama_family(&entry.provider_id) {
+                    full_reasoning_levels()
+                } else {
+                    levels
+                }
+            })
             .unwrap_or_default()
     }
 
@@ -861,6 +894,10 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
+                "openrouter" => std::env::var("OPENROUTER_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
                 "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
                     .ok()
                     .filter(|k| !k.is_empty())
@@ -1207,17 +1244,26 @@ impl App {
             baseline_cost,
             m.request_multiplier,
         );
+        let provider_id = m.provider_id.clone();
+        let reasoning = m.capabilities.reasoning;
+        let thinking_levels =
+            if m.capabilities.thinking_levels.is_empty() && is_ollama_family(&provider_id) {
+                ragent_llm::providers::thinking::full_reasoning_levels()
+            } else {
+                m.capabilities.thinking_levels
+            };
         ModelPickerEntry {
+            provider_id,
             id: m.id,
             name: m.name,
             context_window: m.context_window,
             max_output: m.max_output,
             cost_input: m.cost.input,
             cost_output: m.cost.output,
-            reasoning: m.capabilities.reasoning,
+            reasoning,
             vision: m.capabilities.vision,
             tool_use: m.capabilities.tool_use,
-            thinking_levels: m.capabilities.thinking_levels,
+            thinking_levels,
             thinking_config: m.thinking_config,
             cost_tier,
             cost_multiplier,
@@ -1294,8 +1340,8 @@ impl App {
         if selected_provider != provider_id {
             return Vec::new();
         }
-
         vec![ModelPickerEntry {
+            provider_id: provider_id.to_string(),
             id: model_id.to_string(),
             name: model_id.to_string(),
             context_window: self.selected_model_ctx_window.unwrap_or(0),

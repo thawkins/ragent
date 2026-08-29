@@ -255,6 +255,14 @@ pub async fn run_tui(
     {
         router_provider.set_storage(Arc::clone(&storage));
     }
+    // Attach storage to the OpenRouter provider so chat clients can resolve
+    // the encrypted credential stored via `ragent auth openrouter <key>`.
+    if let Some(openrouter_provider) = provider_registry
+        .get_as_any("openrouter")
+        .and_then(|p| p.downcast_ref::<ragent_llm::providers::openrouter::OpenRouterProvider>())
+    {
+        openrouter_provider.set_storage(Arc::clone(&storage));
+    }
     // Pass through the config file paths loaded at startup so the TUI
     // can display them in the message window.
     app.config_paths = config_paths;
@@ -773,13 +781,32 @@ pub async fn run_tui(
             event = event_rx.recv() => {
                 match event {
                     Some(event) => app.handle_event(event),
-                    None => {} // Bridge task exited
+                    None => {
+                        // Event-bus bridge exited (broadcast Closed). Without
+                        // this break the arm resolves immediately forever,
+                        // defeating the sleep-until-deadline idle design.
+                        // Idle-CPU fix: treat it as a fatal UI event source
+                        // loss and stop the loop (the 3 s force-exit safety
+                        // net still runs during teardown).
+                        tracing::warn!("event bus bridge closed, exiting TUI loop");
+                        app.is_running = false;
+                    }
                 }
             }
             // Periodic wake for animations, countdowns, status expiry, etc.
             _ = tokio::time::sleep_until(tokio::time::Instant::from_std(next_deadline)) => {}
         }
     }
+
+    // -- Safety-net: force exit after 3 seconds if cleanup hangs --
+    // Armed FIRST, before any teardown step (history flush, tty restore,
+    // storage close): if a wedged tty or blocked write hangs any of those,
+    // this timer still guarantees the process exits and the terminal is
+    // recoverable (idle-CPU/exit-hang fix).
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        std::process::exit(0);
+    });
 
     // Final synchronous save if history was modified since last flush.
     if app.history_dirty {
@@ -797,12 +824,6 @@ pub async fn run_tui(
     // Drop the terminal guard now (before slow cleanup) to leave alternate screen
     // and disable raw mode. This prevents the "stuck in TUI" appearance.
     drop(terminal_guard);
-
-    // -- Safety-net: force exit after 3 seconds if cleanup hangs --
-    tokio::spawn(async {
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        std::process::exit(0);
-    });
 
     // -- Graceful shutdown of background resources --
     // Stop the cron scheduler (FR-017: non-blocking background task).

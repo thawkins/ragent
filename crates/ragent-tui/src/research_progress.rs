@@ -35,6 +35,10 @@ pub enum StepStatus {
     Done,
     /// The phase reported an error but the session continues gracefully.
     Error,
+    /// A candidate was deliberately excluded by a gather policy (low
+    /// relevance, too-short extraction) rather than failing on the network.
+    /// Tracked separately so fetch-failure counts stay meaningful.
+    Excluded,
 }
 
 impl StepStatus {
@@ -44,6 +48,7 @@ impl StepStatus {
             Self::Started => "▶",
             Self::Done => "✓",
             Self::Error => "⚠",
+            Self::Excluded => "−",
         }
     }
 }
@@ -74,8 +79,14 @@ pub struct ResearchProgress {
     pub done: bool,
     /// Number of URLs/pages successfully fetched in the web phase.
     pub fetched_count: usize,
-    /// Number of URLs/pages that failed to fetch in the web phase.
+    /// Number of URLs/pages that failed to fetch in the web phase (network
+    /// errors and timeouts only; policy exclusions are counted in
+    /// [`Self::excluded_live`]).
     pub failed_count: usize,
+    /// Number of live (mid-run) URLs excluded by gather policy (low
+    /// relevance, too-short extraction). Superseded by the final
+    /// `excluded_count` once the run completes.
+    pub excluded_live: usize,
     /// Number of recovered PDF documents.
     pub pdf_count: usize,
     /// Number of recovered YouTube transcripts / video URLs.
@@ -95,6 +106,7 @@ impl ResearchProgress {
             done: false,
             fetched_count: 0,
             failed_count: 0,
+            excluded_live: 0,
             pdf_count: 0,
             youtube_count: 0,
             excluded_count: 0,
@@ -118,6 +130,9 @@ impl ResearchProgress {
             && detail.starts_with("fetch failed for ")
         {
             self.failed_count += 1;
+            return;
+        } else if phase == SessionPhase::Web && status == StepStatus::Excluded {
+            self.excluded_live += 1;
             return;
         }
 
@@ -209,11 +224,17 @@ impl ResearchProgress {
                 self.name
             ));
             out.push_str(&line);
-        } else if self.fetched_count > 0 || self.failed_count > 0 {
+        } else if self.fetched_count > 0 || self.failed_count > 0 || self.excluded_live > 0 {
             out.push('\n');
             out.push_str(&format!(
-                "📊 Web fetch totals: {} fetched, {} failed",
-                self.fetched_count, self.failed_count
+                "📊 Web fetch totals: {} fetched, {} failed{}",
+                self.fetched_count,
+                self.failed_count,
+                if self.excluded_live > 0 {
+                    format!(", {} excluded", self.excluded_live)
+                } else {
+                    String::new()
+                }
             ));
         }
         out
@@ -274,6 +295,19 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                     "fetch failed for {}: {}",
                     sanitize_for_display(url),
                     sanitize_for_display(error)
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::WebSourceExcluded { url, reason } => (
+                SessionPhase::Web,
+                "excluded_url",
+                format!(
+                    "excluded {}: {}",
+                    sanitize_for_display(url),
+                    sanitize_for_display(reason)
                 ),
                 None,
                 0,
@@ -642,6 +676,7 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
         "started" => StepStatus::Started,
         "captured" | "done" | "queries" | "preview" | "config" => StepStatus::Done,
         "failed_url" | "error" => StepStatus::Error,
+        "excluded_url" => StepStatus::Excluded,
         _ => return None,
     };
     Some(DecodedProgress {

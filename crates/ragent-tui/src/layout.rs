@@ -35,7 +35,8 @@ use ragent_agent::message::{Message, MessagePart, Role, ToolCallStatus};
 use ragent_storage::storage::MemoryRow;
 
 use crate::app::{
-    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
+    App, ContextAction, LogLevel, ModelPickerEntry, OutputViewTarget, PROVIDER_LIST,
+    ProviderSetupStep, SelectionPane,
 };
 use crate::widgets::message_widget::{
     canonical_tool_name, capitalize_tool_name, is_agent_notice, read_line_range,
@@ -60,6 +61,123 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
 /// Saturating addition for `u16` wrapped line counts (FR-003).
 fn total_wrapping_add(a: u16, b: u16) -> u16 {
     a.saturating_add(b)
+}
+
+/// Padding applied to each side of a content-sized table column.
+const COLUMN_PADDING_CHARS: usize = 1;
+
+/// Column header labels shared by the model-picker dialogs.
+const MODEL_PICKER_HEADERS: [&str; 5] = ["Model", "Context", "Cost", "Thinking", "Features"];
+
+/// Default spacing between table columns (matches `Table::column_spacing`).
+const MODEL_PICKER_COLUMN_SPACING: usize = 1;
+
+/// Format a model-picker entry into its five display-cell strings.
+///
+/// The first cell carries the selection indicator prefix (a filled-triangle
+/// glyph plus space when `selected`, two spaces otherwise) so column
+/// measurement sees exactly what the table will render.
+fn model_picker_entry_cells(entry: &ModelPickerEntry, selected: bool) -> Vec<String> {
+    // Format context window.
+    let ctx_str = if entry.context_window >= 1_000_000 {
+        format!("{}M", entry.context_window / 1_000_000)
+    } else if entry.context_window >= 1_000 {
+        format!("{}K", entry.context_window / 1_000)
+    } else {
+        entry.context_window.to_string()
+    };
+
+    // Format cost: display tier (Free, Low, Medium, etc.) and multiplier.
+    let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
+    let thinking_str = App::format_thinking_levels(&entry.thinking_levels);
+
+    // Format features.
+    let mut features = Vec::new();
+    if entry.reasoning {
+        features.push("R");
+    }
+    if entry.vision {
+        features.push("V");
+    }
+    if entry.tool_use {
+        features.push("T");
+    }
+    let features_str = if features.is_empty() {
+        "-".to_string()
+    } else {
+        features.join(",")
+    };
+
+    // Selection indicator lives inside the name cell.
+    let model_name = if selected {
+        format!("▸ {}", entry.name)
+    } else {
+        format!("  {}", entry.name)
+    };
+
+    vec![model_name, ctx_str, cost_str, thinking_str, features_str]
+}
+
+/// Inner (table-area) width in characters needed to render every model-picker
+/// cell without truncation.
+///
+/// This mirrors the measurement in [`content_sized_columns`]: widest cell or
+/// header per column, plus padding on each side, plus one column of spacing
+/// between adjacent columns.
+fn model_picker_inner_width(cells: &[Vec<String>]) -> usize {
+    let col_count = MODEL_PICKER_HEADERS.len();
+    let mut total = 0;
+    for col in 0..col_count {
+        let widest = cells
+            .iter()
+            .filter_map(|row| row.get(col))
+            .map(|cell| cell.chars().count())
+            .chain(std::iter::once(MODEL_PICKER_HEADERS[col].chars().count()))
+            .max()
+            .unwrap_or(0)
+            + COLUMN_PADDING_CHARS * 2;
+        total += widest;
+    }
+    // Spacing between adjacent columns.
+    total + MODEL_PICKER_COLUMN_SPACING * col_count.saturating_sub(1)
+}
+
+/// Build the shared cell grid for a model-picker dialog.
+fn model_picker_cells(models: &[ModelPickerEntry], selected: usize) -> Vec<Vec<String>> {
+    models
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| model_picker_entry_cells(entry, i == selected))
+        .collect()
+}
+
+/// Build table column constraints sized to hold the widest content.
+///
+/// Each column is measured against its header label and every row's cell
+/// string, then widened by [`COLUMN_PADDING_CHARS`] spaces on each side. The
+/// first column uses `Min` so it absorbs any surplus dialog width (giving
+/// model names room to grow); the remaining columns are exact `Length`s so
+/// they never truncate their widest cell.
+fn content_sized_columns(cells: &[Vec<String>]) -> Vec<Constraint> {
+    MODEL_PICKER_HEADERS
+        .iter()
+        .enumerate()
+        .map(|(col, label)| {
+            let content_width = cells
+                .iter()
+                .filter_map(|row| row.get(col))
+                .map(|cell| cell.chars().count())
+                .chain(std::iter::once(label.chars().count()))
+                .max()
+                .unwrap_or(0)
+                + COLUMN_PADDING_CHARS * 2;
+            if col == 0 {
+                Constraint::Min(content_width as u16)
+            } else {
+                Constraint::Length(content_width as u16)
+            }
+        })
+        .collect()
 }
 
 /// Render the full TUI chat screen.
@@ -587,11 +705,21 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::SelectModel {
+            provider_id: _,
             provider_name,
             models,
             selected,
-            ..
         } => {
+            // Dialog width adapts to its content: columns are sized to the
+            // widest cell in each column (see `content_sized_columns`), and
+            // the dialog is just wide enough to hold the full row. The cap
+            // (`centered_rect_max`) also clamps to the terminal, so small
+            // terminals still fit.
+            let cells = model_picker_cells(models, *selected);
+            let inner_w = model_picker_inner_width(&cells) as u16;
+            let area = centered_rect_max(100, 80, inner_w.saturating_add(2), 30, frame.area());
+            frame.render_widget(Clear, area);
+
             if models.is_empty() {
                 let paragraph = Paragraph::new(vec![
                     Line::from(""),
@@ -619,7 +747,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             }
 
             // Create header row
-            let header = Row::new(vec!["Model", "Context", "Cost", "Thinking", "Features"]).style(
+            let header = Row::new(MODEL_PICKER_HEADERS).style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
                     .fg(Color::Cyan),
@@ -637,12 +765,12 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             };
             let end = (start + visible).min(models.len());
 
-            let rows: Vec<Row> = models
+            let rows: Vec<Row> = cells
                 .iter()
                 .enumerate()
                 .skip(start)
                 .take(end - start)
-                .map(|(i, entry)| {
+                .map(|(i, row_cells)| {
                     let is_selected = i == *selected;
                     let style = if is_selected {
                         Style::default()
@@ -651,72 +779,18 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                     } else {
                         Style::default().fg(Color::White)
                     };
-
-                    // Format context window
-                    let ctx_str = if entry.context_window >= 1_000_000 {
-                        format!("{}M", entry.context_window / 1_000_000)
-                    } else if entry.context_window >= 1_000 {
-                        format!("{}K", entry.context_window / 1_000)
-                    } else {
-                        entry.context_window.to_string()
-                    };
-
-                    // Format cost: display tier (Free, Low, Medium, etc.) and multiplier (0x, 1x, 3x, etc.)
-                    let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
-                    let thinking_str = App::format_thinking_levels(&entry.thinking_levels);
-
-                    // Format features
-                    let mut features = Vec::new();
-                    if entry.reasoning {
-                        features.push("R");
-                    }
-                    if entry.vision {
-                        features.push("V");
-                    }
-                    if entry.tool_use {
-                        features.push("T");
-                    }
-                    let features_str = if features.is_empty() {
-                        "-".to_string()
-                    } else {
-                        features.join(",")
-                    };
-
-                    // Add selection indicator
-                    let model_name = if is_selected {
-                        format!("▸ {}", entry.name)
-                    } else {
-                        format!("  {}", entry.name)
-                    };
-
-                    Row::new(vec![
-                        model_name,
-                        ctx_str,
-                        cost_str,
-                        thinking_str,
-                        features_str,
-                    ])
-                    .style(style)
+                    Row::new(row_cells.clone()).style(style)
                 })
                 .collect();
 
-            let table = Table::new(
-                rows,
-                [
-                    Constraint::Percentage(35), // Model name
-                    Constraint::Percentage(15), // Context window
-                    Constraint::Percentage(20), // Cost
-                    Constraint::Percentage(18), // Thinking
-                    Constraint::Percentage(12), // Features
-                ],
-            )
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(format!(" Select Model - {} ", provider_name))
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
+            let table = Table::new(rows, content_sized_columns(&cells))
+                .header(header)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!(" Select Model - {} ", provider_name))
+                        .border_style(Style::default().fg(Color::Cyan)),
+                );
 
             frame.render_widget(table, area);
 
@@ -1623,7 +1697,16 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
             selected,
             target_tier,
         } => {
-            let area = centered_rect(72, 78, frame.area());
+            // Content-sized dialog: when models exist the dialog is just wide
+            // enough to hold the widest row (clamped to the terminal); the
+            // empty-model notice keeps the shared default width.
+            let area = if models.is_empty() {
+                centered_rect(72, 78, frame.area())
+            } else {
+                let cells = model_picker_cells(models, *selected);
+                let inner_w = model_picker_inner_width(&cells) as u16;
+                centered_rect_max(100, 78, inner_w.saturating_add(2), 30, frame.area())
+            };
             frame.render_widget(Clear, area);
 
             let block = Block::default()
@@ -1656,12 +1739,11 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 // standard model picker so users can compare context window,
                 // cost, thinking levels, and feature flags before assigning a
                 // model to a router tier bucket.
-                let header = Row::new(vec!["Model", "Context", "Cost", "Thinking", "Features"])
-                    .style(
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(Color::Cyan),
-                    );
+                let header = Row::new(MODEL_PICKER_HEADERS).style(
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(Color::Cyan),
+                );
 
                 let header_height = 3;
                 let footer_height = 3;
@@ -1675,12 +1757,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                 };
                 let end = (start + visible).min(models.len());
 
-                let rows: Vec<Row> = models
+                let cells = model_picker_cells(models, *selected);
+                let rows: Vec<Row> = cells
                     .iter()
                     .enumerate()
                     .skip(start)
                     .take(end - start)
-                    .map(|(i, m)| {
+                    .map(|(i, row_cells)| {
                         let is_selected = i == *selected;
                         let style = if is_selected {
                             Style::default()
@@ -1689,62 +1772,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &mut App) {
                         } else {
                             Style::default().fg(Color::White)
                         };
-
-                        let ctx_str = if m.context_window >= 1_000_000 {
-                            format!("{}M", m.context_window / 1_000_000)
-                        } else if m.context_window >= 1_000 {
-                            format!("{}K", m.context_window / 1_000)
-                        } else {
-                            m.context_window.to_string()
-                        };
-                        let cost_str = format!("{} · {}", m.cost_tier, m.cost_multiplier);
-                        let thinking_str = App::format_thinking_levels(&m.thinking_levels);
-
-                        let mut features = Vec::new();
-                        if m.reasoning {
-                            features.push("R");
-                        }
-                        if m.vision {
-                            features.push("V");
-                        }
-                        if m.tool_use {
-                            features.push("T");
-                        }
-                        let features_str = if features.is_empty() {
-                            "-".to_string()
-                        } else {
-                            features.join(",")
-                        };
-
-                        let model_name = if is_selected {
-                            format!("▸ {}", m.name)
-                        } else {
-                            format!("  {}", m.name)
-                        };
-
-                        Row::new(vec![
-                            model_name,
-                            ctx_str,
-                            cost_str,
-                            thinking_str,
-                            features_str,
-                        ])
-                        .style(style)
+                        Row::new(row_cells.clone()).style(style)
                     })
                     .collect();
 
-                let table = Table::new(
-                    rows,
-                    [
-                        Constraint::Percentage(35),
-                        Constraint::Percentage(15),
-                        Constraint::Percentage(20),
-                        Constraint::Percentage(18),
-                        Constraint::Percentage(12),
-                    ],
-                )
-                .header(header)
-                .block(block);
+                let table = Table::new(rows, content_sized_columns(&cells))
+                    .header(header)
+                    .block(block);
                 frame.render_widget(table, area);
 
                 // Footer hint.
@@ -2106,11 +2140,174 @@ fn input_widget_lines(input: &str, inner_width: usize) -> Vec<String> {
     result
 }
 
-/// Render input text as styled ratatui `Line`s with keyboard-selection highlighting.
+/// Wrap one rendered [`Line`] into styled display rows that match ratatui's
+/// `Paragraph` word-wrapping (`Wrap { trim: false }`).
 ///
-/// Characters within `selection` (a `[start, end)` char-index range) are
-/// rendered with a blue background. Prefix characters (`"> "` / `"  "`) are
-/// never considered part of the selection.
+/// Rows are broken exactly where ratatui's `WordWrapper` (0.29
+/// `widgets/reflow.rs`, `WordWrapper::process_input`) breaks them, and each
+/// row keeps the original span styles.  Because no row ever exceeds the
+/// target width, re-wrapping a row inside `Paragraph` is a no-op: the cache
+/// geometry and the painted output stay in one coordinate system.
+fn wrap_line_styled(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+
+    if width == 0 {
+        return vec![unbounded_line(line)];
+    }
+
+    let max = width;
+    // Flat stream of (grapheme symbol, patched style) mirroring
+    // `Paragraph::styled_graphemes` (line style patched with span style).
+    let base = line.style;
+    let graphemes: Vec<(String, ratatui::style::Style)> = line
+        .spans
+        .iter()
+        .flat_map(|span| {
+            let span_style = base.patch(span.style);
+            span.content
+                .graphemes(true)
+                .map(move |g| (g.to_string(), span_style))
+        })
+        .collect();
+
+    // Port of `WordWrapper::process_input` (trim = false).  State:
+    // `row` is the display row being built, `word` the current word buffer,
+    // `ws` the pending whitespace run.
+    let mut rows: Vec<Vec<(String, ratatui::style::Style)>> = Vec::new();
+    let mut row: Vec<(String, ratatui::style::Style)> = Vec::new();
+    let mut row_width: usize = 0;
+    let mut word: Vec<(String, ratatui::style::Style)> = Vec::new();
+    let mut word_width: usize = 0;
+    let mut ws: Vec<(String, ratatui::style::Style)> = Vec::new();
+    let mut ws_width: usize = 0;
+    let mut non_ws_previous = false;
+
+    for (g, style) in graphemes {
+        // ratatui 0.29 treats NBSP as a regular (non-whitespace) grapheme
+        // and ZWSP (zero-width space) as whitespace, so the port must agree
+        // with `StyledGrapheme::is_whitespace` or the wrapped geometry
+        // drifts from the painted output.
+        let is_ws = (g.chars().all(char::is_whitespace) && g != "\u{00a0}") || g == "\u{200b}";
+        // Symbols wider than the limit are ignored (as in WordWrapper).
+        if g.width() > max {
+            continue;
+        }
+        let gw = g.width();
+
+        let word_found = non_ws_previous && is_ws;
+        // The completed word (with its preceding whitespace run) would
+        // overflow even on an otherwise empty row.
+        let untrimmed_overflow = row.is_empty() && word_width + ws_width + gw > max;
+
+        // Flush the completed word to the row (trim = false keeps the
+        // leading whitespace run).
+        if word_found || untrimmed_overflow {
+            row.append(&mut ws);
+            row_width += ws_width;
+            row.append(&mut word);
+            row_width += word_width;
+            ws_width = 0;
+            word_width = 0;
+        }
+
+        let row_full = row_width >= max;
+        let pending_word_overflow = gw > 0 && row_width + ws_width + word_width >= max;
+
+        if row_full || pending_word_overflow {
+            let remaining = max.saturating_sub(row_width);
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+
+            // Drop whitespace up to the end of the emitted row.
+            while let Some((front, _)) = ws.first() {
+                let fw = front.width();
+                if fw > remaining {
+                    break;
+                }
+                ws_width -= fw;
+                ws.remove(0);
+            }
+
+            // The wrapping whitespace symbol is consumed by the break.
+            // (WordWrapper skips the counter update on this path too.)
+            if is_ws && ws.is_empty() {
+                continue;
+            }
+        }
+
+        if is_ws {
+            ws.push((g, style));
+            ws_width += gw;
+        } else {
+            word.push((g, style));
+            word_width += gw;
+        }
+        non_ws_previous = !is_ws;
+    }
+
+    // Tail: emit whatever is still buffered for this input line (trim =
+    // false keeps trailing whitespace on the row).
+    if row.is_empty() && word.is_empty() && !ws.is_empty() {
+        rows.push(vec![]);
+    }
+    row.append(&mut ws);
+    row.append(&mut word);
+    if !row.is_empty() {
+        rows.push(row);
+    } else if rows.is_empty() {
+        // Whitespace-independent blank input line: WordWrapper still emits a
+        // single (blank) row so blank separator lines keep their height.
+        rows.push(vec![]);
+    }
+
+    rows.into_iter().map(cells_to_line).collect()
+}
+
+/// Convert a wrapped row's grapheme/style cells back into one styled `Line`,
+/// collapsing adjacent same-style graphemes into single spans.
+fn cells_to_line(cells: Vec<(String, ratatui::style::Style)>) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(cells.len());
+    let mut text = String::new();
+    let mut cur_style: Option<ratatui::style::Style> = None;
+    for (g, st) in cells {
+        if cur_style.is_some_and(|s| s != st) && !text.is_empty() {
+            spans.push(Span::styled(std::mem::take(&mut text), cur_style.unwrap()));
+        }
+        cur_style = Some(st);
+        text.push_str(&g);
+    }
+    if !text.is_empty() {
+        spans.push(Span::styled(text, cur_style.unwrap_or_default()));
+    }
+    Line::from(spans)
+}
+
+/// Re-anchor an un-wrapped [`Line`] as a `'static` line for the width == 0
+/// degenerate case (no wrapping possible).
+fn unbounded_line(line: &Line<'_>) -> Line<'static> {
+    Line::from(
+        line.spans
+            .iter()
+            .map(|s| Span::styled(s.content.to_string(), s.style))
+            .collect::<Vec<_>>(),
+    )
+    .style(line.style)
+}
+
+/// Plain-text projection of pre-wrapped [`Line`]s for text-selection copy.
+fn wrapped_lines_to_strings(wrapped: &[Line<'_>]) -> Vec<String> {
+    wrapped
+        .iter()
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
+        .collect()
+}
+
 fn input_lines_with_kb_selection(
     input: &str,
     inner_width: usize,
@@ -3070,6 +3267,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     while app.log_line_cache.len() < all_entries.len() {
         app.log_line_cache.push(crate::app::LogLineGroup {
             lines: Vec::new(),
+            wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
             version: 0, // stale
@@ -3086,29 +3284,40 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         if group.version != entry.seq {
             group.lines = log_entry_to_lines(entry, &app.sid_to_display_name);
             group.version = entry.seq;
-            group.content_lines = build_wrapped_content_lines(&group.lines, w);
-            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
-            group.wrapped_count = para.line_count(inner_width) as u16;
+            // Pre-wrap this entry's lines at the current width so scroll
+            // geometry, selection copy, and the rendered window all share
+            // one wrapped-row coordinate system (mirrors render_messages).
+            group.wrapped_lines = group
+                .lines
+                .iter()
+                .flat_map(|l| wrap_line_styled(l, w))
+                .collect();
+            group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
+            group.wrapped_count = group.wrapped_lines.len() as u16;
         }
     }
 
     // Re-wrap all groups when the width changed.
     if need_rewrap {
         for group in app.log_line_cache.iter_mut() {
-            group.content_lines = build_wrapped_content_lines(&group.lines, w);
-            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
-            group.wrapped_count = para.line_count(inner_width) as u16;
+            group.wrapped_lines = group
+                .lines
+                .iter()
+                .flat_map(|l| wrap_line_styled(l, w))
+                .collect();
+            group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
+            group.wrapped_count = group.wrapped_lines.len() as u16;
         }
         app.log_cache_width = inner_width;
     }
 
     // Flatten all cached groups into a single Vec<Line> for rendering and
-    // accumulate the total wrapped line count.
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    // accumulate the total wrapped line count.  The full `all_lines` vector
+    // is never materialised any more (see the scroll-window slice below);
+    // only the content lines used for text-selection copy are collected.
     let mut all_content_lines: Vec<String> = Vec::new();
     let mut total_wrapped: u16 = 0;
     for group in app.log_line_cache.iter() {
-        all_lines.extend(group.lines.iter().cloned());
         all_content_lines.extend(group.content_lines.iter().cloned());
         total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
     }
@@ -3116,16 +3325,51 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Store the flattened content lines for text-selection copy.
     app.log_content_lines = all_content_lines;
 
-    let paragraph = Paragraph::new(all_lines).wrap(Wrap { trim: false });
-
     // Use the accumulated wrapped count as the total height.
     let total_lines = total_wrapped;
     let visible_height = log_inner.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
     app.log_max_scroll = max_scroll;
     let scroll = app.log_scroll_offset.min(max_scroll);
+    let scroll_from_top = max_scroll.saturating_sub(scroll);
 
-    let paragraph = paragraph.scroll((max_scroll.saturating_sub(scroll), 0));
+    // ── Scroll-window slice (idle-CPU fix, mirrors render_messages) ──────
+    //
+    // Slice the cached pre-wrapped log rows to the visible window instead of
+    // handing ratatui the entire log history inside one Paragraph with
+    // .scroll(), which re-wraps and re-measures every line on every frame.
+    // Both the slice and the scroll geometry are in wrapped-row coordinates,
+    // so the pinned view always shows the newest entries.
+    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible_height as usize + 1);
+    let mut skipped: u16 = 0;
+    let window_end = scroll_from_top.saturating_add(visible_height.saturating_add(1));
+    'outer: for group in app.log_line_cache.iter() {
+        let group_len = group.wrapped_lines.len() as u16;
+        let group_start = skipped;
+        let group_end = skipped.saturating_add(group_len);
+        skipped = group_end;
+        if group_end <= scroll_from_top || group_start >= window_end {
+            continue;
+        }
+        let (start_in_group, end_in_group) = if group_start >= scroll_from_top {
+            (0, group_len)
+        } else {
+            (scroll_from_top - group_start, group_len)
+        };
+        let end_in_group = end_in_group.min(window_end - group_start);
+        for (li, line) in group.wrapped_lines.iter().enumerate() {
+            let li = li as u16;
+            if li < start_in_group {
+                continue;
+            }
+            if li >= end_in_group {
+                continue 'outer;
+            }
+            window.push(line.clone());
+        }
+    }
+
+    let paragraph = Paragraph::new(window).wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, log_inner);
 
@@ -4283,8 +4527,9 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // ── Per-message line cache (FR-003, FR-006) ──────────────────────────
     //
     // The cache holds one `MessageLineGroup` per message.  Each group stores
-    // the un-wrapped `Line<'static>` values (width-independent), the
-    // word-wrapped content lines, and the wrapped-line count at a given width.
+    // the un-wrapped `Line<'static>` values (width-independent) and the
+    // pre-wrapped styled rows at the cached width (`wrapped_lines`, one per
+    // display row) together with the wrapped-line count.
     //
     // On every render we:
     //   1. Reconcile the cache length with `messages.len()`.
@@ -4292,7 +4537,8 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     //      changed).  When only the last message changed (the common streaming
     //      case), only that one group is re-rendered (FR-006).
     //   3. Re-wrap all groups when the terminal width changed.
-    //   4. Flatten the cached lines and sum the wrapped counts.
+    //   4. Sum the wrapped counts and slice the cached wrapped rows to the
+    //      visible window.
     //
     // Staleness is tracked per message via `Message::edit_seq` (bumped by
     // `Message::touch()` on every in-place mutation) rather than a global
@@ -4310,6 +4556,7 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     while app.message_line_cache.len() < messages_to_show.len() {
         app.message_line_cache.push(crate::app::MessageLineGroup {
             lines: Vec::new(),
+            wrapped_lines: Vec::new(),
             content_lines: Vec::new(),
             wrapped_count: 0,
             edit_seq: 0, // rendered on the first pass below
@@ -4328,34 +4575,44 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             group.lines =
                 message_to_lines(msg, &app.tool_step_map, &app.sid_to_display_name, &app.cwd);
             group.edit_seq = msg.edit_seq;
-            // Recompute the wrapped line count and content lines for this
-            // group at the current width.  Without this, newly-streamed
-            // messages keep `wrapped_count: 0` and the total height never
-            // grows, so the view never auto-scrolls to show new content.
-            group.content_lines = build_wrapped_content_lines(&group.lines, w);
-            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
-            group.wrapped_count = para.line_count(inner_width) as u16;
+            // Pre-wrap this group's lines at the current width.  Scroll
+            // geometry, selection-copy content, and the rendered window are
+            // all derived from `wrapped_lines`, so the wrapped and painted
+            // coordinate systems can never diverge.  Without this,
+            // newly-streamed messages keep `wrapped_count: 0` and the total
+            // height never grows, so the view never auto-scrolls to show
+            // new content.
+            group.wrapped_lines = group
+                .lines
+                .iter()
+                .flat_map(|l| wrap_line_styled(l, w))
+                .collect();
+            group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
+            group.wrapped_count = group.wrapped_lines.len() as u16;
         }
     }
 
     // Re-wrap all groups when the width changed (FR-003).
     if need_rewrap {
         for group in app.message_line_cache.iter_mut() {
-            group.content_lines = build_wrapped_content_lines(&group.lines, w);
-            // Compute the wrapped line count for this group.
-            let para = Paragraph::new(group.lines.clone()).wrap(Wrap { trim: false });
-            group.wrapped_count = para.line_count(inner_width) as u16;
+            group.wrapped_lines = group
+                .lines
+                .iter()
+                .flat_map(|l| wrap_line_styled(l, w))
+                .collect();
+            group.content_lines = wrapped_lines_to_strings(&group.wrapped_lines);
+            group.wrapped_count = group.wrapped_lines.len() as u16;
         }
         app.message_cache_width = inner_width;
     }
 
-    // Flatten all cached groups into a single Vec<Line> for rendering and
-    // accumulate the total wrapped line count.
-    let mut all_lines: Vec<Line<'static>> = Vec::new();
+    // Accumulate the total wrapped line count and collect the content lines
+    // used for text-selection copy.  The full `all_lines` vector is never
+    // materialised any more (see the scroll-window slice below) — only the
+    // visible window is passed to ratatui.
     let mut all_content_lines: Vec<String> = Vec::new();
     let mut total_wrapped: u16 = 0;
     for group in app.message_line_cache.iter() {
-        all_lines.extend(group.lines.iter().cloned());
         all_content_lines.extend(group.content_lines.iter().cloned());
         total_wrapped = total_wrapping_add(total_wrapped, group.wrapped_count);
     }
@@ -4363,7 +4620,8 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // Store the flattened content lines for text-selection copy.
     app.message_content_lines = all_content_lines;
 
-    // Build the paragraph with wrapping so we can measure the true rendered height.
+    // Compute scroll geometry from the cached wrapped counts (cheap — no
+    // re-wrapping involved).
     let session_display = app
         .session_id
         .as_deref()
@@ -4383,11 +4641,6 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let paragraph = Paragraph::new(all_lines)
-        .block(messages_block)
-        .wrap(Wrap { trim: false });
-
-    // Use the accumulated wrapped count as the total height.
     let total = total_wrapped;
     let visible = area.height.saturating_sub(2);
     let max_scroll = total.saturating_sub(visible);
@@ -4395,14 +4648,60 @@ pub fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // (C3 fix: Timeline no longer goes blank when content shrinks)
     app.scroll_offset = app.scroll_offset.min(max_scroll);
     app.message_max_scroll = max_scroll;
-    let scroll = max_scroll.saturating_sub(app.scroll_offset);
-    let paragraph = paragraph.scroll((scroll, 0));
+    let scroll_from_top = max_scroll.saturating_sub(app.scroll_offset);
+
+    // ── Scroll-window slice (idle-CPU fix) ────────────────────────────────
+    //
+    // Handing ratatui a Paragraph containing the ENTIRE transcript with
+    // `.scroll((offset, 0))` makes Paragraph::render re-run WordWrapper and
+    // unicode-width measurement over EVERY line on EVERY frame (ratatui
+    // 0.29 only skips work for the no-wrap path).  With hundreds of
+    // messages that is millions of width computations per frame, which
+    // pinned a core even when the agent was idle.
+    //
+    // Instead, slice the cached pre-wrapped rows down to the visible window
+    // and let ratatui lay out only ~`visible` rows.  Because the slice and
+    // the scroll geometry are both expressed in the same wrapped-row
+    // coordinate system, the pinned-bottom view always shows the true tail
+    // of the transcript and newly appended messages stay visible.
+    let mut window: Vec<Line<'static>> = Vec::with_capacity(visible as usize + 1);
+    let mut skipped: u16 = 0;
+    let window_end = scroll_from_top.saturating_add(visible.saturating_add(1));
+    'outer: for group in app.message_line_cache.iter() {
+        let group_len = group.wrapped_lines.len() as u16;
+        let group_start = skipped;
+        let group_end = skipped.saturating_add(group_len);
+        skipped = group_end;
+        if group_end <= scroll_from_top || group_start >= window_end {
+            continue;
+        }
+        let (start_in_group, end_in_group) = if group_start >= scroll_from_top {
+            (0, group_len)
+        } else {
+            (scroll_from_top - group_start, group_len)
+        };
+        let end_in_group = end_in_group.min(window_end - group_start);
+        for (li, line) in group.wrapped_lines.iter().enumerate() {
+            let li = li as u16;
+            if li < start_in_group {
+                continue;
+            }
+            if li >= end_in_group {
+                continue 'outer;
+            }
+            window.push(line.clone());
+        }
+    }
+
+    let paragraph = Paragraph::new(window)
+        .block(messages_block)
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 
     // Render scrollbar when content overflows
     if total > visible {
-        let scroll_position = scroll as usize;
+        let scroll_position = scroll_from_top as usize;
         let mut scrollbar_state =
             ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)

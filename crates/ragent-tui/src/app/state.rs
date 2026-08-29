@@ -251,12 +251,15 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("azure_resource", "Azure Resource (File)"),
     ("bedrock", "Amazon Bedrock"),
     ("copilot", "GitHub Copilot"),
+    ("openrouter", "OpenRouter"),
     ("router", "Model Router"),
 ];
 
 /// Entry in the model picker with full metadata for table display.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ModelPickerEntry {
+    /// The provider identifier this model belongs to (e.g. "ollama").
+    pub provider_id: String,
     /// Model identifier (e.g. "gpt-4o").
     pub id: String,
     /// Human-readable display name.
@@ -291,13 +294,18 @@ pub struct ModelPickerEntry {
 /// Cached rendered lines for a single message (FR-003, FR-006).
 ///
 /// The raw `lines` are width-independent (they are the un-wrapped ratatui
-/// `Line` values produced by `message_to_lines`).  The `content_lines` and
-/// `wrapped_count` are width-dependent and are recomputed when the terminal
-/// width changes.
+/// `Line` values produced by `message_to_lines`).  The `wrapped_lines` are
+/// the same lines pre-wrapped at the cached terminal width (styles were
+/// preserved); `wrapped_count` is `wrapped_lines.len()`, and `content_lines`
+/// is the plain-text projection of the wrapped rows (for text-selection
+/// copy).  Scroll geometry and the visible-window slice are both taken from
+/// `wrapped_lines` so the two coordinate systems can never diverge.
 #[derive(Clone)]
 pub struct MessageLineGroup {
     /// Un-wrapped rendered lines for this message.
     pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Pre-wrapped styled lines at the cached width (one per display row).
+    pub wrapped_lines: Vec<ratatui::text::Line<'static>>,
     /// Word-wrapped plain-text content lines (for text-selection copy).
     pub content_lines: Vec<String>,
     /// Number of wrapped lines this message occupies at the cached width.
@@ -309,14 +317,16 @@ pub struct MessageLineGroup {
 /// Cached rendered lines for a single log entry.
 ///
 /// Mirrors [`MessageLineGroup`] for the log panel: the un-wrapped `Line`
-/// values are width-independent and rendered once per entry; the
-/// `content_lines` and `wrapped_count` are recomputed only when the
+/// values are width-independent and rendered once per entry; the wrapped
+/// rows, `content_lines`, and `wrapped_count` are recomputed only when the
 /// terminal width changes.  The `version` mirrors the entry's own `seq`, so
 /// only newly-added entries are re-rendered.
 #[derive(Clone)]
 pub struct LogLineGroup {
     /// Un-wrapped rendered lines for this log entry.
     pub lines: Vec<ratatui::text::Line<'static>>,
+    /// Pre-wrapped styled lines at the cached width (one per display row).
+    pub wrapped_lines: Vec<ratatui::text::Line<'static>>,
     /// Word-wrapped plain-text content lines (for text-selection copy).
     pub content_lines: Vec<String>,
     /// Number of wrapped lines this entry occupies at the cached width.

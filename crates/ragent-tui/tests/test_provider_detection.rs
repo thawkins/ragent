@@ -22,6 +22,33 @@ fn mem_storage() -> Arc<Storage> {
 }
 
 // =========================================================================
+// Vendor-slug model id partitioning (openrouterprov FR-017)
+// =========================================================================
+
+use ragent_tui::app::model_part_from_selected_model;
+
+#[test]
+fn test_model_part_from_selected_model_preserves_vendor_slug() {
+    assert_eq!(
+        model_part_from_selected_model("openrouter/anthropic/claude-sonnet-4"),
+        Some("anthropic/claude-sonnet-4")
+    );
+}
+
+#[test]
+fn test_model_part_from_selected_model_single_slash() {
+    assert_eq!(
+        model_part_from_selected_model("anthropic/claude-sonnet-4"),
+        Some("claude-sonnet-4")
+    );
+}
+
+#[test]
+fn test_model_part_from_selected_model_bare_string_returns_none() {
+    assert!(model_part_from_selected_model("claude-sonnet-4").is_none());
+}
+
+// =========================================================================
 // Basic: detect_provider doesn't panic with empty storage
 // =========================================================================
 
@@ -249,4 +276,53 @@ fn test_get_configured_providers_no_auto_discovery() {
             "auto-discovery should no longer be used for provider detection"
         );
     }
+}
+
+// =========================================================================
+// OpenRouter provider surfacing (openrouterprov T-009)
+// =========================================================================
+
+use ragent_tui::app::PROVIDER_LIST;
+
+#[test]
+fn test_provider_list_includes_openrouter() {
+    assert!(
+        PROVIDER_LIST.iter().any(|(id, _)| *id == "openrouter"),
+        "PROVIDER_LIST must contain the openrouter provider"
+    );
+    let entry = PROVIDER_LIST
+        .iter()
+        .find(|(id, _)| *id == "openrouter")
+        .expect("openrouter entry");
+    assert_eq!(entry.1, "OpenRouter");
+}
+
+#[test]
+fn test_detect_provider_openrouter_from_stored_key() {
+    let storage = mem_storage();
+    storage
+        .set_provider_auth("openrouter", "sk-or-test-key")
+        .expect("store openrouter key");
+
+    let providers = App::get_configured_providers(&storage);
+    let openrouter = providers.iter().find(|p| p.id == "openrouter");
+    assert!(openrouter.is_some(), "stored key should surface openrouter");
+    assert_eq!(openrouter.unwrap().source, ProviderSource::Database);
+}
+
+#[test]
+fn test_detect_provider_openrouter_preferred_moves_to_front() {
+    let storage = mem_storage();
+    storage
+        .set_provider_auth("anthropic", "sk-ant-test")
+        .expect("store anthropic key");
+    storage
+        .set_provider_auth("openrouter", "sk-or-test-key")
+        .expect("store openrouter key");
+    storage
+        .set_setting("preferred_provider", "openrouter")
+        .expect("set preferred");
+
+    let detected = App::detect_provider(&storage).expect("a provider is detected");
+    assert_eq!(detected.id, "openrouter", "preferred openrouter should win");
 }

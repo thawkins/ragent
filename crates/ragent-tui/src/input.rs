@@ -6,8 +6,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ragent_types::ThinkingLevel;
 
+/// Returns true for providers that use Ollama's boolean `think` parameter.
+fn is_ollama_family(provider_id: &str) -> bool {
+    provider_id == "ollama" || provider_id == "ollama_cloud"
+}
+
 use crate::app::{
-    App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
+    App, ConfiguredProvider, ContextAction, ModelPickerEntry, PROVIDER_LIST, ProviderSetupStep,
+    ProviderSource,
 };
 use ragent_llm::providers::router_config::Tier;
 
@@ -1278,7 +1284,33 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if let Some(entry) = models.get(selected).cloned() {
-                    if entry.thinking_levels.is_empty() {
+                    // Ollama-family providers are boolean thinkers, but model
+                    // detection of reasoning support is unreliable. Always
+                    // show the reasoning selector so the user can override it.
+                    let force_selector =
+                        is_ollama_family(&provider_id) || !entry.thinking_levels.is_empty();
+                    if force_selector {
+                        let default_level = App::default_thinking_level_for_entry(&entry);
+                        let thinking_levels =
+                            if entry.thinking_levels.is_empty() && is_ollama_family(&provider_id) {
+                                ragent_llm::providers::thinking::full_reasoning_levels()
+                            } else {
+                                entry.thinking_levels.clone()
+                            };
+                        let selected_level = thinking_levels
+                            .iter()
+                            .position(|level| *level == default_level)
+                            .unwrap_or(0);
+                        app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
+                            provider_id,
+                            provider_name,
+                            model: ModelPickerEntry {
+                                thinking_levels,
+                                ..entry
+                            },
+                            selected: selected_level,
+                        });
+                    } else {
                         let model_name = app.finalize_model_selection(
                             provider_id,
                             provider_name.clone(),
@@ -1288,19 +1320,6 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         app.provider_setup = Some(ProviderSetupStep::Done {
                             provider_name,
                             model_name: Some(model_name),
-                        });
-                    } else {
-                        let default_level = App::default_thinking_level_for_entry(&entry);
-                        let selected_level = entry
-                            .thinking_levels
-                            .iter()
-                            .position(|level| *level == default_level)
-                            .unwrap_or(0);
-                        app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
-                            provider_id,
-                            provider_name,
-                            model: entry,
-                            selected: selected_level,
                         });
                     }
                 } else {
@@ -1535,7 +1554,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             model_name: app
                                 .selected_model
                                 .as_ref()
-                                .and_then(|m| m.split('/').nth(1))
+                                .and_then(|m| crate::app::model_part_from_selected_model(m))
                                 .map(String::from),
                         });
                     } else {

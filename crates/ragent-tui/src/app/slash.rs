@@ -3901,10 +3901,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                                                                                                                                                                       let ctx = ragent_agent::tool::ToolContext {
                                                                                                                                                                                                                           session_id: sid_clone.clone(),
                                                                                                                                                                                                                           working_dir: working_dir_clone.clone(),
-                                                                                                                                                                                                                          event_bus: event_bus.clone(),
-                                                                                                                                                                                                                          storage: Some(storage.clone()),
-                                                                                                                                                                                                                          agent_manager: None,
-                                                                                                                                                                                                                          active_model: active_model_clone,
+                                                                                                                                                                                                                          event_bus: event_bus.clone(),                            storage: Some(storage.clone()),
+                            agent_manager: None,
+                            active_model: active_model_clone,
+                            provider_registry: Some(Arc::clone(
+                                &session_processor.provider_registry,
+                            )),
                                                                                                                                                                                                                           team_context: None,
                                                                                                                                                                                                                           team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_agent::tool::TeamManagerInterface>),
                                                                                                                                                                                                                           code_index: None,
