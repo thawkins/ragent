@@ -365,7 +365,11 @@ The `create` form supports a number of optional flags:
   — choose the output artifact.
 
 Reports are saved under `research/<name>/RESEARCH.md`. Open the report in the
-TUI with `/research open <name>`.
+TUI with `/research open <name>`. Quality-assurance detail (contradiction
+graph, loci analysis, depth investigation, reconcile, tensions, audits) is
+kept in a companion file at `research/<name>/CORPA.md`; it includes a
+`Sources Reference` copy of the References Index so `[#N]` citations resolve
+in both documents.
 
 > Note: web research uses keyless search by default; a `TAVILY_API_KEY` or
 > `LANGSEARCH_API_KEY` can be configured in `ragent.json` for higher-quality

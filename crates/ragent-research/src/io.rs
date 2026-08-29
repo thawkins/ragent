@@ -66,6 +66,17 @@ impl ResearchIo {
         Self::item_dir(research_root, name).join("RESEARCH.md")
     }
 
+    /// Compute the path of the `CORPA.md` companion file for a research item.
+    ///
+    /// CORPA.md carries the QA render sections (contradiction graph, loci
+    /// analysis, depth investigation, cross-locus reconcile, source tensions,
+    /// synthesis audit, corpus critic) plus a copy of the references table, so
+    /// `RESEARCH.md` can stay focused on the narrative findings.
+    #[must_use]
+    pub fn corpa_md_path(research_root: &Path, name: &ResearchName) -> PathBuf {
+        Self::item_dir(research_root, name).join("CORPA.md")
+    }
+
     /// Compute the path of the `sources/` subdirectory for a research item.
     #[must_use]
     pub fn sources_dir(research_root: &Path, name: &ResearchName) -> PathBuf {
@@ -217,37 +228,45 @@ impl ResearchIo {
     ///
     /// `captured_at` is the timestamp shown for the "No sources captured"
     /// placeholder; pass `Utc::now()` when generating fresh output.
-    ///
-    /// The table includes a **Published** column (between **Title** and
-    /// **Relevance**) showing each web source's publication date when it
-    /// could be parsed from the page's embedded metadata, and `—` otherwise.
-    /// Non-web sources have no publication date and always show `—`.
-    ///
-    /// The table also includes a **Media** column (between **Type** and
-    /// **Path/URL**) showing the classified media type for web sources
-    /// (`page`, `pdf`, or `youtube`), and `—` for non-web sources.
-    ///
-    /// The table also includes a **Language** column (between **Media** and
-    /// **Path/URL**) showing the human language detected from each web
-    /// source's extracted text (e.g. `English`, `French`), and `—` for
-    /// non-web sources or when detection was inconclusive.
-    ///
-    /// The table also includes an **Author** column (between **Title** and
-    /// **Published**) showing the author extracted from the page's embedded
-    /// metadata, and `—` for non-web sources or when no author was detected.
     #[must_use]
     pub fn render_references_index(sources: &[Source], captured_at: DateTime<Utc>) -> String {
+        let mut out = String::from("## References Index\n\n");
+        out.push_str(&Self::render_references_index_table(sources, captured_at));
+        out
+    }
+
+    /// Render the references table body without the `## References Index`
+    /// heading, for reuse by companion documents (e.g. the `Sources Reference`
+    /// copy in `CORPA.md`).
+    ///
+    /// An empty source list still renders the table with the "No sources
+    /// captured" placeholder row so the document structure is stable for
+    /// downstream tooling.
+    ///
+    /// Column semantics:
+    ///
+    /// - **Published** shows each web source's publication date when it could
+    ///   be parsed from the page's embedded metadata, and `—` otherwise.
+    ///   Non-web sources have no publication date and always show `—`.
+    /// - **Media** shows the classified media type for web sources (`page`,
+    ///   `pdf`, or `youtube`), and `—` for non-web sources.
+    /// - **Language** shows the human language detected from each web source's
+    ///   extracted text (e.g. `English`, `French`), and `—` for non-web
+    ///   sources or when detection was inconclusive.
+    /// - **Author** shows the author extracted from the page's embedded
+    ///   metadata, and `—` for non-web sources or when no author was detected.
+    #[must_use]
+    pub fn render_references_index_table(sources: &[Source], captured_at: DateTime<Utc>) -> String {
         if sources.is_empty() {
             return format!(
-                "## References Index\n\n| # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |\n\
-                           |---|------|-------|----------|----------|-------|--------|-----------|-----------|-------------|--------|----------|\n\
-                           | 1 | other | — | — | — | No sources captured | — | — | (no gathering run) | — | — | {} |\n",
+                "| # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |\n\
+                            |---|------|-------|----------|----------|-------|--------|-----------|-----------|-------------|--------|----------|\n\
+                            | 1 | other | — | — | — | No sources captured | — | — | (no gathering run) | — | — | {} |\n",
                 captured_at.to_rfc3339()
             );
         }
         let mut out = String::from(
-            "## References Index\n\n\
-             | # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |\n\
+            "| # | Type | Media | Language | Path/URL | Title | Author | Published | Relevance | Search tool | Engine | Captured |\n\
              |---|------|-------|----------|----------|-------|--------|-----------|-----------|-------------|--------|----------|\n",
         );
         for (idx, source) in sources.iter().enumerate() {

@@ -20,8 +20,8 @@
 //! background tasks.
 
 use crate::document::{
-    AssembledDocument, ResearchDocument, assemble_document, mark_in_progress, render_skeleton,
-    render_supporting_file,
+    AssembledDocument, ResearchDocument, assemble_document, mark_in_progress,
+    render_corpa_skeleton, render_skeleton, render_supporting_file,
 };
 use crate::io::{IndexEntry, ResearchIo, ResearchIoError};
 use crate::item::ResearchItem;
@@ -283,6 +283,14 @@ impl ResearchManager {
         ResearchIo::atomic_write(
             ResearchIo::research_md_path(&self.research_root, &name),
             &content,
+        )
+        .await?;
+        // CORPA.md companion skeleton: QA sections are empty at creation but
+        // the file is present so downstream tooling sees a stable structure.
+        let corpa_content = render_corpa_skeleton(&name, title, topic, output_format);
+        ResearchIo::atomic_write(
+            ResearchIo::corpa_md_path(&self.research_root, &name),
+            &corpa_content,
         )
         .await?;
         tracing::info!(
@@ -599,6 +607,10 @@ impl ResearchManager {
         // 3. Write RESEARCH.md itself.
         let path = ResearchIo::research_md_path(&self.research_root, &name);
         ResearchIo::atomic_write(&path, &assembled.content).await?;
+
+        // 4. Write the CORPA.md companion with the QA render sections.
+        let corpa_path = ResearchIo::corpa_md_path(&self.research_root, &name);
+        ResearchIo::atomic_write(&corpa_path, &assembled.corpa).await?;
 
         tracing::info!(
             name = %name,

@@ -174,6 +174,12 @@ pub struct AssembledDocument {
     pub frontmatter: String,
     /// Just the body text (without the frontmatter).
     pub body: String,
+    /// Full `CORPA.md` companion payload. Carries the QA render sections
+    /// (Contradiction Graph, Loci Analysis, Depth Investigation, Cross-Locus
+    /// Reconcile, Source Tensions, Synthesis Audit, Corpus Critic) plus a
+    /// `Sources Reference` copy of the references table. Written alongside
+    /// `RESEARCH.md` by [`crate::manager::ResearchManager::write_document`].
+    pub corpa: String,
 }
 
 /// Extract the headline for a finding and return the finding body with the
@@ -301,6 +307,26 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
     // inside code spans, fenced blocks, and existing Markdown links untouched.
     let body = linkify_urls(&body);
 
+    // ── CORPA.md companion document ──────────────────────────────────────
+    // The QA render sections are split into this separate per-research
+    // `CORPA.md` file so RESEARCH.md keeps its narrative focus (spec
+    // corpusAnalysis). It reuses the same references table so `[#N]` source
+    // indices resolve in both files.
+    let mut corpa = String::with_capacity(4096);
+    corpa.push_str("# Corpus Analysis Companion (CORPA.md)\n\n");
+    corpa.push_str(&format!(
+        "Quality-assurance companion document for `{title}`. Generated \
+         together with `RESEARCH.md`; the `[#N]` source indices reference \
+         the Sources Reference table at the bottom of this file.\n\n"
+    ));
+    corpa.push_str(&assemble_corpa_body(doc));
+    corpa.push_str("## Sources Reference\n\n");
+    corpa.push_str(&ResearchIo::render_references_index_table(
+        &doc.item.sources,
+        Utc::now(),
+    ));
+    let corpa = linkify_urls(&corpa);
+
     let mut content = String::with_capacity(frontmatter.len() + 1 + body.len());
     content.push_str(&frontmatter);
     content.push('\n');
@@ -312,7 +338,153 @@ pub fn assemble_document(doc: &ResearchDocument) -> AssembledDocument {
             .trim_end_matches("---\n")
             .to_string(),
         body,
+        corpa,
     }
+}
+
+/// Build the body of the per-research `CORPA.md` companion file.
+///
+/// CORPA.md carries the QA render sections that used to inline at the bottom
+/// of `RESEARCH.md`, in a fixed order:
+///
+/// 1. Contradiction Graph
+/// 2. Loci Analysis
+/// 3. Depth Investigation
+/// 4. Cross-Locus Reconcile
+/// 5. Source Tensions
+/// 6. Synthesis Audit
+/// 7. Corpus Critic
+///
+/// Each section is emitted only when its artifact was produced, so a light
+/// tier run yields a short file. The `Sources Reference` table is appended by
+/// [`assemble_document`]. The report and IMRaD layouts share one CORPA body —
+/// the companion document always uses top-level `##` headings so it renders
+/// identically regardless of the `RESEARCH.md` layout in use.
+fn assemble_corpa_body(doc: &ResearchDocument) -> String {
+    let mut body = String::new();
+
+    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
+    if let Some(graph) = &doc.contradiction_graph {
+        body.push_str("## Contradiction Graph\n\n");
+        if graph.is_empty() {
+            body.push_str("_(no contradictions detected among the gathered sources)_\n\n");
+        } else {
+            body.push_str("| Pair | Dimension | Strength | Source A | Source B | Note |\n");
+            body.push_str("|------|-----------|----------|----------|----------|------|\n");
+            for edge in &graph.edges {
+                let a = format!(
+                    "#{} {}",
+                    edge.claim_a.source_index, edge.claim_a.source_path
+                );
+                let b = format!(
+                    "#{} {}",
+                    edge.claim_b.source_index, edge.claim_b.source_path
+                );
+                body.push_str(&format!(
+                    "| {} vs {} | {} | {} | {} | {} | {} |\n",
+                    edge.claim_a.source_index,
+                    edge.claim_b.source_index,
+                    edge.dimension,
+                    edge.strength,
+                    escape_pipe(&a),
+                    escape_pipe(&b),
+                    escape_pipe(&edge.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
+    if let Some(loci) = &doc.loci {
+        body.push_str("## Loci Analysis\n\n");
+        if loci.is_empty() {
+            body.push_str(
+                "_(no recurring research dimensions detected among the gathered sources)_\n\n",
+            );
+        } else {
+            body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
+            body.push_str("|-------|---------|----------|-------------------------|\n");
+            for locus in &loci.loci {
+                let indices: Vec<String> = locus
+                    .source_indices
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect();
+                let snippets = if locus.snippets.is_empty() {
+                    "—".to_string()
+                } else {
+                    locus
+                        .snippets
+                        .join("; ")
+                        .chars()
+                        .take(120)
+                        .collect::<String>()
+                };
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&locus.label),
+                    escape_pipe(&indices.join(", ")),
+                    locus.mentions,
+                    escape_pipe(&snippets)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
+    if let Some(investigations) = &doc.depth_investigation {
+        body.push_str("## Depth Investigation\n\n");
+        if investigations.is_empty() {
+            body.push_str("_(no depth investigation available)_\n\n");
+        } else {
+            body.push_str("| Locus | Depth | Sources | Note |\n");
+            body.push_str("|-------|-------|---------|------|\n");
+            for inv in investigations {
+                let sources = inv
+                    .representative_sources
+                    .iter()
+                    .map(|i| format!("#{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                body.push_str(&format!(
+                    "| {} | {} | {} | {} |\n",
+                    escape_pipe(&inv.label),
+                    inv.depth.as_str(),
+                    escape_pipe(&sources),
+                    escape_pipe(&inv.note)
+                ));
+            }
+            body.push('\n');
+        }
+    }
+
+    // ── Cross-Locus Reconcile (FR-005, T-009) ───────────────────────────
+    if let Some(reconcile) = &doc.cross_locus_reconcile {
+        body.push_str("## Cross-Locus Reconcile\n\n");
+        body.push_str(&render_cross_locus_reconcile(reconcile));
+    }
+
+    // ── Source Tensions (FR-005, T-009) ──────────────────────────���──────
+    if let Some(tensions) = &doc.source_tensions {
+        body.push_str("## Source Tensions\n\n");
+        body.push_str(&render_source_tensions(tensions));
+    }
+
+    // ── Synthesis Audit (FR-005, T-012) ─────────────────────────────────
+    if let Some(audit) = &doc.synthesis_audit {
+        body.push_str("## Synthesis Audit\n\n");
+        body.push_str(&render_synthesis_audit(audit));
+    }
+
+    // ── Corpus Critic (FR-005, T-010) ───────────────────────────────────
+    if let Some(report) = &doc.corpus_critic {
+        body.push_str("## Corpus Critic\n\n");
+        body.push_str(&render_corpus_critic(report));
+    }
+
+    body
 }
 
 /// Render the synthesis audit as a concise markdown section.
@@ -1254,103 +1426,10 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
     }
     // ── Findings Relationship Diagram (FR-001 / FR-002 / FR-012) ────────────
     body.push_str(&crate::diagram::render_findings_diagram(&doc.findings));
-
-    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
-    if let Some(graph) = &doc.contradiction_graph {
-        body.push_str("## Contradiction Graph\n\n");
-        if graph.is_empty() {
-            body.push_str("_(no contradictions detected among the gathered sources)_\n\n");
-        } else {
-            body.push_str("| Pair | Dimension | Strength | Source A | Source B | Note |\n");
-            body.push_str("|------|-----------|----------|----------|----------|------|\n");
-            for edge in &graph.edges {
-                let a = format!(
-                    "#{} {}",
-                    edge.claim_a.source_index, edge.claim_a.source_path
-                );
-                let b = format!(
-                    "#{} {}",
-                    edge.claim_b.source_index, edge.claim_b.source_path
-                );
-                body.push_str(&format!(
-                    "| {} vs {} | {} | {} | {} | {} | {} |\n",
-                    edge.claim_a.source_index,
-                    edge.claim_b.source_index,
-                    edge.dimension,
-                    edge.strength,
-                    escape_pipe(&a),
-                    escape_pipe(&b),
-                    escape_pipe(&edge.note)
-                ));
-            }
-            body.push('\n');
-        }
-    }
-
-    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
-    if let Some(loci) = &doc.loci {
-        body.push_str("## Loci Analysis\n\n");
-        if loci.is_empty() {
-            body.push_str(
-                "_(no recurring research dimensions detected among the gathered sources)_\n\n",
-            );
-        } else {
-            body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
-            body.push_str("|-------|---------|----------|-------------------------|\n");
-            for locus in &loci.loci {
-                let indices: Vec<String> = locus
-                    .source_indices
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect();
-                let snippets = if locus.snippets.is_empty() {
-                    "—".to_string()
-                } else {
-                    locus
-                        .snippets
-                        .join("; ")
-                        .chars()
-                        .take(120)
-                        .collect::<String>()
-                };
-                body.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
-                    escape_pipe(&locus.label),
-                    escape_pipe(&indices.join(", ")),
-                    locus.mentions,
-                    escape_pipe(&snippets)
-                ));
-            }
-            body.push('\n');
-        }
-    }
-
-    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
-    if let Some(investigations) = &doc.depth_investigation {
-        body.push_str("## Depth Investigation\n\n");
-        if investigations.is_empty() {
-            body.push_str("_(no depth investigation available)_\n\n");
-        } else {
-            body.push_str("| Locus | Depth | Sources | Note |\n");
-            body.push_str("|-------|-------|---------|------|\n");
-            for inv in investigations {
-                let sources = inv
-                    .representative_sources
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                body.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
-                    escape_pipe(&inv.label),
-                    inv.depth.as_str(),
-                    escape_pipe(&sources),
-                    escape_pipe(&inv.note)
-                ));
-            }
-            body.push('\n');
-        }
-    }
+    // NOTE: the QA render sections (Contradiction Graph, Loci Analysis,
+    // Depth Investigation, Cross-Locus Reconcile, Source Tensions,
+    // Synthesis Audit, Corpus Critic) moved to the per-research CORPA.md
+    // companion file -- see `assemble_corpa_body`.
 
     // ── Evidence Digest (FR-005, T-011) ───────────────────────────────────
     if let Some(digest) = &doc.evidence_digest {
@@ -1363,30 +1442,8 @@ fn assemble_report_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("## Triple Draft\n\n");
         body.push_str(&render_triple_draft(draft));
     }
-
-    // ── Cross-Locus Reconcile (FR-005, T-009) ────────────────────────��
-    if let Some(reconcile) = &doc.cross_locus_reconcile {
-        body.push_str("## Cross-Locus Reconcile\n\n");
-        body.push_str(&render_cross_locus_reconcile(reconcile));
-    }
-
-    // ── Source Tensions (FR-005, T-009) ─────────────────────────────────
-    if let Some(tensions) = &doc.source_tensions {
-        body.push_str("## Source Tensions\n\n");
-        body.push_str(&render_source_tensions(tensions));
-    }
-
-    // ── Synthesis Audit (FR-005, T-012) ─────────────────────────────────
-    if let Some(audit) = &doc.synthesis_audit {
-        body.push_str("## Synthesis Audit\n\n");
-        body.push_str(&render_synthesis_audit(audit));
-    }
-
-    // ── Corpus Critic (FR-005, T-010) ─────────────────────────��──────────
-    if let Some(report) = &doc.corpus_critic {
-        body.push_str("## Corpus Critic\n\n");
-        body.push_str(&render_corpus_critic(report));
-    }
+    // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
+    // Corpus Critic also moved to CORPA.md (`assemble_corpa_body`).
 
     // ── Gap-Fill Fetch (FR-005, T-010) ───────────────────────────────────
     if let Some(result) = &doc.gap_fetch {
@@ -1556,102 +1613,9 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str(&dq_summary);
     }
 
-    // ── Contradiction Graph (FR-005, T-007) ─────────────────────────────
-    if let Some(graph) = &doc.contradiction_graph {
-        body.push_str("### Contradiction Graph\n\n");
-        if graph.is_empty() {
-            body.push_str("_(no contradictions detected among the gathered sources)_\n\n");
-        } else {
-            body.push_str("| Pair | Dimension | Strength | Source A | Source B | Note |\n");
-            body.push_str("|------|-----------|----------|----------|----------|------|\n");
-            for edge in &graph.edges {
-                let a = format!(
-                    "#{} {}",
-                    edge.claim_a.source_index, edge.claim_a.source_path
-                );
-                let b = format!(
-                    "#{} {}",
-                    edge.claim_b.source_index, edge.claim_b.source_path
-                );
-                body.push_str(&format!(
-                    "| {} vs {} | {} | {} | {} | {} | {} |\n",
-                    edge.claim_a.source_index,
-                    edge.claim_b.source_index,
-                    edge.dimension,
-                    edge.strength,
-                    escape_pipe(&a),
-                    escape_pipe(&b),
-                    escape_pipe(&edge.note)
-                ));
-            }
-            body.push('\n');
-        }
-    }
-
-    // ── Loci Analysis (FR-005, T-008) ───────────────────────────────────
-    if let Some(loci) = &doc.loci {
-        body.push_str("### Loci Analysis\n\n");
-        if loci.is_empty() {
-            body.push_str(
-                "_(no recurring research dimensions detected among the gathered sources)_\n\n",
-            );
-        } else {
-            body.push_str("| Locus | Sources | Mentions | Representative Snippets |\n");
-            body.push_str("|-------|---------|----------|-------------------------|\n");
-            for locus in &loci.loci {
-                let indices: Vec<String> = locus
-                    .source_indices
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect();
-                let snippets = if locus.snippets.is_empty() {
-                    "—".to_string()
-                } else {
-                    locus
-                        .snippets
-                        .join("; ")
-                        .chars()
-                        .take(120)
-                        .collect::<String>()
-                };
-                body.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
-                    escape_pipe(&locus.label),
-                    escape_pipe(&indices.join(", ")),
-                    locus.mentions,
-                    escape_pipe(&snippets)
-                ));
-            }
-            body.push('\n');
-        }
-    }
-
-    // ── Depth Investigation (FR-005, T-008) ───────────────────────────────
-    if let Some(investigations) = &doc.depth_investigation {
-        body.push_str("### Depth Investigation\n\n");
-        if investigations.is_empty() {
-            body.push_str("_(no depth investigation available)_\n\n");
-        } else {
-            body.push_str("| Locus | Depth | Sources | Note |\n");
-            body.push_str("|-------|-------|---------|------|\n");
-            for inv in investigations {
-                let sources = inv
-                    .representative_sources
-                    .iter()
-                    .map(|i| format!("#{i}"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                body.push_str(&format!(
-                    "| {} | {} | {} | {} |\n",
-                    escape_pipe(&inv.label),
-                    inv.depth.as_str(),
-                    escape_pipe(&sources),
-                    escape_pipe(&inv.note)
-                ));
-            }
-            body.push('\n');
-        }
-    }
+    // NOTE: the QA subsections (Contradiction Graph, Loci Analysis, Depth
+    // Investigation) moved to the per-research CORPA.md companion file --
+    // see `assemble_corpa_body`.
 
     // ── Evidence Digest (FR-005, T-011) ────��──────────────────────────────
     if let Some(digest) = &doc.evidence_digest {
@@ -1664,30 +1628,8 @@ fn assemble_imrad_body(doc: &ResearchDocument, topic: &str) -> String {
         body.push_str("### Triple Draft\n\n");
         body.push_str(&render_triple_draft(draft));
     }
-
-    // ── Cross-Locus Reconcile (FR-005, T-009) ──────────────────────────
-    if let Some(reconcile) = &doc.cross_locus_reconcile {
-        body.push_str("### Cross-Locus Reconcile\n\n");
-        body.push_str(&render_cross_locus_reconcile(reconcile));
-    }
-
-    // ── Source Tensions (FR-005, T-009) ─────────────────────────────────
-    if let Some(tensions) = &doc.source_tensions {
-        body.push_str("### Source Tensions\n\n");
-        body.push_str(&render_source_tensions(tensions));
-    }
-
-    // Synthesis Audit (FR-005, T-012)
-    if let Some(audit) = &doc.synthesis_audit {
-        body.push_str("### Synthesis Audit\n\n");
-        body.push_str(&render_synthesis_audit(audit));
-    }
-
-    // Corpus Critic (FR-005, T-010)
-    if let Some(report) = &doc.corpus_critic {
-        body.push_str("### Corpus Critic\n\n");
-        body.push_str(&render_corpus_critic(report));
-    }
+    // NOTE: Cross-Locus Reconcile, Source Tensions, Synthesis Audit, and
+    // Corpus Critic also moved to CORPA.md (`assemble_corpa_body`).
 
     // Gap-Fill Fetch (FR-005, T-010)
     if let Some(result) = &doc.gap_fetch {
@@ -1769,13 +1711,40 @@ pub fn render_skeleton(
     topic: &str,
     output_format: crate::run_config::OutputFormat,
 ) -> String {
+    assemble_document(&placeholder_document(name, title, topic, output_format)).content
+}
+
+/// Render the `CORPA.md` companion skeleton written alongside the
+/// `RESEARCH.md` skeleton by [`crate::manager::ResearchManager::create`].
+/// No QA sections have artifacts at creation time, so the skeleton carries
+/// only the header and the `Sources Reference` placeholder table — this
+/// keeps the file well-formed the moment it lands on disk.
+#[must_use]
+pub fn render_corpa_skeleton(
+    name: &ResearchName,
+    title: &str,
+    topic: &str,
+    output_format: crate::run_config::OutputFormat,
+) -> String {
+    assemble_document(&placeholder_document(name, title, topic, output_format)).corpa
+}
+
+/// Build the empty placeholder `ResearchDocument` shared by [`render_skeleton`]
+/// and [`render_corpa_skeleton`]. Non-default output formats are persisted in
+/// the frontmatter (FR-012) so the skeleton records the requested artifact.
+fn placeholder_document(
+    name: &ResearchName,
+    title: &str,
+    topic: &str,
+    output_format: crate::run_config::OutputFormat,
+) -> ResearchDocument {
     let mut placeholder = ResearchItem::new(name.clone(), title, topic);
     // Persist non-default formats in the frontmatter (FR-012) so the skeleton
     // records the requested artifact from the moment it is created.
     if output_format != crate::run_config::OutputFormat::Report {
         placeholder.output_format = Some(output_format.as_str().to_string());
     }
-    let doc = ResearchDocument {
+    ResearchDocument {
         item: placeholder,
         summary: String::new(),
         findings: Vec::new(),
@@ -1799,8 +1768,7 @@ pub fn render_skeleton(
         template_body: None,
         decomposed_queries: Vec::new(),
         output_format,
-    };
-    assemble_document(&doc).content
+    }
 }
 
 /// Apply the FR-020 template substitution to `template_body`.
@@ -2689,11 +2657,13 @@ mod tests {
         let mut doc = sample_doc(sample_item());
         doc.contradiction_graph = Some(graph);
         let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("## Contradiction Graph"));
-        assert!(assembled.body.contains("performance"));
-        assert!(assembled.body.contains("opposing performance claims"));
-        assert!(assembled.body.contains("#1"));
-        assert!(assembled.body.contains("#2"));
+        // The contradiction graph renders in the CORPA.md companion payload.
+        assert!(assembled.corpa.contains("## Contradiction Graph"));
+        assert!(!assembled.body.contains("## Contradiction Graph"));
+        assert!(assembled.corpa.contains("performance"));
+        assert!(assembled.corpa.contains("opposing performance claims"));
+        assert!(assembled.corpa.contains("#1"));
+        assert!(assembled.corpa.contains("#2"));
     }
 
     #[test]
@@ -2701,10 +2671,10 @@ mod tests {
         let mut doc = sample_doc(sample_item());
         doc.contradiction_graph = Some(crate::contradiction::ContradictionGraph::empty());
         let assembled = assemble_document(&doc);
-        assert!(assembled.body.contains("## Contradiction Graph"));
+        assert!(assembled.corpa.contains("## Contradiction Graph"));
         assert!(
             assembled
-                .body
+                .corpa
                 .contains("no contradictions detected among the gathered sources")
         );
     }
@@ -2714,6 +2684,7 @@ mod tests {
         let doc = sample_doc(sample_item());
         let assembled = assemble_document(&doc);
         assert!(!assembled.body.contains("## Contradiction Graph"));
+        assert!(!assembled.corpa.contains("## Contradiction Graph"));
     }
 
     #[test]
@@ -2742,15 +2713,19 @@ mod tests {
         });
         let assembled = assemble_document(&doc);
         assert!(
-            assembled.body.contains("## Corpus Critic"),
-            "report layout should render corpus critic section"
+            assembled.corpa.contains("## Corpus Critic"),
+            "CORPA.md should render corpus critic section"
+        );
+        assert!(
+            !assembled.body.contains("## Corpus Critic"),
+            "RESEARCH.md must no longer carry the corpus critic section"
         );
         assert!(
             assembled.body.contains("## Gap-Fill Fetch"),
             "report layout should render gap-fill section"
         );
-        assert!(assembled.body.contains("72/100"));
-        assert!(assembled.body.contains("Broaden the width sweep"));
+        assert!(assembled.corpa.contains("72/100"));
+        assert!(assembled.corpa.contains("Broaden the width sweep"));
         assert!(assembled.body.contains("**New sources captured:** 2"));
         assert!(assembled.body.contains("topic cost evidence"));
     }
@@ -3771,13 +3746,17 @@ mod tests {
         });
         let assembled = assemble_document(&doc);
         assert!(
-            assembled.body.contains("## Source Tensions"),
-            "report layout must contain Source Tensions section"
+            assembled.corpa.contains("## Source Tensions"),
+            "CORPA.md must contain Source Tensions section"
         );
-        assert!(assembled.body.contains("contradiction"));
-        assert!(assembled.body.contains("performance"));
-        assert!(assembled.body.contains("#1, #2"));
-        assert!(assembled.body.contains("opposing performance claims"));
+        assert!(
+            !assembled.body.contains("## Source Tensions"),
+            "RESEARCH.md must no longer carry the Source Tensions section"
+        );
+        assert!(assembled.corpa.contains("contradiction"));
+        assert!(assembled.corpa.contains("performance"));
+        assert!(assembled.corpa.contains("#1, #2"));
+        assert!(assembled.corpa.contains("opposing performance claims"));
     }
 
     #[test]
@@ -3795,12 +3774,15 @@ mod tests {
             sources_scanned: 5,
         });
         let assembled = assemble_document(&doc);
+        // IMRaD and report layouts share one CORPA.md companion: the QA
+        // sections always render as top-level `##` headings there.
         assert!(
-            assembled.body.contains("### Source Tensions"),
-            "IMRaD layout must render Source Tensions as a subsection"
+            assembled.corpa.contains("## Source Tensions"),
+            "CORPA.md must render Source Tensions"
         );
-        assert!(assembled.body.contains("shallow evidence"));
-        assert!(assembled.body.contains("cost"));
+        assert!(!assembled.body.contains("### Source Tensions"));
+        assert!(assembled.corpa.contains("shallow evidence"));
+        assert!(assembled.corpa.contains("cost"));
     }
 
     #[test]

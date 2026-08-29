@@ -39,6 +39,8 @@ pub enum StepStatus {
     /// relevance, too-short extraction) rather than failing on the network.
     /// Tracked separately so fetch-failure counts stay meaningful.
     Excluded,
+    /// The step is not required for the selected tier and was skipped.
+    Skipped,
 }
 
 impl StepStatus {
@@ -49,6 +51,7 @@ impl StepStatus {
             Self::Done => "✓",
             Self::Error => "⚠",
             Self::Excluded => "−",
+            Self::Skipped => "○",
         }
     }
 }
@@ -136,14 +139,15 @@ impl ResearchProgress {
             return;
         }
 
-        // If the last step is the same phase and now we're marking it done,
-        // update it in place rather than appending a duplicate line.
-        if status == StepStatus::Done
+        // If the last step is the same phase and now we're marking it done
+        // or skipped, update it in place rather than appending a duplicate
+        // line.
+        if matches!(status, StepStatus::Done | StepStatus::Skipped)
             && let Some(last) = self.steps.last_mut()
             && last.phase == phase.as_str()
             && last.status == StepStatus::Started
         {
-            last.status = StepStatus::Done;
+            last.status = status;
             last.detail = detail;
             return;
         }
@@ -429,8 +433,8 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 status,
                 detail,
             } => (
-                SessionPhase::Setup,
-                status.as_str(),
+                run_step_phase(step),
+                run_step_status(status),
                 format!(
                     "pipeline step: {step}{}",
                     detail
@@ -604,10 +608,170 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
                 0,
                 0,
             ),
-            _ => (
+            SessionEvent::PlanUpdated { sub_questions } => (
                 SessionPhase::Setup,
-                "event",
-                format!("{event:?}"),
+                "done",
+                format!("plan updated: {} sub-question(s)", sub_questions.len()),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::SubQuestionStatusChanged { id, status } => (
+                SessionPhase::Web,
+                "done",
+                format!(
+                    "sub-question {}: {}",
+                    sanitize_for_display(id),
+                    sanitize_for_display(status)
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::SourceFailed { source, error } => (
+                SessionPhase::Web,
+                "error",
+                match source {
+                    Some(s) => format!(
+                        "source failed: {} — {}",
+                        sanitize_for_display(s),
+                        sanitize_for_display(error)
+                    ),
+                    None => format!("source failed: {}", sanitize_for_display(error)),
+                },
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Synthesis(SynthesisEvent::CriticResult { score, gaps }) => (
+                SessionPhase::Synthesize,
+                "done",
+                match score {
+                    Some(s) => format!("critic: {s}/100 — {} gap(s)", gaps.len()),
+                    None => format!("critic: {} gap(s)", gaps.len()),
+                },
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::VerificationResult { passed, issues } => (
+                SessionPhase::Synthesize,
+                if *passed { "done" } else { "error" },
+                format!(
+                    "verification: {} — {} issue(s)",
+                    if *passed { "pass" } else { "fail" },
+                    issues.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::IterationCompleted { iteration, score } => (
+                SessionPhase::Synthesize,
+                "done",
+                match score {
+                    Some(s) => format!("iteration {iteration} complete (score {s})"),
+                    None => format!("iteration {iteration} complete"),
+                },
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::FollowUpQueries { queries } => (
+                SessionPhase::Web,
+                "queries",
+                format!("{} follow-up querie(s) generated", queries.len()),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::ContradictionGraph {
+                edges,
+                sources_scanned,
+            }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "contradiction graph: {} edge(s) from {sources_scanned} source(s)",
+                    edges.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::LociAnalysis {
+                loci,
+                sources_scanned,
+            }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "loci analysis: {} dimension(s) from {sources_scanned} source(s)",
+                    loci.loci.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::DepthInvestigation { investigations }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "depth investigation: {} loci classified",
+                    investigations.len()
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::CrossLocusReconcile { reconcile }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!("cross-locus reconcile: {} pair(s)", reconcile.pairs.len()),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::SourceTensions { tensions }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!("source tensions: {} recorded", tensions.tensions.len()),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::EvidenceDigest { digest }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "evidence digest: {} claim(s) from {} source(s)",
+                    digest.claims.len(),
+                    digest.sources_scanned
+                ),
+                None,
+                0,
+                0,
+                0,
+            ),
+            SessionEvent::Analysis(AnalysisEvent::TripleDraft { draft }) => (
+                SessionPhase::Synthesize,
+                "done",
+                format!(
+                    "triple draft: {} candidate(s) produced",
+                    draft.candidates.len()
+                ),
                 None,
                 0,
                 0,
@@ -627,6 +791,34 @@ pub fn encode_progress_event(name: &str, topic: &str, event: &SessionEvent) -> S
     };
     let json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
     format!("{PROGRESS_SENTINEL}{json}")
+}
+
+/// Map a pipeline-step name to the session phase that owns it.
+///
+/// Decompose and width-sweep run during web gathering; every other
+/// manifest step belongs to the synthesize pipeline. Ad-hoc steps
+/// (e.g. `vault_sufficient`) also surface during web gathering.
+fn run_step_phase(step: &str) -> SessionPhase {
+    match step {
+        "decompose" | "width_sweep" => SessionPhase::Web,
+        "vault_sufficient" => SessionPhase::Setup,
+        _ => SessionPhase::Synthesize,
+    }
+}
+
+/// Map a run-manifest pipeline status string to a TUI step status.
+///
+/// Unknown statuses fall through to `'event'`, which decodes as
+/// [`StepStatus::Done`] while keeping the detail visible in the log.
+fn run_step_status(status: &str) -> &str {
+    match status {
+        "pending" | "in_progress" => "started",
+        "completed" => "done",
+        "failed" => "error",
+        "skipped" => "skipped",
+        "event" | "tier done" => "event",
+        _ => "event",
+    }
 }
 
 /// Human-readable description for a phase-start event.
@@ -673,10 +865,12 @@ pub fn decode_progress_event(message: &str) -> Option<DecodedProgress> {
     let payload: ProgressPayload = serde_json::from_str(rest).ok()?;
     let phase = parse_phase(&payload.phase)?;
     let status = match payload.status.as_str() {
-        "started" => StepStatus::Started,
-        "captured" | "done" | "queries" | "preview" | "config" => StepStatus::Done,
-        "failed_url" | "error" => StepStatus::Error,
+        "started" | "in_progress" | "pending" => StepStatus::Started,
+        "completed" | "captured" | "done" | "queries" | "preview" | "config" | "event"
+        | "tier done" => StepStatus::Done,
+        "failed" | "failed_url" | "error" => StepStatus::Error,
         "excluded_url" => StepStatus::Excluded,
+        "skipped" => StepStatus::Skipped,
         _ => return None,
     };
     Some(DecodedProgress {

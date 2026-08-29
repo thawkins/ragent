@@ -5360,3 +5360,27 @@ removed dead code, migrated inline tests, and cleaned up repository hygiene.
 ### Added
 - **Initial commit** — Project created.
 
+# Changelog
+
+## Version: 1.0.67
+
+### Added
+
+- **CORPA.md research companion file** — QA render sections (Contradiction Graph,
+  Loci Analysis, Depth Investigation, Cross-Locus Reconcile, Source Tensions,
+  Synthesis Audit, Corpus Critic) are now written to a per-research
+  `research/<name>/CORPA.md` companion instead of being embedded in
+  `RESEARCH.md`. `AssembledDocument` gained a `corpa` field; the
+  layout-independent `assemble_corpa_body` renders the seven QA sections with
+  top-level `##` headings shared between the report and IMRaD paths.
+  `create_with_format` writes a CORPA skeleton via the new
+  `ResearchIo::corpa_md_path`, and `write_document` writes the assembled CORPA
+  content. (spec: `corpaAnalysis`)
+
+### Tests
+
+- New `tests/test_corpa_companion.rs` (6 tests including manager
+  create/write integration); `test_hyperresearch_manual.rs` now asserts the QA
+  sections land in the corpa payload and are absent from the report body;
+  `test_scoreboard_imrad.rs` checks Contradiction Graph via `assembled.corpa`.
+  821 `ragent-research` tests, 896 agent+server tests pass; fmt/clippy clean.

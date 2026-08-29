@@ -101,8 +101,8 @@ pub use corpus_critic::{
 pub use diagram::render_findings_diagram;
 pub use document::{
     AssembledDocument, CrossReference, MAX_SOURCE_BODY_BYTES, REQUIRED_SECTIONS, ResearchDocument,
-    assemble_document, fence_source_body, mark_complete, mark_in_progress, render_skeleton,
-    render_supporting_file, truncate_body_to_bytes,
+    assemble_document, fence_source_body, mark_complete, mark_in_progress, render_corpa_skeleton,
+    render_skeleton, render_supporting_file, truncate_body_to_bytes,
 };
 pub use engine::{
     Critic, CriticResult, EngineConfig, IterationResult, IterativeEngine, SimpleCritic,

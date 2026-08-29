@@ -448,6 +448,15 @@ The depth also controls how many local files are captured:
 The format is recorded in the item frontmatter and can be reopened later
 with `/research open`.
 
+### CORPA.md companion
+
+Quality-assurance renders (Contradiction Graph, Loci Analysis, Depth
+Investigation, Cross-Locus Reconcile, Source Tensions, Synthesis Audit,
+Corpus Critic) are written to `research/<name>/CORPA.md` rather than inline
+in `RESEARCH.md`. The companion file is created with the skeleton and
+rewritten on every full write; its `## Sources Reference` section repeats the
+References Index table so `[#N]` indices resolve in either document.
+
 ### Format aliases
 
 The parser accepts several aliases for each format:

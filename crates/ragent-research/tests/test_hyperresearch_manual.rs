@@ -128,23 +128,33 @@ fn manual_case_1_full_tier_renders_graph_tensions_and_cite_summary() {
         gate_open: true,
     });
 
-    let AssembledDocument { body, .. } = assemble_document(&doc);
+    let AssembledDocument { body, corpa, .. } = assemble_document(&doc);
 
+    // The QA render sections live in the CORPA.md companion payload; the
+    // RESEARCH.md body keeps only the citation-check summary.
     assert!(
-        body.contains("## Contradiction Graph"),
-        "RESEARCH.md must contain a Contradiction Graph section"
+        corpa.contains("## Contradiction Graph"),
+        "CORPA.md must contain a Contradiction Graph section"
     );
     assert!(
-        body.contains("opposing cardiovascular claims"),
-        "graph edge note must be rendered"
+        corpa.contains("opposing cardiovascular claims"),
+        "graph edge note must be rendered in CORPA.md"
     );
     assert!(
-        body.contains("## Source Tensions"),
-        "RESEARCH.md must contain a Source Tensions section"
+        corpa.contains("## Source Tensions"),
+        "CORPA.md must contain a Source Tensions section"
     );
     assert!(
-        body.contains("direct contradiction between sources"),
-        "tension note must be rendered"
+        corpa.contains("direct contradiction between sources"),
+        "tension note must be rendered in CORPA.md"
+    );
+    assert!(
+        !body.contains("## Contradiction Graph"),
+        "RESEARCH.md must no longer carry the Contradiction Graph section"
+    );
+    assert!(
+        !body.contains("## Source Tensions"),
+        "RESEARCH.md must no longer contain a Source Tensions section"
     );
     assert!(
         body.contains("## Citation Check"),
@@ -308,6 +318,7 @@ fn manual_case_6_open_access_recovery_is_disclosed() {
         content,
         frontmatter,
         body,
+        corpa: _,
     } = assemble_document(&doc);
 
     assert!(

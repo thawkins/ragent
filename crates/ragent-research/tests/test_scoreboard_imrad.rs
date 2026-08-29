@@ -319,8 +319,9 @@ fn test_imrad_scoreboard_omitted_for_empty_skeleton() {
 fn test_imrad_data_quality_summary_untouched_by_scoreboard() {
     // FR-012: with QA artifacts present, the detailed Data Quality & Consistency
     // subsection still renders inside Discussion, with the same heading and
-    // verdict row. (The Contradiction Graph subsection only renders when a
-    // contradiction graph artifact is supplied, so it is set here too.)
+    // verdict row. (The Contradiction Graph renders in the CORPA.md companion
+    // payload; the graph artifact is supplied so the Data Quality metrics row
+    // has data.)
     let mut item = sample_item();
     item.sources = vec![web_source("example.com", "High", "body", None)];
     let mut doc = empty_doc(item);
@@ -333,16 +334,30 @@ fn test_imrad_data_quality_summary_untouched_by_scoreboard() {
         .body
         .find("### Data Quality & Consistency")
         .expect("FR-012: Data Quality & Consistency subsection must still render");
+    // The detailed Contradiction Graph table moved to CORPA.md; RESEARCH.md
+    // must no longer carry the subsection.
     let contradiction_pos = assembled
-        .body
-        .find("### Contradiction Graph")
-        .expect("FR-012: Contradiction Graph subsection must still render");
+        .corpa
+        .find("## Contradiction Graph")
+        .expect("CORPA.md must carry the Contradiction Graph section");
     assert!(
-        discussion_pos < dq_pos && dq_pos < contradiction_pos,
-        "FR-012: Data Quality placement changed (discussion {discussion_pos}, dq {dq_pos}, contradiction {contradiction_pos})"
+        assembled.body.find("### Contradiction Graph").is_none(),
+        "IMRaD RESEARCH.md must no longer carry the Contradiction Graph subsection"
+    );
+    assert!(
+        discussion_pos < dq_pos,
+        "FR-012: Data Quality placement changed (discussion {discussion_pos}, dq {dq_pos})"
+    );
+    assert!(
+        !assembled.corpa.is_empty() && contradiction_pos > 0,
+        "CORPA.md Contradiction Graph placement changed"
     );
     assert!(
         assembled.body.contains("| Corpus critic | 74/100 (pass) |"),
         "FR-012: Data Quality critic row missing"
+    );
+    assert!(
+        assembled.corpa.contains("## Corpus Critic"),
+        "CORPA.md must carry the Corpus Critic section"
     );
 }

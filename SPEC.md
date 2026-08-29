@@ -1615,6 +1615,14 @@ Every `RESEARCH.md` contains:
   Open Questions sits directly under Top 10 Implications so unresolved gaps
   surface immediately after the ranked consequences.
 
+  The quality-assurance render sections (Contradiction Graph, Loci Analysis,
+  Depth Investigation, Cross-Locus Reconcile, Source Tensions, Synthesis
+  Audit, Corpus Critic) are written to a per-research companion file
+  `research/<name>/CORPA.md` instead of `RESEARCH.md`. The companion is
+  created alongside the skeleton and rewritten on every `write_document`;
+  it ends with a `## Sources Reference` copy of the References Index table so
+  `[#N]` source indices resolve in both files.
+
 ### 11.5 Slash Commands
 
 | Command | Purpose |
